@@ -47,7 +47,7 @@
   // releases/latest/download/<asset> 恒指向最新版资产（GitHub 302 到具体版本）。
   // 移动端先行判定：iOS UA 含「like Mac OS X」、Android UA 含 Linux——
   // 桌面三路之前先排除，否则手机会被误配 darwin/linux 安装包。
-  var RELEASES = 'https://github.com/zhouchangjian2016/codecombo/releases'
+  var RELEASES = 'https://github.com/wtr20211202/codecombo/releases'
   var ua = navigator.userAgent || ''
   var os = null
   if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) os = null
