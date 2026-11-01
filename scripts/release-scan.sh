@@ -62,7 +62,7 @@ trap 'rm -rf "$SCAN_CANARY"' EXIT
     '/home/z''cj/n' \
     'sca_0123456789''abcdef0' \
     'scl_0123456789''abcdef0' \
-    'sc_0123456789abcdef'
+    'sc_0123456789''abcdef'
 } > "$SCAN_CANARY/canary.txt"
 canary_hits=0
 for pat in "${PATTERNS[@]}"; do

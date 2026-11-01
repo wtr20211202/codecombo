@@ -207,6 +207,7 @@ for must in main.go go.mod go.sum LICENSE NOTICE README.md CONTRIBUTING.md SECUR
             docs/whatsnew.md docs/EXTENSION_POINTS.md docs/README.zh-CN.md docs/adr/README.md \
             server/api/tools/dsh.go server/share/assets/xterm.js web/public/fonts/LICENSE-JetBrainsMono.txt \
             web/package.json web/package-lock.json scripts/e2e-seed.sh scripts/check-event-names.mjs \
+            scripts/release-export.sh scripts/release-scan.sh scripts/release-publish.sh \
             .github/workflows/ci.yml .github/workflows/release.yml .github/ISSUE_TEMPLATE/bug_report.md; do
   if [ ! -e "$DEST_ABS/$must" ]; then
     echo "FATAL: 导出树缺骨架文件：$must" >&2; fail=1
