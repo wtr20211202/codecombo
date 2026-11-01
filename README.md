@@ -81,6 +81,26 @@ go run main.go                         # Go backend on :9999 (second terminal)
 Run the quality gates before submitting changes: `cd web && npm run check`
 (type-check + lint + unit tests + contract gates) and `go test ./...`.
 
+## What's inside
+
+| Tool | What it does |
+|---|---|
+| **Git workbench** | Visual Git: hunk-level staging, three-way diffs, drag-and-drop interactive rebase, merge preview, conflict resolution, worktrees, submodules, LFS, GPG-signed commits, commit graph with cherry-pick / squash / extract |
+| **Web terminal** | Real PTYs (ConPTY / pty), optional tmux persistence with output replay across restarts, split panes, floating windows, image paste upload, bookmarks, command blocks |
+| **Remote machines** | SSH host management with encrypted credentials, remote terminals (incl. remote tmux), one-click remote deployment pipelines (bootstrap → runtime → systemd), live deploy logs, port forwarding |
+| **AI agent sessions** | claude / codex / dsh sessions per project — side-by-side runs, continuation chains, scheduled jobs, reusable runbooks, fleet execution; every session a real PTY with replayable scrollback |
+| **Agent ops channel** | Agents operate the workbench itself over a structured API: downloads, clipboard, open-at-line, preview links, ask & approval cards, cross-device notifications |
+| **Approval center** | High-risk commands and mass replacements return as approval cards with live terminal recording — approve / deny / edit per item; secrets redacted on the way out |
+| **On-call dashboard** | One screen for instance health (memory / goroutines / git pressure), 52-week activity heatmap, live change stream, agent collaboration flow, stalled-session triage |
+| **Multi-instance sync** | Manage local & remote instances from one screen: switching with health overview, terminal/panel take-over, instance-to-instance sync, encrypted machine migration (`.scpkg`) |
+| **Sharing links** | One-click links for files / folders / snippets / live terminals — TTL, password, view-once, frozen snapshot; visitors need no account |
+| **dsh integration** | Embed the dsh (DeepSeek Harness) Web UI over a loopback proxy, plus npm version management: upgrade / rollback with changelog |
+| **Security foundation** | Global lock (first-start password, idle auto-lock), AES-256 master-key encryption for all stored secrets, per-IP rate limiting, audit log with CSV export |
+| **Self-update** | GitHub-release-based update checks with automatic rollback; central instances can cache and forward binaries to child instances |
+| **i18n & themes** | English / 简体中文 UI; four built-in themes (Dark / Light / One Dark / Dracula) |
+
+Details and screenshots per tool in [Highlights](#highlights).
+
 ## Highlights
 
 ### Agent ops channel
@@ -161,6 +181,9 @@ and a commit graph you can cherry-pick / squash / extract from.
 
 ## Highlights (continued): the rest of the toolbox
 
+- **dsh integration** — the dsh (DeepSeek Harness) Web UI embedded over a
+  loopback proxy; npm version management with upgrade / rollback and a version
+  changelog.
 - **Web terminal** — real PTYs (ConPTY on Windows, creack/pty on Unix),
   optional tmux persistence with output replay across restarts, split panes,
   floating windows, image paste upload, bookmarks, command blocks.

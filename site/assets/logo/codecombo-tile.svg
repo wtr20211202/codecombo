@@ -12,20 +12,18 @@
   </defs>
   <rect width="512" height="512" rx="115" fill="url(#tile)"/>
   <g transform="translate(64 64) scale(8)">
-    <!-- 双弧反向慢旋（10s/圈）与 icon-auto 同款；SMIL 在 GitHub README 的
-         <img> 引用里照常动；PWA/og 派生 PNG 为静态导出不受影响 -->
-    <g>
-      <path d="M24 8A16 16 0 0 0 8 24" stroke="#79c0ff" stroke-width="4.2" stroke-linecap="round"/>
-      <circle cx="8" cy="24" r="3.4" fill="#79c0ff"/>
-      <animateTransform attributeName="transform" type="rotate" values="0 24 24;360 24 24" dur="10s"
-        repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1"/>
-    </g>
-    <g>
-      <path d="M24 40A16 16 0 0 0 40 24" stroke="#388bfd" stroke-width="4.2" stroke-linecap="round"/>
-      <circle cx="40" cy="24" r="3.4" fill="#388bfd"/>
-      <animateTransform attributeName="transform" type="rotate" values="0 24 24;-360 24 24" dur="10s"
-        repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1"/>
-    </g>
+    <!-- 双弧静态，仅两端节点相位交错呼吸闪烁（与 icon-auto 同款）；
+         SMIL 在 GitHub README 的 <img> 引用里照常动；PWA/og 派生 PNG 静态导出 -->
+    <path d="M24 8A16 16 0 0 0 8 24" stroke="#79c0ff" stroke-width="4.2" stroke-linecap="round"/>
+    <path d="M24 40A16 16 0 0 0 40 24" stroke="#388bfd" stroke-width="4.2" stroke-linecap="round"/>
+    <circle cx="8" cy="24" r="3.4" fill="#79c0ff">
+      <animate attributeName="opacity" values="1;0.3;1" dur="2.8s" repeatCount="indefinite"
+        calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+    </circle>
+    <circle cx="40" cy="24" r="3.4" fill="#388bfd">
+      <animate attributeName="opacity" values="1;0.3;1" dur="2.8s" begin="-1.4s" repeatCount="indefinite"
+        calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1"/>
+    </circle>
     <circle cx="24" cy="24" r="5.4" fill="#e6edf3" opacity="0.16"/>
     <circle cx="24" cy="24" r="2.6" fill="#e6edf3"/>
   </g>

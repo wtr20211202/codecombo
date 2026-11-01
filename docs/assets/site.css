@@ -323,6 +323,16 @@ code, pre { font-family: var(--font-mono); }
 }
 .card h3 { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 8px; }
 .card p { color: var(--text-dim); font-size: 14.5px; }
+.toolbox-more {
+  margin-top: 30px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.85;
+  text-align: center;
+}
+.toolbox-more b { color: var(--text); font-weight: 600; }
 
 /* ---------- Scenarios ---------- */
 .scenarios { display: grid; gap: 20px; max-width: 880px; margin: 0 auto; }
