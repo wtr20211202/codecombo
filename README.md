@@ -8,9 +8,14 @@
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3.5-42b883?logo=vue.js&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![Status](https://img.shields.io/badge/Status-Beta-orange)
 <!-- CI badge: uncomment after the first green run on GitHub Actions
 ![CI](https://github.com/wtr20211202/codecombo/actions/workflows/ci.yml/badge.svg)
 -->
+
+> **Status: Beta.** Codecombo is under active development and has not had its
+> stable 1.0 release yet — interfaces and on-disk data formats may still change
+> between versions. Feedback and bug reports are very welcome.
 
 **Codecombo — every dev tool, chained.**
 

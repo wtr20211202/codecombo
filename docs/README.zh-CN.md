@@ -8,6 +8,10 @@
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3.5-42b883?logo=vue.js&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![Status](https://img.shields.io/badge/Status-Beta-orange)
+
+> **状态：Beta（预览版）。** Codecombo 仍在积极开发中，尚未正式发布 1.0——
+> 界面与磁盘数据格式在版本间仍可能调整。欢迎提 issue 反馈问题与建议。
 
 **Codecombo —— 开发常用工具的一站式集合。** 自托管的单二进制 Web 工作台：
 Git 工作台、真实终端会话、AI 智能体、远程主机管理，全部装进同一个浏览器

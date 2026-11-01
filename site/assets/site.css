@@ -157,6 +157,27 @@ code, pre { font-family: var(--font-mono); }
   color: var(--text-dim);
   font-size: 17.5px;
 }
+.beta-chip {
+  display: inline-block;
+  margin-inline-start: 8px;
+  padding: 1px 8px 2px;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+.beta-note {
+  max-width: 720px;
+  margin: -16px auto 30px;
+  color: var(--text-faint);
+  font-size: 13.5px;
+}
+.beta-note strong { color: var(--text-dim); font-weight: 600; }
 .hero-actions {
   display: flex;
   align-items: center;
