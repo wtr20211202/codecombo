@@ -41,6 +41,10 @@ npm 包只是薄包装，npm 会按平台经 optionalDependencies 自动装上�
 （Windows / Linux / macOS，amd64 & arm64），零 postinstall 脚本。也可从
 [Releases](../../releases) 直接下载二进制。
 
+想尝鲜？预发布版本（rc / beta）走 `next` 通道：`npm i -g codecombo@next`——
+或显式指定任意版本（如 `npm i -g codecombo@0.2.0-rc1`）。稳定的
+`npm i -g codecombo` 不会被动到。
+
 ### 从源码构建
 
 前置要求：Go 1.26+、Node.js 20.19+ / 22.12+、Git。

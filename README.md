@@ -51,6 +51,10 @@ native binary for your platform (Windows / Linux / macOS, amd64 & arm64) via
 optional dependencies. No postinstall scripts. Prebuilt binaries are also on
 the [Releases](../../releases) page.
 
+Feeling adventurous? Pre-release versions (rc / beta) publish to the `next`
+channel: `npm i -g codecombo@next` — or pin any version explicitly, e.g.
+`npm i -g codecombo@0.2.0-rc1`. Stable `npm i -g codecombo` never moves.
+
 ### Build and run
 
 Prerequisites: Go 1.26+, Node.js 20.19+ / 22.12+, Git.
