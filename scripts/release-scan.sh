@@ -35,7 +35,7 @@ fi
 PATTERNS=(
   '172[.]16[.]5[0-9][.]'                          # 内网真实网段（53 系开发段，留两位余量）
   '[.]enhance-wt'                                 # 开发机 worktree 根目录名（点前缀）
-  'zhouchangjian2016[@]gmail[.]com|wtr20211202[@]gmail[.]com'
+  'wtr20211202[@]gmail[.]com|wtr20211202[@]gmail[.]com'
   'D:[\\]workspace|[/]d/workspace|[C]:[\\]Users[/]zcj|[/]home/zcj'
   '\bs[cal]_[A-Za-z0-9]{16,}'                     # sc_/sca_/scl_ 真实 token 形态
 )

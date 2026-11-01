@@ -107,7 +107,7 @@ hunk 级暂存与丢弃、三路差异、拖拽式交互变基、合并预演、
 前置要求：Go 1.26+、Node.js 20.19+ / 22.12+、Git。
 
 ```bash
-git clone https://github.com/zhouchangjian2016/codecombo.git
+git clone https://github.com/wtr20211202/codecombo.git
 cd codecombo
 
 ./build.sh            # Linux/macOS —— 前端 + Go，产物在 dist/

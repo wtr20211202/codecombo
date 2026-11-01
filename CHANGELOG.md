@@ -51,5 +51,5 @@ First public release.
 - **Cross-platform** — single static binary for Windows/Linux/macOS
   (amd64/arm64), no external database; all state in `~/.codecombo/`.
 
-[Unreleased]: https://github.com/zhouchangjian2016/codecombo/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/zhouchangjian2016/codecombo/releases/tag/v0.1.0
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/wtr20211202/codecombo/releases/tag/v0.1.0

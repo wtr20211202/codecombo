@@ -9,7 +9,7 @@
 ![Vue](https://img.shields.io/badge/Vue-3.5-42b883?logo=vue.js&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 <!-- CI badge: uncomment after the first green run on GitHub Actions
-![CI](https://github.com/zhouchangjian2016/codecombo/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/wtr20211202/codecombo/actions/workflows/ci.yml/badge.svg)
 -->
 
 **Codecombo — every dev tool, chained.**
@@ -135,7 +135,7 @@ and a commit graph you can cherry-pick / squash / extract from.
 Prerequisites: Go 1.26+, Node.js 20.19+ / 22.12+, Git.
 
 ```bash
-git clone https://github.com/zhouchangjian2016/codecombo.git
+git clone https://github.com/wtr20211202/codecombo.git
 cd codecombo
 
 ./build.sh            # Linux/macOS — frontend + Go, output to dist/
