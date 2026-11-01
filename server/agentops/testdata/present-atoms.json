@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "capability": "ops.present-atoms",
+    "note": "原子呈现能力注册表双侧快照（P-20261022-3）：Go 侧 server/agentops/capabilities.go 注册表与此对账（capabilities_test.go），web 侧镜像单测读取本文件核对 opsEvents.ts 事件 detail 接口字段与前端消费常量（web/src/__tests__/utils/presentAtoms.test.ts）——双侧字段增删不同步即红。atoms[].payload 为该原子载荷契约键（⊆ 事件级契约 server/archguard/testdata/ops-events.json，Go 测试交叉核对）；deepLinks[].params 为人类深链 query 参数全集（前端 parseFileDeepLinkQuery / consumeViewQuery 消费面对账键）。",
+    "manual": "GET /ops-manual（ops-channel 节由注册表渲染）"
+  },
+  "atoms": [
+    { "id": "frontend.clipboard", "verb": "frontend", "event": "frontend.clipboard", "payload": ["text"] },
+    { "id": "frontend.download", "verb": "frontend", "event": "frontend.download", "payload": ["path", "projectId"] },
+    { "id": "frontend.open", "verb": "frontend", "event": "frontend.open", "payload": ["url"] },
+    { "id": "navigate.changes", "verb": "navigate", "event": "navigate", "payload": ["view"] },
+    { "id": "navigate.diff", "verb": "navigate", "event": "navigate", "payload": ["file", "project", "view"], "deepLink": "file" },
+    { "id": "navigate.file", "verb": "navigate", "event": "navigate", "payload": ["file", "line", "project"], "deepLink": "file" },
+    { "id": "navigate.path", "verb": "navigate", "event": "navigate", "payload": ["path"] },
+    { "id": "navigate.terminal", "verb": "navigate", "event": "navigate", "payload": ["terminalId"] },
+    { "id": "notify.persist", "verb": "notify", "event": "notify.persist", "payload": ["action", "actionPayload", "body", "level", "title"], "deepLink": "session" },
+    { "id": "notify.toast", "verb": "notify", "event": "notify", "payload": ["level", "message"] },
+    { "id": "notify.watch", "verb": "notify", "event": "watch.invite", "payload": ["body", "title", "url"] },
+    { "id": "present.file", "verb": "present", "event": "open-file-at", "payload": ["col", "line", "path", "projectId"], "deepLink": "file" },
+    { "id": "present.panel", "verb": "present", "event": "panel", "payload": ["name"] },
+    { "id": "present.port", "verb": "present", "event": "preview.port", "payload": ["hostId", "label", "port"] },
+    { "id": "present.tree", "verb": "present", "event": "locate-in-tree", "payload": ["focus", "path", "projectId"] }
+  ],
+  "deepLinks": [
+    {
+      "id": "file",
+      "pattern": "/project?file=<项目相对路径>&project=<项目id>&line=<N>&col=<M>[&diff=1]",
+      "params": ["col", "diff", "file", "line", "project"]
+    },
+    {
+      "id": "view",
+      "pattern": "/project?view=<remote|shares|dashboard>[&host=<主机id>]",
+      "params": ["host", "view"],
+      "viewValues": ["dashboard", "remote", "shares"]
+    },
+    {
+      "id": "monitor",
+      "pattern": "/monitor[?fleet=<batchId>]",
+      "params": ["fleet"]
+    },
+    {
+      "id": "session",
+      "pattern": "notify.persist {\"action\":\"terminal\",\"actionPayload\":\"<会话id>\"}",
+      "params": ["action", "actionPayload"]
+    }
+  ]
+}

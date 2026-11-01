@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Codecombo brand mark（P-20261101-1 精修版）。意象：两条四分之一啮合弧
+       绕轴心旋转 + 两端节点 + 中轴毂点 = 会话/进程互相啮合协作。
+       与旧版（cubic 近似弧 + stroke 3.5）差异：真圆弧 A 命令、stroke 4.2
+       （16px 下 ~1.4px 更耐缩）、端点节点加大为 r3.4、毂点加光晕环。
+       纯实色（无渐变）——16px favicon 下渐变会糊；渐变品牌版见 site/assets/logo/。
+       品牌色与 PWA tile（icons/*.png 派生源）一致：#79c0ff / #388bfd / #e6edf3 -->
+  <path d="M24 8A16 16 0 0 0 8 24" stroke="#79c0ff" stroke-width="4.2" stroke-linecap="round"/>
+  <path d="M24 40A16 16 0 0 0 40 24" stroke="#388bfd" stroke-width="4.2" stroke-linecap="round"/>
+  <circle cx="8" cy="24" r="3.4" fill="#79c0ff"/>
+  <circle cx="40" cy="24" r="3.4" fill="#388bfd"/>
+  <circle cx="24" cy="24" r="5.2" fill="#e6edf3" opacity="0.18"/>
+  <circle cx="24" cy="24" r="2.6" fill="#e6edf3"/>
+</svg>

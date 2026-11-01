@@ -1,0 +1,307 @@
+{
+  "approval.pending": {
+    "anchor": "approval.pending",
+    "contractKey": "store.AgentApproval",
+    "payload": [
+      "agent",
+      "createdAt",
+      "detail",
+      "id",
+      "impact",
+      "merged",
+      "mergedInto",
+      "op",
+      "reason",
+      "resolvedAt",
+      "ruleHit",
+      "sessionId",
+      "status",
+      "target"
+    ],
+    "source": "server"
+  },
+  "approval.resolved": {
+    "anchor": "approval.resolved",
+    "payload": [
+      "id",
+      "reason",
+      "ruleHit",
+      "sessionId",
+      "status"
+    ],
+    "source": "server"
+  },
+  "chain.triggered": {
+    "anchor": "chain.triggered",
+    "payload": [
+      "chainId",
+      "runtime",
+      "sessionId",
+      "sourceTerminalId",
+      "status"
+    ],
+    "source": "server"
+  },
+  "clipboard.arrived": {
+    "anchor": "clipboard.arrived",
+    "payload": [
+      "at",
+      "origin",
+      "size"
+    ],
+    "source": "server"
+  },
+  "experiment.changed": {
+    "anchor": "experiment.changed",
+    "payload": [
+      "id",
+      "resultA",
+      "resultB",
+      "status"
+    ],
+    "source": "server"
+  },
+  "frontend.clipboard": {
+    "anchor": "frontend.clipboard",
+    "payload": [
+      "text"
+    ],
+    "source": "agent"
+  },
+  "frontend.download": {
+    "anchor": "frontend.download",
+    "payload": [
+      "path",
+      "projectId"
+    ],
+    "source": "agent"
+  },
+  "frontend.open": {
+    "anchor": "frontend.open",
+    "payload": [
+      "url"
+    ],
+    "source": "agent"
+  },
+  "input.request": {
+    "anchor": "input.request",
+    "contractKey": "store.AgentAsk",
+    "payload": [
+      "agent",
+      "answer",
+      "answeredAt",
+      "createdAt",
+      "expiresAt",
+      "id",
+      "options",
+      "question",
+      "status",
+      "terminalId"
+    ],
+    "source": "server"
+  },
+  "input.resolved": {
+    "anchor": "input.resolved",
+    "payload": [
+      "id",
+      "status",
+      "terminalId"
+    ],
+    "source": "server"
+  },
+  "locate-in-tree": {
+    "anchor": "locate-in-tree",
+    "payload": [
+      "focus",
+      "path",
+      "projectId"
+    ],
+    "source": "agent"
+  },
+  "navigate": {
+    "anchor": "navigate",
+    "payload": [
+      "file",
+      "line",
+      "path",
+      "project",
+      "terminalId",
+      "view"
+    ],
+    "source": "agent"
+  },
+  "notify": {
+    "anchor": "notify",
+    "payload": [
+      "level",
+      "message"
+    ],
+    "source": "agent"
+  },
+  "notify.persist": {
+    "anchor": "notify.persist",
+    "payload": [
+      "action",
+      "actionPayload",
+      "body",
+      "level",
+      "title"
+    ],
+    "source": "agent"
+  },
+  "open-file-at": {
+    "anchor": "open-file-at",
+    "payload": [
+      "col",
+      "line",
+      "path",
+      "projectId"
+    ],
+    "source": "agent"
+  },
+  "panel": {
+    "anchor": "panel",
+    "payload": [
+      "name"
+    ],
+    "source": "agent"
+  },
+  "preview.port": {
+    "anchor": "preview.port",
+    "payload": [
+      "hostId",
+      "label",
+      "port",
+      "source"
+    ],
+    "source": "server+agent"
+  },
+  "projects.changed": {
+    "anchor": "projects.changed",
+    "payload": [
+      "action",
+      "frozen",
+      "id",
+      "locked",
+      "name"
+    ],
+    "source": "server"
+  },
+  "queue.changed": {
+    "anchor": "queue.changed",
+    "payload": [
+      "remaining",
+      "sessionId"
+    ],
+    "source": "server"
+  },
+  "remoteaccess.status": {
+    "anchor": "remoteaccess.status",
+    "payload": [
+      "activeConnections",
+      "at",
+      "droppedConnections",
+      "event",
+      "lastError",
+      "lastErrorAt",
+      "onlineSince",
+      "profileId",
+      "publicUrl",
+      "reconnectAttempts",
+      "remoteBindHost",
+      "remotePort",
+      "startedAt",
+      "state",
+      "totalConnections"
+    ],
+    "source": "server"
+  },
+  "share.drop": {
+    "anchor": "share.drop",
+    "payload": [
+      "id",
+      "kind",
+      "name",
+      "nick",
+      "shareName",
+      "size",
+      "terminalId",
+      "token"
+    ],
+    "source": "server"
+  },
+  "settings.changed": {
+    "anchor": "settings.changed",
+    "payload": [],
+    "source": "server"
+  },
+  "system:rate-limited": {
+    "anchor": "system:rate-limited",
+    "payload": [
+      "dimension",
+      "dropped",
+      "key",
+      "limit",
+      "windowSec"
+    ],
+    "source": "server"
+  },
+  "task.progress": {
+    "anchor": "task.progress",
+    "payload": [
+      "bookId",
+      "runId",
+      "sessionId",
+      "status",
+      "step",
+      "steps",
+      "summary",
+      "task",
+      "terminalId"
+    ],
+    "source": "server+agent"
+  },
+  "task.relaySkipped": {
+    "anchor": "task.relaySkipped",
+    "payload": [
+      "cronId",
+      "name",
+      "reason"
+    ],
+    "source": "server"
+  },
+  "terminal.message": {
+    "anchor": "terminal.message",
+    "payload": [
+      "at",
+      "from",
+      "summary",
+      "to"
+    ],
+    "source": "server"
+  },
+  "terminal.message.read": {
+    "anchor": "terminal.message.read",
+    "payload": [
+      "count",
+      "sessionId"
+    ],
+    "source": "server"
+  },
+  "terminals.changed": {
+    "anchor": "terminals.changed",
+    "payload": [
+      "sessions"
+    ],
+    "source": "server"
+  },
+  "watch.invite": {
+    "anchor": "watch.invite",
+    "payload": [
+      "body",
+      "title",
+      "url"
+    ],
+    "source": "agent"
+  }
+}

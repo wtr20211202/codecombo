@@ -1,0 +1,467 @@
+/* TerminalPane 内部元素样式（从 TerminalView.vue 抽取，非 scoped：
+   根元素 .term-pane 的布局类（split flex / active outline）仍由 TerminalView scoped 样式管理） */
+
+/* xterm 画布尺寸：铺满 pane 容器 */
+.term-container .xterm,
+.term-pane .xterm {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* xterm.css 默认给 .xterm-viewport 硬编码 #000 背景（为 macOS 滚动条不透明），
+   fit 行数取整后 pane 底部的零头高度（不足一行）会露出这块黑，与终端主题背景
+   形成一条黑边——viewport 置透明，由 .term-container 跟随主题的背景色兜底 */
+.term-container .xterm .xterm-viewport,
+.term-pane .xterm .xterm-viewport {
+  background-color: transparent;
+}
+
+/* xterm scrollbar 主题化：覆盖默认浏览器样式 */
+.term-container .xterm-viewport,
+.term-pane .xterm-viewport {
+  overflow-y: auto !important;
+}
+.term-container .xterm-viewport::-webkit-scrollbar,
+.term-pane .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.term-container .xterm-viewport::-webkit-scrollbar-track,
+.term-pane .xterm-viewport::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+/* thumb 默认半透明（自动隐藏视觉感），hover viewport / thumb 时变实 */
+.term-container .xterm-viewport::-webkit-scrollbar-thumb,
+.term-pane .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+  opacity: 0.5;
+  transition: opacity var(--motion-base) ease;
+}
+.term-container .xterm-viewport:hover::-webkit-scrollbar-thumb,
+.term-container .xterm-viewport::-webkit-scrollbar-thumb:hover,
+.term-pane .xterm-viewport:hover::-webkit-scrollbar-thumb,
+.term-pane .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  opacity: 1;
+}
+
+/* 连接中 spinner */
+.term-pane-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+/* 后端不可用错误浮层 */
+.term-pane-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--bg-terminal);
+  color: var(--text-secondary);
+  z-index: 4;
+}
+.term-pane-error-icon {
+  font-size: 28px;
+  color: var(--accent-yellow);
+}
+.term-pane-error-text {
+  font-size: 13px;
+}
+
+/* ============== 搜索框 ============== */
+.term-search-bar {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+/* not found 时输入框红框 + 一次性抖动 */
+.term-search-bar .term-search-input-noresult .n-input__input-el,
+.term-search-bar .term-search-input-noresult {
+  border-color: var(--accent-red) !important;
+  animation: term-search-shake 0.3s ease-out;
+}
+@keyframes term-search-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  50% { transform: translateX(3px); }
+  75% { transform: translateX(-2px); }
+}
+/* Aa / .* 选项文字 mono 字体（icon-like 表达） */
+.term-search-opt-icon {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+.term-search-counter {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 24px;
+  text-align: center;
+}
+.term-search-counter.is-no-result {
+  color: var(--accent-red);
+}
+.term-search-nav-btn {
+  background: none;
+  border: 1px solid var(--border-default);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 2px;
+  transition: all var(--motion-base);
+}
+.term-search-nav-btn:hover {
+  border-color: var(--brand-accent);
+  color: var(--brand-accent);
+}
+.term-search-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 14px;
+  line-height: 1;
+}
+.term-search-close-btn:hover {
+  color: var(--text-body);
+}
+/* 查询历史下拉（P-20261004-109）：锚定搜索条（右上角）下缘右对齐，向左展开
+   不越 pane 右缘；样式族镜像 ProjectSearch 的 .ps-history（P-48 同惯例） */
+.term-search-history {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  width: 240px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  box-shadow: var(--shadow-strong);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.term-search-history-list {
+  max-height: 180px;
+  overflow-y: auto;
+}
+.term-search-history-empty {
+  padding: 12px 10px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.term-search-history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+.term-search-history-item:hover {
+  background: var(--bg-hover);
+}
+.term-search-history-item-icon {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.term-search-history-item-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-search-history-clear {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--motion-fast), color var(--motion-fast);
+}
+.term-search-history-clear:hover {
+  background: var(--bg-hover);
+  color: var(--accent-red);
+}
+
+/* ============== 多行粘贴预览 ============== */
+.paste-preview {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  color: var(--text-body);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ============== 拖拽文件遮罩 ============== */
+.term-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--brand-accent-soft);
+  border: 2px dashed var(--brand-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.term-drop-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 24px;
+  background: var(--bg-panel);
+  color: var(--brand-accent);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+.term-drop-text {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ============== 按当前窗口尺寸重绘按钮 ============== */
+/* pane 根统一建立定位上下文：absolute 子元素（重绘按钮/错误浮层/搜索条）在
+   任何宿主（项目终端/管理页/悬浮窗/远程）都锚定到 pane 自身——部分宿主的
+   scoped 样式只给宽高不给 position，此前浮层会锚到外层容器 */
+.term-container {
+  position: relative;
+}
+/* pane 右上角常显小按钮：低透明度不扰终端内容，hover 增强。点击 = TerminalPane.fit
+   （fit 重算行列 + xterm 滚动区 refresh + tmux 权威重绘），滚轮上翻失灵、切换/
+   最大化后显示错乱的一键自愈入口，全终端宿主（项目终端/管理页/悬浮窗/远程）通用。
+   z-index 压在错误/断连/拖拽浮层之下：浮层出现时按钮自然隐没 */
+.term-pane-refresh {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-panel) 70%, transparent);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity var(--motion-base), color var(--motion-base), background var(--motion-base);
+}
+.term-pane-refresh:hover {
+  opacity: 1;
+  color: var(--accent-blue);
+  background: var(--bg-panel);
+}
+
+/* ============== 窗格只读观察锁（P-20261003-91） ============== */
+/* 锁 toggle：重绘按钮左侧同行。未锁定与重绘按钮同款低透明度不扰终端内容；
+   锁定后常显警示色角标——状态徽章必须一直可见，不随 hover 消失 */
+.term-pane-lock {
+  position: absolute;
+  top: 6px;
+  right: 34px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-panel) 70%, transparent);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity var(--motion-base), color var(--motion-base), background var(--motion-base);
+}
+.term-pane-lock:hover {
+  opacity: 1;
+  color: var(--accent-orange);
+  background: var(--bg-panel);
+}
+.term-pane-lock.is-locked {
+  opacity: 1;
+  color: var(--accent-orange);
+  background: var(--bg-panel);
+}
+/* 锁定边框提示：inset 阴影画 1px 描边，不参与布局（xterm 行列数保持不变，
+   不会因锁定触发 resize/PTY 重绘） */
+.term-container.is-input-locked {
+  box-shadow: inset 0 0 0 1px var(--accent-orange);
+}
+
+/* ============== pane 临时最大化（P-20261004-64） ============== */
+/* 最大化 toggle：锁按钮左侧同行（right 递增 24px 同 4px 步距），样式与
+   锁/重绘同款低透明度；最大化态常显（还原入口不可随 hover 消失） */
+.term-pane-maximize {
+  position: absolute;
+  top: 6px;
+  right: 58px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-panel) 70%, transparent);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity var(--motion-base), color var(--motion-base), background var(--motion-base);
+}
+.term-pane-maximize:hover {
+  opacity: 1;
+  color: var(--accent-blue);
+  background: var(--bg-panel);
+}
+.term-pane-maximize[aria-pressed='true'] {
+  opacity: 1;
+  color: var(--accent-blue);
+}
+/* 最大化态边缘弱提示：低饱和焦点色 inset 描边（outline 不挤占布局，xterm
+   行列不变），提示「当前全幅是临时态、可还原」。!important 压过宿主 scoped
+   的 split 活跃 pane outline（.term-pane-layout.split .term-pane.is-active-pane
+   特异性更高且 CSS 序不保证）——最大化态自身必须始终可辨 */
+.term-container.is-pane-maximized {
+  outline: 1px solid color-mix(in srgb, var(--accent-blue) 45%, transparent) !important;
+  outline-offset: -1px;
+}
+
+/* ============== 命令成败装饰行（P-20261003-150） ============== */
+/* OSC 133 D 帧退出码的命令区间标记：xterm registerDecoration DOM 覆盖层
+   （不写 PTY 字节流，输出内容零污染），1 cell 宽左缘条 + 半透明区间底色，
+   主题变量取色（color-mix 先例：实例活动热力图）。class 由装饰 onRender
+   挂载——元素被渲染器持久复用，行内样式会被重绘重写，class 是唯一持久通道。
+   pointer-events: none：装饰纯视觉，不拦截选区/点击命中链 */
+.xterm-decoration.sc-cmd-ok {
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent-green);
+}
+.xterm-decoration.sc-cmd-fail {
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent-red);
+}
+
+/* ============== scrollback 书签小旗（P-20261004-16） ============== */
+/* 右键「标记此行」的行级标记：1 cell 宽左缘条（成败装饰同款形态，暖黄语义色
+   区分成败绿红），e2e 以 .xterm-decoration.sc-bookmark 可见性断言标记/跳转。
+   pointer-events: none：纯视觉，不拦截选区/点击命中链 */
+.xterm-decoration.sc-bookmark {
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent-yellow-warm) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent-yellow-warm);
+}
+
+/* ============== 高危命令影响面确认卡（P-20261005-191） ============== */
+/* n-modal dialog 挂在 body 层（无本组件 scope id），与 paste-preview 同样放
+   全局表；主题变量取色，danger/warning 档由 dialog type 自带图标承载 */
+.cmd-preview-body {
+  color: var(--text-body);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.cmd-preview-lead {
+  margin: 0 0 10px;
+}
+.cmd-preview-match {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-panel);
+}
+.cmd-preview-kind {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.cmd-preview-seg {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent-red) 8%, var(--bg-terminal));
+  color: var(--text-body);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow: auto;
+}
+.cmd-preview-impact {
+  color: var(--accent-orange);
+  font-weight: 600;
+}
+/* 计数为 0 的命中（降级灰提示不弹卡的同一判据在 gate；卡上多命中混排时
+   零影响条目弱化显示，不再恐吓） */
+.cmd-preview-impact.is-zero {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+.cmd-preview-paths {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.cmd-preview-static {
+  margin: 0 0 10px;
+  color: var(--accent-orange);
+}
+.cmd-preview-hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}

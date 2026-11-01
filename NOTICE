@@ -1,0 +1,48 @@
+Codecombo
+Copyright 2026 zhouchangjian2016
+
+This product includes software developed by the Codecombo contributors
+(https://github.com/zhouchangjian2016/codecombo).
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+========================================================================
+Third-party components
+========================================================================
+
+Embedded fonts (SIL Open Font License 1.1)
+------------------------------------------
+This product bundles the following open-source monospace fonts, all licensed
+under the SIL Open Font License 1.1 (full texts in web/public/fonts/LICENSE-*.txt):
+
+- JetBrains Mono — https://github.com/JetBrains/JetBrainsMono (Reserved Font Name: JetBrains Mono)
+- Cascadia Code — https://github.com/microsoft/cascadia-code (Reserved Font Name: Cascadia Code)
+- IBM Plex Mono — https://github.com/IBM/plex (Reserved Font Name: IBM Plex Mono)
+- Fira Code — https://github.com/tonsky/FiraCode (Reserved Font Name: Fira Code)
+
+Per OFL 1.1, the distributed font files keep their original font names
+(including Reserved Font Names) and are unmodified.
+
+Additional fonts are installed from npm packages at build time:
+- Geist Sans (@fontsource/geist-sans) — SIL OFL 1.1
+- Inter (@fontsource/inter) — SIL OFL 1.1
+- codicon icon font (bundled inside monaco-editor) — upstream vscode-codicons is CC-BY-4.0
+
+Vendored assets
+---------------
+- server/share/assets/xterm.js, addon-fit.js, xterm.css — vendored from
+  @xterm/xterm and @xterm/addon-fit (MIT License, copyright the xterm.js
+  authors; https://xtermjs.org). Version/provenance registry:
+  server/share/assets/README.md.
+- web/src/assets/brands/claude.svg, dsh.svg — brand icon path data from
+  Simple Icons (CC0-1.0 path data). Claude and DeepSeek trademarks belong to
+  Anthropic / DeepSeek respectively; used solely to identify which agent
+  runtime a session runs (nominative use), not as product branding.
+
+dsh integration boundary (important)
+------------------------------------
+Codecombo neither includes nor distributes dsh (DeepSeek Harness). Codecombo
+only ships an optional local reverse-proxy/embedding channel: if and only if
+the user has installed dsh on their own machine, Codecombo can embed the dsh
+web UI over a loopback proxy. No dsh code, binaries, or assets are part of
+this repository or of any Codecombo distribution artifact.

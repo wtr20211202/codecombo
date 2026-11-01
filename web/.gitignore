@@ -1,0 +1,7 @@
+web/test-results/
+
+# eslint --cache 产物（P-20261003-62：no-cycle 等规则令大仓 lint 变慢，check 门禁走缓存）
+.eslintcache
+
+# vitest coverage 产物（P-20261003-206：覆盖率常开，text 摘要进终端、html 落 coverage/）
+coverage/

@@ -1,0 +1,47 @@
+/* 编辑器选区 → agent 侧栏拖拽（P-20261003-162）的全局视觉面：
+   ghost 由 views/editor/selectionDrag 以原生 DOM 挂 body 创建（无组件 scope
+   属性），故样式必须放全局表；颜色/动效全部走主题变量（六主题自动跟随）。 */
+
+.sc-selection-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 3000; /* 高于 naive 弹层（~2000）与悬浮窗（1500），拖影恒在最上层 */
+  pointer-events: none;
+  max-width: min(360px, 70vw);
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-strong);
+  will-change: transform;
+}
+
+.sc-selection-drag-ghost-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sc-selection-drag-ghost-hint {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+/* 拖拽期全局 copy 光标（手势语义 = 复制上下文，不改动源选区） */
+body.sc-selection-dragging,
+body.sc-selection-dragging * {
+  cursor: copy !important;
+}
+
+/* 落点/spring 目标悬停高亮：整行描边（会话行已有 hover 底色，描边是最小增量） */
+.sc-selection-drop-hover {
+  outline: 2px dashed var(--accent-blue);
+  outline-offset: -2px;
+  border-radius: 4px;
+}

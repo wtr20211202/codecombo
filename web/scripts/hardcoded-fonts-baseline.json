@@ -1,0 +1,8 @@
+{
+  "_comment": "硬编码字体基线：存量直写豁免清单。键 = \"文件|声明值\"，值 = 豁免理由（terminal-themes 注册表与 CrashFallback 零依赖回退为结构性白名单不在此列）；治理替换为 var(--font-mono) 后删除对应条目。重建：npm run check:fonts -- --update-baseline",
+  "entries": {
+    "src/components/settings/AppearanceSettings.vue|'Cascadia Code', monospace": "字体选择器预览样本（.terminal-font-cascadia .tfc-sample）：逐选项直写展示该字体真实渲染，与 terminal-themes 注册表同性质",
+    "src/components/settings/AppearanceSettings.vue|'IBM Plex Mono', monospace": "字体选择器预览样本（.terminal-font-ibmplex .tfc-sample）：逐选项直写展示该字体真实渲染，与 terminal-themes 注册表同性质",
+    "src/components/settings/AppearanceSettings.vue|'JetBrains Mono', monospace": "字体选择器预览样本（.terminal-font-jetbrains .tfc-sample）：逐选项直写展示该字体真实渲染，与 terminal-themes 注册表同性质"
+  }
+}

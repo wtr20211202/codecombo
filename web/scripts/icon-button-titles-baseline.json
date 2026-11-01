@@ -1,0 +1,4 @@
+{
+  "_comment": "icon-only 按钮缺 title/aria-label 基线：存量缺口豁免清单（P-20261005-213 落地时清零，故为空）。键 = \"文件|行|标签\"，值 = 豁免理由；基线外新增即 check:icon-titles 退码 1。补齐 title/aria-label 后删除对应条目。重建：npm run check:icon-titles -- --update-baseline",
+  "entries": {}
+}

@@ -1,0 +1,61 @@
+```
+TimeoutError: locator.click: Timeout 2000ms exceeded.
+Call log:
+  - waiting for locator('.tree-action-btn[title="搜索文件"]')
+
+```
+
+# Test source
+
+```ts
+  1   | import { test, expect } from '@playwright/test'
+  2   | import fs from 'node:fs'
+  3   | import os from 'node:os'
+  4   | import path from 'node:path'
+  5   | import { execFileSync } from 'node:child_process'
+  6   | import { DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock } from '../../tests/helpers'
+  7   | 
+  8   | /**
+  9   |  * 编辑器 Git 快捷操作 E2E：
+  10  |  *   1. 全角标点（，不再被 Monaco「歧义字符」黄框标记（unicodeHighlight.ambiguousCharacters=false）
+  11  |  *   2. Blame 按钮：点击后按行注入 blame 注释（回归：后端 lineNo 与前端 line 字段错位曾静默无效果）
+  12  |  *   3. 文件历史弹窗：commit 列表 + 该文件 diff
+  13  |  *   4. 对比分支：选 ref 后展示「ref → HEAD」的本文件 diff
+  14  |  * 自备临时仓库（两提交 + feature 分支指回第一提交，保证对比必有差异），afterAll 清理
+  15  |  */
+  16  | 
+  17  | const REPO_DIR = path.join(os.tmpdir(), 'sc-e2e-editor-git')
+  18  | const PROJ_NAME = 'e2e-editor-git'
+  19  | const FILE = 'notes.md'
+  20  | const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:9999'
+  21  | 
+  22  | let projectId = ''
+  23  | 
+  24  | // 固定参数列表调用 git（无 shell 拼接），身份用 -c 内联避免依赖本机 git 配置
+  25  | function git(cwd: string, args: string[]) {
+  26  |   return execFileSync(
+  27  |     'git',
+  28  |     ['-c', 'user.name=e2e', '-c', 'user.email=e2e@test.local', ...args],
+  29  |     { cwd, encoding: 'utf8' },
+  30  |   )
+  31  | }
+  32  | 
+  33  | test.beforeAll(async () => {
+  34  |   const unlockRes = await fetch(BASE + '/api/lock/unlock', {
+  35  |     method: 'POST',
+  36  |     headers: { 'Content-Type': 'application/json' },
+  37  |     body: JSON.stringify({ password: DEFAULT_PASSWORD }),
+  38  |   })
+  39  |   const token = (await unlockRes.json()).token || ''
+  40  |   const headers = { 'Content-Type': 'application/json', 'X-Lock-Token': token }
+  41  |   const stale = await (await fetch(BASE + '/api/projects', { headers })).json()
+  42  |   const old = ((stale?.data || []) as { id: string; name: string }[]).find(p => p.name === PROJ_NAME)
+  43  |   if (old) await fetch(`${BASE}/api/projects/${old.id}`, { method: 'DELETE', headers })
+  44  |   try { fs.rmSync(REPO_DIR, { recursive: true, force: true }) } catch { /* 残留忽略 */ }
+  45  |   fs.mkdirSync(REPO_DIR, { recursive: true })
+  46  |   git(REPO_DIR, ['init'])
+  47  | 
+  48  |   // 提交 1：含全角标点的 v1 内容
+  49  |   fs.writeFileSync(path.join(REPO_DIR, FILE), `# 测试（中文标题）\n\n第一行，包含全角标点。\n`)
+  50  |   git(REPO_DIR, ['add', '.'])
+  51

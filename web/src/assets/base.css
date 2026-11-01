@@ -1,0 +1,148 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* CSS 字体变量：UI / 标题 / 等宽。
+ * brand 栈 = 打包的 Geist Sans / Inter（SIL OFL 1.1，随构建分发，跨机器渲染一致）；
+ * system 栈 = 纯系统字体（与 dsh 等原生应用渲染一致）。
+ * 外观设置写 html[data-ui-font='system'] 在两套间切换，默认 brand */
+:root {
+  --font-stack-brand-ui: 'Geist Sans', 'Geist', 'Inter', -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-stack-brand-display: 'Geist', 'Sora', 'Space Grotesk', 'Inter',
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-stack-system: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue',
+    Helvetica, Arial, sans-serif;
+  --font-ui: var(--font-stack-brand-ui);
+  --font-display: var(--font-stack-brand-display);
+  /* 自定义等宽字体名注入点（P-20261005-227）：--font-mono-lead 缺省空值 =
+     内置栈原样；设置页输入经 font store 写 `'字体名', `（带尾逗号）前插回退链
+     ——var() 拼接发生在 token 串层面，字体未安装时整链顺延天然回退不炸 */
+  --font-mono-lead: ;
+  --font-mono: var(--font-mono-lead) 'JetBrains Mono', 'Geist Mono', 'Fira Code',
+    'Cascadia Code', 'Source Code Pro', Consolas, 'Courier New', monospace;
+  --font-emoji: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji',
+    'Twemoji Mozilla', sans-serif;
+}
+
+/* 界面字体 = 系统栈（外观设置项）：与 dsh 等原生应用观感一致 */
+html[data-ui-font='system'] {
+  --font-ui: var(--font-stack-system);
+  --font-display: var(--font-stack-system);
+}
+
+/* 动效 token（P-20261007-16）：时长三档 + 缓动两曲线，transition 裸 duration 一律走 var()。
+ * fast = 微反馈（hover/焦点）；base = 常规（面板展开/浮层/Pop 卡）；slow = 长淡入淡出（全屏条带/遮罩级装饰）。
+ * 门禁 scripts/check-motion.mjs 防 transition 回潮裸值；功能性时长（进度条 width 跟手、
+ * P-20261011-1 遮罩防御调优面、reduced-motion kill switch）走基线豁免不收敛。
+ * 缓动曲线为新增组件的默认词汇表（存量 ease 关键字不机械替换，保持零行为变化）：
+ * standard = 进出场通用的平滑启停；emphasized = 大位移进场减速强调 */
+:root {
+  --motion-fast: 0.1s;
+  --motion-base: 0.15s;
+  --motion-slow: 0.25s;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* 界面缩放（P-20261002-2）：CSS 标准化 zoom 作用于根元素，布局 px 单位零改造
+   （选 zoom 而非 rem 改造的原因）。档位经 stores/ui-zoom.ts 注入 --ui-zoom 内联
+   变量覆写，:root 兜底 1（变量缺失/存储不可用时回到 100% 不缩放） */
+:root {
+  --ui-zoom: 1;
+}
+
+html {
+  zoom: var(--ui-zoom);
+}
+
+body {
+  min-height: 100vh;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+}
+
+/* 标题字使用 display 字体 */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  letter-spacing: -0.011em;
+}
+
+/* 等宽内容（代码、提交 hash、路径） */
+code, kbd, pre, .mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'calt' 1, 'liga' 1;
+}
+
+/* 全局滚动条（单一事实源，8px slim）：thumb/hover/track 一律随主题 --scrollbar-* 变量，
+   与终端 xterm 滚动条（terminal-pane.css）同源同色；Firefox 走 scrollbar-color 同变量。
+   变量由 themes/*.ts 经 early-init 在 mount 前注入，回退值取 dark 主题（默认主题） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, #30363d) var(--scrollbar-track, transparent);
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track, transparent);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, #30363d);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, #484f58);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 右键菜单通用 hover 效果 */
+.ctx-menu-item {
+  transition: background var(--motion-fast) ease;
+}
+.ctx-menu-item:hover {
+  background: var(--bg-hover) !important;
+}
+
+/* 全局可点击行 hover 效果 */
+.clickable-row {
+  transition: background var(--motion-fast) ease;
+}
+.clickable-row:hover {
+  background: var(--bg-hover) !important;
+}
+
+/* 全局尊重用户的减少动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 选中文本配色（与主题色对齐） */
+::selection {
+  background: var(--bg-selection, rgba(88, 166, 255, 0.32));
+  color: var(--text-primary);
+}
+
+/* 焦点环（统一） */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}

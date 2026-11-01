@@ -1,0 +1,22 @@
+{
+  "_comment": "errmarkers 对账基线（P-20261004-29）：前端正则不匹配任何 Go 侧已声明 marker 的存量注记。键 = \"表|正则 source\"（source 是正则字面量原文，改写正则即键变化、条目失效并重新出现在 WARN 报告中），值 = 注记理由。WARN 本不阻断，入基线仅为让 check 输出只暴露「新增」未注记条目——新增 WARN 应当：登记 server/errmarkers marker（服务端真实发射的稳定文本）或在此入账注记（通用兜底/仓外原文/旧版本防御）。常态化出口：not-found 族随 P-305 结构化错误码渐进迁移，迁移完成即可移除对应正则与基线条目。",
+  "entries": {
+    "http.ts|instance not found": "通用 handler 文本（dispatch/instance/proxy 多发射点 404），无单一稳定标记；not-found 族走 P-305 结构化 code 渐进迁移",
+    "http.ts|remote host not found": "通用 handler 文本（deploy 域 404 双发射点），同 not-found 族渐进迁移出口",
+    "http.ts|project not found": "通用 handler 文本（项目 404），P-305 已有 projects.not_found 结构化 code，明文映射为旧服务端兼容兜底",
+    "http.ts|session not found": "通用 handler 文本（会话 404 多发射点），同 not-found 族",
+    "http.ts|task not found": "通用 handler 文本（部署任务 404 四发射点），同 not-found 族",
+    "http.ts|snippet not found": "通用 handler 文本（片段 404），同 not-found 族",
+    "http.ts|credential not found": "通用 handler 文本（凭据 404），同 not-found 族",
+    "http.ts|file not found": "通用 handler 文本（文件 404；P-305 files.not_found 已迁移，明文为兼容兜底），同 not-found 族",
+    "http.ts|file already exists": "通用 handler 文本（文件创建冲突 409；P-305 files.conflict 已迁移），明文为兼容兜底",
+    "http.ts|invalid file name": "通用 handler 文本（跨平台文件名校验；P-305 files.name_invalid 已迁移），明文为兼容兜底",
+    "http.ts|path is not a git repository": "通用 handler 文本（非 git 仓库拒绝，多发射点）+ git 自身同文原文，无单一登记点",
+    "http.ts|path does not exist or is not a directory": "通用 handler 文本（项目路径预检 400 双发射点），登记收益低留基线注记",
+    "http.ts|path traversal not allowed|invalid path": "通用 handler 文本（路径越界拒绝；P-305 files.path_outside_root 已迁移），明文为兼容兜底",
+    "http.ts|already up to date": "git 自身原文（pull/push 无新提交）+ update handler 409 同文，双来源不设单一 marker",
+    "http.ts|not found$": "全表兜底后缀：任意「X not found」原文的末位映射（notFoundGeneric），非单一 marker 契约",
+    "http.ts|session archived|会话已归档": "发射点已随会话式 AI 助手死代码移除（be5f4770），正则防御旧版本远程实例代理响应保留",
+    "http.ts|no ai provider configured": "发射点已随 server/ai 提供商精简移除（5aa5b601），正则防御旧版本远程实例代理响应保留"
+  }
+}

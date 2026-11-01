@@ -1,0 +1,351 @@
+.file-tree { display: flex; flex-direction: column; height: 100%; }
+.tree-header {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-default);
+  font-size: max(var(--fs-section-min, 12px), 0.85em);
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  cursor: default;
+  user-select: none;
+}
+.tree-title { font-weight: 500; color: var(--text-secondary); }
+.tree-project { color: var(--text-muted); font-size: max(var(--fs-meta-min, 11.5px), 0.85em); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.tree-action-btn {
+  border: none; background: transparent; color: var(--text-secondary); cursor: pointer;
+  padding: 2px 4px; border-radius: 3px; display: flex; align-items: center; justify-content: center;
+  transition: all var(--motion-fast);
+  /* 最小热区（P-20261019-5）：14px 图标视觉尺寸不动，命中区由 18×22 撑到
+     全局底线（fine 28 / coarse 40） */
+  min-width: var(--hit-target-min, 28px);
+  min-height: var(--hit-target-min, 28px);
+}
+.tree-action-btn:hover { background: var(--border-default); color: var(--text-primary); }
+.tree-action-btn:active { background: var(--border-subtle); transform: scale(0.9); }
+.tree-action-btn.active { color: var(--accent-blue); }
+/* 禁用态（复制改动清单 marks 非空才可用）：压暗 + 免 hover/active 反馈，
+   保持可发现（不隐藏）但不暗示可点 */
+.tree-action-btn:disabled { color: var(--text-muted); opacity: 0.45; cursor: not-allowed; }
+.tree-action-btn:disabled:hover, .tree-action-btn:disabled:active { background: transparent; transform: none; }
+/* 热区放大后的窄栏兜底（P-20261019-5）：coarse 档 7 个按钮 ×40px 超出侧栏
+   宽度，允许换行并补 gap——压扁/裁切按钮比换行更坏（40px 是触屏底线）；
+   细指针档 7×28 + 2px gap 在默认 280px 侧栏内排得下，只剩极端拖窄时的既有
+   溢出行为不变 */
+@media (pointer: coarse) {
+  .tree-header { flex-wrap: wrap; row-gap: 4px; }
+  .tree-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+}
+
+/* 搜索栏 */
+.tree-search {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+}
+
+.tree-list { flex: 1; outline: none; position: relative; overflow: hidden; }
+/* 批量移动进行中（P-20261003-160）：逐个 rename 的短暂忙碌态——降透明 + 拦
+   点击，防批次进行中与旧树交互（完成后整树刷新即恢复） */
+.tree-list.is-moving { opacity: 0.6; pointer-events: none; }
+.tree-list.is-upload-hover {
+  background: var(--brand-accent-soft);
+  outline: 2px dashed var(--brand-accent);
+  outline-offset: -4px;
+}
+.tree-list.is-upload-hover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at center, color-mix(in srgb, var(--brand-accent) 8%, transparent) 0%, transparent 60%);
+}
+.virtual-list-container { height: 100%; overflow-y: auto; }
+.tree-loading { padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.92em; }
+.tree-empty { display: flex; align-items: center; justify-content: center; height: 200px; padding: 24px; color: var(--text-muted); font-size: 0.92em; }
+
+.tree-item {
+  /* 行高密度档（P-20261003-322）：--row-h 由 ui-density store 仅在紧凑档注入
+     （22px，与虚拟列表 itemSize 同源）；舒适档无注入回落 auto = 历史自然行高，
+     构造性零回归。
+     可读性下限（P-20261019-3）：文件名正文 max(12px, 1em)（界面字号调小不跌破
+     12px，调大随 em 放大）+ 1.45 行高；默认 13px 档与历史观感一致 */
+  height: var(--row-h, auto);
+  padding: 3px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--text-primary);
+  position: relative;
+  font-size: max(12px, 1em);
+  line-height: var(--lh-meta, 1.45);
+  transition: background var(--motion-fast) ease;
+}
+/* 缩进引导线 */
+.tree-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 12px;
+  width: calc(var(--indent, 0) * 16px);
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent,
+    transparent 15px,
+    var(--border-default) 15px,
+    var(--border-default) 16px
+  );
+  pointer-events: none;
+  opacity: 0.6;
+}
+.tree-item:hover { background: var(--bg-hover); }
+.tree-item.focused { background: var(--bg-active); }
+/* 多选态：与 hover/focused 的中性灰区分——品牌蓝浅底 + 左侧实线条（资源管理器同款形态） */
+.tree-item.selected { background: color-mix(in srgb, var(--accent-blue) 14%, transparent); box-shadow: inset 2px 0 0 var(--accent-blue); }
+.tree-item.selected.focused { background: color-mix(in srgb, var(--accent-blue) 22%, transparent); }
+.tree-item.drag-over { background: color-mix(in srgb, var(--accent-blue) 15%, transparent); outline: 1px dashed var(--accent-blue); outline-offset: -1px; }
+/* 剪切态（P-20261023-2③a）：内部剪贴板 cut 条目弱化显示（资源管理器「剪切待
+   粘贴」同款形态）——粘贴/清板后集合变化即消失，纯视觉不占布局 */
+.tree-item.is-cut .item-name { opacity: 0.45; }
+/* 触屏长按（P-20261003-137）前置：长按文本会触发系统选择/呼出（pointercancel
+   使长按计时失效），any-pointer: coarse = 设备存在触屏粗指针即抑制；细指针
+   桌面保持文本可选中不变（复制路径另有右键菜单项，树内选中非必需） */
+@media (any-pointer: coarse) {
+  .tree-item { user-select: none; -webkit-touch-callout: none; }
+}
+
+.item-icon { font-size: 10px; flex-shrink: 0; color: var(--text-secondary); width: 28px; text-align: center; display: inline-flex; align-items: center; gap: 1px; }
+.dir-arrow { font-size: 9px; color: var(--text-secondary); transition: transform var(--motion-base); width: 10px; }
+
+/* 文件图标圆点 */
+.file-icon-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.item-name.is-dir { color: var(--accent-blue-light); }
+.item-name.is-hidden { color: var(--text-secondary); }
+.item-name.is-ignored { color: var(--text-muted); text-decoration: line-through; text-decoration-color: var(--text-muted); }
+/* 目录会话驻留徽标（P-20261004-41）：驻留目录的 agent 会话数小计数（弱样式
+   ——绿系低饱和底无边框，同语义于 git 侧栏 worktree 驻留徽标的弱化形态），
+   可点跳会话，hover 加深反馈 */
+.dir-session-badge {
+  flex-shrink: 0;
+  border: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: max(var(--fs-meta-min, 11.5px), 0.7em);
+  line-height: var(--lh-meta, 1.45);
+  font-family: inherit;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--accent-green) 14%, transparent);
+  color: var(--accent-green);
+}
+.dir-session-badge:hover { background: color-mix(in srgb, var(--accent-green) 30%, transparent); }
+.dir-session-badge:focus-visible { outline: 1px solid var(--accent-green); outline-offset: 1px; }
+
+/* 同名族嵌套（P-20261006-21）：主文件行 +N 角标（可点展开/收起，形态对齐
+   dir-session-badge 徽标家族，蓝系中性色——几何组织语义非会话语义）与子行
+   名字弱化（缩进 +1 档已由行内 style 的 --indent 表达） */
+.nest-badge {
+  flex-shrink: 0;
+  border: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: max(var(--fs-meta-min, 11.5px), 0.7em);
+  line-height: var(--lh-meta, 1.45);
+  font-family: inherit;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--accent-blue-light) 14%, transparent);
+  color: var(--accent-blue-light);
+}
+.nest-badge:hover { background: color-mix(in srgb, var(--accent-blue-light) 30%, transparent); }
+.nest-badge:focus-visible { outline: 1px solid var(--accent-blue-light); outline-offset: 1px; }
+.nest-badge.open { background: color-mix(in srgb, var(--accent-blue-light) 30%, transparent); }
+.tree-item.is-nest-child .item-name { color: var(--text-secondary); }
+.item-ignored-badge { font-size: max(var(--fs-meta-min, 11.5px), 0.7em); color: var(--text-muted); font-family: monospace; flex-shrink: 0; border: 1px solid var(--border-subtle); border-radius: 3px; padding: 0 3px; }
+.item-status { font-size: max(var(--fs-meta-min, 11.5px), 0.85em); font-family: monospace; flex-shrink: 0; }
+/* 内联新建/重命名输入行：悬浮于面板底部（始终可见、可聚焦）。此前排在
+   100% 高度的虚拟列表之后，被 .tree-list 的 overflow:hidden 完全裁剪——
+   用户点「新建文件/新建目录」后看不到任何变化（没反应） */
+.inline-input-row {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 6;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-default);
+}
+
+/* 行内重命名目标已存在的红提示（P-20261002-117）：输入行下方红字，
+   输入框保持打开供就地改名（VS Code 资源管理器同款） */
+.inline-input-error {
+  margin-top: 4px;
+  font-size: max(var(--fs-meta-min, 11.5px), 0.75em);
+  color: var(--accent-red);
+  word-break: break-all;
+}
+
+/* 右键「上传文件」的系统选择器：视觉隐藏（离屏 + 透明），由脚本触发 click */
+.upload-input { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+
+/* 已钉选目录区（P-20261002-97）：标题行 + 钉选项列表，置于树列表上方 */
+.pinned-dirs {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.pinned-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px 2px;
+  font-size: max(var(--fs-meta-min, 11.5px), 0.75em);
+  color: var(--text-muted);
+  user-select: none;
+}
+.pinned-clear {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  cursor: pointer;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.pinned-clear:hover { background: var(--bg-hover); color: var(--text-primary); }
+.pinned-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  cursor: pointer;
+  font-size: max(12px, 0.92em);
+  color: var(--text-primary);
+  white-space: nowrap;
+  transition: background var(--motion-fast) ease;
+}
+.pinned-item:hover { background: var(--bg-hover); }
+.pinned-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+/* 失效钉选（已删/改名）：置灰降级，点按无操作，等「清理失效钉选」 */
+.pinned-item.invalid { color: var(--text-muted); cursor: default; }
+.pinned-item.invalid .pinned-name { text-decoration: line-through; text-decoration-color: var(--text-muted); }
+.pinned-unpin {
+  visibility: hidden;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 最小热区（P-20261019-5）：11px 关闭图标视觉尺寸不动，命中区走全局底线 */
+  min-width: var(--hit-target-min, 28px);
+  min-height: var(--hit-target-min, 28px);
+}
+.pinned-unpin:hover { background: var(--border-default); color: var(--text-primary); }
+.pinned-item:hover .pinned-unpin { visibility: visible; }
+
+/* 点击钉选项后的短暂高亮：目标行闪示后回归（revealFile 已设 focused + 滚动） */
+.tree-item.pinned-flash { animation: pinned-flash-anim 1.6s ease; }
+@keyframes pinned-flash-anim {
+  0%, 55% { background: color-mix(in srgb, var(--accent-blue) 25%, transparent); }
+  28% { background: transparent; }
+  100% { background: transparent; }
+}
+
+/* 上传进度浮条（P-20261003-117）：悬浮树列表顶部（树头下缘），不挤占树布局
+   （内联输入行 z-index 6 同层叠加可接受——两者不同时活跃）；全部成功自动
+   撤下，失败停留为可定点/全部重试的清单 */
+.upload-float {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 7;
+  padding: 6px 10px 7px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-default);
+  box-shadow: var(--shadow-soft);
+}
+.upload-float-head { display: flex; align-items: center; gap: 6px; }
+.upload-float-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8em;
+  color: var(--text-secondary);
+}
+.upload-float-text.is-failed { color: var(--accent-red); }
+.upload-float-dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 最小热区（P-20261019-5）：12px 关闭图标视觉尺寸不动，命中区走全局底线 */
+  min-width: var(--hit-target-min, 28px);
+  min-height: var(--hit-target-min, 28px);
+}
+.upload-float-dismiss:hover { background: var(--border-default); color: var(--text-primary); }
+.upload-float-bar {
+  margin-top: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+.upload-float-fill {
+  height: 100%;
+  background: var(--brand-accent);
+  transition: width var(--motion-base) ease;
+}
+/* 失败清单：逐项名字 + 定点重试，多项时尾部「全部重试」；名字截断 hover 全显 */
+.upload-float-failed { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.upload-float-fitem { display: flex; align-items: center; gap: 6px; }
+.upload-float-fname {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78em;
+  color: var(--text-primary);
+}
+.upload-float-retry, .upload-float-retry-all {
+  flex-shrink: 0;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--accent-blue);
+  cursor: pointer;
+  font-size: 0.75em;
+  padding: 1px 8px;
+  border-radius: 3px;
+}
+.upload-float-retry:hover, .upload-float-retry-all:hover { background: var(--bg-hover); }
+.upload-float-retry-all { align-self: flex-end; margin-top: 2px; }
+

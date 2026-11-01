@@ -1,0 +1,204 @@
+.ide-root {
+  height: 100vh;
+  /* 移动浏览器动态地址栏（P-20261019-7）：100vh 会把底栏顶出视口，dvh 随
+     可视线高收缩；不支持 dvh 的浏览器回落到上一行 100vh */
+  height: 100dvh;
+  display: flex;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* 左侧工具栏 */
+.ide-rail {
+  width: 48px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.rail-instance { padding: 6px 6px 2px; display: flex; justify-content: center; flex-shrink: 0; }
+.rail-top {
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.rail-bottom {
+  margin-top: auto;
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border-top: 1px solid var(--border-default);
+}
+
+.rail-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--motion-base);
+  position: relative;
+}
+
+.rail-btn:hover {
+  background: var(--bg-border);
+  color: var(--text-primary);
+}
+
+.rail-btn:active {
+  background: var(--border-subtle);
+  transform: scale(0.92);
+  transition: all var(--motion-fast);
+}
+
+.rail-btn:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: -2px;
+}
+
+.rail-btn.active {
+  color: var(--text-primary);
+}
+
+.rail-btn.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--accent-blue);
+  border-radius: 0 2px 2px 0;
+}
+
+/* 拖拽调整面板时全局禁止选择 */
+.ide-root.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.ide-root.resizing-vertical {
+  cursor: row-resize;
+  user-select: none;
+}
+
+/* 主区域 */
+.ide-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 全局断连指示条（P-20261002-5）：顶栏下方细横条（24px），warning 色系 +
+   脉冲小圆点——网络切换/休眠唤醒后项目 WS 静默断开时给用户感知（显隐节奏
+   由 useWsDisconnectBar 管控，恢复即隐藏） */
+.ws-disconnect-bar {
+  flex-shrink: 0;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: var(--fs-small);
+  color: var(--text-primary);
+  background: var(--bg-warning);
+  border-bottom: 1px solid var(--bg-warning-alt);
+}
+
+.ws-disconnect-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-yellow-warm);
+  animation: ws-disconnect-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ws-disconnect-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* 尊重 reduced-motion：不脉冲（与 main.css 全局豁免同语义，显式声明更可读） */
+@media (prefers-reduced-motion: reduce) {
+  .ws-disconnect-dot {
+    animation: none;
+  }
+}
+
+/* 断连条淡入淡出 */
+.ws-bar-enter-active,
+.ws-bar-leave-active {
+  transition: opacity var(--motion-base) ease;
+}
+.ws-bar-enter-from,
+.ws-bar-leave-to {
+  opacity: 0;
+}
+
+/* 编辑器 + 底部面板容器 */
+.ide-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* 作为底部面板 editor-maximized 的定位上下文，让 absolute 的 .bottom-panel
+     仅覆盖编辑器区域，不影响左侧活动栏/顶部工具栏/底部状态栏 */
+  position: relative;
+}
+
+/* 内嵌远程控制台视图：占满 ide-body 中编辑器的位置（编辑器隐藏时） */
+.remote-embedded {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 内嵌 AI 助手会话视图：同上占满主区 */
+.agent-chat-embedded {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 内嵌 dsh 控制台视图：占满 ide-body 中编辑器的位置（P6） */
+.dsh-console-embedded {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 内嵌项目仪表盘视图：占满 ide-body 中编辑器的位置（P-20261005-224） */
+.dashboard-embedded {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── 窄屏工作区骨架（P-20261019-7，≤700px 与 md 表格/设置弹窗同口径）──
+   ActivityBar 组件在窄屏分支渲染为底部横条：根容器翻转为纵向，主区在前、
+   底栏在后（order），主区独占全部宽度。侧栏在 main.css 转为 fixed drawer，
+   底栏面板在 BottomPanel 内转为 ide-body 内的覆盖层——uiState 的
+   showSidePanel/showBottomPanel 语义不变，桌面↔窄屏幂等映射。 */
+@media (max-width: 700px) {
+  .ide-root {
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .ide-rail { order: 2; }
+  .ide-main {
+    order: 1;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+}

@@ -1,0 +1,420 @@
+.security-settings {
+  padding: var(--space-1) 0;
+}
+
+/* Tab 内边距统一 */
+.tab-section {
+  padding-top: var(--space-2);
+}
+
+/* 数据保留期分区（P-20261003-123）：与下方审计日志表格体拉开间距 */
+.retention-section {
+  padding-bottom: 14px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  margin: 18px 0 var(--space-2);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.section-title:first-child { margin-top: 0; }
+.cred-warn {
+  background: var(--bg-warning-alt);
+  border: 1px solid var(--accent-yellow);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) 10px;
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+  font-size: var(--fs-meta-min, 11.5px);
+  line-height: 1.5;
+}
+.cred-add-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--space-3);
+  align-items: center;
+}
+.token-add-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--space-3);
+}
+.token-result {
+  background: var(--bg-warning-alt);
+  border: 1px solid var(--accent-yellow);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  margin-bottom: var(--space-3);
+  font-size: 12px;
+}
+.token-result-title { color: var(--accent-yellow); margin-bottom: 6px; font-weight: var(--fw-medium); }
+.token-plain {
+  display: block;
+  color: var(--text-primary);
+  word-break: break-all;
+  margin-bottom: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta-min, 11.5px);
+}
+.token-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+.token-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+.token-item:last-child { border-bottom: none; }
+.token-prefix {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta-min, 11.5px);
+}
+/* 入站 Hook curl 示例（P-20261003-23）：只读代码块，横向滚动防窄屏撑破弹层 */
+.hook-curl-sample {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) 10px;
+  margin: 0 0 var(--space-2);
+  overflow-x: auto;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.token-name { color: var(--text-dim); }
+.token-expiry { color: var(--accent-orange); font-size: var(--fs-meta-min, 11.5px); }
+.pane-empty { padding: var(--space-4); text-align: center; color: var(--text-muted); font-size: 12px; }
+
+/* 长效令牌边界警示（P-20261001-25）：签发区 inline 警示 + 列表/Agent 卡片共用小徽标 */
+.token-longlived-warning { margin: -4px 0 10px; }
+.token-longlived-line { margin: 0 0 var(--space-2); }
+.token-longlived-badge {
+  display: inline-block;
+  padding: 0 6px;
+  margin-right: 6px;
+  border: 1px solid var(--accent-yellow);
+  border-radius: var(--radius-lg);
+  color: var(--accent-yellow);
+  font-size: var(--fs-meta-min, 11.5px);
+  line-height: 15px;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+/* 锁定分区 */
+.lock-section {
+  margin-bottom: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+.cred-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-1) 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+/* 行尾控制簇（P-20261006-49）：控件 + 修改标记成组靠右——cred-row 是
+   space-between，标记若与控件平级会被分到中轴把开关挤离右缘 */
+.cred-row-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.lock-now-desc {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-secondary);
+}
+
+/* 快捷键绑定分区 */
+.shortcut-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  min-height: 32px;
+}
+.shortcut-current.is-capturing {
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
+}
+.shortcut-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+}
+.shortcut-capture-hint {
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--accent-blue);
+}
+.shortcut-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ── 审计日志（P-20261002-13）：表格区 ── */
+/* 工具条允许换行：过滤下拉（P-20261003-131）加入后窄窗不溢出 */
+.audit-pane .audit-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+/* 行内过滤（P-20261003-131）：两下拉定宽防标签长度抖动挤动计数 */
+.audit-pane .audit-filter-select {
+  width: 150px;
+}
+.audit-pane .audit-window-note {
+  margin: 0 0 6px;
+}
+/* 条数上限弱提示（P-20261004-80）：desc 下方一行次级灰字 */
+.audit-pane .audit-cap-hint {
+  margin: -4px 0 var(--space-2);
+}
+.audit-pane .audit-total {
+  font-size: var(--fs-meta-min, 11.5px);
+}
+/* NDataTable 渲染树在子组件内，需 :deep 穿透 */
+.audit-pane :deep(.n-data-table-th),
+.audit-pane :deep(.n-data-table-td) {
+  font-size: 12px;
+}
+.audit-pane .sc-audit-dim {
+  color: var(--text-secondary);
+  font-size: var(--fs-meta-min, 11.5px);
+}
+.audit-pane .sc-audit-action {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.audit-pane .sc-audit-action > span:first-child {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.audit-pane .sc-audit-detail {
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+/* 滚动加载容器（P-20261003-223）：定高滚动近底续翻。一满页 20 行必然溢出
+   420px（行高 12px 字号下 ≥28px/行），首屏即有滚动条——无「满页填不满容器、
+   滚不动续不了翻」的死区。本文件被各设置页 scoped 引入，属性选择器落在末位
+   选择器上而 AuditLogPane 内部元素不带宿主 scope 属性（仅根节点带）——
+   穿透其内部必须走 :deep()（.n-data-table-th 既有规则同款） */
+.audit-pane :deep(.audit-scroll) {
+  max-height: 420px;
+  overflow-y: auto;
+}
+/* sticky 表头（P-20261004-136）：长审计滚动数屏后表头钉在容器顶，列义不靠
+   记忆。naive 无 max-height 时 thead 与 tbody 同表渲染在 NScrollbar 内，其
+   .n-scrollbar（overflow:hidden）与 .n-scrollbar-container（overflow:scroll）
+   都是滚动容器、会截走 sticky 的参照系（最近滚动容器不再是 .audit-scroll），
+   须双双放开为 visible 表头才钉得住；两容器在本表面无真实滚动职责（无
+   max-height/scroll-x，滚动全在 .audit-scroll——组件原生 max-height 方案会
+   换掉滚动容器、断 P-223 近底续翻的游标链，故走 CSS 覆盖）。行背景随
+   naive th 既有 var(--n-merged-th-color) 不透明底，无需另配色 */
+.audit-pane :deep(.audit-scroll .n-data-table .n-scrollbar),
+.audit-pane :deep(.audit-scroll .n-data-table .n-scrollbar-container) {
+  overflow: visible;
+}
+.audit-pane :deep(.audit-scroll .n-data-table-thead .n-data-table-th) {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.audit-pane :deep(.audit-more-loading) {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2) 0;
+}
+.audit-pane :deep(.audit-pagination) {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
+/* ── 数据出域面总览卡（P-20261003-20）：安全姿态一页，纯只读聚合 + 直达管理入口 ── */
+.egress-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--bg-secondary);
+}
+.egress-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.egress-title {
+  font-size: 12px;
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  margin: 0 0 2px;
+}
+.egress-desc {
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+.egress-rows {
+  display: flex;
+  flex-direction: column;
+}
+.egress-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+.egress-label {
+  flex: 0 0 auto;
+  min-width: 88px;
+  color: var(--text-secondary);
+}
+.egress-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.egress-endpoint {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-primary);
+}
+.egress-badge {
+  margin-left: 6px;
+  font-size: var(--fs-meta-min, 11.5px);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+.egress-badge-off {
+  color: var(--accent-yellow);
+  border: 1px solid var(--accent-yellow);
+}
+.egress-share-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-right: 10px;
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-secondary);
+}
+.egress-share-target {
+  color: var(--text-secondary);
+}
+.egress-share-created {
+  color: var(--text-muted);
+}
+.egress-share-expiry {
+  color: var(--accent-orange);
+}
+.egress-share-more {
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-muted);
+}
+
+/* ── 入口面总览卡（P-20261004-11）：出域卡的另一半「谁在进来」，同形态
+     只读聚合 + 直达管理入口（类名与 egress 平行，互不耦合） ── */
+.ingress-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--bg-secondary);
+}
+.ingress-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.ingress-title {
+  font-size: 12px;
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  margin: 0 0 2px;
+}
+.ingress-desc {
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+.ingress-rows {
+  display: flex;
+  flex-direction: column;
+}
+.ingress-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+.ingress-label {
+  flex: 0 0 auto;
+  min-width: 88px;
+  color: var(--text-secondary);
+}
+.ingress-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.ingress-endpoint {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-primary);
+}
+.ingress-failures {
+  margin-left: 6px;
+  color: var(--accent-orange);
+}
+.ingress-note {
+  margin-left: 6px;
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-muted);
+}

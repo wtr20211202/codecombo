@@ -1,0 +1,4 @@
+{
+  "_comment": "动作图标语义基线（P-20261022-1）：键 = \"规则|文件|细节\"，值 = 豁免理由。基线外新增即 check:icon-semantics 退码 1；修复后请删除对应条目。重建：npm run check:icon-semantics -- --update-baseline",
+  "entries": {}
+}

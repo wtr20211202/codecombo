@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Codecombo 品牌图标·自适应版（P-20261101-1）。透明背景，随宿主
+       prefers-color-scheme 在暗色（浅弧）/亮色（深弧）两套描边间切换；
+       默认值 = 暗色套（产品 Dark 主形态，og 抓图等不支持 media query 的
+       渲染器一律落暗色套）。显式单套版见同目录 -dark / -light。
+       几何与 web/public/favicon.svg 同源（48 栅格·四分之一啮合弧+双节点+毂点）。
+       注：描边色走 CSS 变量 + 内嵌 media query，<img> 引用与直接内联均生效；
+       不支持 CSS 变量的极端渲染器落 attribute 默认值（同为暗色套，不空画）。 -->
+  <style>
+    .mark {
+      --arc1: #79c0ff;
+      --arc2: #388bfd;
+      --hub: #e6edf3;
+    }
+    @media (prefers-color-scheme: light) {
+      .mark {
+        --arc1: #58a6ff;
+        --arc2: #1f6feb;
+        --hub: #24292f;
+      }
+    }
+  </style>
+  <g class="mark">
+    <path d="M24 8A16 16 0 0 0 8 24" stroke="var(--arc1, #79c0ff)" stroke-width="4.2" stroke-linecap="round"/>
+    <path d="M24 40A16 16 0 0 0 40 24" stroke="var(--arc2, #388bfd)" stroke-width="4.2" stroke-linecap="round"/>
+    <circle cx="8" cy="24" r="3.4" fill="var(--arc1, #79c0ff)"/>
+    <circle cx="40" cy="24" r="3.4" fill="var(--arc2, #388bfd)"/>
+    <circle cx="24" cy="24" r="5.4" fill="var(--hub, #e6edf3)" opacity="0.16"/>
+    <circle cx="24" cy="24" r="2.6" fill="var(--hub, #e6edf3)"/>
+  </g>
+</svg>

@@ -1,0 +1,38 @@
+{
+  "comment": "API 路由对账基线（P-20261004-77）：路由表中无前端 api 层调用引用的合法存量注记——agent 能力面 / 传输通道 / 基础设施端点。前缀键按路径前缀匹配（越具体门禁越强，禁整族宽豁免），routes 精确键为「METHOD path」。路由已删/改名后条目悬空，对账 WARN 会提示修剪；新增消费（domains 补客户端方法）后也应反向修剪本表。",
+  "routePrefixes": {
+    "/api/health": "健康探针——进程/容器探活面，前端不消费",
+    "/api/metrics": "Prometheus 指标出口——监控系统消费",
+    "/api/shutdown": "本机优雅停机通道（回环+自定义头双约束）——CLI 进程管理面",
+    "/api/modules": "模块发现清单——外部工具/未来插件消费，前端静态内置",
+    "/api/whoami": "令牌自校验——agent 脚本/新会话引导面",
+    "/ops-manual": "agent 手册端点——agent 检索教材消费",
+    "/api/ops-ask": "agent 结构化提问的 agent 侧上报/单条轮询面（前端作答 POST /:id/answer、列表 GET /ops-ask 已消费）",
+    "/api/ops-confirm": "审批创建 agent 上报面（前端读面 GET /ops-confirm 列表 + /export 已消费）",
+    "/api/ops-message": "ops 消息通道 agent 面（POST 上报 / GET 轮询）",
+    "/api/ops-notify": "ops 事件上报通道（agent SC_OPS 专用）",
+    "/api/projects/:id/replace": "服务端批量替换原语（P-20261004-114）——agent 能力面，前端批量替换走本地 executeReplace 编排",
+    "/api/projects/:id/tree": "存量项目树端点——前端文件树/Quick Open 走 /file-tree 与 /file-list",
+    "/api/recordings/": "审批录制回放单条元数据——前端回放走 /:id/cast（list/DELETE 已消费）",
+    "/api/remotehosts/:id/terminals/:sid/scrollback": "远程终端 REST scrollback 取回——远程终端现场恢复走 WS 通道",
+    "/api/runbooks/:id/run": "runbook 执行触发——agent/手册自动化面（前端管理面 CRUD 已消费）",
+    "/api/updates/serve-binary": "更新器二进制下发流——自更新下载通道",
+    "/preview/": "端口预览回环反代——浏览器 iframe 直连传输通道",
+    "/proxy/": "实例代理传输通道——机器间转发管道",
+    "/ws/": "WebSocket 传输通道族——前端经 WS URL 构造器直连（不经 api.* 调用面）",
+    "/api/quickdrop": "快投递投递原语（P-20261006-51）——agent/脚本/iOS 快捷指令直投面（token 即凭据），浏览器内前端无调用点；收件箱清单/摘除与凭据生命周期已由 domains/share quickdropApi 消费",
+    "/api/csp-report": "CSP 违规报告收集端点（P-20261007-6）——浏览器按 CSP 规范自动 POST（无应用凭据），不经前端 domains 调用面；报告聚合入审计供 /api/audit 消费",
+    "/api/hooks": "入站事件 Hook 原语（P-20261003-23）——外部 CI/监控/脚本直投面（sch_ 凭据即门禁），浏览器内前端无调用点；凭据生命周期 /api/hook-token 已由 domains/system hookTokenApi 消费",
+    "/s/": "分享访客面同源入口（P-20261020-2）——访客浏览器/手机直开的零依赖页面与子资源（页面/SSE/口令/留言），不经前端 api 层；分享链接由 utils/shareAddress 地址计划拼装（不调 api.*）",
+    "/api/sync/units": "多实例同步对端面（P-20261023-1）：对端实例间 zip 打包/落位传输通道——本端前端经 /sync/pull|push 编排端点间接消费，不经 domains 直调",
+    "/api/projects/:id/file/download": "文件下载直链消费面（P-20261030-2 blob 反模式直链化）：utils/directDownload 构造同源 <a href download> 程序化点击 + frontendAtomActions ops 原子同款——浏览器原生 GET 自动携带锁 cookie 载体（P-20261019-2），不经 axios domains"
+  },
+  "routes": {
+    "POST /api/audit/archive": "审计保留巡更手动触发（P-20261003-277）——运维/agent 维护面（归档自动进行，UI 无按钮；e2e 窗口翻转用例直打 API）",
+    "GET /drop/:token": "访客投递页（P-20261006-51）——手机浏览器直开的零依赖单页，不经前端应用",
+    "POST /drop/:token": "访客投递页表单提交——同上，页面自包含",
+    "GET /assets/xterm.js": "分享访客页 vendored 资产（P-20261020-2）——访客页 <script> 直载，不经前端 api 层",
+    "GET /assets/addon-fit.js": "分享访客页 vendored 资产（P-20261020-2）——xterm addon，同上",
+    "GET /assets/xterm.css": "分享访客页 vendored 资产（P-20261020-2）——访客页 <link> 直载，同上"
+  }
+}

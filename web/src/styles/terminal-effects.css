@@ -1,0 +1,240 @@
+/* 终端主题特效层
+ * - @font-face 三款 OFL 字体（懒加载 swap）
+ * - 字体 class（由 useTerminalTheme 切换）
+ * - 全局 noise texture（深色终端主题启用）
+ * - .term-pane[data-effects-*] 启用主题专属特效（scanline / corner / vignette / starfield / cursor glow / text glow / ambient glow）
+ */
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Cascadia Code';
+  src: url('/fonts/CascadiaCode-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Cascadia Code';
+  src: url('/fonts/CascadiaCode-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('/fonts/IBMPlexMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('/fonts/IBMPlexMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Fira Code';
+  src: url('/fonts/FiraCode-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Fira Code';
+  src: url('/fonts/FiraCode-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* 字体 class：由 useTerminalTheme 应用到 <html> */
+.terminal-font-jetbrains .xterm,
+.terminal-font-jetbrains .term-screen,
+.terminal-font-jetbrains .term-font-mono {
+  font-family: 'JetBrains Mono', var(--font-mono, monospace);
+}
+.terminal-font-cascadia .xterm,
+.terminal-font-cascadia .term-screen,
+.terminal-font-cascadia .term-font-mono {
+  font-family: 'Cascadia Code', var(--font-mono, monospace);
+}
+.terminal-font-ibmplex .xterm,
+.terminal-font-ibmplex .term-screen,
+.terminal-font-ibmplex .term-font-mono {
+  font-family: 'IBM Plex Mono', var(--font-mono, monospace);
+}
+.terminal-font-fira .xterm,
+.terminal-font-fira .term-screen,
+.terminal-font-fira .term-font-mono {
+  font-family: 'Fira Code', var(--font-mono, monospace);
+}
+
+/* 连字开关（外观设置）：关闭时禁用编程连字（calt = JetBrains Mono/Fira
+ * Code/Cascadia 的 => !== 合字所在特性）。覆盖两类活跃面：
+ * 1) 终端字体面——xterm DOM 回退渲染（WebGL 失败/RDP/VM/上下文耗尽时生效，
+ *    WebGL 逐格绘制本就不出连字）
+ * 2) 全局等宽文本（base.css 对 code/kbd/pre/.mono 显式开启 calt/liga） */
+html[data-ligatures='off'][class*='terminal-font-'] .xterm,
+html[data-ligatures='off'][class*='terminal-font-'] .term-screen,
+html[data-ligatures='off'][class*='terminal-font-'] .term-font-mono,
+html[data-ligatures='off'] code,
+html[data-ligatures='off'] kbd,
+html[data-ligatures='off'] pre,
+html[data-ligatures='off'] .mono {
+  font-variant-ligatures: none;
+  font-feature-settings: 'calt' 0, 'liga' 0;
+}
+
+/* xterm 抗锯齿优化（所有字体通用） */
+.xterm {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'liga' 1, 'calt' 1;
+}
+
+/* ============== 终端主题特效层 ==============
+ * 宿主限定 .term-pane（终端区） + .terminal-theme-card（设置页预览）
+ * 避免通用 [data-effects-*] 误命中其他 DOM 节点
+ */
+
+/* ============== Scanline ============== */
+/* subtle：极淡（cyber-hud） */
+.term-pane[data-effects-scanline="subtle"]::before,
+.terminal-theme-card[data-effects-scanline="subtle"]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0,
+    transparent 2px,
+    rgba(255, 255, 255, 0.025) 2px,
+    rgba(255, 255, 255, 0.025) 3px
+  );
+  z-index: 2;
+  mix-blend-mode: overlay;
+}
+
+/* strong：明显（industrial CRT） */
+.term-pane[data-effects-scanline="strong"]::before,
+.terminal-theme-card[data-effects-scanline="strong"]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 176, 0, 0.06) 0,
+    rgba(255, 176, 0, 0.06) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  z-index: 2;
+  mix-blend-mode: overlay;
+  animation: term-scanline-drift 8s linear infinite;
+  will-change: background-position;
+}
+@keyframes term-scanline-drift {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 12px; }
+}
+
+/* ============== Cursor glow（仅真实 xterm 中生效，预览卡片无 .xterm-rows） ============== */
+.term-pane[data-effects-cursor-glow="subtle"] .xterm-rows .xterm-cursor {
+  box-shadow: 0 0 4px currentColor;
+}
+.term-pane[data-effects-cursor-glow="strong"] .xterm-rows .xterm-cursor {
+  box-shadow: 0 0 10px currentColor, 0 0 18px currentColor;
+}
+
+/* ============== Text glow（仅真实 xterm 中生效） ============== */
+.term-pane[data-effects-text-glow="strong"] .xterm-rows {
+  text-shadow: 0 0 4px currentColor;
+}
+.term-pane[data-effects-text-glow="subtle"] .xterm-rows {
+  text-shadow: 0 0 1px currentColor;
+}
+
+/* ============== Corner brackets（cyber-hud 专属） ============== */
+.term-pane[data-effects-corner="true"]::after,
+.terminal-theme-card[data-effects-corner="true"]::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  pointer-events: none;
+  z-index: 3;
+  background:
+    linear-gradient(to right, var(--term-accent, transparent) 14px, transparent 14px) top left / 14px 1px no-repeat,
+    linear-gradient(to bottom, var(--term-accent, transparent) 14px, transparent 14px) top left / 1px 14px no-repeat,
+    linear-gradient(to left, var(--term-accent, transparent) 14px, transparent 14px) top right / 14px 1px no-repeat,
+    linear-gradient(to bottom, var(--term-accent, transparent) 14px, transparent 14px) top right / 1px 14px no-repeat,
+    linear-gradient(to right, var(--term-accent, transparent) 14px, transparent 14px) bottom left / 14px 1px no-repeat,
+    linear-gradient(to top, var(--term-accent, transparent) 14px, transparent 14px) bottom left / 1px 14px no-repeat,
+    linear-gradient(to left, var(--term-accent, transparent) 14px, transparent 14px) bottom right / 14px 1px no-repeat,
+    linear-gradient(to top, var(--term-accent, transparent) 14px, transparent 14px) bottom right / 1px 14px no-repeat;
+  opacity: 0.55;
+}
+
+/* ============== Vignette（industrial 专属） ============== */
+.term-pane[data-effects-vignette="true"],
+.terminal-theme-card[data-effects-vignette="true"] {
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.6);
+}
+
+/* ============== Starfield（deep-space 专属） ============== */
+.term-pane[data-effects-starfield="true"]::before,
+.terminal-theme-card[data-effects-starfield="true"]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background-image:
+    radial-gradient(1px 1px at 20px 30px, rgba(255, 255, 255, 0.45), transparent),
+    radial-gradient(1px 1px at 60px 70px, rgba(255, 255, 255, 0.35), transparent),
+    radial-gradient(1px 1px at 110px 50px, rgba(124, 158, 255, 0.5), transparent),
+    radial-gradient(1px 1px at 160px 100px, rgba(255, 255, 255, 0.25), transparent),
+    radial-gradient(1px 1px at 200px 40px, rgba(199, 125, 255, 0.45), transparent),
+    radial-gradient(1px 1px at 240px 80px, rgba(0, 245, 212, 0.4), transparent),
+    radial-gradient(1px 1px at 280px 110px, rgba(255, 255, 255, 0.3), transparent);
+  background-size: 320px 140px;
+  background-repeat: repeat;
+  opacity: 0.5;
+}
+
+/* ============== Ambient glow（屏幕周围光晕，仅终端区） ============== */
+.term-pane[data-effects-ambient="true"] {
+  box-shadow: inset 0 0 100px var(--term-ambient, transparent);
+}
+
+/* ============== 全局极淡 noise texture（避免纯色塑料感） ==============
+ * 仅深色终端主题 + 终端可见时启用（避免项目树/编辑器等非终端区也承担合成层成本）
+ * body.terminal-noise 由 useTerminalTheme 按 isDark 切换；body.has-terminal 由 TerminalView onMounted/unmount 控制
+ */
+body.has-terminal.terminal-noise::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+

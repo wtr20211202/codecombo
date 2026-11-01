@@ -1,0 +1,311 @@
+.commit-panel { height: 100%; display: flex; flex-direction: column; }
+/* Tabs */
+.cp-tabs { display: flex; border-bottom: 1px solid var(--border-default); background: var(--bg-panel); flex-shrink: 0; }
+.cp-tab { flex: 1; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: max(var(--fs-meta-min, 11.5px), 0.9em); padding: 5px 0; border-bottom: 2px solid transparent; transition: all var(--motion-base); }
+.cp-tab:hover { color: var(--text-primary); }
+.cp-tab.active { color: var(--text-primary); border-bottom-color: var(--accent-blue); }
+/* cp-tab-refresh / cp-tab-action：页签行右侧图标按钮同形制（刷新 / 导出补丁） */
+.cp-tab-refresh,
+.cp-tab-action {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0 10px;
+  border-bottom: 2px solid transparent;
+  transition: color var(--motion-base);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cp-tab-refresh:hover:not(:disabled),
+.cp-tab-action:hover:not(:disabled) { color: var(--brand-accent); }
+.cp-tab-refresh:disabled,
+.cp-tab-action:disabled { opacity: 0.6; cursor: not-allowed; }
+.cp-tab-refresh.rotating > :deep(svg) { animation: cp-spin 0.8s linear infinite; }
+@keyframes cp-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+/* 提交区域 */
+.cp-commit-area { padding: 6px var(--space-2); border-bottom: 1px solid var(--border-default); flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; }
+.cp-commit-actions { display: flex; gap: var(--space-1); align-items: center; }
+
+/* Conventional Commit 工具栏 */
+.cp-cc-toolbar { display: flex; gap: var(--space-1); align-items: center; }
+.cp-cc-types { display: flex; gap: 3px; flex: 1; flex-wrap: wrap; }
+.cp-cc-chip {
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: max(var(--fs-meta-min, 11.5px), 0.78em);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  transition: all var(--motion-fast);
+}
+.cp-cc-chip:hover { border-color: var(--brand-accent); color: var(--brand-accent); }
+.cp-cc-chip.active { border-color: currentColor; font-weight: var(--fw-semibold); }
+.cp-cc-chip.active.feat { color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 14%, transparent); }
+.cp-cc-chip.active.fix { color: var(--accent-orange); background: color-mix(in srgb, var(--accent-orange) 14%, transparent); }
+.cp-cc-chip.active.docs { color: var(--accent-blue); background: color-mix(in srgb, var(--accent-blue) 14%, transparent); }
+.cp-cc-chip.active.style { color: var(--accent-purple); background: color-mix(in srgb, var(--accent-purple) 14%, transparent); }
+.cp-cc-chip.active.refactor { color: var(--accent-purple); background: color-mix(in srgb, var(--accent-purple) 14%, transparent); }
+.cp-cc-chip.active.perf { color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 14%, transparent); }
+.cp-cc-chip.active.test { color: var(--accent-yellow-warm); background: color-mix(in srgb, var(--accent-yellow-warm) 14%, transparent); }
+.cp-cc-chip.active.build { color: var(--text-primary); background: var(--bg-hover); }
+.cp-cc-chip.active.ci { color: var(--text-primary); background: var(--bg-hover); }
+.cp-cc-chip.active.chore { color: var(--text-primary); background: var(--bg-hover); }
+.cp-cc-chip.active.revert { color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 14%, transparent); }
+.cp-cc-toggle {
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cp-cc-toggle:hover { color: var(--brand-accent); border-color: var(--brand-accent); }
+.cp-cc-advanced {
+  display: flex; gap: var(--space-1); align-items: center;
+  padding: var(--space-1) 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+.cp-cc-scope { width: 100px; }
+.cp-cc-footer-input { flex: 1; }
+.cp-cc-breaking {
+  display: inline-flex; align-items: center; gap: 3px;
+  cursor: pointer;
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: var(--fw-semibold);
+  color: var(--accent-red);
+}
+/* 文件列表 */
+/* 即时过滤输入行：位于提交区与列表之间（滚动区是下方 .cp-file-list，无需 sticky） */
+.cp-filter-row { display: flex; align-items: center; gap: 6px; padding: 6px var(--space-2) 2px; flex-shrink: 0; }
+.cp-filter-input { flex: 1; }
+.cp-filter-count { font-size: max(var(--fs-meta-min, 11.5px), 0.8em); color: var(--text-muted); flex-shrink: 0; font-family: var(--font-mono); }
+.cp-no-match { padding: var(--space-4) var(--space-2); text-align: center; color: var(--text-muted); font-size: max(var(--fs-meta-min, 11.5px), 0.88em); flex-shrink: 0; }
+.cp-loading { padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.92em; }
+.cp-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.92em; }
+.cp-file-list { flex: 1; overflow-y: auto; min-height: 0; }
+/* 树头批量展开/收起（P-20261003-169）：列表上方右对齐两枚小钮，cp-cc-toggle
+   同形制（20px 方钮、边框、hover brand 色） */
+.cp-tree-head { display: flex; justify-content: flex-end; gap: var(--space-1); padding: var(--space-1) var(--space-2) 2px; flex-shrink: 0; }
+.cp-tree-head-btn {
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  transition: all var(--motion-fast);
+}
+.cp-tree-head-btn:hover { color: var(--brand-accent); border-color: var(--brand-accent); }
+/* 排序模式钮激活态（P-20261003-239）：hover 同色常驻——「按改动量排序」在效的反馈 */
+.cp-tree-head-btn.active { color: var(--brand-accent); border-color: var(--brand-accent); }
+/* 键盘导航：容器可聚焦（Tab 进入/行内点击聚焦），:focus-visible 描边只给键盘落焦
+   （点击聚焦以高亮行为指示，鼠标路径不挂常驻描边） */
+.cp-file-list:focus-visible { outline: 1px solid var(--brand-accent); outline-offset: -1px; }
+/* 行高密度档（P-20261003-322）：--row-h 仅紧凑档注入（22px，与虚拟列表 itemSize
+   同源）；舒适档回落 26px = 历史值，零回归 */
+.cp-node { height: var(--row-h, 26px); padding: 0 10px; display: flex; align-items: center; gap: var(--space-1); cursor: pointer; white-space: nowrap; color: var(--text-primary); font-size: max(12px, 0.92em); }
+.cp-node:hover { background: var(--bg-hover); }
+.cp-node.is-selected { background: var(--bg-active); }
+/* 键盘光标行（通知中心 is-active 同款：hover 底色 + brand 色左条）；与点选态
+   并存时选中底色优先——声明顺序在后即胜出 */
+.cp-node.is-active { background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--brand-accent); }
+.cp-node.is-active.is-selected { background: var(--bg-active); }
+/* 键盘多选成员行（P-20261003-271）：文件树多选同视觉语（accent-blue 浅染，
+   区别于单选的 bg-active）；光标行加深一档——box-shadow 不重声明，brand 左条
+   从 .is-active 规则自然保留，两态叠加可同时读出「在范围内」与「光标在哪」 */
+.cp-node.is-multi-selected { background: color-mix(in srgb, var(--accent-blue) 14%, transparent); }
+.cp-node.is-active.is-multi-selected { background: color-mix(in srgb, var(--accent-blue) 22%, transparent); }
+.cp-chevron { width: 12px; flex-shrink: 0; display: flex; align-items: center; color: var(--text-secondary); }
+/* 文件行内联 diff 展开 chevron（P-20261004-25）：目录 chevron 同槽同图标语，
+   hover 提亮给可点击反馈 */
+.cp-expand-chevron { cursor: pointer; }
+.cp-expand-chevron:hover { color: var(--accent-blue); }
+/* 行内嵌 diff 槽（P-20261004-25）：高度由模板钉死（useChangeTree itemHeight 同值，
+   虚列表几何一致）；上下边界线把槽与相邻行分开，面板底色承载 diff 行。
+   槽内 body/state 样式在 CommitInlineDiff 自己的 scoped 块——父组件 scoped
+   只到子组件根节点，够不着子组件内部元素 */
+.cp-inline-diff { border-top: 1px solid var(--border-default); border-bottom: 1px solid var(--border-default); background: var(--bg-panel); overflow: hidden; }
+.cp-stage-toggle { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--text-muted); display: flex; align-items: center; justify-content: center; font-size: 9px; cursor: pointer; flex-shrink: 0; color: var(--text-muted); transition: all var(--motion-base); }
+.cp-stage-toggle:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+.cp-stage-toggle.staged { background: var(--accent-green); border-color: var(--accent-green); color: var(--bg-primary); }
+.cp-commit-check { font-size: 12px; cursor: pointer; flex-shrink: 0; user-select: none; color: var(--accent-blue); }
+.cp-commit-check:hover { color: var(--accent-blue-hover); }
+.cp-select-all { font-size: max(var(--fs-meta-min, 11.5px), 0.85em); cursor: pointer; user-select: none; color: var(--text-secondary); display: flex; align-items: center; gap: 2px; }
+.cp-select-all:hover { color: var(--text-primary); }
+.cp-amend { font-size: max(var(--fs-meta-min, 11.5px), 0.85em); cursor: pointer; user-select: none; color: var(--text-secondary); display: flex; align-items: center; gap: 2px; }
+.cp-amend:hover { color: var(--text-primary); }
+.cp-icon { font-size: 11px; width: 14px; text-align: center; flex-shrink: 0; }
+.cp-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.cp-name.is-dir { color: var(--accent-blue-light); font-weight: var(--fw-medium); }
+/* 会话归属点标（P-20261003-22）：agent 产出文件打点，文件树 item-agent-dot 同视觉语 */
+.cp-agent-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-purple); margin: 0 var(--space-1); cursor: help; }
+/* 行数热力条（P-20261003-239）：行首 3px 竖条五档梯度（0 档不渲染），色阶全部
+   主题变量 color-mix 派生（P-37 活动热力图同族绿阶，对比度域归主题治理脚本把关）；
+   cursor: help 提示悬停有精确行数（与 cp-agent-dot 同语） */
+.cp-heat { flex-shrink: 0; width: 3px; height: 12px; border-radius: 2px; cursor: help; }
+.cp-heat.is-l1 { background: color-mix(in srgb, var(--accent-green) 25%, var(--bg-panel)); }
+.cp-heat.is-l2 { background: color-mix(in srgb, var(--accent-green) 45%, var(--bg-panel)); }
+.cp-heat.is-l3 { background: color-mix(in srgb, var(--accent-green) 70%, var(--bg-panel)); }
+.cp-heat.is-l4 { background: var(--accent-green); }
+/* 归属二态过滤 chips（仅 Agent / 仅人工）：同 cp-cc-chip 视觉语，紫色=归属语义 */
+.cp-agent-chip {
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: max(var(--fs-meta-min, 11.5px), 0.78em);
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: all var(--motion-fast);
+}
+.cp-agent-chip:hover { border-color: var(--accent-purple); color: var(--accent-purple); }
+.cp-agent-chip.active { border-color: currentColor; font-weight: var(--fw-semibold); color: var(--accent-purple); background: color-mix(in srgb, var(--accent-purple) 14%, transparent); }
+/* 状态维度过滤 chips（P-20261003-136，全部/未暂存/已暂存/冲突）：过滤条下第二行
+   （CommitFilterBar 双行根），同 cp-agent-chip 视觉语，蓝色=状态语义与紫色归属区分 */
+.cp-status-row { display: flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2) 0; flex-shrink: 0; flex-wrap: wrap; }
+.cp-status-chip {
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: max(var(--fs-meta-min, 11.5px), 0.78em);
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: all var(--motion-fast);
+}
+.cp-status-chip:hover:not(:disabled) { border-color: var(--accent-blue); color: var(--accent-blue); }
+.cp-status-chip.active { border-color: currentColor; font-weight: var(--fw-semibold); color: var(--accent-blue); background: color-mix(in srgb, var(--accent-blue) 14%, transparent); }
+/* 无冲突文件时冲突 chip 禁用（点击只得空列表，禁用即「当前无冲突」反馈） */
+.cp-status-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+.cp-status { font-size: max(var(--fs-meta-min, 11.5px), 0.8em); font-family: monospace; flex-shrink: 0; margin-left: auto; }
+/* 组头统计（P-20261003-280）：目录行右缘「N 文件 +x -y」组级 diffstat（P-239
+   numstat 数据面同源）——绿增红删 = GitHub 提交列表同视觉语，色值全走主题变量
+   （.cp-heat 色阶同治理）；数字面 monospace 与 .cp-status 同族 */
+.cp-dir-stat { flex-shrink: 0; margin-left: auto; display: flex; gap: 6px; font-size: max(var(--fs-meta-min, 11.5px), 0.8em); font-family: monospace; color: var(--text-secondary); }
+.cp-dir-stat-add { color: var(--accent-green); }
+.cp-dir-stat-del { color: var(--accent-red); }
+/* Stash */
+.cp-stash-toolbar { padding: 6px var(--space-2); border-bottom: 1px solid var(--border-default); flex-shrink: 0; }
+.cp-stash-list { flex: 1; overflow-y: auto; }
+.cp-stash-item { padding: 6px var(--space-2); border-bottom: 1px solid var(--border-default); display: flex; align-items: center; justify-content: space-between; }
+.cp-stash-item:hover { background: var(--bg-hover); }
+.cp-stash-info { flex: 1; min-width: 0; }
+.cp-stash-msg { font-size: max(12px, 0.92em); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.cp-stash-actions { display: flex; gap: var(--space-1); flex-shrink: 0; }
+
+/* 提交框旁工具行：生成提交信息 + 生成 PR 描述 + 提交消息历史入口，右对齐小按钮
+   （flex-wrap：窄侧栏三键排不下时换行不挤压，dock/底部等宽位不受影响） */
+.cp-msg-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-1); margin-bottom: 2px; flex-wrap: wrap; }
+.cp-msg-generate {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.cp-msg-generate:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-secondary); }
+.cp-msg-generate:disabled { opacity: 0.45; cursor: not-allowed; }
+.cp-msg-history {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.cp-msg-history:hover { background: var(--bg-hover); color: var(--text-secondary); }
+
+/* ============== 变更列表（changelist）分区（P-20261007-19） ============== */
+/* 标题行：折叠开关 + 计数 + 新建钮，单行紧凑（收起只占一行保变更树空间） */
+.cp-cl-section { flex-shrink: 0; border-bottom: 1px solid var(--border-default); }
+.cp-cl-head { display: flex; align-items: center; justify-content: space-between; padding: var(--space-1) var(--space-2) 2px; }
+.cp-cl-toggle {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  background: transparent; border: none; padding: 2px var(--space-1);
+  color: var(--text-secondary); font-size: max(var(--fs-section-min, 12px), 0.82em); font-weight: var(--fw-semibold);
+  cursor: pointer; border-radius: var(--radius-sm); min-height: 20px;
+}
+.cp-cl-toggle:hover { background: var(--bg-hover); color: var(--brand-accent); }
+.cp-cl-head-count {
+  font-family: var(--font-mono); font-size: max(var(--fs-meta-min, 11.5px), 0.9em); color: var(--text-muted);
+  background: var(--bg-surface); border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg); padding: 0 6px;
+}
+.cp-cl-new {
+  background: transparent; border: none; padding: 2px 6px;
+  color: var(--text-tertiary); font-size: max(var(--fs-meta-min, 11.5px), 0.78em);
+  cursor: pointer; border-radius: var(--radius-sm); white-space: nowrap;
+}
+.cp-cl-new:hover { background: var(--bg-hover); color: var(--brand-accent); }
+/* 列表行：活跃点标 + 名称 + 文件数徽标 + 搁置/删除动作；活跃行整行着色 */
+.cp-cl-rows { padding: 0 var(--space-1) var(--space-1); }
+.cp-cl-row {
+  display: flex; align-items: center; gap: var(--space-1);
+  padding: 2px var(--space-1); border-radius: var(--radius-sm); font-size: max(var(--fs-meta-min, 11.5px), 0.86em);
+}
+.cp-cl-row:hover { background: var(--bg-hover); }
+.cp-cl-row.is-active { background: color-mix(in srgb, var(--accent-green) 10%, transparent); }
+.cp-cl-active-btn {
+  background: transparent; border: none; padding: 0 2px;
+  color: var(--text-muted); font-size: 0.9em; line-height: 1;
+  cursor: pointer; flex-shrink: 0;
+}
+.cp-cl-active-btn:hover { color: var(--accent-green); }
+.cp-cl-active-btn.on { color: var(--accent-green); }
+.cp-cl-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-primary); cursor: pointer;
+}
+.cp-cl-row.is-active .cp-cl-name { font-weight: var(--fw-semibold); }
+.cp-cl-count {
+  font-family: var(--font-mono); font-size: max(var(--fs-meta-min, 11.5px), 0.85em); color: var(--text-muted);
+  background: var(--bg-surface); border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg); padding: 0 5px; flex-shrink: 0;
+}
+.cp-cl-act {
+  background: transparent; border: none; padding: 2px;
+  color: var(--text-muted); cursor: pointer; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; flex-shrink: 0;
+}
+.cp-cl-act:hover { color: var(--brand-accent); background: var(--bg-hover); }
+.cp-cl-act:last-child:hover { color: var(--accent-red); }
+/* stash 页签搁置条目徽标（shelve: 前缀条目，恢复=同页 pop） */
+.cp-cl-stash-badge {
+  flex-shrink: 0; font-size: max(var(--fs-meta-min, 11.5px), 0.72em); font-weight: var(--fw-semibold); margin-right: 5px;
+  color: var(--accent-green); border: 1px solid currentColor;
+  border-radius: var(--radius-sm); padding: 0 var(--space-1);
+}

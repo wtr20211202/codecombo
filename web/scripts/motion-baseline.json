@@ -1,0 +1,14 @@
+{
+  "_comment": "transition 裸时长基线（P-20261007-16 动效 token 门禁）：功能性时长豁免清单。键 = \"文件|时长字面量\"，值 = 豁免理由（P-20261011-1 遮罩防御调优面为整文件结构性豁免不在此列）；装饰性时长一律收敛 var(--motion-fast/base/slow) 后删除对应条目。重建：npm run check:motion -- --update-baseline",
+  "entries": {
+    "src/App.vue|0.01ms": "prefers-reduced-motion 全局 kill switch（功能性：无障碍偏好直显，非装饰节奏）",
+    "src/App.vue|0.1s": "boot 遮罩/naive 弹层 coarse 指针减半值（P-20261011-1 ③，与正常档和 :duration 钉成对）",
+    "src/App.vue|0.2s": "boot 遮罩离场（P-20261011-1 防御调优：与 coarse 减半 0.1s 和 <Transition :duration> 钉成对）",
+    "src/assets/base.css|0.01ms": "prefers-reduced-motion 全局 kill switch（功能性：无障碍偏好直显，非装饰节奏）",
+    "src/assets/main.css|0.01ms": "prefers-reduced-motion 全局 kill switch（功能性：无障碍偏好直显，非装饰节奏）",
+    "src/assets/main.css|99999s": "autofill 背景过渡抑制 hack（功能性：对抗浏览器 UA 样式过渡，非装饰时长）",
+    "src/components/home/CloneStatusBar.vue|0.3s": "克隆进度条 width 跟手（功能性：与进度数据节奏同步，非装饰节奏）",
+    "src/components/home/VersionPanel.vue|0.3s": "版本任务进度条 width 跟手（功能性：与进度数据节奏同步，非装饰节奏）",
+    "src/components/settings/SystemMonitorPanel.vue|.3s": "磁盘占用条 width 跟手（功能性：与采样数据节奏同步，非装饰节奏）"
+  }
+}

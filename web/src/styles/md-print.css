@@ -1,0 +1,112 @@
+/* md-print.css —— md 预览打印 / 导出 PDF（P-20261003-244）
+ *
+ * 入口 = 编辑器 md 预览工具条「打印」按钮（MonacoEditor.vue printPreview）：
+ * 触发时给 <html> 挂 md-printing 类、给打印按钮所在分屏面板挂 md-printing-pane
+ * 类，本文件 @media print 下的规则仅在标记类存在时生效——浏览器 Ctrl+P 原生
+ * 打印路径不挂类，行为零变化。
+ *
+ * 为什么放全局样式表而非组件 scoped：去 chrome 面横跨 Layout 深层子组件
+ * （.md-preview 不携带 Layout 的 scope id，scoped 选择器够不着，layout.css
+ * 同理也是 scoped 引入）；为什么用具体色值而非主题变量：纸面是固定白底介质，
+ * 暗色主题的预览靠深底衬托浅字，浏览器打印默认去背景图，必须显式翻成黑字
+ * 白底才可读——与分享访客页打印块同款取舍（server/share/page.go）。
+ */
+
+@media print {
+  /* 亮色翻转：主题变量由 theme store 内联写入 documentElement.style，
+   * 样式表覆盖必须逐条 !important 才能压过内联值 */
+  html.md-printing {
+    --bg-primary: #fff !important;
+    --bg-panel: #f6f8fa !important;
+    --text-primary: #1f2328 !important;
+    --text-secondary: #57606a !important;
+    --text-hover: #1f2328 !important;
+    --border-default: #d0d7de !important;
+    --accent-blue: #0969da !important;
+    --accent-orange: #bc4c00 !important;
+    --brand-accent: #0969da !important;
+  }
+
+  html.md-printing,
+  html.md-printing body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /* 去 chrome：枚举式隐藏（fail-open——布局日后新增 chrome 最坏是多印一条
+   * 装饰，不会吞内容）；非打印组的分屏与分隔条经 md-printing-pane 标记排除 */
+  html.md-printing .ide-rail,
+  html.md-printing .ide-side-panel,
+  html.md-printing .ide-header,
+  html.md-printing .http-warning-bar,
+  html.md-printing .ws-disconnect-bar,
+  html.md-printing .status-bar,
+  html.md-printing .bottom-panel,
+  html.md-printing .editor-pane:not(.md-printing-pane),
+  html.md-printing .split-divider,
+  html.md-printing .editor-tabs-row,
+  html.md-printing .md-mode-bar,
+  html.md-printing .editor-with-blame {
+    display: none !important;
+  }
+
+  /* 预览祖先链放开高度与滚动裁剪，让内容自然分页（IDE 布局全是
+   * height:100vh + flex + overflow:hidden 的视口内约束，打印纸面没有视口） */
+  html.md-printing .ide-root,
+  html.md-printing .ide-main,
+  html.md-printing .ide-body,
+  html.md-printing .ide-editor-area,
+  html.md-printing .editor-split,
+  html.md-printing .editor-pane,
+  html.md-printing .editor-pane-inner,
+  html.md-printing .editor-wrapper,
+  html.md-printing .editor-body {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* 预览容器成为打印主体：滚动容器放开、分屏时的 inline width:50% 清零 */
+  html.md-printing .md-preview {
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    background: #fff !important;
+  }
+
+  html.md-printing .md-preview-content {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+
+  /* 分页质量：代码块放开换行防横向溢出页宽，块级元素防跨页截断；
+   * 链接补下划线（纸面无 hover，仅剩颜色线索，可点性暗示保留） */
+  html.md-printing .md-preview-content pre {
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow: visible !important;
+  }
+
+  html.md-printing .md-preview-content pre,
+  html.md-printing .md-preview-content table,
+  html.md-printing .md-preview-content img,
+  html.md-printing .md-preview-content blockquote {
+    break-inside: avoid;
+  }
+
+  html.md-printing .md-preview-content a {
+    text-decoration: underline !important;
+  }
+
+  /* 拖拽切 fixed 的表（P-20261010-1）打印时不按 ellipsis 截断——纸上无法悬浮
+   * title 看全文，放开换行保留内容（列宽沿用用户拖拽值） */
+  html.md-printing .md-preview-content table.sc-cols-fixed th,
+  html.md-printing .md-preview-content table.sc-cols-fixed td {
+    white-space: normal !important;
+    overflow: visible !important;
+  }
+}

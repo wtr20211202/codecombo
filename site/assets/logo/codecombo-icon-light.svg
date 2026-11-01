@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Codecombo 品牌图标·亮背景版（P-20261101-1）。放在白色/浅色底上使用：
+       描边整体加深保证对比（浅弧 #58a6ff / 主弧 #1f6feb / 毂点 #24292f），
+       透明背景。几何与 web/public/favicon.svg 同源（48 栅格·四分之一啮合弧+双节点+毂点）。 -->
+  <path d="M24 8A16 16 0 0 0 8 24" stroke="#58a6ff" stroke-width="4.2" stroke-linecap="round"/>
+  <path d="M24 40A16 16 0 0 0 40 24" stroke="#1f6feb" stroke-width="4.2" stroke-linecap="round"/>
+  <circle cx="8" cy="24" r="3.4" fill="#58a6ff"/>
+  <circle cx="40" cy="24" r="3.4" fill="#1f6feb"/>
+  <circle cx="24" cy="24" r="5.4" fill="#24292f" opacity="0.14"/>
+  <circle cx="24" cy="24" r="2.6" fill="#24292f"/>
+</svg>

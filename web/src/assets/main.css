@@ -1,0 +1,523 @@
+@import './base.css';
+
+/* 全局 body 复位（原散落在 Layout.vue 的非 scoped 块） */
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-primary);
+}
+
+/* 默认 CSS 变量（与 dark 主题对齐，主题加载前可用） */
+:root {
+  --fs-base: 13px;
+  --fs-small: 12px;
+  --fs-tiny: 11px;
+  --fs-terminal: 14px;
+  --fs-diff: 13px;
+  --fs-log: 13px;
+  --fs-changes: 13px;
+
+  /* 可读性分层下限（P-20261019-3）：元信息字号/行高下限——密集面板（Git 侧栏/
+     设置弹窗/文件树）禁止再以压字号换密度，层级改由字重与颜色表达。
+     使用点统一 `font-size: max(var(--fs-meta-min), <em 期望值>)`：默认字号下取
+     下限，用户调大 --fs-base 时随 em 自然放大；调小时不低于下限仍可读。
+     舒适档 11.5px = 下限基准；紧凑档由 ui-density store 覆写为 10.5px（保密度）。
+     分区标题恒守 12px（结构层级，不随密度压缩）。 */
+  --fs-meta-min: 11.5px;
+  --fs-section-min: 12px;
+  --lh-meta: 1.45;
+
+  /* 设计令牌三轴（P-20261019-8）：圆角/间距/字重收敛为可验证刻度。
+     圆角三档 4/6/10（sm 控件与徽标 / md 按钮与卡片 / lg 弹窗与浮层），
+     间距四档 4/8/12/16（--space-1..4），字重三档 400/500/600。
+     结构例外不进 token：头像与状态点 50%、胶囊 999px、方向性微条
+     （如 `0 2px 2px 0`）与 1~2px 指示线保持字面量；密集面板的 2/3px
+     微间距是刻意压缩，属渐进收敛面而非令牌缺失。高频面（Git 面板/
+     设置/活动栏/顶栏）先落；`npm run check:design-tokens` 只读列出
+     off-scale 硬编码（不阻断构建），例外与迁移纪律见 docs/design/design-tokens.md。 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  /* 图标按钮最小热区纪律（P-20261019-5，强制执行）：所有图标按钮的命中区桌面
+     ≥28×28、粗指针（触屏/远程串流）≥40×40（P-20261003-128 审批卡 40px 先例
+     的全站底线化）。图标视觉尺寸不动——按钮盒以 min-width/min-height 撑开透明
+     区并居中，落点处相邻按钮 gap 同步放大，防热区膨胀后互相误触。
+     用 token 而非逐处写媒体查询：fine 档 28 是常量，coarse 档在本文件下方
+     `@media (pointer: coarse)` 整体覆写为 40，落点只引用 var 一处口径。 */
+  --hit-target-min: 28px;
+  /* 窄屏底部切换器高度（P-20261019-7）：ActivityBar/侧栏抽屉遮罩/通知中心
+     三处必须对齐（抽屉与通知面板的下缘让出它），单点定义防漂移 */
+  --narrow-rail-height: 52px;
+
+  /* 弹窗宽度档位（P-20261003-295）：n-modal/自绘弹窗的内联宽度一律引用档位 token，
+     禁止同量级随手取值（存量 420/460/480→sm、520/560/600→md、620/640/680/760→lg、
+     900/960→xl 并档）；引用处必须搭配 max-width: 94vw 回退防窄窗口/浏览器缩放溢出视口。
+     确需档位外宽度的特例（部署日志 800px、广播结果 1180px）在组件内白名单注记理由 */
+  --modal-w-sm: 420px;
+  --modal-w-md: 560px;
+  --modal-w-lg: 760px;
+  --modal-w-xl: 960px; /* 提案为三档；diff/历史/对比查看器类的 900/960 是提案后新增形态，按同机制增档 */
+
+  /* 背景色 */
+  --bg-primary: #0d1117;
+  --bg-panel: #161b22;
+  --bg-border: #21262d;
+  --bg-hover: #1c2128;
+  --bg-active: #1c3a5f;
+  --bg-search: #094771;
+  --bg-selection: #264f78;
+  --bg-terminal: #1e1e1e;
+  --bg-warning: #5a3a00;
+  --bg-warning-alt: #6a4a10;
+
+  /* 表面分层（4 档深度） */
+  --bg-canvas: #0a0e14;
+  --bg-surface: #161b22;
+  --bg-elevated: #1c2230;
+  --bg-overlay: #1f2632;
+  --bg-glass: rgba(13, 17, 23, 0.78);
+  /* 自绘弹窗遮罩（Git 弹窗/推送对话框等）：随主题覆盖，浅色主题不再用纯黑 */
+  --overlay-mask: rgba(0, 0, 0, 0.5);
+  --rail-bg: #0a0e14;
+  --statusbar-bg: #0a0e14;
+
+  /* 文本色 */
+  --text-primary: #e6edf3;
+  --text-body: #d4d4d4;
+  --text-hover: #c9d1d9;
+  --text-secondary: #8b949e;
+  /* 与 themes/dark.ts 同步（P-20261019-4）：辅助文字 10~12px 需 4.5:1 */
+  --text-muted: #858e99;
+  --text-dim: #9ba3af;
+  --text-label: #aaa;
+  --text-link: #58a6ff;
+  --text-link-hover: #79c0ff;
+  /* 深色主题亮 accent 上的墨色（P-20261019-4），与 themes/dark.ts 同步 */
+  --text-on-accent: #0d1117;
+
+  /* 边框色 */
+  --border-default: #21262d;
+  --border-subtle: #30363d;
+  --border-strong: #484f58;
+  --border-brand: rgba(88, 166, 255, 0.45);
+
+  /* 强调色 - 蓝色 */
+  --accent-blue: #58a6ff;
+  --accent-blue-light: #75beff;
+  --accent-blue-hover: #79c0ff;
+  --accent-vs-blue: #007acc;
+
+  /* 强调色 - 绿色 */
+  --accent-green: #3fb950;
+  --accent-green-dim: #6a9955;
+
+  /* 强调色 - 红色 */
+  --accent-red: #f44747;
+  --accent-red-bright: #f85149;
+
+  /* 强调色 - 黄色/橙色 */
+  --accent-yellow: #dcdcaa;
+  --accent-orange: #f0883e;
+  --accent-yellow-warm: #d29922;
+
+  /* 强调色 - 紫色/青色 */
+  --accent-purple: #c586c0;
+  --accent-teal: #4ec9b0;
+
+  /* 品牌识别 */
+  --brand-accent: #58a6ff;
+  --brand-accent-hover: #79c0ff;
+  --brand-accent-soft: rgba(88, 166, 255, 0.12);
+  --brand-amber: #f0883e;
+  --brand-gradient: linear-gradient(135deg, #58a6ff 0%, #1f6feb 50%, #b08bff 100%);
+  --brand-gradient-soft: linear-gradient(135deg, rgba(88,166,255,0.14) 0%, rgba(31,111,235,0.08) 50%, rgba(176,139,255,0.14) 100%);
+
+  /* 阴影系统 */
+  --shadow-soft: 0 1px 0 rgba(255,255,255,0.04), 0 4px 12px rgba(0,0,0,0.28);
+  --shadow-strong: 0 1px 0 rgba(255,255,255,0.06), 0 12px 32px rgba(0,0,0,0.5);
+  --shadow-glow: 0 0 0 1px rgba(88,166,255,0.4), 0 0 18px rgba(88,166,255,0.28);
+  /* 弹层投影阶梯：散落的硬编码黑投影按尺寸收敛为四档
+     （色板审计落地——组件内 box-shadow 与阶梯完全匹配的必须引用 token） */
+  --shadow-pop-sm: 0 2px 8px rgba(0, 0, 0, 0.3);    /* 小浮层：按钮组/迷你提示 */
+  --shadow-pop: 0 4px 16px rgba(0, 0, 0, 0.25);     /* 中弹层：下拉/输入建议 */
+  --shadow-pop-lg: 0 8px 32px rgba(0, 0, 0, 0.4);   /* 大弹层：modal/右键菜单 */
+  --shadow-pop-xl: 0 14px 44px rgba(0, 0, 0, 0.5);  /* 大浮层：浮动窗/全屏浮面 */
+  --shadow-pop-drawer: -6px 0 20px rgba(0, 0, 0, 0.3); /* 右侧抽屉/浮层（方向性） */
+  --shadow-pop-drawer-l: 4px 0 12px rgba(0, 0, 0, 0.2); /* 左侧抽屉/浮层（方向性） */
+  /* 危险语义弹层：黑投影 + 红描边（不可用单色阶梯表达，token 化保语义） */
+  --shadow-pop-danger: 0 4px 14px rgba(0, 0, 0, 0.3), 0 0 0 1px color-mix(in srgb, var(--accent-red) 20%, transparent);
+
+  /* 骨架屏 */
+  --skeleton-base: rgba(255,255,255,0.04);
+  --skeleton-shine: rgba(255,255,255,0.08);
+
+  /* 图标/特殊 */
+  --dir-icon-color: #dcb67a;
+  --focus-ring: #58a6ff;
+
+  /* 分支图调色板 */
+  --graph-1: #d16969;
+  --graph-2: #569cd6;
+  --graph-3: #b5cea8;
+  --graph-4: #ce9178;
+  --graph-5: #d7ba7d;
+  --graph-6: #9cdcfe;
+}
+
+/* 粗指针热区档（P-20261019-5）：触屏/远程串流（指针坐标经压缩传输）下 28px
+   仍需精准瞄准，抬到 40px（44px 触控指南的工程档，同 P-20261003-128）。
+   `pointer` 而非 `any-pointer`：笔电外接触屏但以鼠标为主时仍是 fine 呈现。 */
+@media (pointer: coarse) {
+  :root {
+    --hit-target-min: 40px;
+  }
+}
+
+#app {
+  width: 100%;
+  height: 100vh;
+  /* 移动浏览器动态地址栏（P-20261019-7）：dvh 随可视线高变化 */
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+}
+
+/* 全局交互增强 */
+
+/* 右键菜单项 hover 效果 */
+[style*="box-shadow"][style*="border-radius: 6px"] > div[style*="cursor: pointer"],
+[style*="box-shadow"][style*="border-radius: 4px"] > div[style*="cursor: pointer"] {
+  transition: background var(--motion-fast) ease;
+}
+
+/* 可点击行项 hover 效果 */
+.list-item-hover {
+  transition: background var(--motion-fast) ease;
+}
+.list-item-hover:hover {
+  background: var(--bg-hover) !important;
+}
+
+/* 焦点样式 - 键盘导航 */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* 按钮焦点 */
+button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* 全局平滑滚动 */
+html {
+  scroll-behavior: smooth;
+}
+
+/* 列表和面板区域使用平滑滚动 */
+*[style*="overflow-y: auto"],
+*[style*="overflow-y:auto"] {
+  scroll-behavior: smooth;
+}
+
+/* Naive UI Modal 遮罩层样式增强 */
+.n-modal-mask {
+  background-color: rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(3px);
+}
+
+/* 输入框聚焦动画增强 */
+.n-input:focus-within {
+  transition: border-color var(--motion-base) ease, box-shadow var(--motion-base) ease;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-blue) 20%, transparent);
+}
+
+/* 包裹态 n-spin 滚动链修复（P-20261030-3）：带默认插槽的 n-spin 渲染
+   .n-spin-container > .n-spin-content 两层普通块盒，夹在 flex 纵向链中间时把
+   「flex:1 + overflow-y:auto」滚动区的高度约束拦断——flex 子项默认 min-height:auto
+   不收缩，内层滚动永不触发，宿主容器被裁剪后底部条目不可达（远程主机列表实测）。
+   给包裹态 n-spin 挂本类即恢复链路：容器自身成为可收缩的纵向 flex 项，content 层
+   透传高度，滚动区 flex:1 正常生效。仅按需挂类不做全局改写——全仓 60+ 处 n-spin
+   的块布局/外边距折叠语义不容全局扰动（HistoryPanel/搜索浮层等 7 处存量
+   *-spin 容器档只修了一半，滚动仍在 content 层断链，统一迁到本类）。 */
+.spin-fill {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.spin-fill > .n-spin-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 品牌渐变文本工具类 */
+.brand-text {
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* 品牌渐变背景工具类 */
+.brand-bg {
+  background: var(--brand-gradient);
+}
+
+/* 玻璃拟态工具类 */
+.glass-panel {
+  background: var(--bg-glass);
+  /* 只写标准属性：手写 -webkit- 双份会被 lightningcss 去重成仅剩 -webkit-，
+     新版 Chromium 已移除该别名 → 玻璃模糊全站静默失效（构建自动补前缀） */
+  backdrop-filter: blur(12px) saturate(140%);
+}
+
+/* 骨架屏动画 */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-base) 0%,
+    var(--skeleton-shine) 50%,
+    var(--skeleton-base) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+/* 路由切换过渡 */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity var(--motion-base) ease, transform var(--motion-base) ease;
+}
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* 卡片 stagger 入场动画 */
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.card-enter {
+  animation: card-enter 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 弹窗/通知缩放入场 */
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.pop-in {
+  animation: pop-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 骨架屏 shimmer 效果 */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-panel) 0%,
+    var(--bg-hover) 50%,
+    var(--bg-panel) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  border-radius: 4px;
+  display: inline-block;
+}
+.skeleton-line {
+  height: 12px;
+  width: 100%;
+  margin-bottom: 8px;
+}
+.skeleton-line.short { width: 60%; }
+.skeleton-line.long { width: 85%; }
+.skeleton-block {
+  height: 64px;
+  width: 100%;
+  border-radius: 8px;
+}
+
+/* 可访问性：尊重用户的 reduced-motion 偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 焦点可见性增强 */
+:focus-visible {
+  outline: 2px solid var(--brand-accent, var(--accent-blue, #58a6ff));
+  outline-offset: 2px;
+}
+
+/* 全局滚动条样式收敛于 base.css（单一事实源，随主题 --scrollbar-* 变量），此处不再重复定义 */
+
+/* 响应式断点：窄屏自动收起非关键面板 */
+@media (max-width: 1100px) {
+  /* 中等屏幕：默认隐藏侧栏装饰元素，仅保留图标 */
+  .ide-sidebar .side-label,
+  .ide-sidebar .side-meta {
+    display: none !important;
+  }
+}
+
+@media (max-width: 900px) {
+  /* 窄屏：强制收起底部面板与文件树二级展开 */
+  .ide-body {
+    flex-direction: column !important;
+  }
+  /* 隐藏次要工具按钮，避免拥挤 */
+  .header-divider {
+    display: none !important;
+  }
+}
+
+@media (max-width: 700px) {
+  /* 极窄屏（P-20261019-7）：侧栏改为全高 overlay 抽屉——活动栏在底部
+  （files/changes 按钮即开合入口），抽屉从顶栏下缘贴到 52px 底栏上缘，
+  遮罩点击收起；不再 display:none 硬砍导致无展开入口。宽度上限 340px，
+  右侧留出可见的编辑器边缘暗示「可关闭」。 */
+  .breadcrumb-extra {
+    display: none !important;
+  }
+  .ide-side-panel[id='side-panel'] {
+    position: fixed;
+    left: 0;
+    top: var(--topbar-height, 40px);
+    bottom: var(--narrow-rail-height, 52px);
+    width: min(86vw, 340px) !important;
+    z-index: 900;
+    box-shadow: var(--shadow-pop-drawer-l);
+  }
+  /* 抽屉形态下宽度拖拽把手无意义（且 8px 把手会占住主区边缘） */
+  .ide-side-resizer {
+    display: none !important;
+  }
+}
+
+/* 高对比度模式支持：Windows 高对比度 / 部分 AT 工具会启用此查询 */
+@media (prefers-contrast: more) {
+  :focus-visible {
+    outline-width: 3px !important;
+    outline-offset: 2px !important;
+  }
+  /* 强化边框对比 */
+  .glass-panel,
+  .naive-ui .n-card {
+    border-width: 1.5px !important;
+  }
+}
+
+/* 字体流畅缩放：标题与正文使用 clamp() 实现响应式排版 */
+h1 { font-size: clamp(1.5rem, 1.3rem + 0.8vw, 2.2rem); }
+h2 { font-size: clamp(1.25rem, 1.15rem + 0.5vw, 1.7rem); }
+h3 { font-size: clamp(1.1rem, 1rem + 0.4vw, 1.4rem); }
+
+/* 屏幕阅读器专用文本：视觉隐藏但对辅助技术可见 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 跳过链接：键盘用户快速跳到主内容 */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 8px;
+  z-index: 10000;
+  padding: 6px 12px;
+  background: var(--brand-accent, #58a6ff);
+  color: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  text-decoration: none;
+  transition: top var(--motion-base);
+}
+.skip-link:focus {
+  top: 8px;
+}
+
+/* 浏览器对 password/表单输入框自动填充时强加浅色背景（:-webkit-autofill 无视组件主题），
+   全局覆盖回输入框底色——--bg-primary 与各主题 naiveOverrides.inputColor 成对一致，
+   覆盖锁屏 / 部署配置 / 凭据等所有 Naive 输入框 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+input:autofill,
+input:autofill:hover,
+input:autofill:focus,
+input:autofill:active {
+  /* !important 对抗浏览器 UA 样式；:hover/:focus/:active 三态必写——
+     Chromium 对聚焦中的 autofill 单独渲染浅色底，只覆盖基础态会
+     出现「刷新时白框、失焦后恢复」的现象 */
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-primary) inset !important;
+  box-shadow: 0 0 0 1000px var(--bg-primary) inset !important; /* Firefox :autofill 只认标准属性 */
+  -webkit-text-fill-color: var(--text-primary) !important;
+  caret-color: var(--text-primary);
+  transition: background-color 99999s ease-out !important;
+}
+
+/* 全局 message toast 层级：naive-ui 默认 6000，低于首页版本弹窗等自定义
+   overlay（9999）及其内 tooltip（10000）、锁定屏（10000）——弹窗开着时
+   toast 被压在遮罩下显得「沉底变灰」（首页版本弹窗实测）。提到全局
+   overlay 带之上：瞬时提示永远可见；!important 对抗 naive-ui 运行时
+   注入的样式表（注入晚于本文件，同优先级会输） */
+.n-message-container {
+  z-index: 10002 !important;
+}
+/* 锁定期间收紧：toast 降到锁定屏（10000）之下，锁屏不泄露后台活动痕迹。
+   body.sc-locked 由 App.vue 的 lockStore.isLocked watch 维护 */
+body.sc-locked .n-message-container {
+  z-index: 9990 !important;
+}
+
+/* 布局锁定（P-20261003-180）：body.sc-layout-locked 由 layoutLock store watch
+   维护（body.sc-locked 系统锁定同款惯例）——锁定时各分隔条把手 cursor 归位做
+   「不可拖」观感；拖拽 handler 已在入口统一短路（layoutLock.interceptDrag），
+   这里只管反馈。键盘 resize 的 separator（role=separator + 方向键）不受影响 */
+body.sc-layout-locked .ide-side-resizer,
+body.sc-layout-locked .bottom-resize-handle,
+body.sc-layout-locked .split-divider,
+body.sc-layout-locked .git-sidebar-resizer,
+body.sc-layout-locked .term-split-divider,
+body.sc-layout-locked .atv-side-resizer {
+  cursor: default;
+}

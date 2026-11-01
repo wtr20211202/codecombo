@@ -1,0 +1,11 @@
+{
+  "_comment": "vue 样式硬编码颜色基线：存量直写豁免清单。键 = \"文件|颜色字面量\"，值 = 豁免理由（CrashFallback 零依赖回退与 var() fallback 参数为结构性豁免不在此列）；治理替换为主题变量后删除对应条目。重建：npm run check:hardcoded-colors -- --update-baseline",
+  "entries": {
+    "src/App.vue|#0d1117": "启动屏双声明兜底首行：early-init 失效/CSS 变量缺失时防透底，紧随其后的 var(--bg-primary, #0d1117) 正常态覆盖（有意保留）",
+    "src/components/lock/LockScreenOverlay.vue|rgba(0, 0, 0, 0.3)": "全屏锁卡片单例投影：行内注释已定性「不入弹层阶梯，收敛任一档都会改变全屏锁视觉重量」（有意保留）",
+    "src/components/settings/AppearanceSettings.vue|#000": "终端主题预览卡 mask-image 线性渐变端点 ×2：遮罩只消费 alpha 通道，颜色值无视觉语义",
+    "src/components/settings/AppearanceSettings.vue|rgba(0, 0, 0, 0.2)": "终端主题预览卡激活衬底：中性暗化以忠实展示所选终端主题的固定调色板，随主题变色反而失真",
+    "src/components/settings/AppearanceSettings.vue|rgba(128, 128, 128, 0.1)": "终端主题预览卡非激活衬底：同上，中性透明灰两主题皆可读",
+    "src/components/terminal/TerminalPanesArea.vue|rgba(0, 0, 0, 0.35)": "终端屏凹陷内阴影 ×3：黑色内阴影模拟屏幕陷入面板，两主题下物理语义一致（辉光已随主题，见同行 color-mix focus-ring）"
+  }
+}

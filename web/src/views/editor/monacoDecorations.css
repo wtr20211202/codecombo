@@ -1,0 +1,39 @@
+/* Monaco 装饰全局类（P-20261003-301 自 MonacoEditor.vue 全局 style 块原样搬出，
+ * 由 useEditorDecorations.ts 侧引入——装饰 DOM 由 Monaco 动态创建，挂不上任何
+ * 组件的 scoped data-v 属性，必须走全局类；样式跟随 owning 桥模块而非宿主组件） */
+
+/* 书签锚装饰（P-20261002-131）：gutter 图标画在 glyph margin 车道（点击 toggle，
+ * 见 handleBookmarkGlyphClick）；整行弱高亮用主题橙色低饱和底，图标用固定
+ * 琥珀色（SVG data URI 里无法引用 CSS 变量，取明暗主题下均有对比度的中间调） */
+.sc-bookmark-glyph {
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%23d99a2b' d='M352 48H160a48 48 0 0 0-48 48v368l144-128 144 128V96a48 48 0 0 0-48-48z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 14px 14px;
+}
+.sc-bookmark-line {
+  background: color-mix(in srgb, var(--accent-orange) 9%, transparent);
+}
+
+/* 失效弱标（P-20261004-105）：重定位判定锚在窗口内未找回的书签——同图标去饱
+ * 和降透明、去整行高亮（applyBookmarkDecorations 对 stale 不落 sc-bookmark-line），
+ * 视觉严格弱于有效书签：诚实降级不瞎猜，悬停见 staleGlyphTip 说明 */
+.sc-bookmark-glyph.is-stale {
+  opacity: 0.4;
+  filter: grayscale(0.9);
+}
+
+/* gutter 变更条（P-20261003-14）：added 绿条 / modified 蓝条，画在
+ * linesDecorations 车道。色取主题变量经 color-mix 降饱和（3px 窄条全饱和
+ * 刺眼）；宽窄与边距对齐 VS Code dirty-diff 惯例（3px 条 + 6px 左缩进） */
+.sc-gutter-added {
+  width: 3px !important;
+  margin-left: 6px;
+  background: color-mix(in srgb, var(--accent-green) 75%, transparent);
+}
+.sc-gutter-modified {
+  width: 3px !important;
+  margin-left: 6px;
+  background: color-mix(in srgb, var(--accent-blue) 75%, transparent);
+}

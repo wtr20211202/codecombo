@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 224 64" fill="none" role="img" aria-label="Codecombo">
+  <!-- Codecombo 横排 lockup·亮背景版（P-20261101-1）：图标（亮底深弧套）+ 字标
+       #24292f。字标字体 = 产品 UI 同族 Geist Sans（OFL 1.1，woff2 随
+       site/assets/fonts 分发）；textLength 钉住字标宽度——字体回退时几何不散架。
+       暗背景版见 -dark。 -->
+  <g transform="translate(0 8)">
+    <path d="M24 8A16 16 0 0 0 8 24" stroke="#58a6ff" stroke-width="4.2" stroke-linecap="round"/>
+    <path d="M24 40A16 16 0 0 0 40 24" stroke="#1f6feb" stroke-width="4.2" stroke-linecap="round"/>
+    <circle cx="8" cy="24" r="3.4" fill="#58a6ff"/>
+    <circle cx="40" cy="24" r="3.4" fill="#1f6feb"/>
+    <circle cx="24" cy="24" r="5.4" fill="#24292f" opacity="0.14"/>
+    <circle cx="24" cy="24" r="2.6" fill="#24292f"/>
+  </g>
+  <text x="66" y="33" dominant-baseline="central"
+        font-family="'Geist Sans','Geist','Inter','Segoe UI',system-ui,sans-serif"
+        font-weight="650" font-size="30" letter-spacing="-0.5"
+        textLength="152" lengthAdjust="spacingAndGlyphs" fill="#24292f">Codecombo</text>
+</svg>

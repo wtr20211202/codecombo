@@ -1,0 +1,231 @@
+/* SettingsModal 布局样式（P-20261003-301 自 SettingsModal.vue scoped 块原样搬出，
+ * 以 <style scoped src> 回引保持 scoped 隔离语义；即时分区子组件 SettingsInstantPanes
+ * 自带 .pane-title 副本，此处 .pane-title 供宿主直挂的分区标题用） */
+.settings-card {
+  /* 880：安全分节 7 个子页签自然宽 ~580，760 下右端标签被 flex 压缩到内部
+   * 截断（「Agent Token」只剩「Agent T」，无省略号提示）；放宽后各分节
+   * 表单也同步获得呼吸空间 */
+  width: 880px;
+  max-width: 92vw;
+  /* 高度固定：分节内容差异大（外观/终端长、Git/安全短），随内容伸缩会让
+     弹窗在切换分节时上下跳动；固定高度 + 内容区内部滚动保持稳定 */
+  height: min(720px, 86vh);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-strong);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-default);
+}
+.settings-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 14px;
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+}
+.settings-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0 var(--space-1);
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  /* 最小热区（P-20261019-5）：视觉字号仍是 22px，命中区撑到全局底线
+     （原实测 21×22）；inline-flex 居中防 × 在高盒里偏上 */
+  min-width: var(--hit-target-min, 28px);
+  min-height: var(--hit-target-min, 28px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.settings-close:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+/* 图标按钮最小热区（P-20261019-5）：各分区内的 naive-ui 图标钮（tiny 实测
+   26×22）统一撑到全局底线，图标视觉尺寸由按钮主题的 --n-icon-size 决定不动。
+   `:has` 双条件锁「有图标槽且无文本内容」——带文字按钮（复制/删除/安装等）
+   不进此面：文字本身提供宽命中区，抬高其 min-height 会整体胀行高。
+   分区均渲染在 .settings-content 内（含 v-show 常驻的隐藏页），一处口径覆盖全部。 */
+.settings-content :deep(.n-button:has(.n-button__icon):not(:has(.n-button__content))) {
+  min-width: var(--hit-target-min, 28px);
+  min-height: var(--hit-target-min, 28px);
+}
+/* 行内动作组的 gap 随 coarse 档补足（P-20261019-5）：定时任务/片段/审批规则等
+   行尾动作组原 gap 2px，命中区抬到 40px 后相邻按钮贴面易误触——只抬 coarse
+   档，细指针桌面保持原密度（2px 缝对鼠标足够） */
+@media (pointer: coarse) {
+  .settings-content :deep(.att-row-actions),
+  .settings-content :deep(.snippet-row-actions),
+  .settings-content :deep(.arls-actions),
+  .settings-content :deep(.pr-head-actions),
+  .settings-content :deep(.att-head-actions) {
+    gap: 6px;
+  }
+}
+
+.settings-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.settings-nav {
+  width: 180px;
+  flex-shrink: 0;
+  background: var(--bg-canvas);
+  border-right: 1px solid var(--border-default);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+
+/* 分区按钮容器：桌面保持左栏纵向列表；窄屏（文件末 @media）转为顶部横向
+ * 可滚动页签（P-20261019-6）。搜索框刻意留在容器外——窄屏下独占一行，
+ * 不随页签横向滚动。 */
+.nav-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: all var(--motion-base);
+  text-align: left;
+}
+.nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.nav-item.active {
+  background: var(--brand-accent-soft);
+  color: var(--brand-accent);
+  font-weight: var(--fw-medium);
+}
+/* 搜索命中态：过滤保留（非 active）的分区以品牌色描出「命中」，与普通灰字区分 */
+.nav-item.hit { color: var(--brand-accent); }
+.nav-search { margin-bottom: 6px; }
+.nav-empty {
+  padding: 10px var(--space-1);
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.settings-content {
+  flex: 1;
+  padding: 18px 22px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.pane-title {
+  font-size: 13px;
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  margin-bottom: 14px;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* 底部 */
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) 18px;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-canvas);
+}
+
+/* 极窄屏（≤700px，与 md 表格窄屏回落同口径，P-20261019-6）：手机浏览器
+ * （二维码接力扫码打开）是真实使用形态。左栏 180px 固定宽在 390px 视口下
+ * 只剩 ~135px 内容区，220px 表单控件被裁出横向滚动——转为顶部横向页签
+ * 后内容区恢复整行宽度。断点内只改布局，桌面分支零变化。 */
+@media (max-width: 700px) {
+  .settings-card {
+    /* 92vw 在 390px 下仅 359px，再被 n-modal 自身边距压缩；窄屏取视口
+     * 满宽减两侧各 8px 边距，内容区多留出约 25px */
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+  }
+
+  .settings-header {
+    padding: var(--space-3) 14px;
+  }
+
+  .settings-body {
+    flex-direction: column;
+  }
+
+  .settings-nav {
+    width: auto;
+    flex-shrink: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border-default);
+    padding: var(--space-2) var(--space-2) 6px;
+    /* 横向滚动交给 .nav-items；容器不裁切搜索框/页签的焦点提示 */
+    overflow: visible;
+  }
+
+  .nav-items {
+    flex-direction: row;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    /* 留出焦点环（outline 2px + offset 2px）空间：overflow 裁剪会切掉
+     * 贴边页签的键盘焦点提示 */
+    padding: var(--space-1);
+    scrollbar-width: thin;
+  }
+
+  .nav-item {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .nav-empty {
+    flex: 1;
+  }
+
+  .settings-content {
+    padding: 14px;
+  }
+
+  /* 分区内部（子组件）的固定宽控件在窄屏下不得撑破内容区：设置行/滑条行
+   * 允许换行，Naive 输入类控件以内容区宽度为上限。:deep 穿透 scoped 边界，
+   * 覆盖各分区子组件的内联 width（如 TerminalSettings 的 340px shell 选择器） */
+  .settings-content :deep(.setting-row),
+  .settings-content :deep(.slider-row) {
+    flex-wrap: wrap;
+  }
+  .settings-content :deep(.n-input),
+  .settings-content :deep(.n-input-number),
+  .settings-content :deep(.n-select) {
+    max-width: 100%;
+  }
+
+  .settings-footer {
+    padding: 10px 14px;
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "comment": "自定义敏感模式双端一致性锚定语料（P-20261006-11，单一共享文件）：patterns 由 Go（RE2，server/mask corpus_test.go）与 TS（RegExp，web/src/utils/sensitiveMask.test.ts）各自编译后注入各自遮蔽链，samples 逐条断言「全链（内置模式集→自定义清单）遮蔽输出」两侧一致——任一侧实现漂移即测试红。替换形态：无捕获组=命中段整段 ***；有捕获组=保留第 1 组（键名/分隔符可读）值段 ***。样例停留在 RE2 与 JS RegExp 公共子集（禁内联旗标/环视/反向引用/空匹配，与服务端写入口 ValidateCustomSensitivePatterns 同口径）；大小写不敏感用 [Xx] 字符类表达（双端方言公约，见 config/sensitive_patterns.go 头注）。改模式集或语料须两侧同步。",
+  "patterns": [
+    "(MY_APP_TOKEN[\"']?[ \\t]*[=:][ \\t]*)(?:\"[^\"]*\"|'[^']*'|[^ \\t\\r\\n,;]+)",
+    "scrt_[A-Za-z0-9]{20,}",
+    "[Pp]roject[Aa]pi[Kk]ey[ \\t]*[=:][ \\t]*[^ \\t\\r\\n,;\"]+"
+  ],
+  "samples": [
+    {
+      "input": "export MY_APP_TOKEN=abc123 && deploy",
+      "masked": "export MY_APP_TOKEN=*** && deploy"
+    },
+    {
+      "input": "\"MY_APP_TOKEN\": \"s3cr3t-value\"",
+      "masked": "\"MY_APP_TOKEN\": ***"
+    },
+    {
+      "input": "uploading scrt_a1B2c3D4e5F6g7H8A9B2 done",
+      "masked": "uploading *** done"
+    },
+    {
+      "input": "curl -H \"projectApiKey: prjak_123456\" api.example.com",
+      "masked": "curl -H \"***\" api.example.com"
+    },
+    {
+      "input": "password=hunter2 scrt_ZZ99ZZ99ZZ99ZZ99ZZ99",
+      "masked": "password=*** ***"
+    },
+    {
+      "input": "password=scrt_ZZ99ZZ99ZZ99ZZ99ZZ99 tail",
+      "masked": "password=*** tail"
+    },
+    {
+      "input": "token=AKIAIOSFODNN7EXAMPLE plain",
+      "masked": "token=*** plain"
+    },
+    {
+      "input": "key AKIAIOSFODNN7EXAMPLE ok",
+      "masked": "key *** ok"
+    },
+    {
+      "input": "git push origin main && npm run check",
+      "masked": "git push origin main && npm run check"
+    }
+  ]
+}

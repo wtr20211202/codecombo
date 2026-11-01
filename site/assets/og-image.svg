@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
+  <!-- Codecombo og-image 设计源（P-20261101-1）——1200×630 社交分享卡。
+       派生：scripts 跑 web/scripts/site-assets-gen.mjs 栅格化为同目录
+       og-image.png（改此文件后重跑，png 不手改）。文案源=README.md §首段
+       标语「every dev tool, chained.」（双维护纪律：改先改 README）。
+       字体 Geist Sans（OFL 1.1）相对路径引用仅在本文件被当作文档渲染时生效
+       （栅格化脚本即此路径）；作为 <img> 引用时 SVG 不加载外部资源，故
+       此文件仅作设计源不作展示面，展示面用栅格 png。 -->
+  <style>
+    @font-face {
+      font-family: 'Geist Sans';
+      src: url('../fonts/geist-sans-latin-600-normal.woff2') format('woff2');
+      font-weight: 600;
+    }
+    @font-face {
+      font-family: 'Geist Sans';
+      src: url('../fonts/geist-sans-latin-500-normal.woff2') format('woff2');
+      font-weight: 500;
+    }
+  </style>
+  <defs>
+    <radialGradient id="glow" cx="0.24" cy="0.18" r="0.85">
+      <stop offset="0" stop-color="#1b2740"/>
+      <stop offset="0.55" stop-color="#111a2c"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </radialGradient>
+    <linearGradient id="wordfade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e6edf3"/>
+      <stop offset="1" stop-color="#c9d6e4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 底：深色主形态 + 右侧大尺度啮合弧水印（产品意象呼应，裁切出血） -->
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <g transform="translate(830 90) scale(11)" opacity="0.05">
+    <path d="M24 8A16 16 0 0 0 8 24" stroke="#79c0ff" stroke-width="4.2" stroke-linecap="round"/>
+    <path d="M24 40A16 16 0 0 0 40 24" stroke="#388bfd" stroke-width="4.2" stroke-linecap="round"/>
+    <circle cx="8" cy="24" r="3.4" fill="#79c0ff"/>
+    <circle cx="40" cy="24" r="3.4" fill="#388bfd"/>
+  </g>
+
+  <!-- 品牌图标 tile（与 codecombo-tile.svg 同构，168px） -->
+  <g transform="translate(96 130)">
+    <rect width="168" height="168" rx="38" fill="#101827" stroke="#303d55" stroke-width="2"/>
+    <g transform="translate(21 21) scale(2.625)">
+      <path d="M24 8A16 16 0 0 0 8 24" stroke="#79c0ff" stroke-width="4.2" stroke-linecap="round"/>
+      <path d="M24 40A16 16 0 0 0 40 24" stroke="#388bfd" stroke-width="4.2" stroke-linecap="round"/>
+      <circle cx="8" cy="24" r="3.4" fill="#79c0ff"/>
+      <circle cx="40" cy="24" r="3.4" fill="#388bfd"/>
+      <circle cx="24" cy="24" r="5.4" fill="#e6edf3" opacity="0.16"/>
+      <circle cx="24" cy="24" r="2.6" fill="#e6edf3"/>
+    </g>
+  </g>
+
+  <!-- 字标 + 标语（文案源=README.md 首段） -->
+  <text x="300" y="206" dominant-baseline="central"
+        font-family="'Geist Sans','Inter','Segoe UI',system-ui,sans-serif"
+        font-weight="600" font-size="88" letter-spacing="-3"
+        fill="url(#wordfade)">Codecombo</text>
+  <text x="300" y="298"
+        font-family="'Geist Sans','Inter','Segoe UI',system-ui,sans-serif"
+        font-weight="500" font-size="34" letter-spacing="-0.3"
+        fill="#58a6ff">every dev tool, chained.</text>
+
+  <!-- 能力一览（与 README Highlights 对应，短语级） -->
+  <text x="96" y="412"
+        font-family="'Geist Sans','Inter','Segoe UI',system-ui,sans-serif"
+        font-weight="500" font-size="36" letter-spacing="-0.3"
+        fill="#b6c2cf">Git workbench · Web terminal · AI agent sessions · Remote machines</text>
+  <text x="96" y="466"
+        font-family="'Geist Sans','Inter','Segoe UI',system-ui,sans-serif"
+        font-weight="500" font-size="36" letter-spacing="-0.3"
+        fill="#6e7b8a">One self-hosted binary — everything in one browser tab.</text>
+
+  <!-- 仓库指路 -->
+  <text x="96" y="560"
+        font-family="'Geist Sans','Inter','Segoe UI',system-ui,sans-serif"
+        font-weight="500" font-size="28"
+        fill="#58a6ff">github.com/zhouchangjian2016/codecombo</text>
+</svg>

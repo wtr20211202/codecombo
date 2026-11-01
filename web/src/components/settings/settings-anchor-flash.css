@@ -1,0 +1,29 @@
+/* 搜索行级锚定（P-20261003-39）：命中词条的锚点控件两闪引导视线后自动褪去；
+ * 颜色全部复用既有品牌色主题变量（软底+描边），四主题自动适配零新增词条。
+ *
+ * 必须全局（非 scoped，P-20261019-6 自 SettingsModal.vue 原样搬出以守单文件
+ * 500 行上限）：闪烁类由 useSettingsSearch 命令式加到锚点元素上，而锚点控件
+ * 在各分区子组件内部（GeneralSettings/AppearanceSettings…），scoped 选择器
+ * 带 SettingsModal 的 scope id 打不中子组件内部节点。 */
+.anchor-flash {
+  border-radius: var(--radius-md);
+  animation: anchor-flash 2s ease-out;
+}
+@keyframes anchor-flash {
+  0%, 40% {
+    background-color: var(--brand-accent-soft);
+    box-shadow: 0 0 0 1px var(--brand-accent);
+  }
+  55% {
+    background-color: transparent;
+    box-shadow: 0 0 0 1px transparent;
+  }
+  70% {
+    background-color: var(--brand-accent-soft);
+    box-shadow: 0 0 0 1px var(--brand-accent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 1px transparent;
+  }
+}

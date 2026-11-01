@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS may be added later; Windows + Linux are the supported dev/target platforms.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend (includes vue-tsc type-check)
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Frontend unit tests
+        working-directory: web
+        run: npm run test:unit
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go tests
+        run: go test ./...

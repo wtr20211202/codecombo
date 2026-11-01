@@ -1,0 +1,452 @@
+/* ============== 顶部标签栏 / 工具栏 ============== */
+.term-tabbar {
+  display: flex;
+  align-items: center;
+  background: var(--bg-panel);
+  /* 顶部渐变线：替代 border-bottom，呼吸感（中间实，两端淡） */
+  position: relative;
+  height: 36px;
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+.term-tabbar::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--border-default) 20%,
+    var(--border-default) 80%,
+    transparent 100%
+  );
+}
+
+.term-tablist {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  gap: 2px;
+}
+
+/* tab 溢出快速选择按钮（P-20261002-112，同编辑器 tabs-overflow-btn 语义）：
+   溢出时出现在 tab 条尾部，点开下拉直达任意会话；视觉对齐 term-tool-btn */
+.term-tabs-overflow-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all var(--motion-base);
+}
+.term-tabs-overflow-btn:hover {
+  border-color: var(--brand-accent);
+  color: var(--brand-accent);
+  background: var(--brand-accent-soft);
+}
+
+/* Tab 卡片样式：active 时顶部高亮 + 背景与终端区一致，模拟"凸起"感 */
+.term-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 6px 6px 0 0;
+  white-space: nowrap;
+  min-width: 0;
+  position: relative;
+  background: transparent;
+  /* 新建 tab 滑入动画 */
+  animation: term-tab-slide-in 0.18s ease-out;
+  color: var(--text-dim);
+  transition: background var(--motion-base) ease, color var(--motion-base) ease;
+}
+.term-tab.is-active {
+  background: var(--bg-terminal);
+  color: var(--text-body);
+}
+/* 顶部 1px 高亮条 + 上方淡阴影 */
+.term-tab::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background: transparent;
+  border-radius: 0 0 2px 2px;
+  transition: background var(--motion-base) ease;
+}
+.term-tab.is-active::before {
+  background: var(--accent-blue);
+}
+/* active tab 底部 1px 遮盖 .term-tabbar 的 border-bottom，让 tab 视觉上"长在"终端上 */
+.term-tab.is-active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--bg-terminal);
+}
+/* failed tab：左侧 3px 红色色条 + ::before 变红 + 一次性抖动 */
+.term-tab.is-failed {
+  box-shadow: inset 3px 0 0 var(--accent-red);
+  animation: term-tab-shake 0.4s ease-out;
+}
+.term-tab.is-failed::before {
+  background: var(--accent-red);
+}
+@keyframes term-tab-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-2px); }
+  40% { transform: translateX(2px); }
+  60% { transform: translateX(-1px); }
+  80% { transform: translateX(1px); }
+}
+.term-tab:hover:not(.is-active) {
+  background: var(--bg-hover);
+}
+/* 序号徽章 */
+.term-tab-index {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-canvas);
+  min-width: 16px;
+  text-align: center;
+}
+.term-tab.is-active .term-tab-index {
+  color: var(--accent-blue);
+  background: var(--brand-accent-soft);
+}
+
+/* 命令状态点（P-20261003-285 语义色统一）：running 进行中蓝 pulse（原黄——
+   与会话总览/浮窗标题栏的 running 蓝档归一）/ failed 失败红 */
+.term-tab-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--status-failed);
+}
+.term-tab.is-running .term-tab-status {
+  background: var(--status-running);
+  animation: term-tab-pulse 1.5s ease-in-out infinite;
+}
+@keyframes term-tab-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* 浮动指示：tab 已拖出为浮动窗 */
+.term-tab-float-ico {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--accent-blue);
+  opacity: 0.85;
+}
+
+/* 未读活动点（P-20261003-310）：后台会话有新输出——进行中蓝（默认）/
+   失败红（最后命令失败）两档语义色（P-20261003-285 起引用语义 token）。
+   一次性布尔：无计数无频闪，激活即清 */
+.term-tab-unread {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--status-running);
+}
+.term-tab-unread.is-warning {
+  background: var(--status-failed);
+}
+
+/* 拖拽重排序落点指示：目标 tab 左缘插入线 */
+.term-tab.is-reorder-target {
+  box-shadow: inset 2px 0 0 var(--accent-blue);
+}
+
+/* 置顶 tab（P-20261004-53）：粗体名 + 名前图钉标（编辑器 pinned tab 对称；
+ * 置顶分组由宿主显示序投影保证，这里只承载视觉） */
+.term-tab.is-pinned .term-tab-name {
+  font-weight: 600;
+}
+.term-tab-pin {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent-blue);
+  opacity: 0.85;
+}
+
+/* 项目硬锁徽标（P-20261004-143）：小锁中性呈现（锁是状态不是错误，不走语义红，
+ * 首页 .project-locked-badge 同款 accent-orange 语义）；图标自带 tooltip 说明
+ * 「API 已锁、shell 不受限」的诚实边界 */
+.term-tab-lock {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent-orange);
+  opacity: 0.9;
+}
+
+/* 直播中徽标（P-20261005-161）：红点呼吸，视觉语与访客页「直播中」徽标同源
+ * （pulse 缩放呼吸 + 语义红档）；色走 token（--status-failed）随主题联动。
+ * TTL 到界/撤销/轮换由宿主投影摘除，本组件纯指示 */
+.term-tab-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--status-failed);
+  animation: term-tab-pulse 1.6s ease-in-out infinite;
+}
+
+.term-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 目录徽标（P-20261005-192）：非根目录会话的尾部目录短标（root/sub/dir → dir），
+   与根会话一眼区分。形态对齐序号徽章（等宽小字 + 底色片），色走 muted 不抢
+   running/failed 语义色；悬停 title = 完整相对目录 */
+.term-tab-dir {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-canvas);
+}
+.term-tab.is-active .term-tab-dir {
+  color: var(--accent-blue);
+  background: var(--brand-accent-soft);
+}
+
+.term-rename-input {
+  background: var(--border-default);
+  color: var(--text-body);
+  border: 1px solid var(--accent-vs-blue);
+  padding: 1px 4px;
+  font-size: 12px;
+  width: 120px;
+  outline: none;
+  border-radius: 2px;
+}
+
+/* 关闭按钮 */
+.term-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--motion-fast), background var(--motion-fast), transform var(--motion-fast);
+  border-radius: 3px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.term-tab:hover .term-close-btn {
+  opacity: 0.6;
+}
+.term-close-btn:hover {
+  opacity: 1 !important;
+  background: var(--accent-red);
+  color: var(--text-on-accent);
+}
+.term-close-btn:active {
+  transform: scale(0.85);
+  background: var(--accent-blue);
+}
+
+/* ============== 工具栏 ============== */
+.term-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+.term-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.term-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border-default);
+  margin: 0 4px;
+}
+
+/* 字体 +/- 按钮 */
+.term-font-btn {
+  background: none;
+  border: 1px solid var(--border-default);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 1px 6px;
+  font-size: 12px;
+  border-radius: 2px;
+  transition: all var(--motion-base);
+}
+.term-font-btn:hover {
+  border-color: var(--brand-accent);
+  color: var(--brand-accent);
+}
+.term-font-value {
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 24px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  transition: transform var(--motion-base) ease, color var(--motion-base) ease;
+}
+.term-font-value:hover {
+  transform: scale(1.1);
+  color: var(--text-body);
+}
+/* 字号变化时一次性滚动动画（上下翻转 + 淡入） */
+.term-font-value.is-rolling {
+  animation: term-font-roll 0.2s ease-out;
+}
+@keyframes term-font-roll {
+  0% { transform: translateY(-8px); opacity: 0.2; }
+  60% { transform: translateY(1px); opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* 新建 tab 滑入 + 关闭 tab 滑出 */
+@keyframes term-tab-slide-in {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* 操作按钮（带边框） */
+.term-tool-btn {
+  background: none;
+  border: 1px solid var(--border-default);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--motion-base);
+  position: relative;
+}
+/* 会话总览按钮徽标：总会话数；存在失败会话时红色强调 */
+.term-overview-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 13px;
+  height: 13px;
+  line-height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+.term-overview-badge.has-failed {
+  background: var(--accent-red);
+  border-color: var(--accent-red);
+  color: var(--text-on-accent);
+}
+.term-tool-btn.is-accent {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+.term-tool-btn:hover:not(:disabled) {
+  border-color: var(--brand-accent);
+  color: var(--brand-accent);
+  background: var(--brand-accent-soft);
+}
+.term-tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* backend chip：显示 tmux / native，等宽小字 */
+.term-backend-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  margin-left: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 通用按钮反馈 */
+button:active {
+  transform: scale(0.94);
+  transition: transform var(--motion-fast);
+}
+
+/* 挂起态：会话被终端会话管理页接管——视觉降级 + 虚线上边框标识，
+   点击 tab 即取回（语义由 TerminalView 的 onSelectTab 实现） */
+.term-tab.is-suspended {
+  color: var(--text-tertiary);
+  border-top: 2px dashed var(--brand-accent);
+  opacity: 0.75;
+}
+.term-tab.is-suspended.is-active {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+/* 广播选中态（P-20261003-288 舰队式批量输入）：多选模式下的勾选标识——
+   底边实线 + 品牌色文字，与 is-active 的「凸起」视觉区分（激活 ≠ 广播选中） */
+.term-tab.is-broadcast-selected {
+  color: var(--brand-accent);
+  box-shadow: inset 0 -2px 0 var(--brand-accent);
+}
+.term-tab.is-broadcast-selected .term-tab-index {
+  color: var(--brand-accent);
+}
+

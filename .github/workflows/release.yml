@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # SemVer 全形态：正式 vX.Y.Z 与预发布 vX.Y.Z-*（rc/beta 等预发布通道走
+      # 同一构建流程，P-20261101-2）。glob 语义按官方 filter pattern cheat sheet
+      # （[0-9]=单字符区间，+=前一字符一个或多个，*=零或多字符）
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # build.sh derives the version from the nearest reachable v* tag
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build all platforms
+        run: ./build.sh all
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum codecombo-* > SHA256SUMS.txt
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          # 预发布标记：tag 含 '-' 即 SemVer 预发布形态（v0.2.0-rc1/v0.2.0-beta.2）
+          # ——GitHub 页面带 Pre-release 徽章，且 /releases/latest 只认非预发布
+          # （正式实例自更新 GitHubSource.FetchLatest 的取数端点），rc 不会推进
+          # 正式实例的自动更新通道；rc 测试实例显式走具体 tag 的资产下载。
+          # 产物与校验链（SHA256SUMS/.sig 签名）与正式版同链——资产名不变是
+          # 自更新契约，此处零特例
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/codecombo-*
+            dist/SHA256SUMS.txt

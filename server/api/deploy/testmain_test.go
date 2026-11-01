@@ -1,0 +1,21 @@
+package deploy
+
+import (
+	"os"
+	"testing"
+)
+
+// TestMain 隔离留档落盘副作用（P-20261007-8）：日志下载端点的窗内用例经真实
+// Manager 触发死端口部署走到终态收尾点，未设 SC_DATA_DIR 时会把快照写进真实
+// ~/.simple-coding/artifacts/deploy-logs/——全包默认指到临时数据目录兜底；
+// 需要隔离留档落点的用例仍以 t.Setenv 就地覆盖（server/deploy 包 TestMain 同款）
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "sc-api-deploy-test")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("CC_DATA_DIR", dir)
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}

@@ -1,0 +1,4 @@
+{
+  "_comment": "主题对比度基线：存量不达标色对清单。键 = \"主题|fg/bg\"，值 = 审计时实测对比度（已接受下限，劣化会被判失败）；治理达标后删除对应条目。门槛按实际字号绑定：常规文本 ≥4.5、大字号/非文本图形 ≥3（见 scripts/theme-contrast-lib.mjs）。重建：npm run check:theme -- --update-baseline",
+  "entries": {}
+}

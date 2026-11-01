@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Codecombo 品牌 tile·暗色（P-20261101-1）。圆角方底板 + 居中放大 8× 的
+       48 栅格标志，作为 PWA icons（web/public/icons/*.png）与 og-image 的
+       派生源——改此文件后跑 scripts/site-assets-gen.mjs 重新导出 PNG。
+       底板深浅沿用产品 Dark 主形态 #0d1117，径向微渐变给图标加纵深。 -->
+  <defs>
+    <radialGradient id="tile" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0" stop-color="#1b2740"/>
+      <stop offset="0.55" stop-color="#111a2c"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="115" fill="url(#tile)"/>
+  <g transform="translate(64 64) scale(8)">
+    <path d="M24 8A16 16 0 0 0 8 24" stroke="#79c0ff" stroke-width="4.2" stroke-linecap="round"/>
+    <path d="M24 40A16 16 0 0 0 40 24" stroke="#388bfd" stroke-width="4.2" stroke-linecap="round"/>
+    <circle cx="8" cy="24" r="3.4" fill="#79c0ff"/>
+    <circle cx="40" cy="24" r="3.4" fill="#388bfd"/>
+    <circle cx="24" cy="24" r="5.4" fill="#e6edf3" opacity="0.16"/>
+    <circle cx="24" cy="24" r="2.6" fill="#e6edf3"/>
+  </g>
+</svg>

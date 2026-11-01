@@ -1,0 +1,7 @@
+/* 传输到主机弹窗（自 RemoteFilePane 内联样式按区块随迁，P-20261002-27） */
+.rf-transfer { width: min(520px, 92vw); }
+.rf-transfer-body { display: flex; flex-direction: column; gap: 12px; }
+.rf-transfer-row { display: flex; flex-direction: column; gap: 6px; }
+.rf-transfer-label { font-size: 12px; color: var(--text-muted); }
+.rf-transfer-hint { font-size: 12px; color: var(--text-dim); }
+.rf-transfer-foot { display: flex; justify-content: flex-end; gap: 8px; }

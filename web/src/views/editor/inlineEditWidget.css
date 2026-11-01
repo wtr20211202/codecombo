@@ -1,0 +1,103 @@
+/* 选区内联 AI 编辑浮条/浮层全局类（P-20261005-206，由 useEditorInlineEdit.ts
+ * 侧引入）：content widget 的 DOM 由组合式动态创建，挂不上任何组件的 scoped
+ * data-v 属性，必须走全局类（monacoDecorations.css 同款惯例，样式跟随 owning
+ * 桥模块）。颜色/投影一律主题变量（主题适配红线，投影用 main.css 弹层档位），
+ * z 序取 Monaco content widget 常规层（hover 之下、文本之上） */
+
+/* ── 选区浮条：选区末行下缘的「AI 修改此选区」单钮 ── */
+.sc-inline-edit-bar {
+  /* content widget 落点在选区末行行底，整块下移一点点贴出行底不压正文 */
+  margin-top: 2px;
+  pointer-events: auto;
+}
+
+.sc-inline-edit-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  box-shadow: var(--shadow-pop-sm);
+  white-space: nowrap;
+}
+
+.sc-inline-edit-bar-btn:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+  background: var(--bg-hover);
+}
+
+.sc-inline-edit-bar-btn:focus-visible {
+  outline: 1px solid var(--accent-blue);
+  outline-offset: 1px;
+}
+
+/* ── 就地 prompt 浮层：单行输入 + 发送 + 键位提示 ── */
+.sc-inline-edit-prompt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-pop);
+  pointer-events: auto;
+  max-width: 520px;
+}
+
+.sc-inline-edit-input {
+  flex: 1 1 auto;
+  min-width: 260px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  outline: none;
+}
+
+.sc-inline-edit-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.sc-inline-edit-input::placeholder {
+  color: var(--text-muted);
+}
+
+.sc-inline-edit-send {
+  flex: 0 0 auto;
+  padding: 3px 12px;
+  border: 1px solid var(--accent-blue);
+  border-radius: 4px;
+  background: var(--accent-blue);
+  color: var(--text-on-accent);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sc-inline-edit-send:hover {
+  filter: brightness(1.15);
+}
+
+.sc-inline-edit-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.sc-inline-edit-hint {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}

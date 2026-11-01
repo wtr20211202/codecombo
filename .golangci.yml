@@ -1,0 +1,73 @@
+# ============================================================
+# golangci-lint 规则清单与治理——本注释头是启用规则集的规范来源，
+# 改任何配置项必须连带更新对应条目（理由随配置走，不留在 PR 描述里）。
+# ============================================================
+# 基线引入 P-20261002-68：Go 侧静态保障层，与前端 eslint/vue-tsc/vitest 三层对齐。
+# 引入策略（渐进）：存量经「std-error-handling 预设 + 显式弃置(_ =) + 少量 nolint 带因标注」
+# 一次清零（首轮 370→0，处置台账见 docs/lint-baseline.md），此后增量全开——新增吞错/死码/
+# 可疑比较在门禁即被拦截。
+# 运行与安装见 CLAUDE.md 开发命令节（版本固定 v2.14.0）；Linux 门禁接线见 scripts/wsl-verify.sh。
+#
+# ── 启用规则清单（default: standard 五件套，逐条理由）──────────────────────
+#   errcheck     吞错拦截：error 返回值被裸丢。执行器/修复器自动改动大量落 Go 侧、
+#                吞错类问题历史高发，是本基线的第一动机。
+#   govet        Go 官方 vet：printf 格式串、锁拷贝、不可达码等「编译不报、运行期才炸」类疑似错误。
+#   ineffassign  无效赋值：赋值后未读即被覆盖，多为错误处理写一半的残迹，人眼 review 易漏。
+#   staticcheck  正确性 + 简化双族（开关面见下方 settings.staticcheck）：SA 拦真 bug
+#                （nil 解引用/死存储/弃用 API），S 收明显冗余写法。
+#   unused       死码：未用的函数/变量/字段/类型，防重构残留堆积；平台对等 stub、装配缝等
+#                结构性例外走 nolint 带因标注（清单见 docs/lint-baseline.md）。
+#
+# ── 显式关闭面（关什么同样留理由，防无意识回开）────────────────────────────
+#   staticcheck 的 ST*(风格)/QF(编辑器 quickfix)：与 gofmt/revive 同属争议风格面，
+#   噪音大收益小，按提案「后续再议」暂关。
+#   formatters 节未配置（gofmt/goimports）：格式不进 lint 门禁（wsl-verify.sh 亦无 gofmt
+#   层），由编辑器/gofmt 习惯承载；要收编须走下方建议流程。
+#   其余 linter（revive/gocritic 等）未启用：基线取最小集起步，是否扩充走下方建议流程。
+#
+# ── 豁免纪律（三层，越往下越重、越要留痕）──────────────────────────────────
+#   ① 配置层集中豁免（exclusions.presets）：std-error-handling 收编 defer X.Close() /
+#      fmt.Fprint* / os.Remove(All) / std 输出等「静默降级」惯例点——惯例豁免进配置
+#      不进代码，避免 nolint 散落；预设之外的吞错点不允许裸调。
+#   ② 代码层显式弃置（`_ =`）：语义即「有意不管」，比 nolint 轻，预设外吞错点优先用它。
+#   ③ 代码层 nolint 带因标注：仅限结构性豁免（平台对等 stub/装配缝/弃用 API 迁移期），
+#      必须附理由；全仓清单与出处见 docs/lint-baseline.md，增删时同步。
+#
+# ── 新增/调整规则的建议流程（含 linter 集、staticcheck 单条开关、presets、路径排除）──
+#   1. 配置与理由同 PR：动本文件必须连带更新注释头对应条目；提交信息加一行
+#      「lint: <加/关/调> <规则> 因 <动机>」，便于 git log --grep lint 回溯治理决策。
+#   2. 开新规则先看存量：落地前裸跑 golangci-lint run 数命中量——存量>0 时一次清零或给出
+#      分阶段处置计划（参照 P-20261002-68 首轮处置表），不许「开启即红、门禁摆烂」。
+#   3. 版本升级不扩面：升级 golangci-lint 带来的新检查默认继承现有开关面（standard 集合与
+#      下方 checks 语义不变），是否跟进上游新增单独走本流程。
+#
+# ── 运行参数 ─────────────────────────────────────────────────────────────────
+#   run.timeout 10m：全仓 lint 在 /mnt/d（WSL2 9p I/O）实测 4m16s（墙钟远大于
+#   CPU 时间，I/O 主导），5m 预算在并行 worktree 门禁/冷缓存时于包加载期即超时
+#   （P-20261005-8 验证期两连败，golangci-lint 报 context deadline exceeded），
+#   10m = 实测值 ~2.4× 余量；纯预算放宽，检查面不变。
+# ============================================================
+version: "2"
+
+run:
+  timeout: 10m
+
+linters:
+  # standard 集合 = errcheck + govet + ineffassign + staticcheck + unused
+  #（任务书四件套吞错/vet/无效赋值/正确性，外加 unused 死码——staticcheck 家族）
+  default: standard
+  settings:
+    staticcheck:
+      # SA(正确性) + S(简化机会) 全开；ST(风格)/QF(编辑器 quickfix) 与 gofmt/revive
+      # 同属争议风格面，按提案「后续再议」暂关
+      checks: [ "all", "-ST*", "-QF*" ]
+  exclusions:
+    paths:
+      # web/ 前端树不属 Go lint 面（node_modules 内含第三方 Go 包，如 flatted）；
+      # [/\\] 兼容 Windows 反斜杠路径
+      - ^web[/\\]
+    presets:
+      # 「静默降级」惯例的既有点：defer X.Close() / fmt.Fprint* / os.Remove(All) /
+      # std out/err 写入等惯用忽略——集中豁免于配置而非散落 nolint；
+      # 预设之外的吞错点须显式弃置（`_ =`）或真实处理，不允许裸调
+      - std-error-handling

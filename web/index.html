@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg">
+    <link rel="icon" sizes="32x32" href="/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codecombo</title>
+    <!-- PWA 可安装形态（P-20261004-134）：manifest + 图标 + standalone，
+         启动画面由 icons + background_color 自动合成，无需 service worker。
+         theme-color 的静态值是安装默认（深色主形态），运行期由主题系统随主题动态更新 -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0d1117">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
