@@ -4,6 +4,8 @@ simple-coding.exe
 codecombo
 codecombo.exe
 dist/
+# npm 发布组包产物（scripts/npm-stage.mjs 生成，不入库；npm/ 模板与脚本入库）
+npm/dist/
 # E2E 门禁用的测试构建（AI 助手生成，避免覆盖正在运行的正式产物）
 sc-new.exe
 sc-new.exe~

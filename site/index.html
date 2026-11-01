@@ -233,15 +233,22 @@
       <div class="wrap">
         <h2><span data-lang-en>Quickstart</span><span data-lang-zh>快速上手</span></h2>
         <p class="section-sub">
-          <span data-lang-en>Prerequisites: Go 1.26+, Node.js 20.19+ / 22.12+, Git. Prefer a ready binary? Grab one from <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a>.</span>
-          <span data-lang-zh>前置要求：Go 1.26+、Node.js 20.19+ / 22.12+、Git。想要现成二进制？去 <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a> 直接下载。</span>
+          <span data-lang-en>Fastest — <code>npm i -g codecombo</code> (needs Node.js 18+). Building from source requires Go 1.26+, Node.js 20.19+ / 22.12+ and Git; ready-made binaries also on <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a>.</span>
+          <span data-lang-zh>最快路径——<code>npm i -g codecombo</code>（需 Node.js 18+）。从源码构建需 Go 1.26+、Node.js 20.19+ / 22.12+、Git；现成二进制也在 <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a>。</span>
         </p>
         <ol class="qs-steps">
+          <!-- 双路线：Install(npm)→Open 为快路；Build→Run→Open 为源码路。
+               npm 包 = 薄包装，发布链与 GitHub 二进制同源（release.yml 同 tag 同产物）。 -->
+          <li>
+            <span class="qs-label" data-lang-en>Install</span><span class="qs-label" data-lang-zh>安装</span>
+            <pre><code>npm i -g codecombo
+codecombo start            <span class="qs-cmt"># one binary auto-picked for your platform</span></code></pre>
+          </li>
           <li>
             <span class="qs-label" data-lang-en>Build</span><span class="qs-label" data-lang-zh>构建</span>
             <pre><code>git clone https://github.com/wtr20211202/codecombo.git
 cd codecombo
-./build.sh                <span class="qs-cmt"># Linux/macOS — build.bat on Windows</span></code></pre>
+./build.sh                <span class="qs-cmt"># source route alternative — build.bat on Windows</span></code></pre>
           </li>
           <li>
             <span class="qs-label" data-lang-en>Run</span><span class="qs-label" data-lang-zh>启动</span>

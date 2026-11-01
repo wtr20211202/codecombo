@@ -135,6 +135,19 @@ and a commit graph you can cherry-pick / squash / extract from.
 
 ## Quickstart
 
+### Install with npm (fastest)
+
+```bash
+npm i -g codecombo
+codecombo start
+```
+
+Then open **http://localhost:9999** and set your lock password on first start.
+Requires Node.js 18+ — the npm package is a thin wrapper; `npm` picks the
+native binary for your platform (Windows / Linux / macOS, amd64 & arm64) via
+optional dependencies. No postinstall scripts. Prebuilt binaries are also on
+the [Releases](../../releases) page.
+
 ### Build and run
 
 Prerequisites: Go 1.26+, Node.js 20.19+ / 22.12+, Git.

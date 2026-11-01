@@ -108,6 +108,20 @@ hunk 级暂存与丢弃、三路差异、拖拽式交互变基、合并预演、
 
 ## 快速开始
 
+### npm 安装（最快）
+
+```bash
+npm i -g codecombo
+codecombo start
+```
+
+浏览器打开 **http://localhost:9999**，首启设置锁密码。需要 Node.js 18+——
+npm 包只是薄包装，npm 会按平台经 optionalDependencies 自动装上对应原生二进制
+（Windows / Linux / macOS，amd64 & arm64），零 postinstall 脚本。也可从
+[Releases](../../releases) 直接下载二进制。
+
+### 从源码构建
+
 前置要求：Go 1.26+、Node.js 20.19+ / 22.12+、Git。
 
 ```bash

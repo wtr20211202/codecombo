@@ -2,6 +2,8 @@
 # 让远程 Linux 执行报 bad interpreter ^M；core.autocrlf=true 的新 clone
 # 会把工作区转成 CRLF——本文件强制这些类型始终 LF）
 *.sh text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
 *.ps1 text eol=lf
 *.tmux text eol=lf
 *.go text eol=lf
