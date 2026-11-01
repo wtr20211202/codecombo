@@ -12,10 +12,20 @@
   </defs>
   <rect width="512" height="512" rx="115" fill="url(#tile)"/>
   <g transform="translate(64 64) scale(8)">
-    <path d="M24 8A16 16 0 0 0 8 24" stroke="#79c0ff" stroke-width="4.2" stroke-linecap="round"/>
-    <path d="M24 40A16 16 0 0 0 40 24" stroke="#388bfd" stroke-width="4.2" stroke-linecap="round"/>
-    <circle cx="8" cy="24" r="3.4" fill="#79c0ff"/>
-    <circle cx="40" cy="24" r="3.4" fill="#388bfd"/>
+    <!-- 双弧反向慢旋（10s/圈）与 icon-auto 同款；SMIL 在 GitHub README 的
+         <img> 引用里照常动；PWA/og 派生 PNG 为静态导出不受影响 -->
+    <g>
+      <path d="M24 8A16 16 0 0 0 8 24" stroke="#79c0ff" stroke-width="4.2" stroke-linecap="round"/>
+      <circle cx="8" cy="24" r="3.4" fill="#79c0ff"/>
+      <animateTransform attributeName="transform" type="rotate" values="0 24 24;360 24 24" dur="10s"
+        repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1"/>
+    </g>
+    <g>
+      <path d="M24 40A16 16 0 0 0 40 24" stroke="#388bfd" stroke-width="4.2" stroke-linecap="round"/>
+      <circle cx="40" cy="24" r="3.4" fill="#388bfd"/>
+      <animateTransform attributeName="transform" type="rotate" values="0 24 24;-360 24 24" dur="10s"
+        repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1"/>
+    </g>
     <circle cx="24" cy="24" r="5.4" fill="#e6edf3" opacity="0.16"/>
     <circle cx="24" cy="24" r="2.6" fill="#e6edf3"/>
   </g>

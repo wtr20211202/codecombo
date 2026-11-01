@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Codecombo — every dev tool, chained.</title>
+  <title>Codecombo — one workbench for every dev tool.</title>
   <!--
     Codecombo 产品官网单页（P-20261101-1）。零框架纯 HTML+CSS+少量原生 JS，
     构建零依赖 Philosophy 同款；GitHub Pages 部署形态 = 发布仓 docs/ 根
@@ -20,7 +20,7 @@
     main/docs 模式站点根 = 发布仓 docs/，img/ 即 docs/img/）。两种落位各自
     成立，改引用时两处语义都要顾（见 docs/pages-publishing.md）。
   -->
-  <meta name="description" content="Codecombo is a self-hosted, single-binary workbench that puts your Git workbench, real terminal sessions, AI coding agents and remote machines into one browser tab. Every dev tool, chained.">
+  <meta name="description" content="Codecombo is a self-hosted, single-binary workbench that puts your Git workbench, real terminal sessions, AI coding agents and remote machines into one browser tab.">
   <!-- SEO：单页双语无独立 URL，hreflang 指向 ?lang 查询变体（抓取器落到
        同一静态文件，JS 读取查询参数切换语言；默认英文无 JS 可见） -->
   <link rel="alternate" hreflang="en" href="./">
@@ -29,7 +29,7 @@
   <!-- 社交分享卡：相对路径，抓取器按页面 URL 解析（og:image 支持相对）；
        设计源 og-image.svg，栅格产物由 web/scripts/site-assets-gen.mjs 生成 -->
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Codecombo — every dev tool, chained.">
+  <meta property="og:title" content="Codecombo — one workbench for every dev tool.">
   <meta property="og:description" content="Self-hosted single-binary workbench: Git workbench, real terminals, AI coding agents and remote machines in one browser tab.">
   <meta property="og:image" content="assets/og-image.png">
   <meta property="og:image:width" content="1200">
@@ -47,9 +47,9 @@
         <span class="brand-name">Codecombo</span><span class="beta-chip">Beta</span>
       </a>
       <nav class="header-nav" aria-label="Page">
+        <a href="#quickstart" data-lang-en>Quickstart</a><a href="#quickstart" data-lang-zh>快速上手</a>
         <a href="#features" data-lang-en>Features</a><a href="#features" data-lang-zh>功能</a>
         <a href="#scenarios" data-lang-en>Scenarios</a><a href="#scenarios" data-lang-zh>场景</a>
-        <a href="#quickstart" data-lang-en>Quickstart</a><a href="#quickstart" data-lang-zh>快速上手</a>
         <span class="lang-toggle" role="group" aria-label="Language">
           <button type="button" class="lang-btn" data-lang-set="en" aria-pressed="true">EN</button>
           <button type="button" class="lang-btn" data-lang-set="zh" aria-pressed="false">中文</button>
@@ -71,8 +71,8 @@
           <h1 class="hero-title">Codecombo</h1>
         </div>
         <p class="hero-tagline">
-          <span data-lang-en>Every dev tool, chained.</span>
-          <span data-lang-zh>常用工具，串成一条链。</span>
+          <span data-lang-en>One workbench for every dev tool.</span>
+          <span data-lang-zh>常用开发工具，一站齐备。</span>
         </p>
         <p class="hero-sub">
           <span data-lang-en>A self-hosted, single-binary workbench that puts a full Git workbench, real
@@ -137,7 +137,40 @@
     </section>
 
     <!-- ============ Features 六宫格（文案源=README.md §Highlights 各小节，改先改 README） ============ -->
-    <section class="section" id="features">
+    <section class="section" id="quickstart">
+      <div class="wrap">
+        <h2><span data-lang-en>Quickstart</span><span data-lang-zh>快速上手</span></h2>
+        <p class="section-sub">
+          <span data-lang-en>Fastest — <code>npm i -g codecombo</code> (needs Node.js 18+). Building from source requires Go 1.26+, Node.js 20.19+ / 22.12+ and Git; ready-made binaries also on <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a>.</span>
+          <span data-lang-zh>最快路径——<code>npm i -g codecombo</code>（需 Node.js 18+）。从源码构建需 Go 1.26+、Node.js 20.19+ / 22.12+、Git；现成二进制也在 <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a>。</span>
+        </p>
+        <ol class="qs-steps">
+          <!-- 双路线：Install(npm)→Open 为快路；Build→Run→Open 为源码路。
+               npm 包 = 薄包装，发布链与 GitHub 二进制同源（release.yml 同 tag 同产物）。 -->
+          <li>
+            <span class="qs-label" data-lang-en>Install</span><span class="qs-label" data-lang-zh>安装</span>
+            <pre><code>npm i -g codecombo
+codecombo start            <span class="qs-cmt"># one binary auto-picked for your platform</span></code></pre>
+          </li>
+          <li>
+            <span class="qs-label" data-lang-en>Build</span><span class="qs-label" data-lang-zh>构建</span>
+            <pre><code>git clone https://github.com/wtr20211202/codecombo.git
+cd codecombo
+./build.sh                <span class="qs-cmt"># source route alternative — build.bat on Windows</span></code></pre>
+          </li>
+          <li>
+            <span class="qs-label" data-lang-en>Run</span><span class="qs-label" data-lang-zh>启动</span>
+            <pre><code>./dist/codecombo start    <span class="qs-cmt"># daemon mode; or run ./dist/codecombo directly</span></code></pre>
+          </li>
+          <li>
+            <span class="qs-label" data-lang-en>Open</span><span class="qs-label" data-lang-zh>打开</span>
+            <pre><code>http://localhost:9999      <span class="qs-cmt"># set your lock password on first start</span></code></pre>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section section-alt" id="features">
       <div class="wrap">
         <h2><span data-lang-en>Highlights</span><span data-lang-zh>亮点</span></h2>
         <div class="grid features-grid">
@@ -194,7 +227,7 @@
     </section>
 
     <!-- ============ 典型场景三段（文案源=README.md §Highlights *Typical scenario* 与 §Multi-instance sync，改先改 README） ============ -->
-    <section class="section section-alt" id="scenarios">
+    <section class="section" id="scenarios">
       <div class="wrap">
         <h2><span data-lang-en>Typical scenarios</span><span data-lang-zh>典型场景</span></h2>
         <div class="scenarios">
@@ -229,38 +262,6 @@
     </section>
 
     <!-- ============ Quickstart（文案源=README.md §Quickstart，改先改 README） ============ -->
-    <section class="section" id="quickstart">
-      <div class="wrap">
-        <h2><span data-lang-en>Quickstart</span><span data-lang-zh>快速上手</span></h2>
-        <p class="section-sub">
-          <span data-lang-en>Fastest — <code>npm i -g codecombo</code> (needs Node.js 18+). Building from source requires Go 1.26+, Node.js 20.19+ / 22.12+ and Git; ready-made binaries also on <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a>.</span>
-          <span data-lang-zh>最快路径——<code>npm i -g codecombo</code>（需 Node.js 18+）。从源码构建需 Go 1.26+、Node.js 20.19+ / 22.12+、Git；现成二进制也在 <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a>。</span>
-        </p>
-        <ol class="qs-steps">
-          <!-- 双路线：Install(npm)→Open 为快路；Build→Run→Open 为源码路。
-               npm 包 = 薄包装，发布链与 GitHub 二进制同源（release.yml 同 tag 同产物）。 -->
-          <li>
-            <span class="qs-label" data-lang-en>Install</span><span class="qs-label" data-lang-zh>安装</span>
-            <pre><code>npm i -g codecombo
-codecombo start            <span class="qs-cmt"># one binary auto-picked for your platform</span></code></pre>
-          </li>
-          <li>
-            <span class="qs-label" data-lang-en>Build</span><span class="qs-label" data-lang-zh>构建</span>
-            <pre><code>git clone https://github.com/wtr20211202/codecombo.git
-cd codecombo
-./build.sh                <span class="qs-cmt"># source route alternative — build.bat on Windows</span></code></pre>
-          </li>
-          <li>
-            <span class="qs-label" data-lang-en>Run</span><span class="qs-label" data-lang-zh>启动</span>
-            <pre><code>./dist/codecombo start    <span class="qs-cmt"># daemon mode; or run ./dist/codecombo directly</span></code></pre>
-          </li>
-          <li>
-            <span class="qs-label" data-lang-en>Open</span><span class="qs-label" data-lang-zh>打开</span>
-            <pre><code>http://localhost:9999      <span class="qs-cmt"># set your lock password on first start</span></code></pre>
-          </li>
-        </ol>
-      </div>
-    </section>
   </main>
 
   <!-- ============ Footer ============ -->

@@ -27,6 +27,47 @@ Git 工作台、真实终端会话、AI 智能体、远程主机管理，全部�
 > 智能体运行时，仅提供可选的本机嵌入通道——用户自行安装 dsh 后，Codecombo
 > 可经回环反代把其 Web UI 嵌入面板。详见 [NOTICE](../NOTICE)。
 
+## 快速开始
+
+### npm 安装（最快）
+
+```bash
+npm i -g codecombo
+codecombo start
+```
+
+浏览器打开 **http://localhost:9999**，首启设置锁密码。需要 Node.js 18+——
+npm 包只是薄包装，npm 会按平台经 optionalDependencies 自动装上对应原生二进制
+（Windows / Linux / macOS，amd64 & arm64），零 postinstall 脚本。也可从
+[Releases](../../releases) 直接下载二进制。
+
+### 从源码构建
+
+前置要求：Go 1.26+、Node.js 20.19+ / 22.12+、Git。
+
+```bash
+git clone https://github.com/wtr20211202/codecombo.git
+cd codecombo
+
+./build.sh            # Linux/macOS —— 前端 + Go，产物在 dist/
+build.bat             # Windows
+
+./dist/codecombo start        # 后台守护进程方式启动
+```
+
+浏览器打开 **http://localhost:9999**，首启设置锁密码，添加本地 Git 项目或克
+隆远程仓库。Windows / Linux / macOS（amd64 & arm64）预编译二进制见
+[Releases](../../releases)。
+
+### 开发模式
+
+```bash
+cd web && npm install && npm run dev   # Vite 开发服务器 :5173（代理到 :9999）
+go run main.go                         # Go 后端 :9999（第二个终端）
+```
+
+提交改动前跑质量门禁：`cd web && npm run check`（类型检查 + lint + 单测 +
+契约门禁）与 `go test ./...`。
 
 ## 特色能力
 
@@ -105,48 +146,6 @@ hunk 级暂存与丢弃、三路差异、拖拽式交互变基、合并预演、
   缓存转发二进制给子实例。
 - **双语与主题** —— 简体中文 / English 界面；Dark / Light / One Dark /
   Dracula 四主题。
-
-## 快速开始
-
-### npm 安装（最快）
-
-```bash
-npm i -g codecombo
-codecombo start
-```
-
-浏览器打开 **http://localhost:9999**，首启设置锁密码。需要 Node.js 18+——
-npm 包只是薄包装，npm 会按平台经 optionalDependencies 自动装上对应原生二进制
-（Windows / Linux / macOS，amd64 & arm64），零 postinstall 脚本。也可从
-[Releases](../../releases) 直接下载二进制。
-
-### 从源码构建
-
-前置要求：Go 1.26+、Node.js 20.19+ / 22.12+、Git。
-
-```bash
-git clone https://github.com/wtr20211202/codecombo.git
-cd codecombo
-
-./build.sh            # Linux/macOS —— 前端 + Go，产物在 dist/
-build.bat             # Windows
-
-./dist/codecombo start        # 后台守护进程方式启动
-```
-
-浏览器打开 **http://localhost:9999**，首启设置锁密码，添加本地 Git 项目或克
-隆远程仓库。Windows / Linux / macOS（amd64 & arm64）预编译二进制见
-[Releases](../../releases)。
-
-### 开发模式
-
-```bash
-cd web && npm install && npm run dev   # Vite 开发服务器 :5173（代理到 :9999）
-go run main.go                         # Go 后端 :9999（第二个终端）
-```
-
-提交改动前跑质量门禁：`cd web && npm run check`（类型检查 + lint + 单测 +
-契约门禁）与 `go test ./...`。
 
 ## 项目结构
 

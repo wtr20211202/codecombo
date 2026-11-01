@@ -21,10 +21,21 @@
     }
   </style>
   <g class="mark">
-    <path d="M24 8A16 16 0 0 0 8 24" stroke="var(--arc1, #79c0ff)" stroke-width="4.2" stroke-linecap="round"/>
-    <path d="M24 40A16 16 0 0 0 40 24" stroke="var(--arc2, #388bfd)" stroke-width="4.2" stroke-linecap="round"/>
-    <circle cx="8" cy="24" r="3.4" fill="var(--arc1, #79c0ff)"/>
-    <circle cx="40" cy="24" r="3.4" fill="var(--arc2, #388bfd)"/>
+    <!-- 双弧反向慢旋（10s/圈，缓入缓出）= 齿轮啮合的「转动」意象；
+         SMIL 锚定局部坐标 (24,24)，<img> 引用（官网 header/hero/footer、favicon）均生效；
+         速度刻意放缓；不支持 SMIL 的渲染器静落静态双弧，不空画 -->
+    <g>
+      <path d="M24 8A16 16 0 0 0 8 24" stroke="var(--arc1, #79c0ff)" stroke-width="4.2" stroke-linecap="round"/>
+      <circle cx="8" cy="24" r="3.4" fill="var(--arc1, #79c0ff)"/>
+      <animateTransform attributeName="transform" type="rotate" values="0 24 24;360 24 24" dur="10s"
+        repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1"/>
+    </g>
+    <g>
+      <path d="M24 40A16 16 0 0 0 40 24" stroke="var(--arc2, #388bfd)" stroke-width="4.2" stroke-linecap="round"/>
+      <circle cx="40" cy="24" r="3.4" fill="var(--arc2, #388bfd)"/>
+      <animateTransform attributeName="transform" type="rotate" values="0 24 24;-360 24 24" dur="10s"
+        repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.6 1"/>
+    </g>
     <circle cx="24" cy="24" r="5.4" fill="var(--hub, #e6edf3)" opacity="0.16"/>
     <circle cx="24" cy="24" r="2.6" fill="var(--hub, #e6edf3)"/>
   </g>

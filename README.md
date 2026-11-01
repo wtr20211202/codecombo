@@ -17,7 +17,7 @@
 > stable 1.0 release yet — interfaces and on-disk data formats may still change
 > between versions. Feedback and bug reports are very welcome.
 
-**Codecombo — every dev tool, chained.**
+**Codecombo — one workbench for every dev tool.**
 
 **Codecombo** is a self-hosted, single-binary workbench that collects your
 everyday dev tools — a full Git workbench, real terminal sessions, AI coding
@@ -36,6 +36,50 @@ together. No more juggling separate apps.
 > embedding channel: if *you* installed dsh on your machine, Codecombo can
 > embed its web UI over a loopback proxy. See [NOTICE](NOTICE).
 
+## Quickstart
+
+### Install with npm (fastest)
+
+```bash
+npm i -g codecombo
+codecombo start
+```
+
+Then open **http://localhost:9999** and set your lock password on first start.
+Requires Node.js 18+ — the npm package is a thin wrapper; `npm` picks the
+native binary for your platform (Windows / Linux / macOS, amd64 & arm64) via
+optional dependencies. No postinstall scripts. Prebuilt binaries are also on
+the [Releases](../../releases) page.
+
+### Build and run
+
+Prerequisites: Go 1.26+, Node.js 20.19+ / 22.12+, Git.
+
+```bash
+git clone https://github.com/wtr20211202/codecombo.git
+cd codecombo
+
+./build.sh            # Linux/macOS — frontend + Go, output to dist/
+build.bat             # Windows
+
+./dist/codecombo start        # start the service (daemon)
+# or: ./dist/codecombo        # equivalent to `start`
+```
+
+Then open **http://localhost:9999**, set your lock password on first start,
+and add a project (a local Git repo, or clone one). Prebuilt binaries for
+Windows / Linux / macOS (amd64 & arm64) are published on the
+[Releases](../../releases) page.
+
+### Development mode
+
+```bash
+cd web && npm install && npm run dev   # Vite dev server on :5173 (proxies to :9999)
+go run main.go                         # Go backend on :9999 (second terminal)
+```
+
+Run the quality gates before submitting changes: `cd web && npm run check`
+(type-check + lint + unit tests + contract gates) and `go test ./...`.
 
 ## Highlights
 
@@ -132,51 +176,6 @@ and a commit graph you can cherry-pick / squash / extract from.
   instances.
 - **i18n & themes** — English / 简体中文 UI; four built-in themes
   (Dark / Light / One Dark / Dracula).
-
-## Quickstart
-
-### Install with npm (fastest)
-
-```bash
-npm i -g codecombo
-codecombo start
-```
-
-Then open **http://localhost:9999** and set your lock password on first start.
-Requires Node.js 18+ — the npm package is a thin wrapper; `npm` picks the
-native binary for your platform (Windows / Linux / macOS, amd64 & arm64) via
-optional dependencies. No postinstall scripts. Prebuilt binaries are also on
-the [Releases](../../releases) page.
-
-### Build and run
-
-Prerequisites: Go 1.26+, Node.js 20.19+ / 22.12+, Git.
-
-```bash
-git clone https://github.com/wtr20211202/codecombo.git
-cd codecombo
-
-./build.sh            # Linux/macOS — frontend + Go, output to dist/
-build.bat             # Windows
-
-./dist/codecombo start        # start the service (daemon)
-# or: ./dist/codecombo        # equivalent to `start`
-```
-
-Then open **http://localhost:9999**, set your lock password on first start,
-and add a project (a local Git repo, or clone one). Prebuilt binaries for
-Windows / Linux / macOS (amd64 & arm64) are published on the
-[Releases](../../releases) page.
-
-### Development mode
-
-```bash
-cd web && npm install && npm run dev   # Vite dev server on :5173 (proxies to :9999)
-go run main.go                         # Go backend on :9999 (second terminal)
-```
-
-Run the quality gates before submitting changes: `cd web && npm run check`
-(type-check + lint + unit tests + contract gates) and `go test ./...`.
 
 ## Project structure
 
