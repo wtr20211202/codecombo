@@ -8,6 +8,7 @@ import {
   DEFAULT_PASSWORD,
 } from './helpers'
 import { cleanupProjectsByPathMarker } from './project-residue'
+import { discoverGitTestCloneUrl, e2eCloneParentDir } from './e2e-local-env'
 
 /**
  * Clone 流程 E2E 测试
@@ -25,16 +26,17 @@ import { cleanupProjectsByPathMarker } from './project-residue'
  *
  * 不测 enabled=true + isLocked=true：遮罩态下用户点不到按钮，无法发起 clone，无意义
  *
- * 仓库：http://localhost:3000/zhouchangjian/git-test.git（Gitea 公开仓库，匿名 clone 可用）
- * 前置：simple-coding 已在 :9999 运行（嵌入构建产物）
+ * 仓库：git-test（Gitea 公开仓库，匿名 clone 可用；地址按名发现，owner 不落
+ * 源码——见 ./e2e-local-env.ts）
+ * 前置：Codecombo 已在 :9999 运行（嵌入构建产物）
  */
 
-const REPO_URL = 'http://localhost:3000/zhouchangjian/git-test.git'
+let repoUrl = ''
 
 // clone 目标目录 marker 与父目录：清理 helper 与 nextCloneDir 共用同一常量，
 // 改目录布局不会出现「注册按 A 清、磁盘按 B 扫」的错位
 const CLONE_MARKER = 'e2e-clone-'
-const CLONE_PARENT_DIR = 'D:/workspace/go/coding'
+const CLONE_PARENT_DIR = e2eCloneParentDir()
 
 // Gitea（WSL docker）可达性预检：WSL 处于 NAT 模式时 Windows 侧 localhost:3000
 // 不再转发，clone 必然失败——这是环境缺失而非功能回归，条件跳过（与 wslUp 同惯例）
@@ -49,8 +51,10 @@ function giteaReachable(timeout = 1500): Promise<boolean> {
 }
 
 let giteaUp = false
-test.beforeAll(async () => {
+test.beforeAll(async ({ request }) => {
   giteaUp = await giteaReachable()
+  // 夹具仓按名发现（owner 不落源码）；种子未跑/仓不存在 → 用例统一跳过
+  repoUrl = giteaUp ? await discoverGitTestCloneUrl(request) : ''
   // 自愈式清理（beforeAll + afterAll 双端）：beforeAll 删本 spec 与历史失败运行
   // 遗留的全部 e2e-clone 注册项目 + 磁盘目录（含注册已删的孤儿目录），上次运行
   // afterAll 未执行（中断）时不再拖到本次跑完才清
@@ -71,7 +75,7 @@ async function startClone(page: Page, targetDir: string, projectName: string): P
   await addBtn.click()
   await page.getByText('从 Git 克隆').click()
 
-  await page.getByPlaceholder('https://github.com/user/repo.git').fill(REPO_URL)
+  await page.getByPlaceholder('https://github.com/user/repo.git').fill(repoUrl)
   await page.getByPlaceholder('克隆到哪个目录').fill(targetDir)
   // 唯一项目名：断言只可能命中本用例自己的 clone 注册——同名的播种卡/
   // 前序用例卡会让 getByText('git-test') 假绿（用例秒过而 clone 仍在途中，
@@ -112,7 +116,7 @@ test.describe('Clone 流程 E2E', () => {
   })
 
   test('enabled=false（锁定功能关闭）下 clone 公开仓库成功注册项目', async ({ page }) => {
-    test.skip(!giteaUp, 'Gitea（localhost:3000）不可达，跳过 clone 用例')
+    test.skip(!giteaUp || !repoUrl, 'Gitea（localhost:3000）不可达或夹具仓未发现，跳过 clone 用例')
     await setLockEnabled(page, false)
     await page.reload()
     await waitForAppReady(page)
@@ -125,7 +129,7 @@ test.describe('Clone 流程 E2E', () => {
   })
 
   test('enabled=true（锁定功能开启）+ 已解锁 下 clone 公开仓库也能成功（WS 子协议携带 unlock token）', async ({ page }) => {
-    test.skip(!giteaUp, 'Gitea（localhost:3000）不可达，跳过 clone 用例')
+    test.skip(!giteaUp || !repoUrl, 'Gitea（localhost:3000）不可达或夹具仓未发现，跳过 clone 用例')
     await setLockEnabled(page, true)
     await page.reload()
     await waitForAppReady(page)

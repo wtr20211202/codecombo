@@ -110,8 +110,8 @@ if "%TARGET%"=="all" (
     echo ==^> Building current platform...
     REM parity with build.sh build_target: disable cgo (native build stays static, no dynamic libc)
     set CGO_ENABLED=0
-    go build -ldflags "%LDFLAGS%" -o dist\simple-coding.exe .
-    call :sign_artifact dist\simple-coding.exe
+    go build -ldflags "%LDFLAGS%" -o dist\codecombo.exe .
+    call :sign_artifact dist\codecombo.exe
 )
 
 echo ==^> Output:

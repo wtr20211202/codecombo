@@ -5,6 +5,7 @@ import { fixedLocale, gotoAndUnlock } from '../../tests/helpers'
 import { API_BASE } from '../../tests/api-base'
 import { serverIsRemote, serverPath } from '../../tests/dualpath'
 import { cleanupProjectsByPathMarker, registerProjectByPath } from '../../tests/project-residue'
+import { discoverGitTestCloneUrl, e2eCloneParentDir } from '../../tests/e2e-local-env'
 
 /**
  * 推送弹窗流 E2E（anonymous push 允许的 Gitea :3000）：
@@ -24,11 +25,11 @@ const execFileAsync = promisify(execFile)
 
 // 目录 marker 与父目录：与 clone-flow 的 e2e-clone-* 平行，互不误清
 const MARKER = 'e2e-pushdlg-'
-const PARENT_DIR = 'D:/workspace/go/coding'
-const REPO_URL = 'http://localhost:3000/zhouchangjian/git-test.git'
+const PARENT_DIR = e2eCloneParentDir()
 const PROJ = 'git-test-pushdlg'
 
 let giteaUp = false
+let repoUrl = ''
 
 test.beforeAll(async ({ request }) => {
   // 先清上次中断残留（注册 + 磁盘孤儿目录），再自建本次前置
@@ -37,8 +38,12 @@ test.beforeAll(async ({ request }) => {
   const res = await request.get('http://localhost:3000/').catch(() => null)
   giteaUp = !!res?.ok()
   if (!giteaUp) return
+  // 夹具仓按名发现（owner 不落源码，见 web/tests/e2e-local-env.ts）：
+  // 种子未跑/仓不存在 → 无从前置，套件整体跳过
+  repoUrl = await discoverGitTestCloneUrl(request)
+  if (!repoUrl) return
   const dir = `${PARENT_DIR}/${MARKER}${Date.now()}`
-  await execFileAsync('git', ['clone', '--quiet', REPO_URL, dir], { timeout: 60000 })
+  await execFileAsync('git', ['clone', '--quiet', repoUrl, dir], { timeout: 60000 })
   await registerProjectByPath(PROJ, serverPath(dir))
 })
 
@@ -50,7 +55,7 @@ test('推送弹窗：remote 下拉 → 推送成功 → 弹窗关闭', async ({ 
   // giteaUp 是测试侧探测；UI 推送由服务端 git 执行——跨拓扑（WSL NAT）下
   // 服务端 localhost:3000 到不了 Windows 侧 Gitea，结构性不可跑（镜像网络
   // 形态可达），serverIsRemote 一并门控（P-20261005-187）
-  test.skip(!giteaUp || serverIsRemote, 'Gitea :3000 不可达或跨拓扑 NAT 不可及，跳过')
+  test.skip(!giteaUp || !repoUrl || serverIsRemote, 'Gitea :3000 不可达/夹具仓未播种或跨拓扑 NAT 不可及，跳过')
 
   await fixedLocale(page)
   await gotoAndUnlock(page, `${API_BASE}/`)

@@ -5,6 +5,7 @@ import { fixedLocale, gotoAndUnlock } from '../../tests/helpers'
 import { API_BASE } from '../../tests/api-base'
 import { serverPath } from '../../tests/dualpath'
 import { cleanupProjectsByPathMarker, registerProjectByPath } from '../../tests/project-residue'
+import { e2eCloneParentDir } from '../../tests/e2e-local-env'
 
 /**
  * 推送弹层 force-with-lease 选项 E2E（P-20261003-213）：
@@ -20,7 +21,7 @@ const execFileAsync = promisify(execFile)
 
 // 目录 marker 与父目录：与 push-dialog / push-ahead-preview 的 e2e-* 平行，互不误清
 const MARKER = 'e2e-fwlease-'
-const PARENT_DIR = 'D:/workspace/go/coding'
+const PARENT_DIR = e2eCloneParentDir()
 const PROJ = 'fwlease-local'
 
 const SEED_SUBJECT = 'fwlease seed'

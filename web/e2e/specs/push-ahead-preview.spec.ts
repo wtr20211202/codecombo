@@ -5,6 +5,7 @@ import { fixedLocale, gotoAndUnlock } from '../../tests/helpers'
 import { API_BASE } from '../../tests/api-base'
 import { serverPath } from '../../tests/dualpath'
 import { cleanupProjectsByPathMarker, registerProjectByPath } from '../../tests/project-residue'
+import { e2eCloneParentDir } from '../../tests/e2e-local-env'
 
 /**
  * 推送前 ahead 提交清单预览 E2E（P-20261003-151）：
@@ -20,7 +21,7 @@ const execFileAsync = promisify(execFile)
 
 // 目录 marker 与父目录：与 clone-flow / push-dialog 的 e2e-* 平行，互不误清
 const MARKER = 'e2e-aheadprev-'
-const PARENT_DIR = 'D:/workspace/go/coding'
+const PARENT_DIR = e2eCloneParentDir()
 const PROJ = 'ahead-preview-local'
 
 const SUBJECTS = ['ahead preview commit one', 'ahead preview commit two', 'ahead preview commit three']
