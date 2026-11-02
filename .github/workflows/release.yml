@@ -146,7 +146,23 @@ jobs:
           # 预发布版本走 next 通道——rc/beta 不抢占 latest（npm install -g codecombo 只认 latest）
           NPM_TAG=latest
           case "$VERSION" in *-*) NPM_TAG=next;; esac
-          for d in npm/dist/codecombo-*/; do
-            npm publish "$d" --tag "$NPM_TAG"
-          done
-          npm publish npm/dist/codecombo/ --tag "$NPM_TAG"
+          set -o pipefail
+          {
+            npm whoami || true
+            for d in npm/dist/codecombo-*/; do
+              npm publish "$d" --tag "$NPM_TAG"
+            done
+            npm publish npm/dist/codecombo/ --tag "$NPM_TAG"
+          } 2>&1 | tee npm-publish.log
+
+      # npm 发布失败诊断推回 ci-diagnostics（token 值 npm 自动脱敏，不落日志）
+      - name: Push npm diagnostics
+        if: failure()
+        run: |
+          git config user.email "noreply@github.com"
+          git config user.name "release-diagnostics"
+          git fetch origin ci-diagnostics 2>/dev/null || true
+          git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
+          git add npm-publish.log
+          git commit -m "npm publish diagnostics for ${GITHUB_REF_NAME} (${GITHUB_SHA})" || exit 0
+          git push origin ci-diagnostics
