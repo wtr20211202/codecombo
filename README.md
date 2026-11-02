@@ -202,7 +202,8 @@ and a commit graph you can cherry-pick / squash / extract from.
   key, per-IP rate limiting, audit log with CSV export.
 - **Self-update** — GitHub-release-based update checks with automatic
   rollback; central instances can cache and forward binaries to child
-  instances.
+  instances. Zero-config: the official repo is the built-in default source —
+  clear `updateURL` in settings to opt out of update checks.
 - **i18n & themes** — English / 简体中文 UI; four built-in themes
   (Dark / Light / One Dark / Dracula).
 

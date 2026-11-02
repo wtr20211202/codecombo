@@ -776,13 +776,20 @@ func LegacyDefaultDir() string {
 	return filepath.Join(home, ".simple-coding")
 }
 
+// UpdateURLOfficial 官方发布仓（P-20261103-1 零配置自更新的内置默认源）。
+// 首启/存量缺字段即预填——检查更新对 api.github.com 发一次 GET（phone-home
+// 披露：不希望联网检查的用户在设置里清空 updateURL 即关，语义与历史空值一致）；
+// fork/自建源在设置里覆盖。仅作 defaultConfig 种子，不参与运行时回填
+const UpdateURLOfficial = "https://github.com/wtr20211202/codecombo"
+
 // defaultConfig 默认种子（Load 初始化、损坏降级复位与 Get 兜底共用同一份，
 // 防三处字面量漂移）
 func defaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port: 9999,
-			Host: "127.0.0.1",
+			Port:      9999,
+			Host:      "127.0.0.1",
+			UpdateURL: UpdateURLOfficial,
 		},
 		// Default 种子条目 Active:false（P-20261007-19 起 active 是消费中的 UI 态：
 		// 活跃组高亮+过滤目标；种子恒活跃会让每个项目都看到无文件的活跃组）
