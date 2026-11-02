@@ -15,6 +15,11 @@ platform (Windows / Linux / macOS, amd64 & arm64) via optional dependencies —
 no postinstall scripts, works with `--ignore-scripts`. The app itself is a
 single Go binary; state stays in `~/.codecombo/` on your machine.
 
+Updates are owned by npm: in-app self-update is intentionally disabled for
+npm installs (replacing files inside `node_modules` would desync npm's
+version bookkeeping) — run `npm i -g codecombo@latest` to update, or
+`codecombo@next` for pre-releases.
+
 - Site & docs: https://wtr20211202.github.io/codecombo/
 - Source & issues: https://github.com/wtr20211202/codecombo
 

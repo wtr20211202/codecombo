@@ -3780,6 +3780,7 @@ export default {
       noAiProvider: 'No AI provider configured — install/select one in Settings first',
       alreadyUpToDate: 'Already up to date',
       centerNoUpdateSource: "The center has no preset binary for this platform and no update source configured: place the binary under serve-binaries/<platform>/ in the center's data directory, or configure the update source (updateURL) in the center's settings",
+      updateNpmManaged: 'This instance was installed via npm — update through the package manager: npm i -g codecombo@latest (previews: codecombo@next). In-app self-update does not apply to npm installs',
       centerBinaryMissing: "The center's update source has no package for this platform: check the update source (updateURL) configured on the center, or preset the binary under serve-binaries/<platform>/ in the center's data directory",
       wrongPassphrase: 'Wrong passphrase or corrupted export file',
       credSyncUnverified: 'This instance has not completed pairing and fingerprint verification — finish pairing in the sync center before credential sync',

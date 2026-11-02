@@ -36,7 +36,14 @@ try {
   process.exit(1)
 }
 
-const child = spawn(bin, process.argv.slice(2), { stdio: 'inherit', windowsHide: true })
+const child = spawn(bin, process.argv.slice(2), {
+  stdio: 'inherit',
+  windowsHide: true,
+  // 安装器标识：Go 侧 IsNpmManaged 据此拒绝自更新（node_modules 归 npm 管，
+  // 原位替换会让 npm 版本记账漂移）。路径嗅探（node_modules 段）是 daemon
+  // 重启 / env 丢失时的兜底判据
+  env: { ...process.env, CODECOMBO_INSTALLER: 'npm' },
+})
 child.on('error', (err) => {
   console.error(`Failed to launch ${binName}: ${err.message}`)
   process.exit(1)

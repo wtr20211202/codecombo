@@ -9,6 +9,7 @@ import (
 	"codecombo/server/store"
 	"codecombo/server/update"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -81,6 +82,13 @@ func ApplyUpdate(c *gin.Context) {
 	}
 
 	if err := mgr.ApplyUpdate(c.Request.Context(), info, buildVersion, port, nil); err != nil {
+		// npm 分发形态（P-20261102-2）：node_modules 归 npm 管，自更新拒绝
+		// 409 + 注册表稳定文案（前端 KNOWN_ERROR_I18N 映射双语指引）。检查更新
+		// 不拦——npm 用户仍能在 UI 看到新版本，只是应用动作换指引
+		if errors.Is(err, update.ErrNpmManaged) {
+			shared.Error(c, http.StatusConflict, err.Error(), nil)
+			return
+		}
 		shared.Error(c, http.StatusInternalServerError, "Update operation failed", err)
 		return
 	}

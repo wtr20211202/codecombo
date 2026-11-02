@@ -54,6 +54,8 @@ the [Releases](../../releases) page.
 Feeling adventurous? Pre-release versions (rc / beta) publish to the `next`
 channel: `npm i -g codecombo@next` — or pin any version explicitly, e.g.
 `npm i -g codecombo@0.2.0-rc1`. Stable `npm i -g codecombo` never moves.
+Updates for npm installs are owned by npm: the in-app updater stays off for
+this install shape — just re-run the install command to move to the latest.
 
 ### Build and run
 

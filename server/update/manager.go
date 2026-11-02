@@ -157,9 +157,20 @@ func (m *Manager) CheckUpdateWithCache(ctx context.Context, currentVersion strin
 	return info, nil
 }
 
+// ErrNpmManaged npm 分发形态拒绝自更新（stable 文本进 errmarkers 注册表，
+// update api 以 409 发射——包装器/前端按此文案给出 npm 更新指引）
+var ErrNpmManaged = errors.New(errmarkers.UpdateNpmManaged)
+
 // ApplyUpdate 执行更新（下载+启动子进程）
 // Failed/RolledBack 视为可重试终态：上次失败不阻断本次（Reset 语义内联）
 func (m *Manager) ApplyUpdate(ctx context.Context, info *ReleaseInfo, currentVersion string, port int, progressCB ProgressCallback) error {
+	// npm 分发形态（P-20261102-2）：node_modules 里的文件归 npm 管——自更新
+	// 原位替换会让 npm 版本记账漂移（下次 npm update 把旧版盖回来）。在动
+	// 状态机之前就拒绝，错误面给出 npm 更新指引
+	if IsNpmManaged(m.binaryPath) {
+		return ErrNpmManaged
+	}
+
 	m.mu.Lock()
 	if m.status != StatusIdle && m.status != StatusChecking && m.status != StatusFailed && m.status != StatusRolledBack {
 		m.mu.Unlock()

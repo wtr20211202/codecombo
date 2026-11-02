@@ -426,6 +426,9 @@ api.interceptors.response.use(
       // 从中心更新：中心侧 ServeBinary 的两种 404 语义（无预置且无更新源 /
       // 更新源里没有该平台包）——原文随 rawMessage 透传，子串稳定可匹配
       [/update source not configured/i, 'errors.known.centerNoUpdateSource'],
+      // npm 分发形态拒绝自更新 409（P-20261102-2）——稳定原文即
+      // server/errmarkers UpdateNpmManaged（改文案须两侧同步）
+      [/installed via npm — update with:/i, 'errors.known.updateNpmManaged'],
       [/binary not found for/i, 'errors.known.centerBinaryMissing'],
       [/wrong passphrase or corrupted export file/i, 'errors.known.wrongPassphrase'],
       // 项目硬锁（P-20261004-3）：locked 项目写族的 403 拒绝——稳定标记

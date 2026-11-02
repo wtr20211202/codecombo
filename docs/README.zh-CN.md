@@ -43,7 +43,8 @@ npm 包只是薄包装，npm 会按平台经 optionalDependencies 自动装上�
 
 想尝鲜？预发布版本（rc / beta）走 `next` 通道：`npm i -g codecombo@next`——
 或显式指定任意版本（如 `npm i -g codecombo@0.2.0-rc1`）。稳定的
-`npm i -g codecombo` 不会被动到。
+`npm i -g codecombo` 不会被动到。npm 形态的更新归 npm 管：应用内自更新对
+npm 安装不生效——更新就是重跑安装命令。
 
 ### 从源码构建
 

@@ -3697,6 +3697,7 @@ export default {
       noAiProvider: '未配置 AI 提供方，请先在设置中安装/选择',
       alreadyUpToDate: '已经是最新的，无需操作',
       centerNoUpdateSource: '中心实例未预置本平台的更新包且未配置更新源：请在中心的数据目录 serve-binaries/<平台>/ 下放置对应二进制，或在中心的设置中配置更新源（updateURL）',
+      updateNpmManaged: '本实例经 npm 安装，更新请走包管理器：npm i -g codecombo@latest（尝鲜版 codecombo@next）——界面内自更新不适用于 npm 形态',
       centerBinaryMissing: '中心的更新源中没有本平台的安装包：请检查中心设置的更新源（updateURL），或改为在中心数据目录 serve-binaries/<平台>/ 下预置二进制',
       wrongPassphrase: '口令错误或导出文件已损坏',
       credSyncUnverified: '该实例尚未完成配对与指纹短码核对——请在同步中心「实例配对」完成配对并核对证书指纹后再携密同步',

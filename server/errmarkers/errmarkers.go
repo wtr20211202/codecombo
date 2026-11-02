@@ -108,6 +108,7 @@ const (
 
 	// 中心更新 / 远程不可达 / 会话忙 / ws 上限
 	UpdateSourceNotConfigured   = "update source not configured"
+	UpdateNpmManaged            = "installed via npm — update with: npm i -g codecombo@latest"
 	CenterBinaryMissingTemplate = "binary not found for %s/%s"
 	RemoteUnreachable           = "remote unreachable"
 	SessionBusy                 = "session busy"
@@ -181,6 +182,7 @@ var Registry = []Marker{
 
 	// ── 中心更新 / 远程 / 会话 / ws ──
 	{Symbol: "UpdateSourceNotConfigured", Text: UpdateSourceNotConfigured, LocaleKey: "errors.known.centerNoUpdateSource", Kind: KindEmitted, Note: "从中心更新：中心未配置更新源 404（update/api 双发射点）"},
+	{Symbol: "UpdateNpmManaged", Text: UpdateNpmManaged, LocaleKey: "errors.known.updateNpmManaged", Kind: KindEmitted, Note: "npm 分发形态拒绝自更新 409（P-20261102-2：node_modules 归 npm 管，防版本记账漂移），update api 单发射点"},
 	{Symbol: "CenterBinaryMissingTemplate", Text: CenterBinaryMissingTemplate, LocaleKey: "errors.known.centerBinaryMissing", Kind: KindEmitted, Note: "从中心更新：更新源无该平台包 404"},
 	{Symbol: "RemoteUnreachable", Text: RemoteUnreachable, LocaleKey: "errors.known.netUnreachable", Kind: KindEmitted, Note: "对端实例/代理不可达稳定前缀（dispatch/proxy 双发射点）"},
 	{Symbol: "SessionBusy", Text: SessionBusy, LocaleKey: "errors.known.sessionBusy", Kind: KindEmitted, Note: "远程主机终端会话回复中 409"},
