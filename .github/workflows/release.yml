@@ -83,21 +83,43 @@ jobs:
           fi
           cat release-notes.md
 
+      # 用 gh CLI 替代 softprops action：错误输出可 tee 进诊断分支（action 是
+      # 黑盒，曾致资产上传失败无从诊断）。幂等：release 已存在则仅补传资产
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          body_path: release-notes.md
-          generate_release_notes: true
-          # 预发布标记：tag 含 '-' 即 SemVer 预发布形态（v0.2.0-rc1/v0.2.0-beta.2）
-          # ——GitHub 页面带 Pre-release 徽章，且 /releases/latest 只认非预发布
-          # （正式实例自更新 GitHubSource.FetchLatest 的取数端点），rc 不会推进
-          # 正式实例的自动更新通道；rc 测试实例显式走具体 tag 的资产下载。
-          # 产物与校验链（SHA256SUMS/.sig 签名）与正式版同链——资产名不变是
-          # 自更新契约，此处零特例
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          files: |
-            dist/codecombo-*
-            dist/SHA256SUMS.txt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          {
+            if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+              echo "==> release exists — (re)uploading assets"
+              gh release upload "$GITHUB_REF_NAME" dist/codecombo-* dist/SHA256SUMS.txt --clobber
+            else
+              # 预发布标记：tag 含 '-' 即 SemVer 预发布形态——页面带 Pre-release
+              # 徽章，且 /releases/latest 只认非预发布（正式实例自更新取数端点）；
+              # 产物与校验链与正式版同链，资产名不变是自更新契约
+              PRERELEASE_FLAG=""
+              case "$GITHUB_REF_NAME" in *-*) PRERELEASE_FLAG="--prerelease";; esac
+              gh release create "$GITHUB_REF_NAME" \
+                --title "Codecombo ${GITHUB_REF_NAME}" \
+                --notes-file release-notes.md \
+                --generate-notes \
+                $PRERELEASE_FLAG \
+                dist/codecombo-* dist/SHA256SUMS.txt
+            fi
+          } 2>&1 | tee gh-release.log
+
+      - name: Push diagnostics
+        if: always()
+        run: |
+          git config user.email "noreply@github.com"
+          git config user.name "release-diagnostics"
+          git fetch origin ci-diagnostics 2>/dev/null || true
+          git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
+          git add build-diagnostic.log gh-release.log 2>/dev/null || true
+          git commit -m "release diagnostics for ${GITHUB_REF_NAME} (run ${GITHUB_RUN_ID})" || exit 0
+          git push origin ci-diagnostics
 
   # npm 分发（P-20261102-2）：esbuild/biome 同款 optionalDependencies 免脚本机制
   # ——主包 codecombo（wrapper）+ 六平台包（os/cpu 字段交 npm 择一）。NPM_TOKEN
