@@ -142,7 +142,7 @@ func updateLogf(format string, args ...any) {
 
 // canonicalizeBinaryName 更新成功后的盘上名归一（best-effort，任何失败静默留旧名）
 func canonicalizeBinaryName(currentBinary string) {
-	if systemdUnit() != "" {
+	if systemdUnitOurs() != "" {
 		updateLogf("systemd-managed: keep on-disk binary name (unit ExecStart pins the path)")
 		return
 	}

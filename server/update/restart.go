@@ -41,6 +41,19 @@ func systemdUnit() string {
 	return ""
 }
 
+// systemdUnitOurs systemd 单元中「本产品部署器装的」那两类：codecombo.service
+// 与旧名 simple-coding.service。canonicalizeBinaryName 只为这两类让位盘上改名
+// ——unit ExecStart 钉着旧路径，换名会让 systemctl restart 落空；而泛化的
+// .service 命中（宿主自身就是 systemd 服务的环境，如 GitHub Actions runner）
+// 与本产品无关，不该拦改名（runner 上曾误判致单测挂，实锚）
+func systemdUnitOurs() string {
+	unit := systemdUnit()
+	if unit == "codecombo.service" || unit == "simple-coding.service" {
+		return unit
+	}
+	return ""
+}
+
 // restartService 以新二进制拉起服务进程，保持更新前的监管方式：
 //  - systemd 托管 → systemctl restart 交还 systemd（状态机、Restart= 策略、
 //    日志归属不变，不孵化孤儿进程）。换包完成后磁盘上已是新二进制，
