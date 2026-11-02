@@ -35,7 +35,21 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Build all platforms
-        run: ./build.sh all
+        shell: bash
+        run: set -o pipefail; ./build.sh all 2>&1 | tee build-diagnostic.log
+
+      # 失败时把构建日志推回 ci-diagnostics 分支（raw 可匿名直读）——
+      # Actions log API 与 artifact 下载都要求登录，这是自服务诊断通道
+      - name: Push build diagnostics
+        if: failure()
+        run: |
+          git config user.email "noreply@github.com"
+          git config user.name "release-diagnostics"
+          git fetch origin ci-diagnostics 2>/dev/null || true
+          git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
+          git add build-diagnostic.log
+          git commit -m "build diagnostics for ${GITHUB_REF_NAME} (${GITHUB_SHA})" || exit 0
+          git push origin ci-diagnostics
 
       # npm 分发（P-20261102-2）需要裸二进制（release 资产是同名裸文件，但
       # 跨 job 传递走 artifact 最省依赖——不与 release 创建步骤耦合）

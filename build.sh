@@ -59,7 +59,9 @@ fi
 
 echo "==> Building frontend..."
 cd web
-npm install
+# npm ci（锁文件精确安装）：发布构建要确定性——npm install 的重新解析在
+# runner 上曾致构建失败嫌疑（本地 npm install 可过的解析在干净环境会 ERESOLVE）
+npm ci
 npm run build
 cd ..
 
