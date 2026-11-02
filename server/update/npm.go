@@ -2,7 +2,6 @@ package update
 
 import (
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -22,6 +21,9 @@ func IsNpmManaged(binaryPath string) bool {
 	if binaryPath == "" {
 		return false
 	}
-	parts := strings.Split(filepath.ToSlash(strings.ToLower(binaryPath)), "/")
+	// 双分隔符归一：filepath.ToSlash 只处理「本机分隔符」（Linux 上反斜杠是
+	// 普通字符），跨平台判 Windows 路径样例须显式把两种分隔符都换掉
+	normalized := strings.ToLower(strings.NewReplacer("\\", "/").Replace(binaryPath))
+	parts := strings.Split(normalized, "/")
 	return slices.Contains(parts, "node_modules")
 }
