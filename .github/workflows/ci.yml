@@ -47,4 +47,15 @@ jobs:
         run: go vet ./...
 
       - name: Go tests
-        run: go test ./...
+        shell: bash
+        run: set -o pipefail; go test ./... -v 2>&1 | tee go-test.log
+
+      # 失败日志留存为 artifact（匿名可下载）——runner 环境差异排查面，
+      # 本地全绿/runner 双红的差异诊断一直缺日志（Actions log API 需登录）
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-log-${{ matrix.os }}
+          path: go-test.log
+          retention-days: 7
