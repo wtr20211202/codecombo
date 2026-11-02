@@ -4,14 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Version history starts at the first public release (v0.1.0); earlier internal
+Version history starts at the first public release (v0.1.0-beta.2); earlier internal
 history is not part of this public changelog.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-26
+## [0.1.0-beta.2] - 2026-11-03
 
-First public release.
+First public release (beta).
 
 ### Added
 
@@ -24,6 +24,10 @@ First public release.
   (claude / codex / dsh), approval cards for high-risk commands and batch
   replacements (per-item allow/deny), session continuation chains, scheduled
   agent tasks, dual-agent comparison, and an AI-queryable operations manual.
+- **Agent ops channel** — agents can operate the workbench itself over a
+  structured API: browser downloads, clipboard, open-file-at-line, dev-server
+  preview links, ask/approval cards and cross-device notifications, with a
+  rendered handbook (`GET /api/ops-manual`).
 - **Git workbench** — hunk-level staging/unstage/discard, three-way diff,
   interactive rebase (pick/squash/fixup/reword/drop with drag-and-drop),
   merge preview, changelists and shelves, patch export/import, branch
@@ -39,17 +43,33 @@ First public release.
   live log streaming, port forwarding and an on-call health dashboard.
 - **Multi-instance management** — one instance can manage multiple remote
   Codecombo instances through a central proxy (health overview, terminal and
-  panel take-over, instance-to-instance sync, machine migration).
-- **Sharing** — visitor links for files/snippets/terminals with TTL, password
-  gate, view-once (burn-after-reading) and frozen (read-only snapshot) modes.
+  panel take-over, instance-to-instance sync, machine migration via encrypted
+  `.scpkg` packages).
+- **Sharing** — visitor links for files/folders/snippets/terminals with TTL,
+  password gate, view-once (burn-after-reading) and frozen (read-only
+  snapshot) modes.
 - **Security foundation** — global lock with first-start password setup,
   idle auto-lock, per-IP rate limiting, approval-boundary output redaction,
   audit log with CSV export.
-- **Self-update** — online update check with GitHub release distribution
-  source, child-instance binary cache forwarding, and automatic rollback on
-  failed updates.
+- **Self-update** — online update check with zero-config default source
+  (the official GitHub repo; clear `updateURL` in settings to opt out),
+  signature/checksum verification, child-instance binary cache forwarding,
+  and automatic rollback on failed updates.
+- **npm distribution** — `npm i -g codecombo` installs a thin wrapper plus
+  the native binary for the detected platform (Windows/Linux/macOS,
+  amd64/arm64) via optional dependencies — no postinstall scripts. Pre-release
+  versions publish to the `next` channel (`codecombo@next`); npm-installed
+  instances update through npm while the in-app updater steps aside.
+- **Project website** — bilingual landing page with screenshots, scenarios
+  and quickstart: https://wtr20211202.github.io/codecombo/
 - **Cross-platform** — single static binary for Windows/Linux/macOS
   (amd64/arm64), no external database; all state in `~/.codecombo/`.
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/wtr20211202/codecombo/releases/tag/v0.1.0
+### Changed
+
+- Documentation overhaul: quickstart moved to the front, complete
+  what's-inside toolbox inventory, typical-scenario walkthroughs, and an
+  open contribution guide (DCO-signed PRs welcome).
+
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.1.0-beta.2...HEAD
+[0.1.0-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.1.0-beta.2

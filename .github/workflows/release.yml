@@ -52,9 +52,27 @@ jobs:
           cd dist
           sha256sum codecombo-* > SHA256SUMS.txt
 
+      # Release 页简要说明 = CHANGELOG 本版本段（Keep a Changelog 惯例——
+      # 版本叙事唯一事实源在 CHANGELOG，发布页只做摘录不做第二份手写）
+      - name: Extract release notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '
+            /^## / {
+              if (found) exit
+              if (index($0, "[" v "]") > 0) { found = 1; next }
+            }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "See [CHANGELOG.md](https://github.com/wtr20211202/codecombo/blob/main/CHANGELOG.md) for what is new." > release-notes.md
+          fi
+          cat release-notes.md
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release-notes.md
           generate_release_notes: true
           # 预发布标记：tag 含 '-' 即 SemVer 预发布形态（v0.2.0-rc1/v0.2.0-beta.2）
           # ——GitHub 页面带 Pre-release 徽章，且 /releases/latest 只认非预发布
