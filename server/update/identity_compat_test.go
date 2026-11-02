@@ -28,6 +28,12 @@ func TestAssetNameCandidates(t *testing.T) {
 func TestCanonicalizeBinaryName(t *testing.T) {
 	dir := t.TempDir()
 
+	// 守卫注入：本测试只验改名规则，不验 cgroup 探测（后者是宿主环境函数，
+	// 直接调用会在 GitHub runner 等宿主即 systemd 服务的环境里误拦——实锚）
+	origFn := systemdUnitOursFn
+	systemdUnitOursFn = func() string { return "" }
+	t.Cleanup(func() { systemdUnitOursFn = origFn })
+
 	// 旧名 → 换名成功
 	legacy := filepath.Join(dir, "simple-coding")
 	if err := os.WriteFile(legacy, []byte("bin"), 0o755); err != nil {
@@ -59,6 +65,41 @@ func TestCanonicalizeBinaryName(t *testing.T) {
 	canonicalizeBinaryName(foreign)
 	if _, err := os.Stat(foreign); err != nil {
 		t.Fatal("non-product binary must keep its name")
+	}
+}
+
+// 守卫本身：部署器装的两类单元让位改名；泛化 .service（runner 宿主等）不拦
+func TestCanonicalizeGuardUnitScope(t *testing.T) {
+	origFn := systemdUnitOursFn
+	t.Cleanup(func() { systemdUnitOursFn = origFn })
+
+	dir := t.TempDir()
+	cases := []struct {
+		unit     string // cgroup 实况（文档性，标注语义）
+		ours     string // systemdUnitOursFn 注入值 = 真实函数过滤后的返回
+		wantKept bool   // 旧名二进制是否应保留（部署器单元 = ExecStart 钉路径 → 保留）
+	}{
+		{"", "", false},                                          // 非 systemd 环境（裸进程/Windows/容器）→ 归一改名
+		{"nginx.service", "", false},                             // 宿主上无关的服务（runner 等）被过滤 → 同样改名
+		{"codecombo.service", "codecombo.service", true},         // 部署器正名单元 → 让位
+		{"simple-coding.service", "simple-coding.service", true}, // 部署器旧名单元 → 让位
+	}
+	for _, tc := range cases {
+		legacy := filepath.Join(dir, "simple-coding-guard-"+strings.ReplaceAll(tc.ours+tc.unit, ".", "-"))
+		if err := os.WriteFile(legacy, []byte("bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		systemdUnitOursFn = func() string { return tc.ours }
+		canonicalizeBinaryName(legacy)
+		if tc.wantKept {
+			if _, err := os.Stat(legacy); err != nil {
+				t.Errorf("unit %q: legacy binary should stay (ExecStart pinned)", tc.unit)
+			}
+		} else {
+			if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+				t.Errorf("unit %q: legacy binary must be renamed to codecombo", tc.unit)
+			}
+		}
 	}
 }
 

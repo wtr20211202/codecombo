@@ -46,7 +46,14 @@ func systemdUnit() string {
 // ——unit ExecStart 钉着旧路径，换名会让 systemctl restart 落空；而泛化的
 // .service 命中（宿主自身就是 systemd 服务的环境，如 GitHub Actions runner）
 // 与本产品无关，不该拦改名（runner 上曾误判致单测挂，实锚）
+//
+// 经 systemdUnitOursFn 间接调用：测试注入可控值，摆脱对宿主 /proc/self/cgroup
+// 实况的依赖（环境依赖探测的测试纪律——runner/容器/裸机各不相同）
 func systemdUnitOurs() string {
+	return systemdUnitOursFn()
+}
+
+var systemdUnitOursFn = func() string {
 	unit := systemdUnit()
 	if unit == "codecombo.service" || unit == "simple-coding.service" {
 		return unit
@@ -55,13 +62,14 @@ func systemdUnitOurs() string {
 }
 
 // restartService 以新二进制拉起服务进程，保持更新前的监管方式：
-//  - systemd 托管 → systemctl restart 交还 systemd（状态机、Restart= 策略、
-//    日志归属不变，不孵化孤儿进程）。换包完成后磁盘上已是新二进制，
-//    restart 即以新版本拉起；返回 PID 无意义（由 systemd 接管），恒为 0
-//  - 裸进程 → os.StartProcess 脱离更新子进程独立常驻，父进程退出后由 init
-//    接管（与历史语义一致），返回新进程 PID
+//   - systemd 托管 → systemctl restart 交还 systemd（状态机、Restart= 策略、
+//     日志归属不变，不孵化孤儿进程）。换包完成后磁盘上已是新二进制，
+//     restart 即以新版本拉起；返回 PID 无意义（由 systemd 接管），恒为 0
+//   - 裸进程 → os.StartProcess 脱离更新子进程独立常驻，父进程退出后由 init
+//     接管（与历史语义一致），返回新进程 PID
+//
 // --serve 子命令：main.go 按 os.Args[1] 分发，只有 --serve 进入服务装配
-//（历史缺陷只传 --port，落 default 分支打印 unknown command 后立即退出）
+// （历史缺陷只传 --port，落 default 分支打印 unknown command 后立即退出）
 func restartService(binary string, port int) (int, error) {
 	if unit := systemdUnit(); unit != "" {
 		if err := exec.Command("systemctl", "restart", unit).Run(); err != nil {
