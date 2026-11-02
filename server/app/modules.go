@@ -155,7 +155,7 @@ func builtinModules(cfg *config.Config, rt runtimeInfo, routes api.RouteTable) [
 			Topics:       []string{files.TopicFileSelfWrite},
 			Capabilities: []string{"file-history", "fs-attribution"},
 		}},
-		{update.NewModule(), kernel.Manifest{
+		{update.NewModule(rt.Version), kernel.Manifest{
 			Name:   "update",
 			Title:  "应用更新",
 			Routes: manifestRoutes(routes, "update"),

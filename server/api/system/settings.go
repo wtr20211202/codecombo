@@ -128,6 +128,7 @@ func GetSettings(c *gin.Context) {
 			"dshNpmCommand":      cfg.Server.DshNpmCommand,
 			"dshRollbackVersion": cfg.Server.DshRollbackVersion,
 			"updateURL":          cfg.Server.UpdateURL,
+			"updateChecks":       cfg.Server.UpdateChecks,
 			"externalAccessUrl":  cfg.Server.ExternalAccessURL,
 			// 多实例同步本端落位根（P-20261023-1）：空串 = 默认（主目录下
 			// simple-coding-sync/），前端展示默认值说明
@@ -313,7 +314,10 @@ func UpdateSettings(c *gin.Context) {
 		DshNpmCommand      *string `json:"dshNpmCommand"`
 		DshRollbackVersion *string `json:"dshRollbackVersion"`
 		UpdateURL          *string `json:"updateURL"`
-		ExternalAccessURL  *string `json:"externalAccessUrl"`
+		// UpdateChecks 自动检查更新开关（P-20261103-1）：省略 = 不动；
+		// 指针三态与既有开关字段同口径
+		UpdateChecks      *bool   `json:"updateChecks"`
+		ExternalAccessURL *string `json:"externalAccessUrl"`
 		// SyncDestRoot 多实例同步本端落位根（P-20261023-1）：省略 = 不动；
 		// 空串 = 恢复默认（用户主目录下 simple-coding-sync/）；非空须为绝对
 		// 目录路径（不要求已存在——落位层按需创建；相对路径 400 早反馈）
@@ -728,6 +732,11 @@ func UpdateSettings(c *gin.Context) {
 			return
 		}
 		cfg.Server.UpdateURL = u
+	}
+	// 自动检查更新开关（P-20261103-1）：省略 = 不动；false = 定时检查完全
+	// 静默（手动检查不受影响——更新源内置化后始终可检）
+	if req.UpdateChecks != nil {
+		cfg.Server.UpdateChecks = *req.UpdateChecks
 	}
 	// 外部访问地址（P-20261019-10）：只接受 http/https origin（无凭据/路径/
 	// query/fragment，尾斜杠归一），空串=清除（二维码接力回落当前地址/局域网

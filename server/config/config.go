@@ -161,6 +161,10 @@ type ServerConfig struct {
 	AutoFetch     bool   `json:"autoFetch"`
 	FetchInterval int    `json:"fetchInterval"` // 秒
 	UpdateURL     string `json:"updateURL"`
+	// UpdateChecks 自动检查更新开关（P-20261103-1）：true=每 24h 定时检查并在
+	// 新版本可用时推通知；false=完全静默（手动检查仍可用）。指针语义省略 = 不动，
+	// 默认种子 true。自更新源本身零配置内置（UpdateURLOfficial），本开关只管定时器
+	UpdateChecks bool `json:"updateChecks"`
 	// ExternalAccessURL 外部访问地址（P-20261019-10）：Tailscale/Cloudflare
 	// Tunnel/公网反代接入时的手机可达 origin（scheme+host+可选 port，无路径/
 	// query/fragment/凭据）。二维码接力在桌面端以回环地址打开时优先用它，
@@ -787,9 +791,10 @@ const UpdateURLOfficial = "https://github.com/wtr20211202/codecombo"
 func defaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port:      9999,
-			Host:      "127.0.0.1",
-			UpdateURL: UpdateURLOfficial,
+			Port:         9999,
+			Host:         "127.0.0.1",
+			UpdateURL:    UpdateURLOfficial,
+			UpdateChecks: true,
 		},
 		// Default 种子条目 Active:false（P-20261007-19 起 active 是消费中的 UI 态：
 		// 活跃组高亮+过滤目标；种子恒活跃会让每个项目都看到无文件的活跃组）

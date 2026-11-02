@@ -3,7 +3,7 @@
 // 三处复用：项目页状态栏弹窗（Layout）、首页弹窗（HomeView）、设置关于页（SettingsModal）——
 // 此前三处各自实现，功能不对齐（首页/关于缺检查更新与分发源配置）
 import { ref, computed, onMounted } from 'vue'
-import { useMessage, NTooltip, NIcon } from 'naive-ui'
+import { useMessage, NTooltip, NIcon, NSwitch } from 'naive-ui'
 import { shouldShowToast } from '../../utils/toastDedupe'
 import { InformationCircleOutline } from '@vicons/ionicons5'
 import { settingsApi, updateApi } from '../../api/client'
@@ -153,14 +153,20 @@ async function startUpdate() {
   } catch { /* 拦截器处理 */ }
 }
 
-// ---- 更新分发源 ----
+// ---- 自动检查更新 + 更新分发源 ----
+// 自更新源已内置官方仓库（P-20261103-1 零配置），面板只露自动检查开关；
+// 分发源字段重定界为中心分发（跨平台子实例缓存转发），自更新不再消费它
 const updateSourceUrl = ref('')
 const updateSourceSaving = ref(false)
+const updateChecks = ref(true)
+const updateChecksSaving = ref(false)
 
 async function loadUpdateSource() {
   try {
     const res = await settingsApi.get({ silent: true })
-    updateSourceUrl.value = (res.data as { updateURL?: string } | undefined)?.updateURL || ''
+    const data = res.data as { updateURL?: string; updateChecks?: boolean } | undefined
+    updateSourceUrl.value = data?.updateURL || ''
+    updateChecks.value = data?.updateChecks !== false
   } catch { /* silent */ }
 }
 
@@ -176,6 +182,19 @@ async function saveUpdateSource() {
     message.success(t('update.sourceUrlSaved'))
   } catch { /* 拦截器处理 */ } finally {
     updateSourceSaving.value = false
+  }
+}
+
+async function saveUpdateChecks(v: boolean) {
+  updateChecksSaving.value = true
+  try {
+    await settingsApi.update({ updateChecks: v })
+    message.success(t('update.autoCheckSaved'))
+  } catch {
+    // 失败回滚开关展示态（拦截器已出错误提示）
+    loadUpdateSource()
+  } finally {
+    updateChecksSaving.value = false
   }
 }
 
@@ -286,7 +305,25 @@ onMounted(() => { void loadUpdateSource() })
       </button>
     </div>
 
+    <!-- 自动检查更新：24h 定时检查 + 新版本推通知（P-20261103-1）。
+         更新源自带官方默认，这里只露开关——不联网检查的用户在此关闭 -->
+    <div class="version-source-section">
+      <div class="version-row">
+        <span class="version-label">{{ t('update.autoCheckLabel') }}</span>
+        <n-switch
+          size="small"
+          :value="updateChecks"
+          :disabled="updateChecksSaving"
+          @update:value="saveUpdateChecks"
+        />
+      </div>
+      <div class="version-row">
+        <span class="version-value muted">{{ t('update.autoCheckHint') }}</span>
+      </div>
+    </div>
+
     <!-- 更新分发源：本机作为中心时，跨平台子实例从该地址缓存转发二进制。
+         自更新源已内置官方仓库，此字段只服务中心分发语义。
          placeholder 只放短示例（长文案在输入框里显示不全），完整说明收进 ⓘ 悬浮提示 -->
     <div class="version-source-section">
       <div class="version-row">

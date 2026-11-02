@@ -20,5 +20,5 @@ func newTestStore(t *testing.T) {
 // TestModuleConformance 契约一致性自检（M1.6）
 func TestModuleConformance(t *testing.T) {
 	newTestStore(t)
-	kerneltest.Conformance(t, func() kernel.Module { return NewModule() })
+	kerneltest.Conformance(t, func() kernel.Module { return NewModule("") })
 }
