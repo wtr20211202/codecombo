@@ -67,18 +67,29 @@ jobs:
           sha256sum codecombo-* > SHA256SUMS.txt
 
       # Release 页简要说明 = CHANGELOG 本版本段（Keep a Changelog 惯例——
-      # 版本叙事唯一事实源在 CHANGELOG，发布页只做摘录不做第二份手写）
+      # 版本叙事唯一事实源在 CHANGELOG，发布页只做摘录不做第二份手写）。
+      # 双语：英文主源 + docs/CHANGELOG.zh-CN.md 中文对照，同段提取拼接
       - name: Extract release notes
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          awk -v v="$VERSION" '
-            /^## / {
-              if (found) exit
-              if (index($0, "[" v "]") > 0) { found = 1; next }
-            }
-            found { print }
-          ' CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
+          extract_section() {
+            awk -v v="$VERSION" '
+              /^## / {
+                if (found) exit
+                if (index($0, "[" v "]") > 0) { found = 1; next }
+              }
+              found { print }
+            ' "$1"
+          }
+          extract_section CHANGELOG.md > release-notes.md
+          if [ -f docs/CHANGELOG.zh-CN.md ]; then
+            echo "" >> release-notes.md
+            echo "---" >> release-notes.md
+            echo "" >> release-notes.md
+            extract_section docs/CHANGELOG.zh-CN.md >> release-notes.md
+          fi
+          # 去掉提取段落尾部的链接定义行后若整体为空，回落一行指引
+          if ! grep -q '[^[:space:]]' release-notes.md; then
             echo "See [CHANGELOG.md](https://github.com/wtr20211202/codecombo/blob/main/CHANGELOG.md) for what is new." > release-notes.md
           fi
           cat release-notes.md
@@ -98,7 +109,8 @@ jobs:
           case "$GITHUB_REF_NAME" in *-*) IS_PRERELEASE="yes";; esac
           {
             if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-              echo "==> release exists — (re)uploading assets"
+              echo "==> release exists — refreshing notes and (re)uploading assets"
+              gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
               gh release upload "$GITHUB_REF_NAME" dist/codecombo-* dist/SHA256SUMS.txt --clobber
             else
               gh release create "$GITHUB_REF_NAME" \

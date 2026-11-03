@@ -160,13 +160,16 @@ const updateSourceUrl = ref('')
 const updateSourceSaving = ref(false)
 const updateChecks = ref(true)
 const updateChecksSaving = ref(false)
+const updatePrerelease = ref(false)
+const updatePrereleaseSaving = ref(false)
 
 async function loadUpdateSource() {
   try {
     const res = await settingsApi.get({ silent: true })
-    const data = res.data as { updateURL?: string; updateChecks?: boolean } | undefined
+    const data = res.data as { updateURL?: string; updateChecks?: boolean; updateChannel?: string } | undefined
     updateSourceUrl.value = data?.updateURL || ''
     updateChecks.value = data?.updateChecks !== false
+    updatePrerelease.value = data?.updateChannel === 'prerelease'
   } catch { /* silent */ }
 }
 
@@ -195,6 +198,18 @@ async function saveUpdateChecks(v: boolean) {
     loadUpdateSource()
   } finally {
     updateChecksSaving.value = false
+  }
+}
+
+async function saveUpdatePrerelease(v: boolean) {
+  updatePrereleaseSaving.value = true
+  try {
+    await settingsApi.update({ updateChannel: v ? 'prerelease' : 'stable' })
+    message.success(t('update.prereleaseSaved'))
+  } catch {
+    loadUpdateSource()
+  } finally {
+    updatePrereleaseSaving.value = false
   }
 }
 
@@ -319,6 +334,19 @@ onMounted(() => { void loadUpdateSource() })
       </div>
       <div class="version-row">
         <span class="version-value muted">{{ t('update.autoCheckHint') }}</span>
+      </div>
+      <!-- 预发布通道（P-20261103-3）：开启后检查口径含 beta/rc -->
+      <div class="version-row">
+        <span class="version-label">{{ t('update.prereleaseLabel') }}</span>
+        <n-switch
+          size="small"
+          :value="updatePrerelease"
+          :disabled="updatePrereleaseSaving"
+          @update:value="saveUpdatePrerelease"
+        />
+      </div>
+      <div class="version-row">
+        <span class="version-value muted">{{ t('update.prereleaseHint') }}</span>
       </div>
     </div>
 

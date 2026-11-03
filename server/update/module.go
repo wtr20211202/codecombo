@@ -65,6 +65,12 @@ func (m *Module) Init(_ context.Context, k kernel.Kernel) error {
 		slog.Warn("update source rejected — update check disabled", "url", updateURL, "err", err)
 		return nil
 	}
+	// 预发布通道（P-20261103-3）：设置 updateChannel=prerelease 时跟进 beta/rc
+	//（默认 stable 只认最新正式版）。通道属检查口径，自更新应用链与校验链零特例
+	if strings.EqualFold(strings.TrimSpace(cfg.Server.UpdateChannel), "prerelease") {
+		source.IncludePrerelease = true
+		slog.Info("update: prerelease channel enabled — beta/rc releases visible to checks")
+	}
 	GetManager().SetSource(source)
 	return nil
 }

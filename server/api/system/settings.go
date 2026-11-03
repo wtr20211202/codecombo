@@ -129,6 +129,7 @@ func GetSettings(c *gin.Context) {
 			"dshRollbackVersion": cfg.Server.DshRollbackVersion,
 			"updateURL":          cfg.Server.UpdateURL,
 			"updateChecks":       cfg.Server.UpdateChecks,
+			"updateChannel":      cfg.Server.UpdateChannel,
 			"externalAccessUrl":  cfg.Server.ExternalAccessURL,
 			// 多实例同步本端落位根（P-20261023-1）：空串 = 默认（主目录下
 			// simple-coding-sync/），前端展示默认值说明
@@ -316,7 +317,9 @@ func UpdateSettings(c *gin.Context) {
 		UpdateURL          *string `json:"updateURL"`
 		// UpdateChecks 自动检查更新开关（P-20261103-1）：省略 = 不动；
 		// 指针三态与既有开关字段同口径
-		UpdateChecks      *bool   `json:"updateChecks"`
+		UpdateChecks *bool `json:"updateChecks"`
+		// UpdateChannel 更新通道（P-20261103-3）：stable/prerelease，省略 = 不动
+		UpdateChannel     *string `json:"updateChannel"`
 		ExternalAccessURL *string `json:"externalAccessUrl"`
 		// SyncDestRoot 多实例同步本端落位根（P-20261023-1）：省略 = 不动；
 		// 空串 = 恢复默认（用户主目录下 simple-coding-sync/）；非空须为绝对
@@ -737,6 +740,17 @@ func UpdateSettings(c *gin.Context) {
 	// 静默（手动检查不受影响——更新源内置化后始终可检）
 	if req.UpdateChecks != nil {
 		cfg.Server.UpdateChecks = *req.UpdateChecks
+	}
+	// 更新通道（P-20261103-3）：仅 stable/prerelease 二值（大小写归一），
+	// 非法值 400 早反馈；prerelease 时检查口径含 beta/rc（应用链与校验链零特例）
+	if req.UpdateChannel != nil {
+		ch := strings.ToLower(strings.TrimSpace(*req.UpdateChannel))
+		if ch != "stable" && ch != "prerelease" {
+			shared.Error(c, http.StatusBadRequest, "Settings operation failed",
+				fmt.Errorf("invalid updateChannel %q (stable|prerelease only)", *req.UpdateChannel))
+			return
+		}
+		cfg.Server.UpdateChannel = ch
 	}
 	// 外部访问地址（P-20261019-10）：只接受 http/https origin（无凭据/路径/
 	// query/fragment，尾斜杠归一），空串=清除（二维码接力回落当前地址/局域网

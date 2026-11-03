@@ -353,6 +353,7 @@ export const settingsApi = {
     dshNpmCommand?: string  // npm 命令（默认 npm；dsh 在 WSL 时可配 wsl.exe npm）
     updateURL?: string
     updateChecks?: boolean // 自动检查更新开关（P-20261103-1）：省略=不动
+    updateChannel?: string // 更新通道（P-20261103-3）：stable/prerelease，省略=不动
     externalAccessUrl?: string // 外部访问地址（仅 http/https origin，服务端校验+尾斜杠归一；空串=清除）
     syncDestRoot?: string // 多实例同步本端落位根（P-20261023-1）：绝对目录路径；空串=恢复默认
     shareDefaultTTL?: string // 新建文件分享默认有效期（P-20261020-5）：permanent/1d/7d/30d；省略=不动
