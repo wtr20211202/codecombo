@@ -31,13 +31,7 @@ func SafeJoinProject(root, rel string) (string, error) {
 		return "", err
 	}
 	absRoot, _ := filepath.Abs(root)
-	checkPath, checkRoot := absPath, absRoot
-	if real, e := filepath.EvalSymlinks(absPath); e == nil {
-		checkPath = real
-	}
-	if realRoot, e := filepath.EvalSymlinks(absRoot); e == nil {
-		checkRoot = realRoot
-	}
+	checkPath, checkRoot := evalSymlinksNormalized(absPath), evalSymlinksNormalized(absRoot)
 	if checkPath != checkRoot && !strings.HasPrefix(checkPath, checkRoot+string(filepath.Separator)) {
 		return "", errTraversal
 	}
@@ -45,6 +39,28 @@ func SafeJoinProject(root, rel string) (string, error) {
 		return "", errTraversal
 	}
 	return absPath, nil
+}
+
+// evalSymlinksNormalized 路径真实化：目标存在直接 EvalSymlinks；不存在
+//（未创建的目标文件/rename 目的地/missing 目录）解析最近存在的祖先并把
+// 尾部拼回——裸 EvalSymlinks 是不对称展开（存在侧展开、缺失侧保持原形态），
+// Windows 短名（8.3）环境下「缺失目标的短名 vs 已解析 root 的长名」曾误判
+// traversal（GitHub windows runner 的 TMP=C:\Users\RUNNER~1\... 实锚）
+func evalSymlinksNormalized(absPath string) string {
+	if real, err := filepath.EvalSymlinks(absPath); err == nil {
+		return real
+	}
+	p := absPath
+	for {
+		parent := filepath.Dir(p)
+		if parent == p {
+			return absPath // 到根仍失败：原样返回（第二闸兜底）
+		}
+		if real, err := filepath.EvalSymlinks(parent); err == nil {
+			return real + absPath[len(p):]
+		}
+		p = parent
+	}
 }
 
 // DownloadFile GET /api/projects/:id/file/download?path= — 下载项目内文件。

@@ -87,6 +87,28 @@ func expandHomePath(p string) string {
 // errOutsideRepo 相对路径越出仓库根（.. 穿越/符号链接外逃）
 var errOutsideRepo = errors.New("path escapes repo root")
 
+// evalSymlinksNormalized 路径真实化：目标存在直接 EvalSymlinks；不存在解析
+// 最近存在的祖先并把尾部拼回——裸 EvalSymlinks 不对称展开（存在侧展开、缺失
+// 侧原样），Windows 短名环境下缺失目标曾与已展开 root 前缀失配误判外逃。
+// 与 server/api/files.download.evalSymlinksNormalized 同值最小实现（git 包
+// 不反向 import api 层，同注释互锁）
+func evalSymlinksNormalized(absPath string) string {
+	if real, err := filepath.EvalSymlinks(absPath); err == nil {
+		return real
+	}
+	p := absPath
+	for {
+		parent := filepath.Dir(p)
+		if parent == p {
+			return absPath
+		}
+		if real, err := filepath.EvalSymlinks(parent); err == nil {
+			return real + absPath[len(p):]
+		}
+		p = parent
+	}
+}
+
 // resolveWithinRepo 把 commit.template 的相对路径解析到仓库根内，语义与
 // server/api/files.SafeJoinProject 同标准：拒绝 ".." 段 → Abs 规范化 →
 // 真实路径（符号链接解析后）与规范化路径双前缀校验（拦兄弟目录名伪装与
@@ -104,13 +126,7 @@ func resolveWithinRepo(root, rel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	checkPath, checkRoot := absPath, absRoot
-	if real, e := filepath.EvalSymlinks(absPath); e == nil {
-		checkPath = real
-	}
-	if realRoot, e := filepath.EvalSymlinks(absRoot); e == nil {
-		checkRoot = realRoot
-	}
+	checkPath, checkRoot := evalSymlinksNormalized(absPath), evalSymlinksNormalized(absRoot)
 	if checkPath != checkRoot && !strings.HasPrefix(checkPath, checkRoot+string(filepath.Separator)) {
 		return "", errOutsideRepo
 	}
