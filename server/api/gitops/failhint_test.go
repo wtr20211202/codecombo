@@ -91,8 +91,14 @@ func TestStageFiles_IndexLockStale_HintWithCode(t *testing.T) {
 	if !strings.Contains(body, `"code":"git.index_lock_stale"`) {
 		t.Errorf("hint must coexist with code, got %s", body)
 	}
-	if !strings.Contains(body, filepath.ToSlash(lockPath)) && !strings.Contains(body, lockPath) {
-		t.Errorf("hint detail should carry lock path %s, got %s", lockPath, body)
+	// 锁路径三形态容忍：构造用 TempDir 原样（Windows runner 可能为 8.3 短名）、
+	// 正斜杠形态、git 真实化后的长名形态（git 报错文本输出它自己解析的路径）
+	expectReal := lockPath
+	if real, err := filepath.EvalSymlinks(filepath.Dir(lockPath)); err == nil {
+		expectReal = filepath.ToSlash(filepath.Join(real, filepath.Base(lockPath)))
+	}
+	if !strings.Contains(body, filepath.ToSlash(lockPath)) && !strings.Contains(body, lockPath) && !strings.Contains(body, expectReal) {
+		t.Errorf("hint detail should carry lock path %s (real %s), got %s", lockPath, expectReal, body)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"codecombo/server/agentops"
+	"codecombo/server/api/files"
 	shared "codecombo/server/api/shared"
 	"codecombo/server/config"
 	"codecombo/server/store"
@@ -312,10 +313,10 @@ func lockedProjectForDir(dir string) *config.ProjectConfig {
 	}
 	// target 真实化须与项目侧归一（normalizeDirPath 的 EvalSymlinks）对称：
 	// Windows 短名环境（runner TMP=C:\Users\RUNNER~1\...）下请求 dir 是短名
-	// 而注册项目 Path 已展开成长名，裸 Abs 比较会让硬锁归属判定失效（实锚）
-	if real, e := filepath.EvalSymlinks(target); e == nil {
-		target = real
-	}
+	// 而注册项目 Path 已展开成长名，裸 Abs 比较会让硬锁归属判定失效（实锚）。
+	// target 可能不存在（锁内未创建的子目录）——裸 EvalSymlinks 失败保持短名
+	// 依旧失配，须走「祖先解析」形态（files.EvalSymlinksNormalized）
+	target = files.EvalSymlinksNormalized(target)
 	targetN := strings.ToLower(target)
 	for i := range projects {
 		p := &projects[i]

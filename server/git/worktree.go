@@ -112,10 +112,16 @@ func RemoveWorktree(repoPath string, path string, force bool) error {
 	return err
 }
 
-// normalizeWorktreePath worktree 路径比对键：统一正斜杠 + Clean。
-// Windows 下路径大小写不敏感，第二趟比对回退到小写
+// normalizeWorktreePath worktree 路径比对键：统一正斜杠 + Clean + 真实化。
+// 真实化必须做：git worktree list 登记的是 git 自己解析的**长名**（runneradmin），
+// 而调用方输入可能来自 t.TempDir()/环境 TMP 的 8.3 短名（RUNNER~1）——裸形态
+// 比对永远失配（Windows 大小写回落掩盖不了长短名差异，runner 实锚）
 func normalizeWorktreePath(p string) string {
-	return strings.ReplaceAll(filepath.ToSlash(filepath.Clean(strings.TrimSpace(p))), "\\", "/")
+	p = filepath.ToSlash(filepath.Clean(strings.TrimSpace(p)))
+	if real := evalSymlinksNormalized(filepath.FromSlash(p)); real != "" {
+		p = filepath.ToSlash(real)
+	}
+	return p
 }
 
 // resolveWorktreePath 把任意形态的 worktree 路径解析为 git 注册表中记录的

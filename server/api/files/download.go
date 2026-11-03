@@ -41,6 +41,13 @@ func SafeJoinProject(root, rel string) (string, error) {
 	return absPath, nil
 }
 
+// EvalSymlinksNormalized 路径真实化（导出供同层 terminal 域复用）：目标存在
+// 直接 EvalSymlinks；不存在解析最近存在的祖先把尾部拼回。语义与注意见私有版
+// 注释；server/git 有同值最小实现（互锁注释）
+func EvalSymlinksNormalized(absPath string) string {
+	return evalSymlinksNormalized(absPath)
+}
+
 // evalSymlinksNormalized 路径真实化：目标存在直接 EvalSymlinks；不存在
 //（未创建的目标文件/rename 目的地/missing 目录）解析最近存在的祖先并把
 // 尾部拼回——裸 EvalSymlinks 是不对称展开（存在侧展开、缺失侧保持原形态），
@@ -57,7 +64,9 @@ func evalSymlinksNormalized(absPath string) string {
 			return absPath // 到根仍失败：原样返回（第二闸兜底）
 		}
 		if real, err := filepath.EvalSymlinks(parent); err == nil {
-			return real + absPath[len(p):]
+			// Clean 防拼接错位：大小写不敏感盘（WSL1）上不存在的祖先可能被
+			// 解析到形态不同的真实路径（如 /TMP→/），直拼会产生 "//" 冗余
+			return filepath.Clean(real + absPath[len(p):])
 		}
 		p = parent
 	}
