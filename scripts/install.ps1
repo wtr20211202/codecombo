@@ -20,6 +20,8 @@ $ErrorActionPreference = 'Stop'
 
 $Repo = 'wtr20211202/codecombo'
 $Port = if ($env:CODECOMBO_PORT) { $env:CODECOMBO_PORT } else { '9999' }
+# 绑定地址（默认 127.0.0.1 仅本机；0.0.0.0 = 局域网可达，锁密码是唯一闸门）
+$BindHost = if ($env:CODECOMBO_HOST) { $env:CODECOMBO_HOST } else { '127.0.0.1' }
 $Prefix = if ($env:CODECOMBO_PREFIX) { $env:CODECOMBO_PREFIX } else { "$env:LOCALAPPDATA\Programs\codecombo" }
 $DataDir = "$env:USERPROFILE\.codecombo"
 
@@ -72,7 +74,7 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
   ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if ($isAdmin) {
   Write-Host "==> 注册 Windows 服务 Codecombo（端口 $Port，失败自动重启）"
-  sc.exe create Codecombo binPath= "`"$Bin`" --serve --port=$Port --host 127.0.0.1" start= auto DisplayName= 'Codecombo dev workbench' | Out-Null
+  sc.exe create Codecombo binPath= "`"$Bin`" --serve --port=$Port --host $BindHost" start= auto DisplayName= 'Codecombo dev workbench' | Out-Null
   sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
   # 数据目录保护（安装器纪律）：已有活实例在跑时只注册不启动——两个实例
   # 共写一个数据目录会互踩（pid/锁/日志）；接管时机交给用户

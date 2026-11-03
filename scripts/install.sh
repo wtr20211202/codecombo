@@ -16,6 +16,8 @@
 #                      安装器绝不写入/修改 ~/.codecombo 数据目录，数据只归
 #                      应用自己管理：首启自建、升级零触碰）
 #   CODECOMBO_PORT     服务端口（默认 9999）
+#   CODECOMBO_HOST     绑定地址（默认 127.0.0.1 仅本机；0.0.0.0 = 局域网可达，
+#                      请仅在可信网络使用——锁密码是唯一访问闸门）
 #
 # 版本决策（全自动，无参数）：有正式版装最新正式版；当前没有正式版时装
 # 最新的 rc；没有 rc 才装最新的 beta。GitHub 侧栏同理只认正式版。
@@ -25,6 +27,7 @@ set -eu
 
 REPO="wtr20211202/codecombo"
 PORT="${CODECOMBO_PORT:-9999}"
+BIND_HOST="${CODECOMBO_HOST:-127.0.0.1}"
 PREFIX="${CODECOMBO_PREFIX:-$HOME/.local/bin}"
 BIN="$PREFIX/codecombo"
 DATA_DIR="$HOME/.codecombo"
@@ -122,7 +125,7 @@ After=network.target
 [Service]
 Type=simple
 User=$(id -un)
-ExecStart=$BIN --serve --port=$PORT --host 127.0.0.1
+ExecStart=$BIN --serve --port=$PORT --host $BIND_HOST
 Restart=on-failure
 Environment=HOME=$HOME
 # tmux 持久化：只杀主进程，脱管 tmux server（含智能体进程）随重启存活
@@ -171,7 +174,7 @@ if [ "$OS" = darwin ]; then
     <string>--serve</string>
     <string>--port=$PORT</string>
     <string>--host</string>
-    <string>127.0.0.1</string>
+    <string>$BIND_HOST</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

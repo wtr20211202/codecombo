@@ -114,6 +114,18 @@ go run main.go                         # Go backend on :9999 (second terminal)
 Run the quality gates before submitting changes: `cd web && npm run check`
 (type-check + lint + unit tests + contract gates) and `go test ./...`.
 
+### Access from other devices (LAN)
+
+By default Codecombo binds to `127.0.0.1` (this machine only). To reach it
+from your phone or another machine on the LAN, bind all interfaces:
+
+```bash
+codecombo start --host 0.0.0.0        # or: -H 0.0.0.0 (flag beats config.json server.host)
+```
+
+Then open `http://<machine-ip>:9999` from the other device. The lock password
+(first-start setup) is the gate — bind to `0.0.0.0` only on networks you trust.
+
 ## What's inside
 
 | Tool | What it does |
