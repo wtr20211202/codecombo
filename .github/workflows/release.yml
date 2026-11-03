@@ -188,10 +188,22 @@ jobs:
           set -o pipefail
           {
             npm whoami || true
+            # 幂等守卫：已发布的版本跳过（补发场景——部分包已在线时重跑
+            # 不再因重复版本 EPUBLISH 中断整轮）
+            published() { npm view "$1@$2" version > /dev/null 2>&1; }
             for d in npm/dist/codecombo-*/; do
+              name=$(node -p "require('./' + process.argv[1] + 'package.json').name" "$d")
+              if published "$name" "$VERSION"; then
+                echo "skip $name@$VERSION (already published)"
+                continue
+              fi
               npm publish "$d" --tag "$NPM_TAG"
             done
-            npm publish npm/dist/codecombo/ --tag "$NPM_TAG"
+            if published "codecombo" "$VERSION"; then
+              echo "skip codecombo@$VERSION (already published)"
+            else
+              npm publish npm/dist/codecombo/ --tag "$NPM_TAG"
+            fi
           } 2>&1 | tee npm-publish.log
 
       # npm 发布失败诊断推回 ci-diagnostics（token 值 npm 自动脱敏，不落日志）
