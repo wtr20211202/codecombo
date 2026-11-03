@@ -154,12 +154,14 @@ func TestResolveWorktreePathCaseFallback(t *testing.T) {
 	wtDir := base + "-Wt"
 	run([]string{"worktree", "add", wtDir, "-b", "wt-y"}, base)
 
-	// 精确（正斜杠）匹配
+	// resolve 语义 = 找到等价的注册路径（git worktree list 登记的是 git 自己
+	// 解析的长名，与调用方输入的 TempDir 短名形态不同是正常的）——比较用
+	// 真实化形态而非字面
 	got, err := resolveWorktreePath(base, wtDir)
 	if err != nil {
 		t.Fatalf("resolve（正斜杠）: %v", err)
 	}
-	if strings.ReplaceAll(got, "\\", "/") != strings.ReplaceAll(wtDir, "\\", "/") {
-		t.Fatalf("resolve = %q, want %q", got, wtDir)
+	if normalizeWorktreePath(got) != normalizeWorktreePath(wtDir) {
+		t.Fatalf("resolve = %q, want equivalent to %q", got, wtDir)
 	}
 }

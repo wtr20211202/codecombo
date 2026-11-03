@@ -88,6 +88,15 @@ func waitTasksDrained(t *testing.T, s *fakeTaskStore, ids ...string) {
 			t.Fatalf("task %s should reach terminal state in time, status=%q found=%v", id, st, ok)
 		}
 	}
+	// 通知到达轮询（状态 persist 先于 notify 的残余窗口——慢 FS runner 上
+	// 立即断言曾丢后到通知，实锚 got 1/2）：窗口内等通知到齐再放行
+	nDeadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(nDeadline) {
+		if len(store.Get().Notification.List(0)) >= len(ids) {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	if n := len(store.Get().Notification.List(0)); n < len(ids) {
 		t.Fatalf("expected ≥%d task-done notifications as drain barrier, got %d", len(ids), n)
 	}

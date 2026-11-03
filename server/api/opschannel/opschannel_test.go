@@ -96,8 +96,10 @@ func TestBroadcastDropCountsByTypeAndQueueDepth(t *testing.T) {
 func TestDropStormDebugAggregationThrottled(t *testing.T) {
 	swapTestHub(t, 1)
 	resetDrops(t)
+	// 窗口 500ms：runner 慢 FS 上同步日志写会把「窗口内连发」拖过 50ms 窗
+	//（实锚 65ms 间隔出 2 行）——放大窗口让节流断言从容，窗后 sleep 同步放大
 	oldInterval := dropDebugInterval
-	dropDebugInterval = 50 * time.Millisecond
+	dropDebugInterval = 500 * time.Millisecond
 	t.Cleanup(func() { dropDebugInterval = oldInterval })
 	buf := captureLogs(t)
 
@@ -116,7 +118,7 @@ func TestDropStormDebugAggregationThrottled(t *testing.T) {
 	}
 
 	// 窗口过后首丢再发：累计口径跨窗口（6 approval.pending + 1 navigate = 7）
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 	drops.recordDrop(EventNavigate)
 	if got := strings.Count(buf.String(), "dropping events"); got != 2 {
 		t.Fatalf("expect second debug line after interval, got %d:\n%s", got, buf.String())
