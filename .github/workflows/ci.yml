@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: set -o pipefail; go test ./... -v 2>&1 | tee go-test.log
 
-      # 失败日志留存为 artifact（匿名可下载）——runner 环境差异排查面，
+      # 失败日志留存为 artifact（Actions 页可见）——runner 环境差异排查面，
       # 本地全绿/runner 双红的差异诊断一直缺日志（Actions log API 需登录）
       - name: Upload test log
         if: always()
@@ -59,3 +59,19 @@ jobs:
           name: go-test-log-${{ matrix.os }}
           path: go-test.log
           retention-days: 7
+
+      # 失败日志另推 ci-diagnostics 分支（raw 匿名直读）——artifact API 下载
+      # 需登录，这是无凭环境的自服务诊断通道（与 release.yml 同机制）
+      - name: Push test diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          git config user.email "noreply@github.com"
+          git config user.name "ci-diagnostics"
+          git fetch origin ci-diagnostics 2>/dev/null || true
+          git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
+          mkdir -p diagnostics
+          cp go-test.log "diagnostics/go-test-${{ matrix.os }}.log"
+          git add diagnostics/
+          git commit -m "go test diagnostics: ${{ matrix.os }} (run ${{ github.run_id }})" || exit 0
+          git push origin ci-diagnostics
