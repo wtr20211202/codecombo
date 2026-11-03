@@ -8,6 +8,15 @@ on:
       # （[0-9]=单字符区间，+=前一字符一个或多个，*=零或多字符）
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  # 手动补发（P-20261103-3）：tag 事件产物损坏（gh 批量上传偶发资产 404 实锚）
+  # 或 npm 部分失败时，指名 tag 幂等重跑——Release 已存在则补传资产+刷新说明，
+  # npm 已发布版本自动跳过。Actions 页 Run workflow → 填 tag 名
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '要（重）发布的 tag（如 v0.0.1-beta.1）'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -16,11 +25,17 @@ jobs:
   build:
     name: Build release artifacts
     runs-on: ubuntu-latest
+    env:
+      # 发布目标 tag：tag 事件=tag 名；dispatch 补发=输入值（build/建页/npm
+      # 三处统一消费，替代语义分叉的 GITHUB_REF_NAME——dispatch 时后者是分支名）
+      RELREF: ${{ github.event.inputs.ref || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # build.sh derives the version from the nearest reachable v* tag
+          # build.sh derives the version from the nearest reachable v* tag；
+          # dispatch 补发时按输入 tag 检出（主分支 HEAD 与 tag 提交可能不同）
           fetch-depth: 0
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
 
       - uses: actions/setup-go@v5
         with:
@@ -48,7 +63,7 @@ jobs:
           git fetch origin ci-diagnostics 2>/dev/null || true
           git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
           git add build-diagnostic.log
-          git commit -m "build diagnostics for ${GITHUB_REF_NAME} (${GITHUB_SHA})" || exit 0
+          git commit -m "build diagnostics for ${RELREF} (${GITHUB_SHA})" || exit 0
           git push origin ci-diagnostics
 
       # npm 分发（P-20261102-2）需要裸二进制（release 资产是同名裸文件，但
@@ -71,7 +86,7 @@ jobs:
       # 双语：英文主源 + docs/CHANGELOG.zh-CN.md 中文对照，同段提取拼接
       - name: Extract release notes
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELREF#v}"
           extract_section() {
             awk -v v="$VERSION" '
               /^## / {
@@ -106,24 +121,24 @@ jobs:
           # 预发布判定：tag 含 '-' 即 SemVer 预发布形态——页面带 Pre-release
           # 徽章，且 /releases/latest 只认非预发布（正式实例自更新取数端点）
           IS_PRERELEASE=""
-          case "$GITHUB_REF_NAME" in *-*) IS_PRERELEASE="yes";; esac
+          case "$RELREF" in *-*) IS_PRERELEASE="yes";; esac
           {
-            if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            if gh release view "$RELREF" > /dev/null 2>&1; then
               echo "==> release exists — refreshing notes and (re)uploading assets"
-              gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
-              gh release upload "$GITHUB_REF_NAME" dist/codecombo-* dist/SHA256SUMS.txt --clobber
+              gh release edit "$RELREF" --notes-file release-notes.md
+              gh release upload "$RELREF" dist/codecombo-* dist/SHA256SUMS.txt --clobber
             else
-              gh release create "$GITHUB_REF_NAME" \
-                --title "Codecombo ${GITHUB_REF_NAME}" \
+              gh release create "$RELREF" \
+                --title "Codecombo ${RELREF}" \
                 --notes-file release-notes.md \
                 --generate-notes \
                 $([ -n "$IS_PRERELEASE" ] && echo --prerelease) \
                 dist/codecombo-* dist/SHA256SUMS.txt
             fi
             # 幂等收口：draft（删 tag 转化等）强制发布态，并按 tag 形态补预发布标记
-            gh release edit "$GITHUB_REF_NAME" --draft=false --latest=false
+            gh release edit "$RELREF" --draft=false --latest=false
             if [ -n "$IS_PRERELEASE" ]; then
-              gh release edit "$GITHUB_REF_NAME" --prerelease
+              gh release edit "$RELREF" --prerelease
             fi
           } 2>&1 | tee gh-release.log
 
@@ -135,7 +150,7 @@ jobs:
           git fetch origin ci-diagnostics 2>/dev/null || true
           git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
           git add build-diagnostic.log gh-release.log 2>/dev/null || true
-          git commit -m "release diagnostics for ${GITHUB_REF_NAME} (run ${GITHUB_RUN_ID})" || exit 0
+          git commit -m "release diagnostics for ${RELREF} (run ${GITHUB_RUN_ID})" || exit 0
           git push origin ci-diagnostics || echo "diagnostics push failed (non-fatal)"
 
   # npm 分发（P-20261102-2）：esbuild/biome 同款 optionalDependencies 免脚本机制
@@ -145,6 +160,8 @@ jobs:
     name: Publish npm packages
     runs-on: ubuntu-latest
     needs: build
+    env:
+      RELREF: ${{ github.event.inputs.ref || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -174,14 +191,14 @@ jobs:
 
       - name: Stage npm packages
         if: steps.token.outputs.present == 'yes'
-        run: node scripts/npm-stage.mjs --version "${GITHUB_REF_NAME#v}"
+        run: node scripts/npm-stage.mjs --version "${RELREF#v}"
 
       - name: Publish to npm
         if: steps.token.outputs.present == 'yes'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELREF#v}"
           # 预发布版本走 next 通道——rc/beta 不抢占 latest（npm install -g codecombo 只认 latest）
           NPM_TAG=latest
           case "$VERSION" in *-*) NPM_TAG=next;; esac
@@ -215,5 +232,5 @@ jobs:
           git fetch origin ci-diagnostics 2>/dev/null || true
           git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
           git add npm-publish.log
-          git commit -m "npm publish diagnostics for ${GITHUB_REF_NAME} (${GITHUB_SHA})" || exit 0
+          git commit -m "npm publish diagnostics for ${RELREF} (${GITHUB_SHA})" || exit 0
           git push origin ci-diagnostics
