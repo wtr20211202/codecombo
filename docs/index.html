@@ -141,16 +141,19 @@
       <div class="wrap">
         <h2><span data-lang-en>Quickstart</span><span data-lang-zh>快速上手</span></h2>
         <p class="section-sub">
-          <span data-lang-en>Fastest — <code>npm i -g codecombo</code> (needs Node.js 18+; pre-release channel <code>codecombo@next</code>). Building from source requires Go 1.26+, Node.js 20.19+ / 22.12+ and Git; ready-made binaries also on <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a>.</span>
-          <span data-lang-zh>最快路径——<code>npm i -g codecombo</code>（需 Node.js 18+；预发布走 <code>codecombo@next</code>）。从源码构建需 Go 1.26+、Node.js 20.19+ / 22.12+、Git；现成二进制也在 <a href="https://github.com/wtr20211202/codecombo/releases" target="_blank" rel="noopener">Releases</a>。</span>
+          <span data-lang-en>One command — downloads the latest release, verifies SHA256 and registers
+          a service. <code>npm i -g codecombo</code> also works (Node.js 18+). Building from source requires Go 1.26+, Node.js 20.19+ / 22.12+ and Git.</span>
+          <span data-lang-zh>一条命令——下载最新正式版、SHA256 校验并注册服务。
+          <code>npm i -g codecombo</code> 也可以（需 Node.js 18+）。从源码构建需 Go 1.26+、Node.js 20.19+ / 22.12+、Git。</span>
         </p>
         <ol class="qs-steps">
-          <!-- 双路线：Install(npm)→Open 为快路；Build→Run→Open 为源码路。
-               npm 包 = 薄包装，发布链与 GitHub 二进制同源（release.yml 同 tag 同产物）。 -->
+          <!-- 双路线：Install(一键/npm)→Open 为快路；Build→Run→Open 为源码路。
+               安装方式决定更新方式：脚本/二进制装→应用内自更新；npm 装→npm 更新。 -->
           <li>
             <span class="qs-label" data-lang-en>Install</span><span class="qs-label" data-lang-zh>安装</span>
-            <pre><code>npm i -g codecombo
-codecombo start            <span class="qs-cmt"># one binary auto-picked for your platform</span></code></pre>
+            <pre><code>curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh   <span class="qs-cmt"># Linux / macOS — installs + service</span>
+irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex             <span class="qs-cmt"># Windows PowerShell</span>
+npm i -g codecombo                                                                            <span class="qs-cmt"># or via npm (Node.js 18+)</span></code></pre>
           </li>
           <li>
             <span class="qs-label" data-lang-en>Build</span><span class="qs-label" data-lang-zh>构建</span>

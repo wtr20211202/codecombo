@@ -38,7 +38,33 @@ together. No more juggling separate apps.
 
 ## Quickstart
 
-### Install with npm (fastest)
+### One-line install (recommended)
+
+Downloads the latest release binary, verifies SHA256, installs to
+`~/.codecombo/bin` and registers a service (systemd on Linux, launchd on
+macOS, Windows service when elevated) — one command you can paste to your
+AI assistant:
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex
+```
+
+Then open **http://localhost:9999** and set your lock password on first start.
+Version selection is automatic: the latest stable release when one exists;
+until then the newest rc, falling back to the newest beta.
+
+**Install method decides update method.** Binary installs (this script or a
+manual download) update **in-app** from GitHub releases with automatic
+rollback — the recommended shape. npm installs update through npm instead
+(`npm i -g codecombo@latest`; the in-app updater steps aside automatically).
+
+### Install with npm
 
 ```bash
 npm i -g codecombo

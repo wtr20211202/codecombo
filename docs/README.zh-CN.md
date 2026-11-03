@@ -29,7 +29,30 @@ Git 工作台、真实终端会话、AI 智能体、远程主机管理，全部�
 
 ## 快速开始
 
-### npm 安装（最快）
+### 一键安装（推荐）
+
+下载最新正式版二进制 → SHA256 校验 → 装入 `~/.codecombo/bin` 并注册服务
+（Linux systemd / macOS launchd / Windows 管理员时注册系统服务）——整条
+命令可以直接丢给你的 AI 助手代跑：
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex
+```
+
+浏览器打开 **http://localhost:9999**，首启设置锁密码。版本全自动决策：
+有正式版装最新正式版；当前没有正式版时装最新 rc，没有 rc 才装最新 beta。
+
+**安装方式决定更新方式。** 二进制安装（本脚本或手动下载）走**应用内更新**
+——从 GitHub 拉取新版本、失败自动回滚，是推荐的形态；npm 安装则归 npm 管
+（`npm i -g codecombo@latest`，应用内更新自动让位）。
+
+### npm 安装
 
 ```bash
 npm i -g codecombo
