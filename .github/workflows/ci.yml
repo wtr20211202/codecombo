@@ -9,6 +9,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# 诊断推送（失败时把 go-test.log 推 ci-diagnostics 分支）需要写权限——
+# 新建仓 GITHUB_TOKEN 默认只读（2023- 后注册表默认），无此声明 push 被拒
+permissions:
+  contents: write
+
 jobs:
   test:
     name: Test (${{ matrix.os }})
