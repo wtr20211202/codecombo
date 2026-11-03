@@ -64,7 +64,7 @@ jobs:
           git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
           git add build-diagnostic.log
           git commit -m "build diagnostics for ${RELREF} (${GITHUB_SHA})" || exit 0
-          git push origin ci-diagnostics
+          git push origin ci-diagnostics --force
 
       # npm 分发（P-20261102-2）需要裸二进制（release 资产是同名裸文件，但
       # 跨 job 传递走 artifact 最省依赖——不与 release 创建步骤耦合）
@@ -151,7 +151,7 @@ jobs:
           git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
           git add build-diagnostic.log gh-release.log 2>/dev/null || true
           git commit -m "release diagnostics for ${RELREF} (run ${GITHUB_RUN_ID})" || exit 0
-          git push origin ci-diagnostics || echo "diagnostics push failed (non-fatal)"
+          git push origin ci-diagnostics --force || echo "diagnostics push failed (non-fatal)"
 
   # npm 分发（P-20261102-2）：esbuild/biome 同款 optionalDependencies 免脚本机制
   # ——主包 codecombo（wrapper）+ 六平台包（os/cpu 字段交 npm 择一）。NPM_TOKEN
@@ -160,6 +160,12 @@ jobs:
     name: Publish npm packages
     runs-on: ubuntu-latest
     needs: build
+    # id-token: --provenance 构建溯源（OIDC 签名证明「包由本仓库 workflow
+    # 构建」，npm 页面展示 verified 标）——同时是对抗新账号 spam 风控的
+    # 正路（有真实构建溯源的 PUT 优先级更高）
+    permissions:
+      contents: write
+      id-token: write
     env:
       RELREF: ${{ github.event.inputs.ref || github.ref_name }}
     steps:
@@ -214,12 +220,12 @@ jobs:
                 echo "skip $name@$VERSION (already published)"
                 continue
               fi
-              npm publish "$d" --tag "$NPM_TAG"
+              npm publish "$d" --tag "$NPM_TAG" --provenance
             done
             if published "codecombo" "$VERSION"; then
               echo "skip codecombo@$VERSION (already published)"
             else
-              npm publish npm/dist/codecombo/ --tag "$NPM_TAG"
+              npm publish npm/dist/codecombo/ --tag "$NPM_TAG" --provenance
             fi
           } 2>&1 | tee npm-publish.log
 
@@ -233,4 +239,4 @@ jobs:
           git checkout -B ci-diagnostics origin/ci-diagnostics 2>/dev/null || git checkout -B ci-diagnostics
           git add npm-publish.log
           git commit -m "npm publish diagnostics for ${RELREF} (${GITHUB_SHA})" || exit 0
-          git push origin ci-diagnostics
+          git push origin ci-diagnostics --force
