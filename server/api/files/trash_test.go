@@ -489,6 +489,9 @@ func TestPurgeExpiredTrash_TotalSizeCap(t *testing.T) {
 		if w := doFileJSON(t, r, http.MethodPost, "/api/projects/proj-test/file/delete", `{"path":"`+name+`"}`); w.Code != http.StatusOK {
 			t.Fatalf("delete %s status = %d", name, w.Code)
 		}
+		// DeletedAtMs 毫秒精度：快速连删会落在同一毫秒，「逐最旧」排序失去
+		// 依据（runner 快机器曾三删同毫秒致断言随机挂）——强制跨毫秒
+		time.Sleep(3 * time.Millisecond)
 	}
 	PurgeExpiredTrash()
 	// 逐最旧到回线内即止（>10B → 逐 a1 5B → 10B ≤ 档位停）：a1 出清，a2/a3 保留
