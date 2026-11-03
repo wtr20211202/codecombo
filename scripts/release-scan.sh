@@ -120,28 +120,11 @@ if [ -n "$info_hits" ]; then
 fi
 
 # —— manifest 哈希闭环（全过才生成）——
-# 实现说明：曾用 find|xargs sha256sum（每文件一进程），Windows 上 3261 文件
-# 进程风暴实锚 20 分钟+ 不出活；node crypto 单进程全量哈希秒级，且哈希格式
-# 与 sha256sum 兼容（<hash>  <path>），Linux 侧 GNU 校验可互验
+# 哈希器共用 scripts/manifest-hash.mjs（node crypto 单进程——曾用 find|xargs
+# sha256sum 每文件一进程，Windows 上 3261 文件进程风暴 20 分钟+ 不出活；
+# 哈希行格式与 sha256sum 兼容，Linux 侧 GNU 校验可互验）
 MANIFEST="$(dirname "$(cd "$DIR" && pwd)")/manifest.sha256"
-node - "$DIR" "$MANIFEST" <<'NODE'
-const fs = require('fs'), path = require('path'), crypto = require('crypto');
-const [dir, out] = process.argv.slice(2);
-const lines = [];
-(function walk(d) {
-  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-    const p = path.join(d, e.name);
-    if (e.isDirectory()) walk(p);
-    else if (e.isFile()) {
-      const rel = path.relative(dir, p).split(path.sep).join('/');
-      const h = crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
-      lines.push(`${h}  ${rel}`);
-    }
-  }
-})(dir);
-lines.sort((a, b) => a.slice(65).localeCompare(b.slice(65)));
-fs.writeFileSync(out, lines.join('\n') + '\n');
-NODE
+node "$(dirname "$0")/manifest-hash.mjs" "$DIR" "$MANIFEST"
 echo "release-scan: 0 hits —— 零放行通过；manifest: $MANIFEST ($(wc -l < "$MANIFEST") files)"
 
 # —— 人工抽查兜底（启发式非穷尽，首版必做；打印即交接）——

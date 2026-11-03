@@ -10,7 +10,7 @@
  * 用法：node scripts/npm-stage.mjs --version 0.1.0 [--dist dist] [--out npm/dist]
  *   --version 缺省取最近 v* tag（去 v 前缀）；六平台二进制缺一即 FATAL 列缺。
  */
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import fs, { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import path from 'node:path'
 import process from 'node:process'
@@ -110,6 +110,32 @@ for (const p of PLATFORMS) {
   copyFileSync(path.join(distDir, p.bin), target)
   chmodSync(target, 0o755)
   copyFileSync(LICENSE, path.join(dir, 'LICENSE'))
+}
+
+// ---------- 组包内容自证（固化防错）：npm 包只允许 wrapper+二进制+元数据，
+// 白名单外任何条目（尤其 .go/.ts/.vue 源码）= 响亮失败——「不发源码」不是
+// 纪律是断言，CI 里的 publish 只消费这里产出的树 ----------
+const ALLOWED_TOP = new Set(['package.json', 'LICENSE', 'README.md', 'bin'])
+const bad = []
+for (const p of [path.join(outDir, 'codecombo'), ...PLATFORMS.map((x) => path.join(outDir, x.pkg))]) {
+  const pkgName = path.basename(p)
+  for (const e of fs.readdirSync(p, { withFileTypes: true })) {
+    if (!ALLOWED_TOP.has(e.name)) {
+      bad.push(`${pkgName}/${e.name}（意外顶层条目）`)
+      continue
+    }
+    if (e.name !== 'bin') continue
+    for (const b of fs.readdirSync(path.join(p, 'bin'))) {
+      const ext = path.extname(b)
+      if (ext !== '.js' && ext !== '.exe' && ext !== '') {
+        bad.push(`${pkgName}/bin/${b}（意外文件类型）`)
+      }
+    }
+  }
+}
+if (bad.length) {
+  console.error('FATAL: 组包内容含白名单外文件（npm 包不得混入源码）：\n  ' + bad.join('\n  '))
+  process.exit(1)
 }
 
 // ---------- 摘要 ----------

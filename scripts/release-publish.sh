@@ -39,6 +39,16 @@ fi
 # ---------- 1) 导出（总是全量重导，幂等） ----------
 bash scripts/release-export.sh release/public
 
+# ---------- 内容寻址短路径：新导出与上次「已扫描+已镜像」的树逐字节一致
+# 时，跳过扫描与镜像（同一棵树不会被扫出不同结果，镜像也无可做）——零信任
+# 不减配（首次/变更走全量），只是不为 identical 的树重复买单。清单哈希器
+# 单进程秒级，本短路径把「纯确认一致性」的例行验证从分钟级降到秒级
+node scripts/manifest-hash.mjs release/public release/manifest.pending.sha256
+if cmp -s release/manifest.pending.sha256 release/manifest.prev.sha256 && [ -f release/manifest.sha256 ]; then
+  echo "==> 导出树与上次已验证快照逐字节一致 —— 短路径返回（扫描与镜像已在上轮完成）"
+  exit 0
+fi
+
 # ---------- 2) 零放行扫描（不过即停，exit 1/2 直接终止本脚本） ----------
 bash scripts/release-scan.sh release/public
 
@@ -59,6 +69,9 @@ echo "==> Mirror: $REL_ABS <- release/public"
 find "$REL_ABS" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
 cp -a release/public/. "$REL_ABS/"
 git -C "$REL_ABS" add -A
+
+# 记录「已验证+已镜像」内容基线（短路径的比较锚点，.gitignore 已忽略 release/）
+cp release/manifest.pending.sha256 release/manifest.prev.sha256
 
 # ---------- 4) 待提交摘要（人工确认后 commit / push / tag） ----------
 SRC_COMMIT=$(sed -n 's/^source-commit: //p' release/export-info.txt 2>/dev/null || echo unknown)
