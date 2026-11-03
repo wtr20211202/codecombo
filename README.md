@@ -41,9 +41,10 @@ together. No more juggling separate apps.
 ### One-line install (recommended)
 
 Downloads the latest release binary, verifies SHA256, installs to
-`~/.codecombo/bin` and registers a service (systemd on Linux, launchd on
-macOS, Windows service when elevated) — one command you can paste to your
-AI assistant:
+`~/.local/bin` (outside your data directory — the installer never touches
+`~/.codecombo`, your data belongs to the app alone) and registers a service
+(systemd on Linux, launchd on macOS, Windows service when elevated) — one
+command you can paste to your AI assistant:
 
 ```bash
 # Linux / macOS

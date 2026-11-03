@@ -10,8 +10,9 @@
 # 安装方式决定更新方式：本脚本/手动二进制安装 → 应用内自更新（GitHub 源，
 # 失败自动回滚）；npm 安装 → npm 更新（应用内自动让位）。
 #
-# 环境变量：CODECOMBO_PREFIX（默认 $env:USERPROFILE\.codecombo\bin）、
-#           CODECOMBO_PORT（默认 9999）
+# 环境变量：CODECOMBO_PREFIX（默认 $env:LOCALAPPDATA\Programs\codecombo——
+#           在数据目录之外，安装器绝不写入/修改数据目录 ~/.codecombo，数据
+#           只归应用自己管理：首启自建、升级零触碰）、CODECOMBO_PORT（默认 9999）
 #
 # 版本决策（全自动，无参数）：有正式版装最新正式版；当前没有正式版时装
 # 最新的 rc；没有 rc 才装最新的 beta。GitHub 侧栏同理只认正式版。
@@ -19,7 +20,8 @@ $ErrorActionPreference = 'Stop'
 
 $Repo = 'wtr20211202/codecombo'
 $Port = if ($env:CODECOMBO_PORT) { $env:CODECOMBO_PORT } else { '9999' }
-$Prefix = if ($env:CODECOMBO_PREFIX) { $env:CODECOMBO_PREFIX } else { "$env:USERPROFILE\.codecombo\bin" }
+$Prefix = if ($env:CODECOMBO_PREFIX) { $env:CODECOMBO_PREFIX } else { "$env:LOCALAPPDATA\Programs\codecombo" }
+$DataDir = "$env:USERPROFILE\.codecombo"
 
 # ---------- 版本决策：stable > 最新 rc > 最新 beta（列表按创建时间倒序） ----------
 $releases = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases?per_page=30"
@@ -72,8 +74,25 @@ if ($isAdmin) {
   Write-Host "==> 注册 Windows 服务 Codecombo（端口 $Port，失败自动重启）"
   sc.exe create Codecombo binPath= "`"$Bin`" --serve --port=$Port --host 127.0.0.1" start= auto DisplayName= 'Codecombo dev workbench' | Out-Null
   sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
-  sc.exe start Codecombo | Out-Null
-  Write-Host '==> 服务已启动：sc query Codecombo'
+  # 数据目录保护（安装器纪律）：已有活实例在跑时只注册不启动——两个实例
+  # 共写一个数据目录会互踩（pid/锁/日志）；接管时机交给用户
+  $pidFile = Join-Path $DataDir 'codecombo.pid'
+  $live = $false
+  if (Test-Path $pidFile) {
+    $oldPid = (Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($oldPid) {
+      try {
+        if (Get-Process -Id ([int]$oldPid) -ErrorAction Stop) { $live = $true }
+      } catch { }
+    }
+  }
+  if ($live) {
+    Write-Host '==> 检测到正在运行的 Codecombo 实例——服务已注册但【未启动】（避免双实例共写数据目录）'
+    Write-Host '    停掉旧实例后执行：sc start Codecombo'
+  } else {
+    sc.exe start Codecombo | Out-Null
+    Write-Host '==> 服务已启动：sc query Codecombo'
+  }
 } else {
   Write-Host '==> 非管理员：跳过服务注册。前台启动：'
   Write-Host "     $Bin start"

@@ -12,7 +12,9 @@
 # 失败自动回滚）；npm 安装 → npm 更新（应用内自动让位）。
 #
 # 环境变量：
-#   CODECOMBO_PREFIX   安装目录（默认 $HOME/.codecombo/bin）
+#   CODECOMBO_PREFIX   安装目录（默认 $HOME/.local/bin——在数据目录之外，
+#                      安装器绝不写入/修改 ~/.codecombo 数据目录，数据只归
+#                      应用自己管理：首启自建、升级零触碰）
 #   CODECOMBO_PORT     服务端口（默认 9999）
 #
 # 版本决策（全自动，无参数）：有正式版装最新正式版；当前没有正式版时装
@@ -23,8 +25,9 @@ set -eu
 
 REPO="wtr20211202/codecombo"
 PORT="${CODECOMBO_PORT:-9999}"
-PREFIX="${CODECOMBO_PREFIX:-$HOME/.codecombo/bin}"
+PREFIX="${CODECOMBO_PREFIX:-$HOME/.local/bin}"
 BIN="$PREFIX/codecombo"
+DATA_DIR="$HOME/.codecombo"
 API="https://api.github.com/repos/${REPO}/releases?per_page=30"
 
 say() { printf '\n==> %s\n' "$*"; }
@@ -135,8 +138,15 @@ if [ "$OS" = linux ] && command -v systemctl >/dev/null 2>&1; then
     say "注册 systemd 系统服务 codecombo.service（端口 $PORT）"
     SERVICE_unit | sudo tee /etc/systemd/system/codecombo.service >/dev/null
     sudo systemctl daemon-reload
-    sudo systemctl enable --now codecombo.service
-    say "服务已启动：systemctl status codecombo"
+    # 数据目录保护（安装器纪律）：已有活实例在跑时只注册不启动——两个实例
+    # 共写一个数据目录会互踩（pid/锁/日志）；接管时机交给用户
+    if [ -f "$DATA_DIR/codecombo.pid" ] && kill -0 "$(cat "$DATA_DIR/codecombo.pid" 2>/dev/null)" 2>/dev/null; then
+      say "检测到正在运行的 Codecombo 实例——服务已注册但【未启动】（避免双实例共写数据目录）"
+      say "停掉旧实例后执行：sudo systemctl start codecombo"
+    else
+      sudo systemctl enable --now codecombo.service
+      say "服务已启动：systemctl status codecombo"
+    fi
     say "访问 http://localhost:$PORT（首启设置锁密码）"
     exit 0
   fi
