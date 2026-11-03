@@ -19,11 +19,15 @@ import (
 // 2）/读回/双源幂等/寿命同源清理/字节护栏。真实 filestore 驱动（module_sweep
 // 同款装配），断言以「重读落盘文件与存库」为准而非内存对象
 
-// setupPersistEnv 独立数据目录（SC_DATA_DIR 隔离留档落点）+ 独立 filestore 存储
+// setupPersistEnv 独立数据目录（CC_DATA_DIR 隔离留档落点）+ 独立 filestore 存储。
+// 单一 TempDir 共享：此前两次 t.TempDir() 产生 001/002 两个目录，CC_DATA_DIR 与
+// store 数据根分裂（deployLogDir 写 001、audit/filestore 用 002），runner 短名
+// TMP 环境下曾致留档 mkdir PATH_NOT_FOUND（实锚）——对齐后同一根
 func setupPersistEnv(t *testing.T) store.DeployTaskStore {
 	t.Helper()
-	t.Setenv("CC_DATA_DIR", t.TempDir())
-	store.SetDefault(store.New(filestore.New(filepath.Join(t.TempDir(), "data"))))
+	dataRoot := t.TempDir()
+	t.Setenv("CC_DATA_DIR", dataRoot)
+	store.SetDefault(store.New(filestore.New(filepath.Join(dataRoot, "data"))))
 	t.Cleanup(func() { store.SetDefault(nil) })
 	return store.Get().DeployTask
 }
