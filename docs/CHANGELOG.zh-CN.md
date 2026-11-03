@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-## [0.1.0-beta.2] - 2026-11-03
+## [0.0.1-beta.1] - 2026-11-03
 
 首个公开发布（Beta）。
 
@@ -54,5 +54,5 @@
 - 文档全面刷新：快速开始前置、完整工具清单（What's inside）、典型场景
   走查、开放贡献指南（欢迎 DCO 签名的 PR）。
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.1.0-beta.2...HEAD
-[0.1.0-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.1.0-beta.2
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.1...HEAD
+[0.0.1-beta.1]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.1

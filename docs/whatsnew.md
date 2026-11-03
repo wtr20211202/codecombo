@@ -6,7 +6,7 @@
 新段 → 随二进制 go:embed 分发（`GET /api/whats-new` 消费，离线自含）。
 本文件不进任何运行时写路径，纯构建期冻结内容。
 
-## v0.1.0-beta.2 npm 一键安装与零配置自更新
+## v0.0.1-beta.1 npm 一键安装与零配置自更新
 
 - npm 安装通道：`npm i -g codecombo` 即装即用——npm 按平台自动装上对应原生二进制（Windows/Linux/macOS，amd64/arm64），零 postinstall 脚本；尝鲜通道 `npm i -g codecombo@next`
 - 自更新源内置：官方仓库即默认更新源，装好即用零配置；不希望联网检查的用户在设置里清空 updateURL 即可关闭

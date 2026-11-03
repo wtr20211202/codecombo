@@ -4,12 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Version history starts at the first public release (v0.1.0-beta.2); earlier internal
+Version history starts at the first public release (v0.0.1-beta.1); earlier internal
 history is not part of this public changelog.
 
 ## [Unreleased]
 
-## [0.1.0-beta.2] - 2026-11-03
+## [0.0.1-beta.1] - 2026-11-03
 
 First public release (beta).
 
@@ -71,5 +71,5 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.1.0-beta.2...HEAD
-[0.1.0-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.1.0-beta.2
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.1...HEAD
+[0.0.1-beta.1]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.1
