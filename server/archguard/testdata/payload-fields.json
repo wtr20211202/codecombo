@@ -90,6 +90,8 @@
     "trustedProxies",
     "uiSnapshotEnabled",
     "uidensity",
+    "updateChannel",
+    "updateChecks",
     "updateURL",
     "userPrefs"
   ],

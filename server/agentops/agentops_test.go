@@ -73,8 +73,32 @@ func TestProviderSelection(t *testing.T) {
 	if len(names) < 2 {
 		t.Fatalf("内置 Provider 应已注册（claude/dsh），实际=%v", names)
 	}
-	// 选型返回可用链上的第一个
-	if p := SelectProvider(); p == nil {
-		t.Fatal("SelectProvider 不应返回 nil（内置链含可用项或环境确有 CLI）")
+	// 选型逻辑测试用注入链——宿主可能没有任何 CLI（GitHub runner 干净环境
+	// 全链 nil，真实环境冒烟曾假红；与 systemdUnit 门控同类教训：环境探测
+	// 不进断言）。注册表是包内可换的全局，用完即恢复
+	old := providers
+	t.Cleanup(func() { providers = old })
+
+	fakeOK := &fakeProvider{name: "fake-ok", available: true}
+	fakeDown := &fakeProvider{name: "fake-down", available: false}
+
+	providers = []Provider{fakeDown, fakeOK}
+	if p := SelectProvider(); p == nil || p.Name() != "fake-ok" {
+		t.Fatalf("SelectProvider 应选链上首个 Available 项，got %v", p)
+	}
+
+	providers = []Provider{fakeDown}
+	if p := SelectProvider(); p != nil {
+		t.Fatalf("全链不可用应返回 nil，got %v", p)
 	}
 }
+
+// fakeProvider 选型逻辑测试桩（仅实现接口面，无 CLI 探测）
+type fakeProvider struct {
+	name      string
+	available bool
+}
+
+func (f *fakeProvider) Name() string                       { return f.name }
+func (f *fakeProvider) Available() bool                    { return f.available }
+func (f *fakeProvider) InteractiveCommand() (string, bool) { return "", false }
