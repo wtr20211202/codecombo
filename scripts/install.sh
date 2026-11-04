@@ -28,9 +28,21 @@ set -eu
 REPO="wtr20211202/codecombo"
 PORT="${CODECOMBO_PORT:-9999}"
 BIND_HOST="${CODECOMBO_HOST:-127.0.0.1}"
-PREFIX="${CODECOMBO_PREFIX:-$HOME/.local/bin}"
+
+# 运行用户感知：脚本设计为「普通用户身份运行，内部 sudo 提权写系统文件」。
+# 整条 sudo 跑时 $HOME/SUDO_USER 会指向 root——服务 unit 的 User= 与安装/数据
+# 目录必须跟随真实用户，否则服务以 root 身份跑、数据落 /root/.codecombo
+REAL_USER="${SUDO_USER:-$(id -un)}"
+if command -v getent >/dev/null 2>&1; then
+  REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+else
+  REAL_HOME="$HOME"
+fi
+[ -n "$REAL_HOME" ] || REAL_HOME="$HOME"
+
+PREFIX="${CODECOMBO_PREFIX:-$REAL_HOME/.local/bin}"
 BIN="$PREFIX/codecombo"
-DATA_DIR="$HOME/.codecombo"
+DATA_DIR="$REAL_HOME/.codecombo"
 API="https://api.github.com/repos/${REPO}/releases?per_page=30"
 
 say() { printf '\n==> %s\n' "$*"; }
@@ -124,10 +136,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=$(id -un)
+User=$REAL_USER
 ExecStart=$BIN --serve --port=$PORT --host $BIND_HOST
 Restart=on-failure
-Environment=HOME=$HOME
+Environment=HOME=$REAL_HOME
 # tmux 持久化：只杀主进程，脱管 tmux server（含智能体进程）随重启存活
 KillMode=process
 

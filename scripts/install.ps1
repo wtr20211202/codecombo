@@ -95,8 +95,12 @@ if ($isAdmin) {
     sc.exe start Codecombo | Out-Null
     Write-Host '==> Service restarted: sc query Codecombo'
   } else {
-    Write-Host "==> Registering Windows service Codecombo (port $Port, auto-restart on failure)"
+    Write-Host "==> Registering Windows service Codecombo (port $Port, host $BindHost, auto-restart on failure)"
     sc.exe create Codecombo binPath= "`"$Bin`" --serve --port=$Port --host $BindHost" start= auto DisplayName= 'Codecombo dev workbench' | Out-Null
+    # 服务以 LocalSystem 跑（其 HOME 指向系统 profile）——钉 CC_DATA_DIR 到
+    # 安装者用户的数据目录，保证「服务跑的数据 = 交互运行的数据」同份可复用
+    New-Item -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Codecombo' -Name Environment -Force | Out-Null
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Codecombo\Environment' -Name CC_DATA_DIR -Value $DataDir -Type String
     sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
     sc.exe start Codecombo | Out-Null
     Write-Host '==> Service started: sc query Codecombo'

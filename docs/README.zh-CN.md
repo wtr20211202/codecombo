@@ -49,6 +49,12 @@ irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install
 浏览器打开 **http://localhost:9999**，首启设置锁密码。版本全自动决策：
 有正式版装最新正式版；当前没有正式版时装最新 rc，没有 rc 才装最新 beta。
 
+**权限与服务运行账户。** 注册服务需要提权——Windows 用管理员 PowerShell，
+Linux 用 sudo（脚本内部提权写系统文件，服务仍以**当前用户**身份运行而非
+root）；macOS launchd 用户代理无需提权。不提权也能装：脚本会装好二进制并
+打印前台启动命令。服务只写你自己的数据目录（`~/.codecombo`，Windows 下经
+注册表 `CC_DATA_DIR` 钉死到安装者用户目录）。
+
 **安装方式决定更新方式。** 二进制安装（本脚本或手动下载）走**应用内更新**
 ——从 GitHub 拉取新版本、失败自动回滚，是推荐的形态；npm 安装则归 npm 管
 （`npm i -g codecombo@latest`，应用内更新自动让位）。

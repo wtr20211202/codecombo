@@ -152,6 +152,10 @@
                每条命令右侧一键复制按钮（data-copy 载纯命令，注释不混入剪贴板）。 -->
           <li>
             <span class="qs-label" data-lang-en>Install</span><span class="qs-label" data-lang-zh>安装</span>
+            <p class="perm-note">
+              <span data-lang-en>Registering the service needs elevation (admin PowerShell / sudo); without it you still get the binary + a foreground command.</span>
+              <span data-lang-zh>注册服务需要提权（管理员 PowerShell / sudo）；不提权则安装二进制并给出前台启动命令。</span>
+            </p>
             <div class="cmd-lines">
               <div class="cmd-row">
                 <code class="cmd-text">curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh</code><span class="qs-cmt"># Linux / macOS — installs + service</span>

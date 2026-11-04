@@ -60,6 +60,14 @@ Then open **http://localhost:9999** and set your lock password on first start.
 Version selection is automatic: the latest stable release when one exists;
 until then the newest rc, falling back to the newest beta.
 
+**Permissions & the service account.** To register the service you need
+elevation — administrator PowerShell on Windows, sudo on Linux (the script
+prompts for it and keeps the service running as *your* user, not root);
+macOS launchd agents need no elevation. Without elevation the script still
+installs the binary and prints the foreground command. The service writes
+only to your own data directory (`~/.codecombo`, pinned via `CC_DATA_DIR` on
+Windows).
+
 **Install method decides update method.** Binary installs (this script or a
 manual download) update **in-app** from GitHub releases with automatic
 rollback — the recommended shape. npm installs update through npm instead
