@@ -382,6 +382,56 @@ code, pre { font-family: var(--font-mono); }
   overflow-x: auto;
   color: #cdd9e5;
 }
+/* 一行一命令：自动折行（无横向滚动条）+ 行尾一键复制按钮 */
+.cmd-lines { display: grid; gap: 8px; }
+.cmd-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #cdd9e5;
+}
+.cmd-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: all;
+}
+.cmd-row .qs-cmt { flex-shrink: 0; padding-top: 1px; }
+.copy-btn {
+  flex-shrink: 0;
+  align-self: center;
+  width: 30px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text-faint);
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.copy-btn:hover { color: var(--brand-soft); border-color: var(--brand-deep); }
+.copy-btn .copied-ico { display: none; color: var(--ok); }
+.copy-btn.copied { color: var(--ok); border-color: var(--ok); }
+.copy-btn.copied .copy-ico { display: none; }
+.copy-btn.copied .copied-ico { display: inline; }
+@media (max-width: 760px) {
+  /* 窄屏：注释折到命令下方，复制按钮贴右上角 */
+  .cmd-row { flex-wrap: wrap; padding-right: 44px; }
+  .cmd-row .qs-cmt { order: 3; width: 100%; margin-left: 0; }
+  .copy-btn { position: absolute; top: 8px; right: 8px; }
+}
 .qs-cmt { color: var(--text-faint); user-select: none; }
 
 /* ---------- Footer ---------- */

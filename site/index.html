@@ -147,28 +147,63 @@
           <code>npm i -g codecombo</code> 也可以（需 Node.js 18+）。从源码构建需 Go 1.26+、Node.js 20.19+ / 22.12+、Git。</span>
         </p>
         <ol class="qs-steps">
-          <!-- 双路线：Install(一键/npm)→Open 为快路；Build→Run→Open 为源码路。
-               安装方式决定更新方式：脚本/二进制装→应用内自更新；npm 装→npm 更新。 -->
+          <!-- 双路线：Install(一键/npm)→Run→Open 为快路；Build→Run→Open 为源码路。
+               安装方式决定更新方式：脚本/二进制装→应用内自更新；npm 装→npm 更新。
+               每条命令右侧一键复制按钮（data-copy 载纯命令，注释不混入剪贴板）。 -->
           <li>
             <span class="qs-label" data-lang-en>Install</span><span class="qs-label" data-lang-zh>安装</span>
-            <pre><code>curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh   <span class="qs-cmt"># Linux / macOS — installs + service</span>
-irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex             <span class="qs-cmt"># Windows PowerShell</span>
-npm i -g codecombo                                                                            <span class="qs-cmt"># or via npm (Node.js 18+)</span></code></pre>
+            <div class="cmd-lines">
+              <div class="cmd-row">
+                <code class="cmd-text">curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh</code><span class="qs-cmt"># Linux / macOS — installs + service</span>
+                <button class="copy-btn" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+              <div class="cmd-row">
+                <code class="cmd-text">irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex</code><span class="qs-cmt"># Windows PowerShell</span>
+                <button class="copy-btn" type="button" data-copy="irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+              <div class="cmd-row">
+                <code class="cmd-text">npm i -g codecombo</code><span class="qs-cmt"># or via npm (Node.js 18+)</span>
+                <button class="copy-btn" type="button" data-copy="npm i -g codecombo" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+            </div>
           </li>
           <li>
             <span class="qs-label" data-lang-en>Build</span><span class="qs-label" data-lang-zh>构建</span>
-            <pre><code>git clone https://github.com/wtr20211202/codecombo.git
-cd codecombo
-./build.sh                <span class="qs-cmt"># source route alternative — build.bat on Windows</span></code></pre>
+            <div class="cmd-lines">
+              <div class="cmd-row">
+                <code class="cmd-text">git clone https://github.com/wtr20211202/codecombo.git</code><span class="qs-cmt"># source route</span>
+                <button class="copy-btn" type="button" data-copy="git clone https://github.com/wtr20211202/codecombo.git" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+              <div class="cmd-row">
+                <code class="cmd-text">cd codecombo &amp;&amp; ./build.sh</code><span class="qs-cmt"># build.bat on Windows</span>
+                <button class="copy-btn" type="button" data-copy="cd codecombo && ./build.sh" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+            </div>
           </li>
           <li>
             <span class="qs-label" data-lang-en>Run</span><span class="qs-label" data-lang-zh>启动</span>
-            <pre><code>./dist/codecombo start    <span class="qs-cmt"># daemon mode; or run ./dist/codecombo directly</span></code></pre>
+            <div class="cmd-lines">
+              <div class="cmd-row">
+                <code class="cmd-text">codecombo start</code><span class="qs-cmt"># daemon mode (npm / install-script installs)</span>
+                <button class="copy-btn" type="button" data-copy="codecombo start" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+              <div class="cmd-row">
+                <code class="cmd-text">codecombo start -H 0.0.0.0</code><span class="qs-cmt"># LAN access (default binds 127.0.0.1)</span>
+                <button class="copy-btn" type="button" data-copy="codecombo start -H 0.0.0.0" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+              <div class="cmd-row">
+                <code class="cmd-text">./dist/codecombo start</code><span class="qs-cmt"># built from source</span>
+                <button class="copy-btn" type="button" data-copy="./dist/codecombo start" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+            </div>
           </li>
           <li>
             <span class="qs-label" data-lang-en>Open</span><span class="qs-label" data-lang-zh>打开</span>
-            <pre><code>http://localhost:9999      <span class="qs-cmt"># set your lock password on first start</span></code></pre>
-            <pre><code>codecombo start -H 0.0.0.0 <span class="qs-cmt"># LAN access: bind all interfaces (default 127.0.0.1)</span></code></pre>
+            <div class="cmd-lines">
+              <div class="cmd-row">
+                <code class="cmd-text">http://localhost:9999</code><span class="qs-cmt"># set your lock password on first start</span>
+              </div>
+            </div>
           </li>
         </ol>
       </div>

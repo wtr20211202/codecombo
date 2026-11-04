@@ -73,4 +73,37 @@
     var details = document.querySelector('.dl-all')
     if (details && details.open && !details.contains(ev.target)) details.open = false
   })
+
+  // Quickstart 一键复制命令：data-copy 载纯命令（注释不混入剪贴板）。
+  // Clipboard API 优先，失败（宿主权限策略/非安全上下文）降级 execCommand
+  // textarea 兜底；仅两边都尽力后切 ✓ 形态
+  document.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.copy-btn')
+    if (!btn) return
+    var text = btn.getAttribute('data-copy') || ''
+    var legacy = function () {
+      var ta = document.createElement('textarea')
+      ta.value = text
+      ta.setAttribute('readonly', '')
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy') } catch (e) { /* 降级尽力而为 */ }
+      document.body.removeChild(ta)
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () {
+        legacy()
+        done()
+      })
+      return
+    }
+    legacy()
+    done()
+    function done() {
+      btn.classList.add('copied')
+      window.setTimeout(function () { btn.classList.remove('copied') }, 1200)
+    }
+  })
 })()
