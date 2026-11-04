@@ -98,10 +98,20 @@ jobs:
           }
           extract_section CHANGELOG.md > release-notes.md
           if [ -f docs/CHANGELOG.zh-CN.md ]; then
-            echo "" >> release-notes.md
-            echo "---" >> release-notes.md
-            echo "" >> release-notes.md
-            extract_section docs/CHANGELOG.zh-CN.md >> release-notes.md
+            # 中文对照收进 <details> 折叠（Release body 是静态 Markdown，
+            # 无 JS 切换能力——details 是 GitHub 全站唯一可用折叠形态）：
+            # 默认只展英文，中文点开即读，页面干净
+            {
+              echo ""
+              echo "---"
+              echo ""
+              echo "<details>"
+              echo "<summary><strong>简体中文（Chinese）—— 点击展开</strong></summary>"
+              echo ""
+              extract_section docs/CHANGELOG.zh-CN.md
+              echo ""
+              echo "</details>"
+            } >> release-notes.md
           fi
           # 去掉提取段落尾部的链接定义行后若整体为空，回落一行指引
           if ! grep -q '[^[:space:]]' release-notes.md; then
