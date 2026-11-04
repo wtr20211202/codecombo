@@ -5612,6 +5612,8 @@ export default {
     autoCheckLabel: 'Automatic update check',
     autoCheckHint: 'Checks every 24h and notifies when a new version is available; off = manual check only',
     autoCheckSaved: 'Automatic update check setting saved',
+    starText: 'Codecombo is open source and free — if it helps you,',
+    starAction: 'give it a Star',
     prereleaseLabel: 'Follow pre-releases',
     prereleaseHint: 'When on, beta/rc pre-releases are also detected; default is stable releases only',
     prereleaseSaved: 'Update channel saved',

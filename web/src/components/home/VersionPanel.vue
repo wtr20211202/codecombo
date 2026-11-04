@@ -5,7 +5,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage, NTooltip, NIcon, NSwitch } from 'naive-ui'
 import { shouldShowToast } from '../../utils/toastDedupe'
-import { InformationCircleOutline } from '@vicons/ionicons5'
+import { InformationCircleOutline, LogoGithub } from '@vicons/ionicons5'
 import { settingsApi, updateApi } from '../../api/client'
 import { copyText } from '../../utils/clipboard'
 import { useI18n } from '../../composables/useI18n'
@@ -393,6 +393,24 @@ onMounted(() => { void loadUpdateSource() })
         </button>
       </div>
     </div>
+
+    <!-- 开源仓库 Star 引导（P-20261103-4）：版本面板是用户与产品身份交互的
+         自然位置，低调单行不做弹窗/不打扰；打开步骤之后收尾 -->
+    <div class="version-star-section">
+      <n-icon
+        size="14"
+        class="version-star-icon"
+      >
+        <LogoGithub />
+      </n-icon>
+      <span class="version-star-text">{{ t('update.starText') }}</span>
+      <a
+        class="version-star-link"
+        href="https://github.com/wtr20211202/codecombo"
+        target="_blank"
+        rel="noopener"
+      >{{ t('update.starAction') }}</a>
+    </div>
   </div>
 </template>
 
@@ -434,6 +452,16 @@ onMounted(() => { void loadUpdateSource() })
 .panel-btn.primary:hover { opacity: 0.85; background: var(--accent-blue); color: var(--bg-primary); }
 .panel-btn.inline { width: auto; padding: 7px 16px; margin-top: 0; flex-shrink: 0; }
 .version-source-section { display: flex; flex-direction: column; gap: 6px; padding: 14px 20px 20px; }
+.version-star-section {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 20px 16px; margin-top: 2px;
+  border-top: 1px solid var(--border-default);
+  font-size: 12.5px;
+}
+.version-star-icon { color: var(--text-dim); flex-shrink: 0; }
+.version-star-text { color: var(--text-dim); }
+.version-star-link { color: var(--accent-blue); text-decoration: none; flex-shrink: 0; }
+.version-star-link:hover { text-decoration: underline; }
 .version-source-row { display: flex; gap: 8px; }
 .version-source-input {
   flex: 1; padding: 7px 10px; border: 1px solid var(--border-default); border-radius: 6px;

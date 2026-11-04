@@ -5498,6 +5498,8 @@ export default {
     autoCheckLabel: '自动检查更新',
     autoCheckHint: '每 24 小时检查一次，新版本可用时推送通知；关闭后仅手动检查',
     autoCheckSaved: '自动检查更新设置已保存',
+    starText: 'Codecombo 开源免费，觉得有用的话',
+    starAction: '去给个 Star',
     prereleaseLabel: '跟进预发布版本',
     prereleaseHint: '开启后 beta/rc 等预发布版本也会被检测到；默认只认正式版',
     prereleaseSaved: '更新通道已保存',
