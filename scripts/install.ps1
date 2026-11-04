@@ -1,31 +1,36 @@
-﻿# install.ps1 —— Codecombo 一键安装（Windows）。
+# install.ps1 - Codecombo one-line installer (Windows).
 #
-# 一键形态（管理员或普通 PowerShell 均可，可整条丢给 AI 助手代跑）：
+# One-line form (paste this to your AI assistant or run directly):
 #   irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex
 #
-# 行为：探测架构 → 版本决策（正式版优先，无则最新 rc，再无最新 beta）→
-# 从 GitHub Releases 下载对应二进制 →
-# SHA256 校验 → 装入用户级目录 → 有管理员权限时注册 Windows 服务
-# （sc.exe + 失败自动重启），否则给出前台启动说明。
-# 安装方式决定更新方式：本脚本/手动二进制安装 → 应用内自更新（GitHub 源，
-# 失败自动回滚）；npm 安装 → npm 更新（应用内自动让位）。
+# Behavior: detect architecture -> pick version (latest stable; newest rc;
+# newest beta when no rc/stable) -> download from GitHub Releases -> verify
+# SHA256 -> install to a user-level directory -> register a Windows service
+# when elevated. The installer NEVER touches the data directory
+# (~/.codecombo) - data is owned by the app itself (created on first start,
+# untouched by upgrades, reused as-is).
 #
-# 环境变量：CODECOMBO_PREFIX（默认 $env:LOCALAPPDATA\Programs\codecombo——
-#           在数据目录之外，安装器绝不写入/修改数据目录 ~/.codecombo，数据
-#           只归应用自己管理：首启自建、升级零触碰）、CODECOMBO_PORT（默认 9999）
+# Install method decides update method: binary installs (this script or a
+# manual download) update in-app from GitHub releases with automatic rollback;
+# npm installs update through npm (the in-app updater steps aside).
 #
-# 版本决策（全自动，无参数）：有正式版装最新正式版；当前没有正式版时装
-# 最新的 rc；没有 rc 才装最新的 beta。GitHub 侧栏同理只认正式版。
+# Env vars: CODECOMBO_PREFIX (default $env:LOCALAPPDATA\Programs\codecombo),
+#           CODECOMBO_PORT (default 9999),
+#           CODECOMBO_HOST (default 127.0.0.1; 0.0.0.0 = LAN reachable)
+#
+# NOTE: keep this file ASCII-only, no BOM. It is consumed via `irm | iex`,
+# where Windows PowerShell 5.1 decodes the payload with console encoding and
+# splits it for execution - non-ASCII comments/output break parsing there
+# (real incident: Chinese comments + BOM caused CommandNotFound at line 1).
 $ErrorActionPreference = 'Stop'
 
 $Repo = 'wtr20211202/codecombo'
 $Port = if ($env:CODECOMBO_PORT) { $env:CODECOMBO_PORT } else { '9999' }
-# 绑定地址（默认 127.0.0.1 仅本机；0.0.0.0 = 局域网可达，锁密码是唯一闸门）
 $BindHost = if ($env:CODECOMBO_HOST) { $env:CODECOMBO_HOST } else { '127.0.0.1' }
 $Prefix = if ($env:CODECOMBO_PREFIX) { $env:CODECOMBO_PREFIX } else { "$env:LOCALAPPDATA\Programs\codecombo" }
 $DataDir = "$env:USERPROFILE\.codecombo"
 
-# ---------- 版本决策：stable > 最新 rc > 最新 beta（列表按创建时间倒序） ----------
+# ---------- version pick: latest stable > newest rc > newest beta ----------
 $releases = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases?per_page=30"
 $stable = $rc = $beta = $null
 foreach ($r in $releases) {
@@ -35,70 +40,71 @@ foreach ($r in $releases) {
   if ($r.prerelease -and $r.tag_name -match 'beta' -and -not $beta) { $beta = $r }
 }
 $chosen = if ($stable) { $stable } elseif ($rc) { $rc } elseif ($beta) { $beta } else { $null }
-if (-not $chosen) { throw '仓库中没有任何可用 release（stable/rc/beta 均无）' }
-$kind = if ($stable) { '最新正式版' } elseif ($rc) { '最新 rc——尚无正式版' } else { '最新 beta——尚无正式版与 rc' }
-Write-Host "==> 版本：$($chosen.tag_name)（$kind）"
+if (-not $chosen) { throw 'No usable release found (no stable/rc/beta tag)' }
+$kind = if ($stable) { 'latest stable' } elseif ($rc) { 'newest rc (no stable yet)' } else { 'newest beta (no stable/rc yet)' }
+Write-Host "==> Version: $($chosen.tag_name) ($kind)"
 $Base = "https://github.com/$Repo/releases/download/$($chosen.tag_name)"
 
-# ---------- 架构探测 ----------
+# ---------- architecture ----------
 switch ($env:PROCESSOR_ARCHITECTURE) {
   'AMD64' { $Arch = 'amd64' }
   'ARM64' { $Arch = 'arm64' }
-  default { Write-Error "不支持的架构：$env:PROCESSOR_ARCHITECTURE（amd64/arm64）" }
+  default { Write-Error "Unsupported architecture: $env:PROCESSOR_ARCHITECTURE (amd64/arm64 only)" }
 }
 $Asset = "codecombo-windows-$Arch.exe"
-Write-Host "==> 平台：windows/$Arch -> $Asset"
+Write-Host "==> Platform: windows/$Arch -> $Asset"
 
-# ---------- 下载 + SHA256 校验 ----------
+# ---------- download + SHA256 verify ----------
+# curl.exe first (bundled with Windows 10 1803+): verified-reliable binary
+# downloads. Invoke-WebRequest on PS 5.1 has produced corrupted/corrupted-hash
+# large downloads in the field (real incident: SHA256 mismatch on a 50MB
+# binary while curl fetched the same URL clean) - kept only as fallback.
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ([guid]::NewGuid().ToString()))
+$curlExe = "$env:SystemRoot\System32\curl.exe"
+$useCurl = Test-Path $curlExe
 try {
-  Invoke-WebRequest "$Base/$Asset" -OutFile "$tmp/codecombo.exe"
-  Invoke-WebRequest "$Base/SHA256SUMS.txt" -OutFile "$tmp/SHA256SUMS.txt"
+  if ($useCurl) {
+    & $curlExe -fsSL -o "$tmp/codecombo.exe" "$Base/$Asset"
+    & $curlExe -fsSL -o "$tmp/SHA256SUMS.txt" "$Base/SHA256SUMS.txt"
+  } else {
+    Invoke-WebRequest "$Base/$Asset" -OutFile "$tmp/codecombo.exe"
+    Invoke-WebRequest "$Base/SHA256SUMS.txt" -OutFile "$tmp/SHA256SUMS.txt"
+  }
   $expect = (Select-String -Path "$tmp/SHA256SUMS.txt" -Pattern ('\s' + [regex]::Escape($Asset) + '$')).Line -split '\s+' | Select-Object -First 1
-  if (-not $expect) { throw "校验和清单中未找到 $Asset" }
+  if (-not $expect) { throw "Checksum list has no entry for $Asset" }
   $actual = (Get-FileHash "$tmp/codecombo.exe" -Algorithm SHA256).Hash.ToLower()
-  if ($actual -ne $expect) { throw "SHA256 不匹配！期望 $expect 实际 $actual" }
-  Write-Host '==> SHA256 校验通过'
+  if ($actual -ne $expect) { throw "SHA256 mismatch! expected $expect got $actual" }
+  Write-Host '==> SHA256 verified'
 
-  # ---------- 安装 ----------
+  # ---------- install ----------
   New-Item -ItemType Directory -Force -Path $Prefix | Out-Null
   $Bin = Join-Path $Prefix 'codecombo.exe'
   Move-Item -Force "$tmp/codecombo.exe" $Bin
-  Write-Host "==> 已安装：$Bin"
+  Write-Host "==> Installed: $Bin"
 } finally {
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
-# ---------- 服务化（管理员才有权限写服务库） ----------
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::Current()
-  ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+# ---------- service (elevated only) ----------
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::Current).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$svcExists = (sc.exe query Codecombo 2>$null | Select-String 'STATE') -ne $null
 if ($isAdmin) {
-  Write-Host "==> 注册 Windows 服务 Codecombo（端口 $Port，失败自动重启）"
-  sc.exe create Codecombo binPath= "`"$Bin`" --serve --port=$Port --host $BindHost" start= auto DisplayName= 'Codecombo dev workbench' | Out-Null
-  sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
-  # 数据目录保护（安装器纪律）：已有活实例在跑时只注册不启动——两个实例
-  # 共写一个数据目录会互踩（pid/锁/日志）；接管时机交给用户
-  $pidFile = Join-Path $DataDir 'codecombo.pid'
-  $live = $false
-  if (Test-Path $pidFile) {
-    $oldPid = (Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-    if ($oldPid) {
-      try {
-        if (Get-Process -Id ([int]$oldPid) -ErrorAction Stop) { $live = $true }
-      } catch { }
-    }
-  }
-  if ($live) {
-    Write-Host '==> 检测到正在运行的 Codecombo 实例——服务已注册但【未启动】（避免双实例共写数据目录）'
-    Write-Host '    停掉旧实例后执行：sc start Codecombo'
-  } else {
+  if ($svcExists) {
+    Write-Host '==> Service Codecombo already registered - updating binary only (data dir untouched)'
+    sc.exe stop Codecombo | Out-Null
     sc.exe start Codecombo | Out-Null
-    Write-Host '==> 服务已启动：sc query Codecombo'
+    Write-Host '==> Service restarted: sc query Codecombo'
+  } else {
+    Write-Host "==> Registering Windows service Codecombo (port $Port, auto-restart on failure)"
+    sc.exe create Codecombo binPath= "`"$Bin`" --serve --port=$Port --host $BindHost" start= auto DisplayName= 'Codecombo dev workbench' | Out-Null
+    sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
+    sc.exe start Codecombo | Out-Null
+    Write-Host '==> Service started: sc query Codecombo'
   }
 } else {
-  Write-Host '==> 非管理员：跳过服务注册。前台启动：'
+  Write-Host '==> Not elevated: skipped service registration. Run in foreground:'
   Write-Host "     $Bin start"
-  Write-Host '  （管理员 PowerShell 重跑本脚本可注册 Windows 服务）'
+  Write-Host '  (re-run in an elevated PowerShell to register the Windows service)'
 }
-Write-Host "==> 访问 http://localhost:$Port（首启设置锁密码）"
-Write-Host '==> 更新方式：应用内「检查更新」（GitHub 源，失败自动回滚）'
+Write-Host "==> Open http://localhost:$Port (set your lock password on first start)"
+Write-Host '==> Updates: in-app "check update" (GitHub releases, automatic rollback)'

@@ -76,6 +76,7 @@ excluded() {
     docs/e2e-trash-ui-25-0.md|docs/giant-files-20261007.md|\
     docs/license-audit-20261006.md|docs/license-audit-20261026.md|\
     docs/lint-baseline.md|docs/perf-report.md|docs/polish-roadmap.md|\
+    docs/release-runbook.md|\
     docs/upgrade-compat-audit-20261005.md|docs/workflow-smoke-test.md) return 0;;
     # docs/design 内部过程稿（路线图/能力审计/打磨轮次/轮次台账）
     docs/design/continuation-roadmap.md|docs/design/hidden-capabilities-audit.md|\
