@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+## [0.0.1-beta.2] - 2026-11-05
+
+### 新增
+
+- **Windows 服务支持** —— 注册的 Windows 服务真正运行完整工作台：完整 SCM 协议
+  （状态上报、停止/关机请求经既有优雅退出路径处理、10 秒停止宽限），
+  `--serve` 中的服务上下文自动检测，数据目录经服务环境变量钉到安装者用户目录。
+
+### 修复
+
+- **Windows 安装器加固**（PS 5.1 真实环境五连）：纯 ASCII 无 BOM 脚本（编码
+  问题破坏 `irm | iex` 解析）、`WindowsIdentity::Current` 属性访问（方法调用
+  崩溃）、WebClient 单字符串引导防逐行执行、curl 退出码显式检查（失败曾
+  静默滑入校验段）、下载进度条+重试/超时（静默 50MB 下载像卡死）、root/系统
+  账户防线、服务启动 RUNNING 轮询确认+诊断指引（替代无条件 started 消息）。
+
 ## [0.0.1-beta.1] - 2026-11-03
 
 首个公开发布（Beta）。
@@ -54,5 +70,6 @@
 - 文档全面刷新：快速开始前置、完整工具清单（What's inside）、典型场景
   走查、开放贡献指南（欢迎 DCO 签名的 PR）。
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.1...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.2...HEAD
+[0.0.1-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.2
 [0.0.1-beta.1]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.1

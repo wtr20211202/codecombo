@@ -9,6 +9,27 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.2] - 2026-11-05
+
+### Added
+
+- **Windows service support** — the registered Windows service now runs the
+  real workbench: full SCM protocol (status reporting, stop/shutdown handling
+  via the existing graceful exit path, 10s stop grace), service context
+  detection in `--serve`, data directory pinned to the installing user
+  profile via service environment.
+
+### Fixed
+
+- **Windows installer hardening** (five field incidents on PS 5.1):
+  ASCII-only no-BOM script (encoding broke `irm | iex` parsing),
+  `WindowsIdentity::Current` property access (method-call crash), line-by-line
+  execution guard via WebClient single-string bootstrap, explicit curl exit
+  checks (silent failures slid into verification), download progress bar with
+  retry/timeouts (silent 50MB download looked like a hang), root/system
+  account guard, service start verification with RUNNING polling and
+  diagnostics instead of an unconditional "started" message.
+
 ## [0.0.1-beta.1] - 2026-11-03
 
 First public release (beta).
@@ -71,5 +92,6 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.1...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.2...HEAD
+[0.0.1-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.2
 [0.0.1-beta.1]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.1
