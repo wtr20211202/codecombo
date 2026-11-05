@@ -73,13 +73,21 @@ Write-Host "==> Platform: windows/$Arch -> $Asset"
 # downloads. Invoke-WebRequest on PS 5.1 has produced corrupted/corrupted-hash
 # large downloads in the field (real incident: SHA256 mismatch on a 50MB
 # binary while curl fetched the same URL clean) - kept only as fallback.
+# -# = progress bar (the binary is ~50MB; silent mode looks like a hang),
+# --connect-timeout/--max-time guard against a truly dead connection.
+# $ProgressPreference silent: PS 5.1 Invoke-WebRequest's progress bar slows
+# downloads ~10x in the fallback path.
+$ProgressPreference = 'SilentlyContinue'
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ([guid]::NewGuid().ToString()))
 $curlExe = "$env:SystemRoot\System32\curl.exe"
 $useCurl = Test-Path $curlExe
+Write-Host "==> Downloading ~50 MB from GitHub Releases (progress below; slow networks may take a few minutes)"
 try {
   if ($useCurl) {
-    & $curlExe -fsSL -o "$tmp/codecombo.exe" "$Base/$Asset"
-    & $curlExe -fsSL -o "$tmp/SHA256SUMS.txt" "$Base/SHA256SUMS.txt"
+    & $curlExe -# -fSL --retry 3 --connect-timeout 30 --max-time 1800 -o "$tmp/codecombo.exe" "$Base/$Asset"
+    if ($LASTEXITCODE -ne 0) { throw "download failed (curl exit $LASTEXITCODE): $Asset - check network and re-run" }
+    & $curlExe -fsSL --retry 3 --connect-timeout 30 -o "$tmp/SHA256SUMS.txt" "$Base/SHA256SUMS.txt"
+    if ($LASTEXITCODE -ne 0) { throw "download failed (curl exit $LASTEXITCODE): SHA256SUMS.txt - check network and re-run" }
   } else {
     Invoke-WebRequest "$Base/$Asset" -OutFile "$tmp/codecombo.exe"
     Invoke-WebRequest "$Base/SHA256SUMS.txt" -OutFile "$tmp/SHA256SUMS.txt"
@@ -100,7 +108,24 @@ try {
 }
 
 # ---------- service (elevated only) ----------
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::Current).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+# Admin detection hardened: ::Current can return null in restricted contexts
+# and this script may be executed line-by-line (irm | iex array semantics on
+# PS 5.1) - any null/exception degrades to the non-admin branch (foreground
+# instructions) instead of crashing after a successful install.
+$isAdmin = $false
+try {
+  $wid = [Security.Principal.WindowsIdentity]::Current
+  if ($null -ne $wid) {
+    $isAdmin = ([Security.Principal.WindowsPrincipal]$wid).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  }
+} catch { $isAdmin = $false }
+if (-not $isAdmin) {
+  # fallback probe: `net session` succeeds only for elevated tokens
+  try {
+    $null = net session 2>$null
+    if ($LASTEXITCODE -eq 0) { $isAdmin = $true }
+  } catch { }
+}
 $svcExists = (sc.exe query Codecombo 2>$null | Select-String 'STATE') -ne $null
 if ($isAdmin) {
   if ($svcExists) {

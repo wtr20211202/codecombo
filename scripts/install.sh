@@ -115,9 +115,10 @@ say "平台：${OS}/${ARCH} → ${ASSET}"
 # ---------- 下载（指定版本资产 + 校验和清单） ----------
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-say "下载 $BASE/$ASSET"
-curl -fsSL "$BASE/$ASSET" -o "$TMP/codecombo"
-curl -fsSL "$BASE/SHA256SUMS.txt" -o "$TMP/SHA256SUMS.txt"
+say "下载 $BASE/$ASSET（约 50MB，进度条见下；慢网络需数分钟）"
+# -# 进度条（静默模式像卡死）；--connect-timeout/--max-time 防死连接挂起
+curl -# -fSL --retry 3 --connect-timeout 30 --max-time 1800 "$BASE/$ASSET" -o "$TMP/codecombo"
+curl -fsSL --retry 3 --connect-timeout 30 "$BASE/SHA256SUMS.txt" -o "$TMP/SHA256SUMS.txt"
 
 # ---------- SHA256 校验（GNU sha256sum 与 macOS shasum 双兼容） ----------
 expect=$(grep " ${ASSET}\$" "$TMP/SHA256SUMS.txt" | awk '{print $1}')

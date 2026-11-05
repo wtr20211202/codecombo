@@ -162,8 +162,8 @@
                 <button class="copy-btn" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
               </div>
               <div class="cmd-row">
-                <code class="cmd-text">irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex</code><span class="qs-cmt"># Windows PowerShell</span>
-                <button class="copy-btn" type="button" data-copy="irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+                <code class="cmd-text">iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))</code><span class="qs-cmt"># Windows PowerShell</span>
+                <button class="copy-btn" type="button" data-copy="iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
               </div>
               <div class="cmd-row">
                 <code class="cmd-text">npm i -g codecombo</code><span class="qs-cmt"># or via npm (Node.js 18+)</span>

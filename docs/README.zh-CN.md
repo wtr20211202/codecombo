@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/
 
 ```powershell
 # Windows PowerShell
-irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex
+iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))
 ```
 
 浏览器打开 **http://localhost:9999**，首启设置锁密码。版本全自动决策：
