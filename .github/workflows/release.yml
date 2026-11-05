@@ -32,6 +32,10 @@ jobs:
       # ed25519 验签公钥（公开无妨——验签语义是「客户端只信自己体内公钥」，
       # 私钥在用户侧 secret CC_UPDATE_PRIVATE_KEY，见 docs/release-runbook.md §2）
       CC_UPDATE_PUBKEY: GmAp2SjsrNkCSSt3ekzZNOKuMv99V+aibhNbfd3KrNc=
+      # 签名私钥（secret）：缺失时 build.sh 跳过签名——不产出每资产 .sha256/.sig
+      # 伴随资产 → 客户端自更新因「无校验依据」被安全策略拒绝（曾实锚：只接了
+      # 公钥忘了接私钥，secret 配了 workflow 却没读取）
+      CC_UPDATE_PRIVATE_KEY: ${{ secrets.CC_UPDATE_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
