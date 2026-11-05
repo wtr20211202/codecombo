@@ -3,7 +3,7 @@
  * npm-stage.mjs —— 从 dist/ 二进制组装 npm 发布包（P-20261102-2）。
  *
  * 形态 = esbuild/biome 同款免脚本分发：主包 codecombo（JS wrapper）+ 六平台包
- * codecombo-{win32,linux,darwin}-{x64,arm64}（裸二进制 + os/cpu 字段），npm 安装
+ * codecombo-{windows,linux,darwin}-{x64,arm64}（裸二进制 + os/cpu 字段），npm 安装
  * 时按平台自动择一，零 postinstall。输出 npm/dist/<pkg>/ 树（.gitignore 忽略）；
  * 发布命令打印不代跑——npm publish 由 CI（release.yml，需 NPM_TOKEN）或人工执行。
  *
@@ -44,8 +44,8 @@ if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
 const HOMEPAGE = 'https://wtr20211202.github.io/codecombo/'
 const REPO_URL = 'https://github.com/wtr20211202/codecombo'
 const PLATFORMS = [
-  { pkg: 'codecombo-win32-x64', os: 'win32', cpu: 'x64', bin: 'codecombo-windows-amd64.exe', as: 'codecombo.exe' },
-  { pkg: 'codecombo-win32-arm64', os: 'win32', cpu: 'arm64', bin: 'codecombo-windows-arm64.exe', as: 'codecombo.exe' },
+  { pkg: 'codecombo-windows-x64', os: 'win32', cpu: 'x64', bin: 'codecombo-windows-amd64.exe', as: 'codecombo.exe' },
+  { pkg: 'codecombo-windows-arm64', os: 'win32', cpu: 'arm64', bin: 'codecombo-windows-arm64.exe', as: 'codecombo.exe' },
   { pkg: 'codecombo-linux-x64', os: 'linux', cpu: 'x64', bin: 'codecombo-linux-amd64', as: 'codecombo' },
   { pkg: 'codecombo-linux-arm64', os: 'linux', cpu: 'arm64', bin: 'codecombo-linux-arm64', as: 'codecombo' },
   { pkg: 'codecombo-darwin-x64', os: 'darwin', cpu: 'x64', bin: 'codecombo-darwin-amd64', as: 'codecombo' },
