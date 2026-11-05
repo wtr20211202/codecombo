@@ -32,7 +32,7 @@ func isProcessAlive(pid int) bool {
 }
 
 func setupSignalNotify() <-chan os.Signal {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	return ch
+	// 通道提为包级 signalCh：windows_service.go 的 SCM stop 注入写端
+	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
+	return signalCh
 }

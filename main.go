@@ -253,6 +253,28 @@ func main() {
 
 	// 内部标记：实际运行服务器（装配流程已下沉 server/app 组合根）
 	if len(os.Args) >= 2 && os.Args[1] == "--serve" {
+		// Windows 服务上下文（P-20261103-4）：SCM 启动的进程必须经 svc.Run
+		// 对话上报状态/响应停止——裸 --serve 前台逻辑被 sc.exe 注册后启动必然
+		// 1053（30 秒无状态上报）。serve 实际执行体打包为闭包传给服务 handler
+		if isWindowsService() {
+			_ = runWindowsService(func() {
+				app.Run(app.Options{
+					Version:    version,
+					Commit:     commit,
+					BuildTime:  buildTime,
+					WebFS:      webFS,
+					WhatsNewMD: whatsNewMD,
+					SignalCh:   setupSignalNotify(),
+					Port:       startPort,
+					Host:       startHost,
+					TLSAuto:    startTLS,
+					NoTLS:      startNoTLS,
+					TLSCert:    startTLSCert,
+					TLSKey:     startTLSKey,
+				})
+			})
+			return
+		}
 		app.Run(app.Options{
 			Version:    version,
 			Commit:     commit,
