@@ -56,12 +56,34 @@ root）；macOS launchd 用户代理无需提权。不提权也能装：脚本�
 注册表 `CC_DATA_DIR` 钉死到安装者用户目录）。
 
 **安装后改绑定/端口**：带环境变量前缀重跑同一命令（`$env:CODECOMBO_HOST='0.0.0.0'`，
-幂等更新服务配置），或直接改服务：
+幂等更新服务配置），或直接管理服务。服务管理命令**各平台不同**——Windows 的
+`sc.exe` 是系统自带的服务控制命令行（对应 Linux 的 `systemctl`、macOS 的
+`launchctl`）：
+
+**Windows（服务名 `Codecombo`，用 `sc.exe`）**
 
 ```powershell
-sc.exe stop Codecombo
+sc.exe query Codecombo                # 查看状态
+sc.exe stop Codecombo                 # 停止
 sc.exe config Codecombo binPath= "C:\Users\<你>\AppData\Local\Programs\codecombo\codecombo.exe --serve --port=9999 --host 0.0.0.0"
-sc.exe start Codecombo
+sc.exe start Codecombo                # 以新绑定地址启动
+```
+
+**Linux（systemd）**
+
+```bash
+sudo systemctl status codecombo       # 查看状态
+# 改 unit 内 --host 后：
+sudo systemctl restart codecombo
+```
+
+**macOS（launchd）**
+
+```bash
+launchctl list | grep codecombo       # 查看状态
+# 编辑 ~/Library/LaunchAgents/com.codecombo.plist 的 --host 后：
+launchctl unload ~/Library/LaunchAgents/com.codecombo.plist
+launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 ```
 
 **安装方式决定更新方式。** 二进制安装（本脚本或手动下载）走**应用内更新**
