@@ -68,6 +68,15 @@ installs the binary and prints the foreground command. The service writes
 only to your own data directory (`~/.codecombo`, pinned via `CC_DATA_DIR` on
 Windows).
 
+**Change bind host / port after install**: re-run the same command with
+`CODECOMBO_HOST=0.0.0.0` (env prefix) or edit the service directly:
+
+```powershell
+sc.exe stop Codecombo
+sc.exe config Codecombo binPath= "C:\Users\<you>\AppData\Local\Programs\codecombo\codecombo.exe --serve --port=9999 --host 0.0.0.0"
+sc.exe start Codecombo
+```
+
 **Install method decides update method.** Binary installs (this script or a
 manual download) update **in-app** from GitHub releases with automatic
 rollback — the recommended shape. npm installs update through npm instead

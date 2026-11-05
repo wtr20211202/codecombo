@@ -55,6 +55,15 @@ root）；macOS launchd 用户代理无需提权。不提权也能装：脚本�
 打印前台启动命令。服务只写你自己的数据目录（`~/.codecombo`，Windows 下经
 注册表 `CC_DATA_DIR` 钉死到安装者用户目录）。
 
+**安装后改绑定/端口**：带环境变量前缀重跑同一命令（`$env:CODECOMBO_HOST='0.0.0.0'`，
+幂等更新服务配置），或直接改服务：
+
+```powershell
+sc.exe stop Codecombo
+sc.exe config Codecombo binPath= "C:\Users\<你>\AppData\Local\Programs\codecombo\codecombo.exe --serve --port=9999 --host 0.0.0.0"
+sc.exe start Codecombo
+```
+
 **安装方式决定更新方式。** 二进制安装（本脚本或手动下载）走**应用内更新**
 ——从 GitHub 拉取新版本、失败自动回滚，是推荐的形态；npm 安装则归 npm 管
 （`npm i -g codecombo@latest`，应用内更新自动让位）。
