@@ -382,7 +382,11 @@ code, pre { font-family: var(--font-mono); }
   overflow-x: auto;
   color: #cdd9e5;
 }
-/* 一行一命令：自动折行（无横向滚动条）+ 行尾一键复制按钮 */
+/* 一行一命令：自动折行（无横向滚动条）+ 行尾一键复制按钮。
+   grid-column: 2 —— li 是 92px/1fr 双列 grid，label 之外的新子元素若不显式
+   归列会自动流进 92px label 列（曾致命令逐字符竖排，实锚） */
+.qs-steps .perm-note,
+.qs-steps .cmd-lines { grid-column: 2; align-self: start; }
 .cmd-lines { display: grid; gap: 8px; }
 .cmd-row {
   position: relative;
@@ -470,6 +474,8 @@ code, pre { font-family: var(--font-mono); }
   .hero-lockup img { width: 64px; height: 64px; }
   .hero-tagline { font-size: 21px; }
   .qs-steps li { grid-template-columns: 1fr; gap: 8px; }
+  .qs-steps .perm-note,
+  .qs-steps .cmd-lines { grid-column: 1; }
   .dl-group { flex-direction: column; align-items: stretch; width: 100%; }
   .dl-group .btn-primary, .dl-all .btn-ghost { border-radius: 10px; border-left: 1px solid var(--line); }
   .dl-all { margin-top: 8px; text-align: center; }
