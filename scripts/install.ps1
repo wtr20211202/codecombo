@@ -30,6 +30,20 @@ $BindHost = if ($env:CODECOMBO_HOST) { $env:CODECOMBO_HOST } else { '127.0.0.1' 
 $Prefix = if ($env:CODECOMBO_PREFIX) { $env:CODECOMBO_PREFIX } else { "$env:LOCALAPPDATA\Programs\codecombo" }
 $DataDir = "$env:USERPROFILE\.codecombo"
 
+# ---------- root/builtin-admin guard (same semantics as the remote deployer's
+# non-root useradd): running the workbench as root/SYSTEM is a security
+# anti-pattern - the lock password protects nothing against the account itself,
+# and data under /root or the SYSTEM profile is unreachable by normal users.
+# Regular *named* administrator accounts are fine (they are real user
+# profiles); only root (Unix) and the built-in Administrator/SYSTEM (Windows,
+# no real profile semantics for workbench data) are rejected.
+if ($env:USERNAME -in @('root', 'SYSTEM', 'Administrator') -and $env:USERPROFILE -like '*\Windows\*') {
+  Write-Error @"
+Do not run this installer under a system/built-in account (found USERPROFILE=$env:USERPROFILE).
+Create a normal user account and run the installer from that user's session.
+"@
+}
+
 # ---------- version pick: latest stable > newest rc > newest beta ----------
 $releases = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases?per_page=30"
 $stable = $rc = $beta = $null

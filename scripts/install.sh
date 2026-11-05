@@ -33,6 +33,18 @@ BIND_HOST="${CODECOMBO_HOST:-127.0.0.1}"
 # 整条 sudo 跑时 $HOME/SUDO_USER 会指向 root——服务 unit 的 User= 与安装/数据
 # 目录必须跟随真实用户，否则服务以 root 身份跑、数据落 /root/.codecombo
 REAL_USER="${SUDO_USER:-$(id -un)}"
+
+# root 防线（与远程部署器 useradd 非 root 语义同源）：拒绝 root 安装/服务化
+# ——root 跑工作台是安全反模式（锁密码与凭据保护的资产对 root 无意义），且
+# 数据落 /root 对普通用户不可达。sudo 跑的按 SUDO_USER 视角继续
+if [ "$(id -u)" = "0" ] && [ "$REAL_USER" = "root" ]; then
+  echo "ERROR: do not run this installer as root." >&2
+  echo "  Create a normal user first, then re-run as that user:" >&2
+  echo "    useradd -m -s /bin/bash codecombo && su - codecombo" >&2
+  echo "    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sh" >&2
+  exit 1
+fi
+
 if command -v getent >/dev/null 2>&1; then
   REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 else
