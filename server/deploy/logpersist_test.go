@@ -3,6 +3,7 @@ package deploy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,6 +56,45 @@ func triggerDeadPortTask(t *testing.T, m *Manager, hostID string) string {
 	return ""
 }
 
+// waitForPersistedLog 终态先行、快照后补（finishTask 设计语义）：库态 Failed
+// 可先于 persistLogSnapshot 完成被观察到——CI 慢 FS 下一次性 ReadFile 是对
+// 设计的误读（windows runner 实锚：50ms 轮询先于异步收尾落盘即 ENOENT，
+// 本地 NTFS 快从未复现）。等待落盘文件在位再断言，与生产异步收尾对齐
+func waitForPersistedLog(t *testing.T, taskID string) []byte {
+	t.Helper()
+	file := filepath.Join(deployLogDir(), taskID+persistedLogExt)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(file)
+		if err == nil {
+			return data
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("persisted log read failed: %v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("persisted log missing after 10s: %s", file)
+	return nil
+}
+
+// waitForArchiveAudit 审计事件是落盘动作的再后一步（auditLogPersist 在
+// WritePersistedLog 之后）：同款等待在位
+func waitForArchiveAudit(t *testing.T, taskID string) store.AuditEvent {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, ev := range auditEvents(t) {
+			if ev.Action == store.AuditDeployLogArchive && strings.Contains(ev.Detail, "task="+taskID) {
+				return ev
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("no deploy.log.archive audit event for %s within 5s", taskID)
+	return store.AuditEvent{}
+}
+
 // auditEvents 取审计事件（deploy.log.archive 断言用）
 func auditEvents(t *testing.T) []store.AuditEvent {
 	t.Helper()
@@ -73,12 +113,9 @@ func TestFinishTaskPersistsSnapshot(t *testing.T) {
 	m := NewManager(s)
 	taskID := triggerDeadPortTask(t, m, "host-persist-a")
 
-	// 落盘文件在位且即读回原料（同一渲染终形）
-	file := filepath.Join(deployLogDir(), taskID+persistedLogExt)
-	data, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatalf("persisted log missing: %v", err)
-	}
+	// 落盘文件在位且即读回原料（同一渲染终形）——终态先行、快照后补：等待而非
+	// 一次性读（CI 慢 FS 实锚，见 waitForPersistedLog 注）
+	data := waitForPersistedLog(t, taskID)
 	for _, want := range []string{
 		"codecombo deploy log",
 		"task:     " + taskID,
@@ -110,21 +147,14 @@ func TestFinishTaskPersistsSnapshot(t *testing.T) {
 		t.Error("ReadPersistedLog round-trip mismatch")
 	}
 
-	// 审计摘要：落盘动作入账，Detail 记 task/lines 元数据
-	found := false
-	for _, ev := range auditEvents(t) {
-		if ev.Action == store.AuditDeployLogArchive {
-			found = true
-			if ev.Result != store.AuditResultSuccess {
-				t.Errorf("audit result = %q, want success", ev.Result)
-			}
-			if !strings.Contains(ev.Detail, "task="+taskID) || !strings.Contains(ev.Detail, "lines=") {
-				t.Errorf("audit detail = %q, want task/lines metadata", ev.Detail)
-			}
-		}
+	// 审计摘要：落盘动作入账，Detail 记 task/lines 元数据（快照后补的再后一步，
+	// 同款等待）
+	ev := waitForArchiveAudit(t, taskID)
+	if ev.Result != store.AuditResultSuccess {
+		t.Errorf("audit result = %q, want success", ev.Result)
 	}
-	if !found {
-		t.Error("no deploy.log.archive audit event recorded")
+	if !strings.Contains(ev.Detail, "task="+taskID) || !strings.Contains(ev.Detail, "lines=") {
+		t.Errorf("audit detail = %q, want task/lines metadata", ev.Detail)
 	}
 }
 
