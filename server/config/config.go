@@ -753,6 +753,15 @@ func configFile() string {
 // 旧名回落会被 LegacyEnvUsed 记账（P-20261025-1）：启动面据此输出「使用了 SC_
 // 旧名回落」告警，防外部脚本/远端 unit 静默回落造成数据面分叉的假象
 func DataDir() string {
+	dir := dataDirRaw()
+	// 短名（8.3）归一：runner TMP=C:\Users\RUNNER~1\... 形态下 LocalSystem
+	// 服务/交互用户的 mkdir、子进程 arg 透传曾出现非确定行为（deployLogDir
+	// mkdir PATH_NOT_FOUND 实锚）——展开为长名真实路径，各消费面形态一致
+	return dataDirNormalized(dir)
+}
+
+// dataDirRaw 数据目录原始解析（env 优先级 > 用户家目录默认）
+func dataDirRaw() string {
 	if d := os.Getenv("CC_DATA_DIR"); d != "" {
 		return d
 	}
