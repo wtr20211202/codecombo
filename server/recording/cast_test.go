@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"codecombo/server/config"
 	"codecombo/server/mask"
 )
 
@@ -100,7 +101,10 @@ func TestCastWriter_TruncateOnRecreate(t *testing.T) {
 func TestArtifactsDirFollowsDataDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CC_DATA_DIR", dir)
-	if got := ArtifactsDir(); !strings.HasPrefix(got, filepath.Join(dir, "artifacts")) {
-		t.Fatalf("ArtifactsDir = %q, want under %q", got, dir)
+	// DataDir 归一（P-20261106 短名尾巴修复）后长形态是设计目标：runner TMP
+	// 短名（RUNNER~1）下期望前缀须同型归一，三形态容忍家族（踩坑 #5）
+	wantPrefix := config.EvalSymlinksNormalized(filepath.Join(dir, "artifacts"))
+	if got := ArtifactsDir(); !strings.HasPrefix(got, wantPrefix) {
+		t.Fatalf("ArtifactsDir = %q, want under %q", got, wantPrefix)
 	}
 }

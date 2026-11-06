@@ -68,8 +68,11 @@ func TestLoadCorruptConfigPreservesAndRegisters(t *testing.T) {
 	if base := filepath.Base(rep.PreservedPath); !strings.HasPrefix(base, "config.json.corrupt-") {
 		t.Fatalf("preserved name = %q, want config.json.corrupt-<ts>", base)
 	}
-	if rep.Path != filepath.Join(dir, "config.json") {
-		t.Fatalf("report path = %q, want %q", rep.Path, filepath.Join(dir, "config.json"))
+	// 报告路径经 DataDir 归一（P-20261106 短名尾巴修复后长形态是设计目标）：
+	// runner TMP 短名（RUNNER~1）下期望值须同型归一，三形态容忍家族（踩坑 #5）
+	wantPath := EvalSymlinksNormalized(filepath.Join(dir, "config.json"))
+	if rep.Path != wantPath {
+		t.Fatalf("report path = %q, want %q", rep.Path, wantPath)
 	}
 	if rep.Err == "" {
 		t.Fatal("report must carry the language-neutral parse error")
