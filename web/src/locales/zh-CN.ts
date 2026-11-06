@@ -6217,6 +6217,7 @@ export default {
     // 重裁决不做（仅 pending 可裁决是服务端幂等约束），注记文案写明
     recent: {
       trigger: '最近裁决',
+      dismiss: '收起（新裁决会重新提示）',
       empty: '暂无裁决记录',
       allowed: '已允许',
       denied: '已拒绝',

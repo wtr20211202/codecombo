@@ -73,8 +73,28 @@ const isMonitorRoute = computed(() => route.name === 'monitor')
 // App 持有的 fixed 包装，本组件内做 margin/padding 上抬只会在包装盒内挪动，
 // 包装空盒仍挡徽标点击（实测踩坑），让位动作必须落在徽标组件
 const hasPending = computed(() => approvals.pendingCount > 0)
+// 裁决就近回看窗（48h）+ 手动关闭：浮层只在窗口内有裁决、且未被手动关闭时
+// 撑起——recent 留存恒有最近 10 条，无时效/关闭控制会让浮层在生产长期运行
+// 时永久遮挡终端右下（dev-server 实锚：7 天前旧裁决撑起浮层）。关闭记
+// dismissedAt（localStorage），**新裁决**（晚于关闭时刻）才重新出现；pending
+// 待裁决卡不受影响始终显示。更早历史在值班大屏「最近裁决」面/审计 CSV 仍
+// 完整可见，不丢数据
+const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000
+const RECENT_DISMISS_KEY = 'approval-recent-dismissed-at'
+const recentDismissedAt = ref(Number(localStorage.getItem(RECENT_DISMISS_KEY) || 0))
+const recentFresh = computed(() => {
+  const now = Date.now()
+  return approvals.recent.some((a) => {
+    const t = new Date(a.resolvedAt || a.createdAt || 0).getTime()
+    return t > 0 && now - t <= RECENT_WINDOW_MS && t > recentDismissedAt.value
+  })
+})
+function dismissRecent(): void {
+  recentDismissedAt.value = Date.now()
+  localStorage.setItem(RECENT_DISMISS_KEY, String(recentDismissedAt.value))
+}
 const stackVisible = computed(() =>
-  isMonitorRoute.value === false && (hasPending.value || approvals.recent.length > 0))
+  isMonitorRoute.value === false && (hasPending.value || recentFresh.value))
 
 // 条目悬浮 title：detail 散文 + 拒绝理由（denied 且有附言时）——只读条目的
 // 上下文出口，不进版面。展示面脱敏同 P-197 展示兜底（服务端入库已过 mask，
@@ -321,19 +341,29 @@ function confirmDeny(id: string): void {
       raw
     >
       <template #trigger>
-        <button
-          type="button"
-          class="aprv-recent-trigger"
-          data-test="aprv-recent-trigger"
-          :aria-label="t('approval.recent.trigger')"
-        >
-          <span>{{ t('approval.recent.trigger') }}</span>
-          <span
-            v-if="approvals.recent.length > 0"
-            class="aprv-recent-trigger-count"
-            data-test="aprv-recent-trigger-count"
-          >{{ approvals.recent.length }}</span>
-        </button>
+        <div class="aprv-recent-trigger-wrap">
+          <button
+            type="button"
+            class="aprv-recent-trigger"
+            data-test="aprv-recent-trigger"
+            :aria-label="t('approval.recent.trigger')"
+          >
+            <span>{{ t('approval.recent.trigger') }}</span>
+            <span
+              v-if="approvals.recent.length > 0"
+              class="aprv-recent-trigger-count"
+              data-test="aprv-recent-trigger-count"
+            >{{ approvals.recent.length }}</span>
+          </button>
+          <button
+            type="button"
+            class="aprv-recent-dismiss"
+            data-test="aprv-recent-dismiss"
+            :title="t('approval.recent.dismiss')"
+            :aria-label="t('approval.recent.dismiss')"
+            @click.stop="dismissRecent"
+          >✕</button>
+        </div>
       </template>
       <div
         class="aprv-recent"
@@ -452,13 +482,26 @@ function confirmDeny(id: string): void {
    （border-subtle）不与 pending 卡的警示虚线（status-waiting 等待档）争视觉；
    sticky bottom 与摘要条 sticky top 对偶——堆限高滚动后触发条钉在可视底，
    折叠多卡时回看入口仍可达 */
+.aprv-recent-trigger-wrap {
+  position: sticky; bottom: 0; z-index: 1;
+  display: flex; align-items: center; gap: 6px; width: 100%;
+}
 .aprv-recent-trigger {
   appearance: none; font: inherit; line-height: 1.4; text-align: left;
   display: flex; align-items: center; gap: 6px; width: 100%;
   background: var(--bg-panel); border: 1px dashed var(--border-subtle);
   border-radius: 8px; padding: 4px 12px; cursor: pointer;
   color: var(--text-secondary); font-size: 0.76em;
-  position: sticky; bottom: 0; z-index: 1;
+}
+.aprv-recent-dismiss {
+  appearance: none; font: inherit; flex-shrink: 0;
+  width: 22px; height: 22px; display: inline-flex;
+  align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 6px;
+  color: var(--text-faint); font-size: 12px; cursor: pointer;
+}
+.aprv-recent-dismiss:hover {
+  color: var(--text-primary); background: color-mix(in srgb, var(--text-faint) 15%, transparent);
 }
 .aprv-recent-trigger:hover,
 .aprv-recent-trigger:focus-visible {

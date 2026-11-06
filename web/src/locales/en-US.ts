@@ -6358,6 +6358,7 @@ export default {
     // constraint) and the note copy says so
     recent: {
       trigger: 'Recent decisions',
+      dismiss: 'Dismiss (new decisions will re-surface)',
       empty: 'No decisions yet',
       allowed: 'Allowed',
       denied: 'Denied',
