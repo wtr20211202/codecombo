@@ -48,6 +48,7 @@ var routeWhitelist = map[string]string{
 	"/api/health":          "健康探针，不受任何中间件保护（router.go 尾注）",
 	"/api/metrics":         "Prometheus 指标出口，系统元数据非能力面",
 	"/api/shutdown":        "本机优雅停机通道（回环+自定义头双约束），非能力端点",
+	"/api/restart":         "本机优雅重启通道（回环+自定义头双约束，P-20261106 页面重启链），非能力端点——同 shutdown 族",
 	"/api/modules":         "发现端点自身，无需自登记",
 	"/api/meta":            "能力探测端点自身（版本+能力聚合，P-20261004-4）——发现端点同级免自登记",
 	"/api/whoami":          "令牌自校验引导端点自身（tokenKind+capabilities 摘要，P-20261004-15）——自描述元端点免自登记，同 /api/meta",
