@@ -306,28 +306,25 @@ func (d *CodecomboDeployer) Deploy(ctx context.Context, p DeployParams) error {
 		// chown 必须覆盖数据目录根：全新机器上 sudo mkdir -p 会把 .codecombo
 		// 连同 bin 一起建成 root 所有，只 chown bin 会让服务（cld）写不进自己的
 		// 数据目录（data/、PID 文件、日志全挂）；存量数据目录已是 cld 所有时为 no-op。
-		// 旧数据目录 .simple-coding 存在 → bin 装旧目录（随首启迁移改名落位
-		// codecomboBinPath 的最终路径，ExecStart/plist 钉迁移后路径）
+		// 旧数据目录 .simple-coding 存在 → 数据迁移交给产品首启迁移引擎
+		//（五态含「目标已存在走合并」），**二进制本身必须装到 ExecStart 的
+		// 最终路径**——历史缺陷：曾装入 legacyDir/bin 而 ExecStart 指
+		// codecomboBinPath，迁移靠服务首启触发、服务 exec 又依赖迁移后的
+		// 路径 = 鸡生蛋死锁（服务秒死，存量升级 100% 失败，用户 dev-server 实锚）
 		legacyDir := legacyDataDirOf(cldUser)
 		probe, lerr := p.SSH.Exec(ctx, execOpts(fmt.Sprintf(`test -d %q && echo yes || echo no`, legacyDir)), nil)
 		legacyExists := lerr == nil && len(probe.Stdout) > 0 && strings.TrimSpace(probe.Stdout[0]) == "yes"
-		// 装入目录与最终路径（P-20261103-4 实锚修复）：legacy 数据目录存在时
-		// bin 装 legacyDir/bin（mkdir 与 install 同目录），随首启迁移把整个
-		// 旧目录改名到 .codecombo 后自然落位 codecomboBinPath 的最终路径——
-		// 此前 install 目标误写 codecomboBinPath（.codecombo/bin 不存在，
-		// install 无 -D 不建父目录 → exit 1，存量升级场景 100% 失败）
 		binDir := fmt.Sprintf("/home/%s/.codecombo/bin", cldUser)
-		installPath := binDir + "/codecombo"
 		chownRoot := fmt.Sprintf("/home/%s/.codecombo", cldUser)
+		legacyChown := ""
 		if legacyExists {
-			binDir = legacyDir + "/bin"
-			installPath = binDir + "/codecombo"
-			chownRoot = legacyDir
+			// 旧数据目录归属迁移到 cld（合并时 cld 必须能读旧数据）
+			legacyChown = fmt.Sprintf(" && sudo chown -R %s %q", cldUser, legacyDir)
 		}
 		binPath = codecomboBinPath(cldUser)
 		out, err := execOrFail(ctx, p, "upload", "install binary", execOpts(fmt.Sprintf(
-			`sudo mkdir -p %q && sudo install -m 0755 %q %q && sudo chown -R %s %q && rm -f %q`,
-			binDir, uploadTmp, installPath, cldUser, chownRoot, uploadTmp)), nil)
+			`sudo mkdir -p %q && sudo install -m 0755 %q %q && sudo chown -R %s %q%s && rm -f %q`,
+			binDir, uploadTmp, binPath, cldUser, chownRoot, legacyChown, uploadTmp)), nil)
 		if err != nil {
 			// 远端 stderr 尾部入任务日志（commandFailed 只有包装信息，排障
 			// 需要原文——用户机器实锚场景无 stderr 不可定位）
