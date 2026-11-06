@@ -311,16 +311,34 @@ func (d *CodecomboDeployer) Deploy(ctx context.Context, p DeployParams) error {
 		legacyDir := legacyDataDirOf(cldUser)
 		probe, lerr := p.SSH.Exec(ctx, execOpts(fmt.Sprintf(`test -d %q && echo yes || echo no`, legacyDir)), nil)
 		legacyExists := lerr == nil && len(probe.Stdout) > 0 && strings.TrimSpace(probe.Stdout[0]) == "yes"
+		// 装入目录与最终路径（P-20261103-4 实锚修复）：legacy 数据目录存在时
+		// bin 装 legacyDir/bin（mkdir 与 install 同目录），随首启迁移把整个
+		// 旧目录改名到 .codecombo 后自然落位 codecomboBinPath 的最终路径——
+		// 此前 install 目标误写 codecomboBinPath（.codecombo/bin 不存在，
+		// install 无 -D 不建父目录 → exit 1，存量升级场景 100% 失败）
 		binDir := fmt.Sprintf("/home/%s/.codecombo/bin", cldUser)
+		installPath := binDir + "/codecombo"
 		chownRoot := fmt.Sprintf("/home/%s/.codecombo", cldUser)
 		if legacyExists {
 			binDir = legacyDir + "/bin"
+			installPath = binDir + "/codecombo"
 			chownRoot = legacyDir
 		}
 		binPath = codecomboBinPath(cldUser)
-		if _, err := execOrFail(ctx, p, "upload", "install binary", execOpts(fmt.Sprintf(
+		out, err := execOrFail(ctx, p, "upload", "install binary", execOpts(fmt.Sprintf(
 			`sudo mkdir -p %q && sudo install -m 0755 %q %q && sudo chown -R %s %q && rm -f %q`,
-			binDir, uploadTmp, binPath, cldUser, chownRoot, uploadTmp)), nil); err != nil {
+			binDir, uploadTmp, installPath, cldUser, chownRoot, uploadTmp)), nil)
+		if err != nil {
+			// 远端 stderr 尾部入任务日志（commandFailed 只有包装信息，排障
+			// 需要原文——用户机器实锚场景无 stderr 不可定位）
+			if out != nil && len(out.Stderr) > 0 {
+				tail := out.Stderr
+				if len(tail) > 5 {
+					tail = tail[len(tail)-5:]
+				}
+				log.LogKV("upload", LevelFail, "deploy.log.codecombo.uploadFailed",
+					map[string]any{"stderr": strings.Join(tail, " | ")})
+			}
 			return err
 		}
 		// 存量升级清理：旧版本部署把二进制装在 /usr/local/bin（unit 已改指
