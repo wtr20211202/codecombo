@@ -91,11 +91,19 @@ func GetManager() *Manager {
 	return globalManager
 }
 
-// SetSource 设置更新源
+// SetSource 设置更新源。运行时重接线走 ApplySource（启动与保存共用同一
+// 装配语义，P-20261106 热化），不直接调用本方法
 func (m *Manager) SetSource(source UpdateSource) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.source = source
+}
+
+// Source 返回当前更新源（nil=未装配）——诊断与测试消费
+func (m *Manager) Source() UpdateSource {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.source
 }
 
 // GetStatus 获取当前更新状态

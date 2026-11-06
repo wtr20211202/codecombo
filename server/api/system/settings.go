@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"codecombo/server/update"
 )
 
 // processStartTime 进程启动时刻（HealthCheck 据此计算运行时长）
@@ -735,6 +737,9 @@ func UpdateSettings(c *gin.Context) {
 			return
 		}
 		cfg.Server.UpdateURL = u
+		// 运行时热接线（P-20261106）：自更新源按新设置即时重装配（空=官方仓
+		// 内置回填），不必重启
+		update.ApplySource(cfg)
 	}
 	// 自动检查更新开关（P-20261103-1）：省略 = 不动；false = 定时检查完全
 	// 静默（手动检查不受影响——更新源内置化后始终可检）
@@ -751,6 +756,10 @@ func UpdateSettings(c *gin.Context) {
 			return
 		}
 		cfg.Server.UpdateChannel = ch
+		// 运行时热切换（P-20261106）：通道标志原本只在 update Init 接线一次，
+		// 保存后要重启才生效（用户实锚：开了「跟进预发布版本」仍查不到 beta）
+		// ——这里按新设置即时重装配源，开关保存即生效
+		update.ApplySource(cfg)
 	}
 	// 外部访问地址（P-20261019-10）：只接受 http/https origin（无凭据/路径/
 	// query/fragment，尾斜杠归一），空串=清除（二维码接力回落当前地址/局域网

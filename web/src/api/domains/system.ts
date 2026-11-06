@@ -842,6 +842,11 @@ export const updateApi = {
   apply: () => api.post('/updates/apply'),
   status: (config?: AxiosRequestConfig) => api.get('/updates/status', config),
   clearStatus: () => api.delete('/updates/status'),
+  // 本机优雅重启（P-20261106 页面重启链）：服务形态=SCM recovery 拉起，
+  // systemd=systemctl restart，前台=原参数自 spawn。自定义头与 /api/shutdown
+  // 同型 CSRF 防线（服务端校验存在性）
+  restart: () => api.post('/restart', {}, { headers: { 'X-SC-Restart': '1' }, timeout: 10000 }),
+  healthPing: (config?: { timeout?: number; silent?: boolean }) => api.get('/health', config),
   // 传上级实例 ID：中心地址与凭据由子实例后端从自身存储解析——
   // 实例列表接口不出 token，从浏览器读 token 永远是空（中心锁定时必 423）。
   // 后端在请求内同步下载完整二进制（服务端窗口 5 分钟），前端超时须对齐，

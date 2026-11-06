@@ -2,6 +2,7 @@ package update
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -75,5 +76,52 @@ func TestReleaseHasPlatformAsset(t *testing.T) {
 	}
 	if releaseHasPlatformAsset(r, "linux", "amd64") {
 		t.Error("unrelated asset must not match")
+	}
+}
+
+// TestNormalizeGitHubAPI 网页仓库地址 → REST API 端点归一（P-20261106 根因修）：
+// UpdateURLOfficial 是网页形态，缺归一时检查打的是网页 HTML，JSON 解码必炸
+// ——一切检查恒败被吞成 hasUpdate:false，前端再误报「未配置更新分发源」。
+// 上方 TestFetchLatestChannel 曾以 RepoURL 手工覆写绕过此洞（测试假绿实证）
+func TestNormalizeGitHubAPI(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://github.com/wtr20211202/codecombo", "https://api.github.com/repos/wtr20211202/codecombo"},
+		{"https://github.com/wtr20211202/codecombo/", "https://api.github.com/repos/wtr20211202/codecombo"},
+		{"https://www.github.com/o/r", "https://api.github.com/repos/o/r"},
+		{"https://api.github.com/repos/o/r", "https://api.github.com/repos/o/r"}, // API 形态直传
+		{"https://gitea.example.com/o/r", "https://gitea.example.com/o/r"},       // 非 GitHub 不动
+	}
+	for _, c := range cases {
+		if got := normalizeGitHubAPI(c.in); got != c.want {
+			t.Errorf("normalizeGitHubAPI(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestNewGitHubSourceOfficialWebURL 内置官方源（网页形态）创建后 RepoURL 必须
+// 已归一到 API 端点——不再依赖调用方覆写
+func TestNewGitHubSourceOfficialWebURL(t *testing.T) {
+	s, err := NewGitHubSource("https://github.com/wtr20211202/codecombo")
+	if err != nil {
+		t.Fatalf("NewGitHubSource(official web url): %v", err)
+	}
+	want := "https://api.github.com/repos/wtr20211202/codecombo"
+	if s.RepoURL != want {
+		t.Fatalf("RepoURL = %q, want %q", s.RepoURL, want)
+	}
+}
+
+// TestFetchLatestNoStableReleaseSentinel stable 通道 404（仓库只有 prerelease
+// 被 /releases/latest 排除）必须映射为 ErrNoStableRelease——API 层据此区分
+// 「通道空」与「网络失败/没配源」，前端才能诚实呈现而非误报
+func TestFetchLatestNoStableReleaseSentinel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	// 直构 client：newSafeTransport 的出站守卫拒回环地址，httptest 必须绕开
+	s := &GitHubSource{RepoURL: srv.URL, client: srv.Client()}
+	if _, err := s.FetchLatest(context.Background(), "windows", "amd64"); !errors.Is(err, ErrNoStableRelease) {
+		t.Fatalf("FetchLatest on 404: err=%v, want ErrNoStableRelease", err)
 	}
 }

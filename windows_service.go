@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"codecombo/server/servicectx"
 	"golang.org/x/sys/windows/svc"
 )
 
@@ -56,24 +57,38 @@ func (s *comboService) Execute(args []string, r <-chan svc.ChangeRequest, change
 	}()
 
 	changes <- svc.Status{State: svc.Running, Accepts: accepts}
-	for c := range r {
-		switch c.Cmd {
-		case svc.Interrogate:
-			// SCM 探询：回当前状态（必须响应，否则服务管理器报错）
-			changes <- c.CurrentStatus
-		case svc.Stop, svc.Shutdown:
-			changes <- svc.Status{State: svc.StopPending}
-			// 注入 SIGTERM 走 app.Run 既有优雅退出；双向 chan 由
-			// proc_windows.go setupSignalNotify 持有写端
-			signalCh <- syscall.SIGTERM
-			select {
-			case <-done:
-			case <-time.After(svcStopGrace):
+	for {
+		select {
+		case c, ok := <-r:
+			if !ok {
+				// SCM 请求通道关闭（服务被外部删除/异常）：带意图退出
+				return false, servicectx.ServiceExitCode()
 			}
-			return false, 0
+			switch c.Cmd {
+			case svc.Interrogate:
+				// SCM 探询：回当前状态（必须响应，否则服务管理器报错）
+				changes <- c.CurrentStatus
+			case svc.Stop, svc.Shutdown:
+				changes <- svc.Status{State: svc.StopPending}
+				// 注入 SIGTERM 走 app.Run 既有优雅退出；双向 chan 由
+				// proc_windows.go setupSignalNotify 持有写端
+				signalCh <- syscall.SIGTERM
+				select {
+				case <-done:
+				case <-time.After(svcStopGrace):
+				}
+				// 退出码带重启意图（P-20261106 页面重启链）：页面重启=优雅
+				// 退出+非零码 → SCM failure-recovery 5s 拉起；sc stop=0 不拉起
+				return false, servicectx.ServiceExitCode()
+			}
+		case <-done:
+			// serve 自行结束（API 重启/关机触发优雅退出，非 SCM 请求——原实现
+			// 卡在本循环进程悬挂、SCM 仍视为 Running）：带重启意图则非零码
+			// 结束交 recovery 拉起，否则正常结束
+			changes <- svc.Status{State: svc.StopPending}
+			return false, servicectx.ServiceExitCode()
 		}
 	}
-	return false, 0
 }
 
 // svcStopGrace 停止宽限：优雅退出超时后 Execute 返回由 SCM 决定强杀

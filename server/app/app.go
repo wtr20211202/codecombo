@@ -36,6 +36,7 @@ import (
 	"codecombo/server/middleware"
 	"codecombo/server/notification"
 	"codecombo/server/peercert"
+	"codecombo/server/servicectx"
 	"codecombo/server/share"
 	"codecombo/server/store"
 	"codecombo/server/tlsutil"
@@ -531,6 +532,38 @@ func Run(opts Options) {
 	}
 	system.RegisterShutdown(shutdownFn)
 	update.SetRestartHook(shutdownFn)
+
+	// 页面重启（P-20261106）：真正需要重启的少数设置（监听器类）与人工兜底。
+	// 按运行形态分链——能由监管者拉起的不自 spawn（防孤儿进程与端口竞争）：
+	system.RegisterRestart(func() {
+		time.Sleep(300 * time.Millisecond) // HTTP 202 响应先写出
+		if servicectx.IsService() {
+			// Windows 服务：优雅退出 + 非零退出码 = SCM failure-recovery 扳机
+			//（install.ps1 已挂 actions=restart/5000，5s 内拉起）
+			servicectx.RequestRestart()
+			shutdownFn()
+			return
+		}
+		if done, err := update.RestartViaSystemd(); done {
+			// systemd：systemctl restart 停旧起新全托管；失败则留痕保持存活
+			//（此时退出即失联）
+			if err != nil {
+				slog.Warn("restart: systemctl restart failed — staying up", "err", err)
+			}
+			return
+		}
+		if runtime.GOOS == "darwin" && os.Getppid() == 1 {
+			// launchd 托管（KeepAlive=true）：优雅退出即被拉起，不自 spawn
+			//（防与 KeepAlive 拉起实例抢端口）
+			shutdownFn()
+			return
+		}
+		// 前台/裸进程：先释放监听再以原参数 spawn 自身（新进程即时可绑）
+		shutdownFn()
+		if err := update.RestartSelfExe(); err != nil {
+			slog.Warn("restart: respawn failed — process will exit, manual start required", "err", err)
+		}
+	})
 
 	var serveErr error
 	// 多监听器并发 Serve（回环双栈为 2 个，单监听为 1 个）：任一返回即取首个错误，

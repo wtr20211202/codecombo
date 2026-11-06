@@ -138,6 +138,10 @@ if ($isAdmin) {
     sc.exe stop Codecombo | Out-Null
     sc.exe config Codecombo binPath= $svcBin start= auto | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "    sc config failed (exit $LASTEXITCODE)" }
+    # Re-apply failure recovery (legacy services registered before the
+    # failure-actions line lack it; the in-app restart chain relies on it:
+    # graceful exit with code 1 -> SCM restarts in 5s)
+    sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
   } else {
     Write-Host "==> Registering Windows service Codecombo (port $Port, host $BindHost, auto-restart on failure)"
     sc.exe create Codecombo binPath= $svcBin start= auto DisplayName= 'Codecombo dev workbench' | Out-Null

@@ -510,6 +510,10 @@ export function useProjectActions(openFilesRef?: () => OpenFile[]) {
     changelog?: string
     downloadUrl?: string
     fileSize?: number
+    // 检查失败分类（P-20261106 beta.2 误报实锚）：后端不再吞错，前端据标志诚实呈现
+    channelEmpty?: boolean
+    sourceMissing?: boolean
+    checkError?: string
   }
 
   interface UpdateStatusResult {
@@ -539,17 +543,28 @@ export function useProjectActions(openFilesRef?: () => OpenFile[]) {
     try {
       const res = await updateApi.check()
       updateInfo.value = res.data || res
-      if (updateInfo.value?.hasUpdate || updateInfo.value?.latestVersion) {
+      const info = updateInfo.value
+      if (info?.hasUpdate || (info?.latestVersion && info.latestVersion !== info.currentVersion)) {
         notificationStore.add({
           type: 'info',
           category: 'system',
           title: t('notification.event.updateAvailable'),
-          body: updateInfo.value.latestVersion ? `v${updateInfo.value.latestVersion}` : undefined,
+          body: info.latestVersion ? `v${info.latestVersion}` : undefined,
         })
-      } else if (!updateSourceUrl.value) {
-        // 无分发源时 hasUpdate:false 实为"无源可查"，提示避免误读为"已是最新"
-        if (shouldShowToast('update.noSourceHint')) {
-          message.warning(t('update.noSourceHint'))
+      } else if (info?.channelEmpty) {
+        // stable 通道无正式版（正式通道恒排预发布），提示避免误读为"已是最新"
+        if (shouldShowToast('update.channelEmptyHint')) {
+          message.info(t('update.channelEmptyHint'))
+        }
+      } else if (info?.sourceMissing) {
+        // 自更新源已内置官方仓库；真缺源仅剩「配置的非法分发源被拒」一途
+        if (shouldShowToast('update.sourceMissingHint')) {
+          message.warning(t('update.sourceMissingHint'))
+        }
+      } else if (info?.checkError) {
+        // 其余检查失败如实呈现，不再吞成「未配置源」
+        if (shouldShowToast('update.checkFailedHint')) {
+          message.warning(t('update.checkFailedHint', { reason: info.checkError }))
         }
       }
     } catch {

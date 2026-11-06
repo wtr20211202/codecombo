@@ -52,3 +52,43 @@ func Shutdown(c *gin.Context) {
 	go fn() // 异步执行 srv.Shutdown：先响应，让 cmdStop 的请求正常拿到结果
 	c.JSON(http.StatusAccepted, gin.H{"ok": true})
 }
+
+var (
+	restartMu  sync.RWMutex
+	restartFun func()
+)
+
+// RegisterRestart 组合根（server/app）注册的重启动作（P-20261106 页面重启链）。
+// 注册前收到重启请求返回 503
+func RegisterRestart(fn func()) {
+	restartMu.Lock()
+	restartFun = fn
+	restartMu.Unlock()
+}
+
+// restartHeader 自定义头：与 shutdownHeader 同型 CSRF 防线
+const restartHeader = "X-SC-Restart"
+
+// Restart POST /api/restart —— 本机优雅重启。约束与 Shutdown 相同：仅回环 +
+// 自定义头。成功即 202（重启异步进行：监听短暂离线后回归，前端轮询 /api/health
+// 收口）。运行形态分链见组合根注册的动作
+func Restart(c *gin.Context) {
+	if !isLoopbackRequest(c) {
+		shared.Error(c, http.StatusForbidden, "loopback only", nil)
+		return
+	}
+	if c.GetHeader(restartHeader) == "" {
+		shared.Error(c, http.StatusBadRequest, "missing "+restartHeader, nil)
+		return
+	}
+	restartMu.RLock()
+	fn := restartFun
+	restartMu.RUnlock()
+	if fn == nil {
+		shared.Error(c, http.StatusServiceUnavailable, "restart not ready", nil)
+		return
+	}
+	slog.Info("graceful restart requested via api (local)")
+	go fn() // 异步执行：先响应，前端拿到结果后开始轮询健康
+	c.JSON(http.StatusAccepted, gin.H{"ok": true})
+}

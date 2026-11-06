@@ -28,9 +28,30 @@ func CheckUpdate(c *gin.Context) {
 	mgr := update.GetManager()
 	info, err := mgr.CheckUpdate(c.Request.Context(), buildVersion)
 	if err != nil {
+		// 检查失败细分（beta.2 误报实锚）：曾把一切错误吞成 hasUpdate:false，
+		// 前端再依「分发源字段为空」猜成「未配置更新源」——stable 通道只有
+		// prerelease 时的 404 也走了这条路，误导用户手填本已内置的源
+		resp := model.CheckUpdateResponse{
+			CurrentVersion: buildVersion,
+			HasUpdate:      false,
+		}
+		switch {
+		case errors.Is(err, update.ErrNoStableRelease):
+			resp.ChannelEmpty = true
+		case strings.Contains(err.Error(), errmarkers.UpdateSourceNotConfigured):
+			resp.SourceMissing = true
+		default:
+			resp.CheckError = err.Error()
+		}
+		c.JSON(http.StatusOK, gin.H{"data": resp})
+		return
+	}
+	if info == nil {
+		// 坏源返回 nil,nil（err==nil 但无数据）：归入检查失败，防炸
 		c.JSON(http.StatusOK, gin.H{"data": model.CheckUpdateResponse{
 			CurrentVersion: buildVersion,
 			HasUpdate:      false,
+			CheckError:     "update source returned no data",
 		}})
 		return
 	}

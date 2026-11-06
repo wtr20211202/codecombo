@@ -94,6 +94,43 @@ func restartService(binary string, port int) (int, error) {
 	return proc.Pid, nil
 }
 
+// RestartViaSystemd systemd 托管实例的重启（P-20261106 页面重启链）：
+// systemctl restart 停旧起新全托管（状态机、Restart= 策略、日志归属不变）。
+// 返回 (false, nil)=非 systemd 环境由调用方走自 spawn 链；(true, err)=systemd
+// 托管但 restart 失败（调用方留痕并保持存活——此时绝不能退出，退出即失联）
+func RestartViaSystemd() (bool, error) {
+	unit := systemdUnit()
+	if unit == "" {
+		return false, nil
+	}
+	if err := exec.Command("systemctl", "restart", unit).Run(); err != nil {
+		return true, fmt.Errorf("systemctl restart %s: %w", unit, err)
+	}
+	return true, nil
+}
+
+// RestartSelfExe 前台/裸进程形态的自重启：以**当前进程原参数**（os.Args 全量，
+// 含 --host/--data-dir 等——restartService 只传 --port 会丢参数）spawn 自身后
+// 返回，调用方先释放监听再调本函数（新进程可即时绑定）。systemd/Windows 服务/
+// launchd 形态不走此链（各自监管者接管）
+func RestartSelfExe() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	argv := append([]string{exe}, os.Args[1:]...)
+	attr := &os.ProcAttr{
+		Env:   os.Environ(),
+		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
+	}
+	proc, err := os.StartProcess(exe, argv, attr)
+	if err != nil {
+		return err
+	}
+	// 不等待退出：服务进程自负责生命周期，释放句柄避免僵尸
+	return proc.Release()
+}
+
 // killByPID 精确击杀（健康检查失败回滚路径）。按 PID 而非 pkill -f 名称匹配：
 // 后者按完整命令行做正则匹配（`.` 通配任意字符），会误杀命令行里恰好包含
 // 同名串的无关进程（如 tail -f simple-coding.log）

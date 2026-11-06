@@ -261,6 +261,15 @@ type CheckUpdateResponse struct {
 	Changelog      string `json:"changelog"`
 	DownloadURL    string `json:"downloadUrl"`
 	FileSize       int64  `json:"fileSize"`
+	// 检查失败细分（beta.2 误报实锚：此前一切检查错误吞成 hasUpdate:false，
+	// 前端再依「分发源字段为空」猜成「未配置更新源」——而自更新源已内置，
+	// 真缺源仅剩「配置的非法分发源被拒」一途）。零值省略，成功路径零负担
+	SourceMissing bool `json:"sourceMissing,omitempty"`
+	// ChannelEmpty 当前通道无版本可查（stable=/releases/latest 恒排 prerelease，
+	// 仓库只有 beta/rc 时 404）——提示用户开预发布通道跟进
+	ChannelEmpty bool `json:"channelEmpty,omitempty"`
+	// CheckError 其余检查失败原文（网络/DNS/限流等），前端如实呈现不再吞
+	CheckError string `json:"checkError,omitempty"`
 }
 
 // UpdateStatusResponse 更新状态响应

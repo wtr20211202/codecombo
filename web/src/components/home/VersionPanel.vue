@@ -8,6 +8,7 @@ import { shouldShowToast } from '../../utils/toastDedupe'
 import { InformationCircleOutline, LogoGithub } from '@vicons/ionicons5'
 import { settingsApi, updateApi } from '../../api/client'
 import { copyText } from '../../utils/clipboard'
+import { confirmDialog } from '../../composables/useDialog'
 import { useI18n } from '../../composables/useI18n'
 import { useNotificationStore } from '../../stores/notification'
 
@@ -50,6 +51,10 @@ interface UpdateCheckResult {
   changelog?: string
   downloadUrl?: string
   fileSize?: number
+  // 检查失败分类（P-20261106 beta.2 误报实锚）：后端不再吞错，前端据标志诚实呈现
+  channelEmpty?: boolean
+  sourceMissing?: boolean
+  checkError?: string
 }
 interface UpdateStatusResult {
   status: string
@@ -85,8 +90,9 @@ async function checkUpdate() {
   try {
     const res = await updateApi.check()
     updateInfo.value = res.data || res
-    if (updateInfo.value?.hasUpdate || updateInfo.value?.latestVersion) {
-      const latest = updateInfo.value.latestVersion || ''
+    const info = updateInfo.value
+    if (info?.hasUpdate || (info?.latestVersion && info.latestVersion !== info.currentVersion)) {
+      const latest = info.latestVersion || ''
       emit('update-detected', latest)
       notificationStore.add({
         type: 'info',
@@ -94,14 +100,27 @@ async function checkUpdate() {
         title: t('notification.event.updateAvailable'),
         body: latest ? `v${latest}` : undefined,
       })
-    } else if (!updateSourceUrl.value) {
-      // 无分发源时 hasUpdate:false 实为"无源可查"——不入状态机：
+    } else if (info?.channelEmpty) {
+      // stable 通道无正式版（GitHub 正式通道恒排预发布）——不入状态机：
       // 若存入 updateInfo，面板会渲染「已是最新版本」，与提示自相矛盾
       updateInfo.value = null
-      if (shouldShowToast('update.noSourceHint')) {
-        message.warning(t('update.noSourceHint'))
+      if (shouldShowToast('update.channelEmptyHint')) {
+        message.info(t('update.channelEmptyHint'))
+      }
+    } else if (info?.sourceMissing) {
+      // 自更新源已内置官方仓库；真缺源仅剩「配置的非法分发源被 Init 拒绝」一途
+      updateInfo.value = null
+      if (shouldShowToast('update.sourceMissingHint')) {
+        message.warning(t('update.sourceMissingHint'))
+      }
+    } else if (info?.checkError) {
+      // 其余检查失败（网络/DNS/限流）如实呈现，不再吞成「未配置源」
+      updateInfo.value = null
+      if (shouldShowToast('update.checkFailedHint')) {
+        message.warning(t('update.checkFailedHint', { reason: info.checkError }))
       }
     }
+    // else：latestVersion 非空且同版/更新 → updateInfo 留存，面板渲染「已是最新」
   } catch {
     updateInfo.value = null
   }
@@ -151,6 +170,44 @@ async function startUpdate() {
     notificationStore.add({ type: 'info', category: 'system', title: t('update.updateStarted') })
     pollUpdateStatus()
   } catch { /* 拦截器处理 */ }
+}
+
+// ---- 本机优雅重启（P-20261106 页面重启链）：真正需要重启的少数设置
+//（监听器类）与人工兜底，页面一键完成无须进服务管理器 ----
+const restarting = ref(false)
+
+async function restartApp() {
+  const ok = await confirmDialog({
+    title: t('update.restartApp'),
+    content: t('update.restartConfirm'),
+    type: 'warning',
+  })
+  if (!ok) return
+  restarting.value = true
+  try {
+    await updateApi.restart()
+  } catch {
+    message.error(t('update.restartFailed'))
+    restarting.value = false
+    return
+  }
+  message.info(t('update.restartStarted'))
+  // 轮询健康回归（监听短暂离线后回来，30s 上限）
+  const deadline = Date.now() + 30000
+  const poll = window.setInterval(async () => {
+    try {
+      await updateApi.healthPing({ timeout: 2000, silent: true })
+      window.clearInterval(poll)
+      restarting.value = false
+      message.success(t('update.restartDone'))
+    } catch {
+      if (Date.now() > deadline) {
+        window.clearInterval(poll)
+        restarting.value = false
+        message.warning(t('update.restartTimeout'))
+      }
+    }
+  }, 2000)
 }
 
 // ---- 自动检查更新 + 更新分发源 ----
@@ -317,6 +374,14 @@ onMounted(() => { void loadUpdateSource() })
         @click="checkUpdate"
       >
         {{ updateInfo ? t('update.recheck') : t('update.checkUpdate') }}
+      </button>
+      <!-- 本机优雅重启（P-20261106）：页面一键完成，无须进服务管理器 -->
+      <button
+        class="panel-btn"
+        :disabled="restarting"
+        @click="restartApp"
+      >
+        {{ restarting ? t('update.restarting') : t('update.restartApp') }}
       </button>
     </div>
 

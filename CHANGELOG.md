@@ -9,6 +9,56 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.3] - 2026-11-06
+
+### Fixed
+
+- **Update checks never actually worked** — the built-in official source is
+  a github.com web URL while fetch endpoints are REST API paths; the
+  missing URL normalization made every check decode HTML as JSON and fail,
+  surfacing as a misleading "no distribution source configured" toast.
+  Web repo URLs now normalize to api.github.com, and check failures are no
+  longer flattened into "up to date": an empty stable channel (only
+  pre-releases published) says so and points to the "Follow pre-releases"
+  toggle, while other failures (network, invalid source) surface their
+  actual reason (beta.1/beta.2 regression).
+- **Windows service data directory** — the service command line now carries
+  `--data-dir` directly, pinning the data directory to the installing
+  user's profile (`%USERPROFILE%\.codecombo`); the previous
+  environment-variable approach silently did not take effect under
+  LocalSystem, so the service started with an empty data directory instead
+  of reusing the existing one.
+- **Legacy upgrade via remote deploy** — migrating an old installation no
+  longer fails with `install binary exit 1`: the binary is installed
+  directly to the final ExecStart path (the legacy directory is renamed as
+  a whole during the first-start migration), removing the chicken-and-egg
+  deadlock between the install directory and the migration target. Failed
+  installs now surface the remote command's stderr in the task log.
+- **Path normalization on Windows** — short (8.3) components in a missing
+  target's tail segment are resolved consistently; ancestor resolution
+  used to drop the last path segment, causing false traversal rejections
+  in edge cases.
+- **Recent decisions overlay** — the recent-approval bar is now manually
+  dismissable (✕) and only surfaces decisions from the last 48 hours, so
+  it no longer permanently covers the terminal panel.
+
+### Changed
+
+- **Update settings take effect immediately** — the "follow pre-releases"
+  toggle, update-source changes and the auto-check switch now apply on save
+  without a restart. A "Restart app" button in the version panel covers the
+  few settings that genuinely need one: Windows services restart via SCM
+  failure-recovery, systemd via `systemctl restart`, foreground instances
+  respawn themselves with the original arguments.
+- **npm platform packages renamed** — `codecombo-win32-*` packages are now
+  `codecombo-windows-*` (npm's spam heuristics weigh "win32" naming
+  heavily; same-structure darwin/linux packages passed untouched). The
+  `os: win32` field stays as npm's standard platform identifier, so
+  `npm i -g codecombo` platform selection is unchanged.
+- **npm publish flow** — the main package publishes first and a single
+  package failure no longer aborts the rest; failures are collected and
+  summarized at the end of the run.
+
 ## [0.0.1-beta.2] - 2026-11-05
 
 ### Added
@@ -92,6 +142,7 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.2...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.3...HEAD
+[0.0.1-beta.3]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.3
 [0.0.1-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.2
 [0.0.1-beta.1]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.1

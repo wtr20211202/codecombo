@@ -73,6 +73,10 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 	// 端点自身有回环 + 自定义头双约束（见 system.Shutdown）
 	r.POST("/api/shutdown", system.Shutdown)
 
+	// 本机优雅重启（P-20261106 页面重启链）：同 shutdown 豁免与双约束
+	//（锁定态下也要能重启；回环 + X-SC-Restart 头防任意网页 CSRF 重启）
+	r.POST("/api/restart", system.Restart)
+
 	// 快投递（P-20261006-51）：手机/脚本 → 工作台的最轻投递通道。公开路由
 	// 刻意不入 api 组——投递凭据（scd_ token）即门禁，锁定态/解锁 token 不
 	// 挡投递（外发投递原语与 webhook 推送同级的入站面）；无效凭据恒 404

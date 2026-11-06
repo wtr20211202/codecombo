@@ -6,6 +6,40 @@
 
 ## [Unreleased]
 
+## [0.0.1-beta.3] - 2026-11-06
+
+### 修复
+
+- **检查更新此前从未真正工作** —— 内置官方源是 github.com 网页地址，而取数
+  端点全按 REST API 路径拼接；缺一步 URL 归一使每次检查都在把网页 HTML 当
+  JSON 解码而失败，最终呈现为误导性的「未配置更新分发源」提示。网页仓库地址
+  现归一到 api.github.com；检查失败不再一律吞成「已是最新」：stable 通道暂无
+  正式版时如实说明并指向「跟进预发布版本」开关，其余失败（网络/非法源）
+  如实呈现原因（beta.1/beta.2 回归）。
+- **Windows 服务数据目录** —— 服务命令行直传 `--data-dir`，把数据目录钉到
+  安装者用户目录（`%USERPROFILE%\.codecombo`）：此前经服务环境变量注入在
+  LocalSystem 下静默不生效，服务会以空数据目录启动而非复用既有数据。
+- **远程部署存量升级** —— 老版本迁移不再 `install binary exit 1`：二进制
+  直接装入 ExecStart 最终路径（legacy 目录随首启迁移整体改名），消除装入
+  目录与迁移目标之间的鸡生蛋死锁；安装失败时远端命令 stderr 原文进任务日志。
+- **Windows 短路径归一** —— 缺失目标尾段的短名（8.3）成分一致解析；祖先
+  解析曾丢失最后一段路径，边界场景误判 traversal。
+- **最近裁决浮层** —— 最近审批浮层支持手动关闭（✕），且只回看 48 小时内
+  的裁决，不再永久遮挡终端面板。
+
+### 变更
+
+- **更新相关设置即时生效** —— 「跟进预发布版本」开关、更新源变更与自动检查
+  开关保存即生效，不再要求重启。版本面板新增「重启应用」按钮兜底真正需要
+  重启的少数设置：Windows 服务走 SCM failure-recovery 拉起，systemd 走
+  `systemctl restart`，前台实例以原参数自拉起。
+- **npm 平台包改名** —— `codecombo-win32-*` 更名 `codecombo-windows-*`
+  （npm spam 风控对 win32 命名加权拦截；darwin/linux 同构包未受影响）。
+  `os: win32` 字段保留（npm 官方平台标识），`npm i -g codecombo` 的平台
+  选择行为不变。
+- **npm 发布流程** —— 主包最先发布，单包失败不再中断其余包；失败包收集
+  汇总呈现。
+
 ## [0.0.1-beta.2] - 2026-11-05
 
 ### 新增
@@ -70,6 +104,7 @@
 - 文档全面刷新：快速开始前置、完整工具清单（What's inside）、典型场景
   走查、开放贡献指南（欢迎 DCO 签名的 PR）。
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.2...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.3...HEAD
+[0.0.1-beta.3]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.3
 [0.0.1-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.2
 [0.0.1-beta.1]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.1

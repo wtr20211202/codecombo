@@ -8,24 +8,39 @@
 # 增量语义：发布仓不逐提交同步——每次运行都是「最新代码全量快照」覆盖检出目录
 # （仅保留 .git），发布仓 git 自动把两版快照之差呈现为一个发布提交。
 #
+# 发布=发版铁律（P-20261106 实锚）：日常修复只攒开发仓，本脚本一次同步=一次发版。
+# 发布仓「有代码无版本」的中间态用户拉不到更新（无 tag→无构建→无资产→无 npm 包），
+# 公开面却已超前于最新 Release（beta.2 后 5 个修复提交曾裸挂 main）。故脚本带版本
+# 叙事门禁：导出树 CHANGELOG 顶部版本段必须新于发布仓最新 tag 才放行镜像；仅官网/
+# 文档类同步（不发版）用 --site-only 显式豁免。
+#
 # 流程（顺序即门禁，不可跳步）：
 #   1. release-export.sh —— 当前 HEAD 追踪面 → release/public（幂等全量重导，
 #      拒绝复用旧快照，防陈旧发布）
-#   2. release-scan.sh   —— 零放行敏感扫描（含金丝雀自检），不过即停
-#   3. 镜像同步          —— 检出目录清空（保 .git）→ 灌入导出树 → git add -A
-#   4. 停在待提交状态    —— 展示变更摘要与建议提交信息，commit/push/tag 由人执行
+#   2. 版本叙事门禁      —— CHANGELOG 顶部版本段 ≠ 发布仓最新 tag（否则拒绝）
+#   3. release-scan.sh   —— 零放行敏感扫描（含金丝雀自检），不过即停
+#   4. 镜像同步          —— 检出目录清空（保 .git）→ 灌入导出树 → git add -A
+#   5. 停在待提交状态    —— 展示变更摘要与建议提交信息，commit/push/tag 由人执行
 #      （对外发布是外向动作，永远人工触发；脚本不做 push）
 #
-# 用法：bash scripts/release-publish.sh <发布仓检出目录>
+# 用法：bash scripts/release-publish.sh [--site-only] <发布仓检出目录>
+#   --site-only  仅官网/文档类同步（不发版，用户拉不到二进制更新——慎用）
 #   检出目录前置条件：在 main 分支、工作树干净（有未提交改动先处置，防混入非发布内容）。
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
-REL="${1:-}"
+SITE_ONLY=0
+REL=""
+for arg in "$@"; do
+  case "$arg" in
+    --site-only) SITE_ONLY=1;;
+    *) if [ -z "$REL" ]; then REL="$arg"; fi;;
+  esac
+done
 case "$REL" in
-  ""|"$REPO_ROOT") echo "FATAL: 用法：bash scripts/release-publish.sh <发布仓检出目录>" >&2; exit 2;;
+  "") echo "FATAL: 用法：bash scripts/release-publish.sh [--site-only] <发布仓检出目录>" >&2; exit 2;;
 esac
 REL_ABS="$(mkdir -p "$REL" && cd "$REL" && pwd)"
 case "$REL_ABS" in
@@ -47,6 +62,24 @@ node scripts/manifest-hash.mjs release/public release/manifest.pending.sha256
 if cmp -s release/manifest.pending.sha256 release/manifest.prev.sha256 && [ -f release/manifest.sha256 ]; then
   echo "==> 导出树与上次已验证快照逐字节一致 —— 短路径返回（扫描与镜像已在上轮完成）"
   exit 0
+fi
+
+# ---------- 版本叙事门禁（发布=发版铁律） ----------
+# 导出树 CHANGELOG 顶部版本段必须新于发布仓最新 tag——即本版变更叙事三件套已备好。
+# 仅官网/文档类同步（不发版）用 --site-only 显式豁免
+top_ver=$(awk '/^## \[/{v=substr($0,5); sub(/\].*/,"",v); if (v!="Unreleased"){print v; exit}}' release/public/CHANGELOG.md 2>/dev/null || true)
+if [ -z "$top_ver" ]; then
+  echo "FATAL: 导出树 CHANGELOG.md 无版本段——变更叙事三件套缺失，拒绝发布" >&2
+  exit 2
+fi
+last_tag=$(git -C "$REL_ABS" describe --tags --abbrev=0 2>/dev/null || true)
+if [ "$SITE_ONLY" = "1" ]; then
+  echo "==> --site-only：跳过版本叙事门禁（仅限官网/文档类同步，不发版——用户拉不到二进制更新）"
+elif [ "v$top_ver" = "$last_tag" ]; then
+  echo "FATAL: CHANGELOG 顶部版本段（$top_ver）与发布仓最新 tag（$last_tag）相同——没有基于上个版本的新变更叙事。" >&2
+  echo "       修复请攒在开发仓，攒到发版再同步。本版叙事取材：git log --oneline rel/$last_tag..HEAD" >&2
+  echo "       （仅官网/文档类同步可加 --site-only 豁免）" >&2
+  exit 2
 fi
 
 # ---------- 2) 零放行扫描（不过即停，exit 1/2 直接终止本脚本） ----------
@@ -85,3 +118,5 @@ echo "==> 建议下一步（人工执行）："
 echo "    git -C \"$REL_ABS\" commit -m \"release: snapshot from $SRC_COMMIT\""
 echo "    git -C \"$REL_ABS\" push origin main        # Pages 随推自动重部署"
 echo "    git -C \"$REL_ABS\" tag v<版本> && git -C \"$REL_ABS\" push origin v<版本>   # 触发 release.yml 六平台构建"
+echo "    发版完成后回开发仓打锚点（下次变更叙事取材基线）："
+echo "    git tag rel/v<版本> && git push origin rel/v<版本>   # 指向本次导出 HEAD（$SRC_COMMIT）"

@@ -3,13 +3,25 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"time"
 )
+
+// ErrReleaseNotFound 端点 404（fetchRelease 包裹，errors.Is 可判）——
+// GitHubSource 之外的中心分发路径同样消费此哨兵（文案不改语义）
+var ErrReleaseNotFound = errors.New("release not found")
+
+// ErrNoStableRelease stable 通道无正式版：/releases/latest 恒排 prerelease，
+// 仓库只有 beta/rc 时 404。这是「通道空」不是「没配源」——beta.2 曾把它吞成
+// hasUpdate:false、前端再依分发源字段为空误报「未配置更新分发源」（实锚：
+// 用户实例源回填正常、stable 通道 404，弹了误导提示）
+var ErrNoStableRelease = errors.New("no stable release on the stable channel yet")
 
 // GitHubSource GitHub Releases 更新源
 type GitHubSource struct {
@@ -29,9 +41,27 @@ func NewGitHubSource(repoURL string) (*GitHubSource, error) {
 		return nil, err
 	}
 	return &GitHubSource{
-		RepoURL: strings.TrimRight(repoURL, "/"),
+		RepoURL: normalizeGitHubAPI(strings.TrimRight(repoURL, "/")),
 		client:  &http.Client{Timeout: 30 * time.Second, Transport: newSafeTransport()},
 	}, nil
+}
+
+// normalizeGitHubAPI 网页仓库地址归一到 REST API 端点：github.com/<o>/<r> →
+// api.github.com/repos/<o>/<r>。UpdateURLOfficial 是网页形态（设置里可读可
+// 跳转），而本源的取数端点全按 API 形态拼接——beta.2 实锚：缺这步归一，检查
+// 打的是网页 HTML，JSON 解码必炸，一切检查恒败并被吞成 hasUpdate:false，
+// 前端再误报「未配置更新分发源」（beta.1 起的死洞；此前 httptest 直构 API
+// 形态 URL 绕过了它，测试全绿假象）。API 形态直传不动（带 API token 的场景）
+func normalizeGitHubAPI(raw string) string {
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(raw), "/"))
+	if err != nil {
+		return raw
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "github.com" || host == "www.github.com" {
+		return "https://api.github.com/repos" + u.Path
+	}
+	return raw
 }
 
 type githubRelease struct {
@@ -58,6 +88,11 @@ func (s *GitHubSource) FetchLatest(ctx context.Context, platform, arch string) (
 	} else {
 		rel, err := s.fetchRelease(ctx, s.RepoURL+"/releases/latest")
 		if err != nil {
+			// 404=仓库无正式版（全为 prerelease 被端点排除）→「通道空」类型化，
+			// 让 API 层与「网络失败/源非法」区分开
+			if errors.Is(err, ErrReleaseNotFound) {
+				return nil, ErrNoStableRelease
+			}
 			return nil, err
 		}
 		release = rel
@@ -160,6 +195,9 @@ func (s *GitHubSource) fetchRelease(ctx context.Context, url string) (*githubRel
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("github api returned 404: %w", ErrReleaseNotFound)
+		}
 		return nil, fmt.Errorf("github api returned %d: %s", resp.StatusCode, string(body))
 	}
 	var release githubRelease
@@ -182,6 +220,9 @@ func (s *GitHubSource) fetchJSON(ctx context.Context, url string) ([]byte, error
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("github api returned 404: %w", ErrReleaseNotFound)
+		}
 		return nil, fmt.Errorf("github api returned %d: %s", resp.StatusCode, string(body))
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 512<<10))

@@ -49,13 +49,19 @@ func (m *Module) DependsOn() []string { return nil }
 // 进程内去重——重启后同版本至多再推一次
 const autoCheckInterval = 24 * time.Hour
 
-// Init 装配更新源：设置 UpdateURL 为空时回填官方仓库（P-20261103-1 零配置
-// 自更新）——「不更新」的语义由 UpdateChecks 开关承接（此处只管源，定时器看
-// 开关）。源非法（非 https / 指向内网）时留痕并不启用——更新通道是供应链
-// 入口，宁可不更新也不放宽
+// Init 装配更新源（与设置保存热化共用 ApplySource 同一语义，防双处漂移）
 func (m *Module) Init(_ context.Context, k kernel.Kernel) error {
 	m.k = k
-	cfg := store.Get().Settings.Get()
+	ApplySource(store.Get().Settings.Get())
+	return nil
+}
+
+// ApplySource 装配（或重接线）更新检查源——启动 Init 与设置保存（P-20261106
+// 热化：开关保存即生效，无须重启）共用同一入口：URL 空=官方仓内置
+// （P-20261103-1 零配置自更新，「不更新」语义由 UpdateChecks 开关承接）；
+// 源非法（非 https / 指向内网）时留痕并停用——更新通道是供应链入口，
+// 宁可不更新也不放宽；通道（stable/prerelease）随设置即时生效
+func ApplySource(cfg *config.Config) {
 	updateURL := strings.TrimSpace(cfg.Server.UpdateURL)
 	if updateURL == "" {
 		updateURL = config.UpdateURLOfficial
@@ -63,7 +69,8 @@ func (m *Module) Init(_ context.Context, k kernel.Kernel) error {
 	source, err := NewGitHubSource(updateURL)
 	if err != nil {
 		slog.Warn("update source rejected — update check disabled", "url", updateURL, "err", err)
-		return nil
+		GetManager().SetSource(nil)
+		return
 	}
 	// 预发布通道（P-20261103-3）：设置 updateChannel=prerelease 时跟进 beta/rc
 	//（默认 stable 只认最新正式版）。通道属检查口径，自更新应用链与校验链零特例
@@ -72,11 +79,11 @@ func (m *Module) Init(_ context.Context, k kernel.Kernel) error {
 		slog.Info("update: prerelease channel enabled — beta/rc releases visible to checks")
 	}
 	GetManager().SetSource(source)
-	return nil
 }
 
 // Start 启动期清理：旧备份、过期更新结果、serve 临时缓存；并挂定时检查
-// （UpdateChecks 开关关闭 = 自动检查完全静默，手动检查不受影响）
+// （定时器无条件注册，UpdateChecks 开关由 autoCheck 每次 tick 实读——
+// P-20261106 热化：开关保存即生效，不必重启）
 func (m *Module) Start(ctx context.Context, k kernel.Kernel) error {
 	exePath, _ := os.Executable()
 	CleanupBackup(exePath)
@@ -85,10 +92,6 @@ func (m *Module) Start(ctx context.Context, k kernel.Kernel) error {
 	CleanupServeCache(dd)
 	slog.Debug("update: startup cleanup done")
 
-	if !store.Get().Settings.Get().Server.UpdateChecks {
-		slog.Info("update: auto check disabled by settings")
-		return nil
-	}
 	if !k.Scheduler().AddTicker("update-check", autoCheckInterval, m.autoCheck) {
 		return errors.New("update: update-check ticker already registered")
 	}
@@ -109,6 +112,10 @@ func (m *Module) Start(ctx context.Context, k kernel.Kernel) error {
 // 系统通知（category=system，action=url 跳 Releases 页）
 func (m *Module) autoCheck(ctx context.Context) {
 	if m.k == nil {
+		return
+	}
+	// 开关实读（P-20261106 热化）：设置关闭即静默，保存即时生效
+	if !store.Get().Settings.Get().Server.UpdateChecks {
 		return
 	}
 	cur := strings.TrimSpace(m.currentVerGen())
