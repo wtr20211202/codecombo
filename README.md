@@ -65,8 +65,9 @@ elevation — administrator PowerShell on Windows, sudo on Linux (the script
 prompts for it and keeps the service running as *your* user, not root);
 macOS launchd agents need no elevation. Without elevation the script still
 installs the binary and prints the foreground command. The service writes
-only to your own data directory (`~/.codecombo`, pinned via `CC_DATA_DIR` on
-Windows).
+only to your own data directory (`~/.codecombo` — pinned via the
+`--data-dir` service argument on Windows, since the service account's
+default home points elsewhere).
 
 **Change bind host / port after install**: re-run the same command with
 `CODECOMBO_HOST=0.0.0.0` (env prefix), or manage the service directly.

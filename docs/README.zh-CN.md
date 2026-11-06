@@ -52,8 +52,8 @@ iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercon
 **权限与服务运行账户。** 注册服务需要提权——Windows 用管理员 PowerShell，
 Linux 用 sudo（脚本内部提权写系统文件，服务仍以**当前用户**身份运行而非
 root）；macOS launchd 用户代理无需提权。不提权也能装：脚本会装好二进制并
-打印前台启动命令。服务只写你自己的数据目录（`~/.codecombo`，Windows 下经
-注册表 `CC_DATA_DIR` 钉死到安装者用户目录）。
+打印前台启动命令。服务只写你自己的数据目录（`~/.codecombo`——Windows 下经服务命令行
+`--data-dir` 旗标钉死到安装者用户目录）。
 
 **安装后改绑定/端口**：带环境变量前缀重跑同一命令（`$env:CODECOMBO_HOST='0.0.0.0'`，
 幂等更新服务配置），或直接管理服务。服务管理命令**各平台不同**——Windows 的

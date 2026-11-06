@@ -128,9 +128,13 @@ if (-not $isAdmin) {
 }
 $svcExists = (sc.exe query Codecombo 2>$null | Select-String 'STATE') -ne $null
 if ($isAdmin) {
-  $svcBin = "`"$Bin`" --serve --port=$Port --host $BindHost"
+  # 数据目录直接写进服务命令行（--data-dir 旗标，main.go 原生支持）——
+  # 服务以 LocalSystem 跑（其 HOME 指向系统 profile），不显式指定会让数据
+  # 落 systemprofile\.codecombo 与交互运行分裂（实锚）。binPath 一眼可见、
+  # 不依赖 SCM 的注册表 Environment 注入（该机制有兼容性怪癖曾未生效）
+  $svcBin = "`"$Bin`" --serve --data-dir `"$DataDir`" --port=$Port --host $BindHost"
   if ($svcExists) {
-    Write-Host '==> Service exists - updating binPath + data-dir pin, then restarting'
+    Write-Host '==> Service exists - updating binPath (incl. --data-dir pin), then restarting'
     sc.exe stop Codecombo | Out-Null
     sc.exe config Codecombo binPath= $svcBin start= auto | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "    sc config failed (exit $LASTEXITCODE)" }
@@ -140,11 +144,6 @@ if ($isAdmin) {
     if ($LASTEXITCODE -ne 0) { Write-Host "    sc create failed (exit $LASTEXITCODE)" }
     sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
   }
-  # 服务以 LocalSystem 跑（其 HOME 指向系统 profile）——钉 CC_DATA_DIR 到
-  # 安装者用户的数据目录，保证「服务跑的数据 = 交互运行的数据」同份可复用。
-  # Environment 值规范为 REG_MULTI_SZ
-  New-Item -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Codecombo' -Name Environment -Force | Out-Null
-  New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Codecombo\Environment' -Name CC_DATA_DIR -Value "CC_DATA_DIR=$DataDir" -PropertyType MultiString -Force | Out-Null
   sc.exe start Codecombo 2>&1 | Select-String -Pattern '.' | ForEach-Object { Write-Host "    $_" }
   # 轮询确认 RUNNING（start 报成功≠真的起来了）
   $running = $false
