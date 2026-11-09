@@ -16,6 +16,12 @@ import { createOscFrameReassembler, createOscEventSink, concatBytes, parseOsc7Cw
 import { createDeferredWriteQueue } from './terminalDeferredWrites'
 import { createTerminalWithAddons } from './useTerminalAddons'
 import { attachTerminalKeyHandlers, type TerminalKeyAction } from './useTerminalKeys'
+import {
+  attachMouseModeTracking,
+  resetMouseModeTracking,
+  detachMouseModeTracking,
+} from './terminalMouseModeHint'
+import { attachOsc52Clipboard } from './terminalOsc52Clipboard'
 import { GIT_PANEL_AUTO_REFRESH, isGitWriteCommand } from './useGitPanelAutoRefresh'
 import { markCommandOutcome, resetCommandMarks } from './terminalCommandMarks'
 import { recordCommandBlockAnchor, resetCommandBlocks, scrollCommandBlock } from './terminalCommandBlocks'
@@ -732,6 +738,11 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
     resetCommandTimes(sessionId)
     resetBookmarks(sessionId)
     resetCommandMarks(sessionId)
+    // 鼠标上报模式簿记（P-20261106-6）：term 已 dispose、handler 随之失效，
+    // 硬清理防跨重挂残留；重见重挂 connect 会重新注册并由重放流重建
+    detachMouseModeTracking(sessionId)
+    // OSC 52 能力簿记（P-20261107-6）刻意不清：簿记随会话 id 存活而非 term 实例
+    // （重挂/重见不清，防提示条在能力已证会话反复复现，见 terminalOsc52Clipboard 注）
     commandOutputLines.delete(sessionId)
     commandPromptGen.delete(sessionId)
     // 重放失败收集与挂起的恢复定时器随实例消亡（P-20261006-37）：重见重挂的
@@ -985,6 +996,16 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
       },
     })
     ownedTerm = term
+    // 鼠标上报模式追踪（P-20261106-6）：DECSET/DECRST 1000/1002/1003 旁观记账
+    // （handler 恒透传，协议不动），供 pane 的「应用接管鼠标——Shift+拖选复制」
+    // 提示条显隐。注册先于 WS 建立，scrollback 重放里的模式序列恢复时已记账
+    attachMouseModeTracking(sessionId, term)
+    // OSC 52 剪贴板写入接管（P-20261107-6）：自 @xterm/addon-clipboard 让位——
+    // 自接独占 handler 走 copyText 降级链，写成功即登记「应用自复制能力已证」
+    // （addon 无成功回调拿不到信号），TerminalPane 提示条据此粘性抑制。不按
+    // oscSink 重放门禁短路：R 哨兵仅本地终端 WS 注入，远程链路门禁恒关会把
+    // 活输出全误判为重放（重放边界见 terminalOsc52Clipboard 注）
+    attachOsc52Clipboard(sessionId, term)
     // 快捷键拦截：回调集即本 composable 的 params（TerminalKeyHandlers 的结构超集，直传）。
     // 命令块跳过导航（P-20261003-269）缺省走共享视口实现——项目终端/agent 会话/
     // 远程终端全部面零接线生效；宿主显式注入时以宿主为准
@@ -1138,6 +1159,10 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
           armTimer = null
         }
         termInstance.reset()
+        // 鼠标上报模式软清零（P-20261106-6）：reset 清 xterm 自身模式，会话
+        // 追踪集合同步归零——重放流携带的 DECSET 随后经 handler 重新记账，
+        // 提示条与 xterm 实际鼠标模式保持一致（保留 Map 条目，见 composable 注）
+        resetMouseModeTracking(sessionId)
         oscReassembler.reset()
         // 延迟队列一并丢弃（P-20261004-46）：服务端将重放完整 scrollback，队列里
         // 的断线前积压帧与之重叠，不清即重放后双份；历史门禁/未读闸已重关，
@@ -1353,6 +1378,9 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
     // termInstances 守卫，此处置为双保险）
     writeStorm.dispose()
     resetCommandMarks(sessionId)
+    // 鼠标上报模式簿记硬清理（P-20261106-6）：随 dispose 释放（接管场景同
+    // resetCommandMarks 口径，重挂/重放自会重建）
+    detachMouseModeTracking(sessionId)
     // LRU 摘账（entry ⇔ 活实例同生命周期）+ 驱逐期收编：pane 在驱逐态被卸载
     // （会话关闭/宿主销毁）时，保留的 headless socket 在此关闭。
     // release 带自身 evict 闭包做所有权比对——双挂接窗口期新 pane 已覆盖注册，

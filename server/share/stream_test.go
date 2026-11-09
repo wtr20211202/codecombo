@@ -25,11 +25,17 @@ type stubLive struct {
 	cols    uint16
 	rows    uint16
 	unwired []string
+	// unfiltered 最近一次订阅携带的遮蔽模式（P-20261106-9：SSE 端点须按分享
+	// 记录把 Unfiltered 透传给直播源）
+	unfiltered []bool
+	// sizeFn 可变尺寸源（P-20261107-4 resize 帧用例；nil = 固定 cols/rows）
+	sizeFn func() (uint16, uint16)
 }
 
-func (s *stubLive) Subscribe(token, sessionID string) (LiveSubscription, error) {
+func (s *stubLive) Subscribe(token, sessionID string, unfiltered bool) (LiveSubscription, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.unfiltered = append(s.unfiltered, unfiltered)
 	if s.onSub != nil {
 		if err := s.onSub(s.subs); err != nil {
 			return nil, err
@@ -44,7 +50,7 @@ func (s *stubLive) Subscribe(token, sessionID string) (LiveSubscription, error) 
 	if done == nil {
 		done = make(chan struct{})
 	}
-	return &stubSub{tail: s.tail, data: data, done: done, ended: s.ended, cols: s.cols, rows: s.rows, live: s}, nil
+	return &stubSub{tail: s.tail, data: data, done: done, ended: s.ended, cols: s.cols, rows: s.rows, sizeFn: s.sizeFn, live: s}, nil
 }
 
 func (s *stubLive) Unwire(token string) {
@@ -54,13 +60,14 @@ func (s *stubLive) Unwire(token string) {
 }
 
 type stubSub struct {
-	tail  []byte
-	data  chan []byte
-	done  chan struct{}
-	ended bool
-	cols  uint16
-	rows  uint16
-	live  *stubLive
+	tail   []byte
+	data   chan []byte
+	done   chan struct{}
+	ended  bool
+	cols   uint16
+	rows   uint16
+	sizeFn func() (uint16, uint16)
+	live   *stubLive
 }
 
 func (s *stubSub) Tail() []byte          { return s.tail }
@@ -68,6 +75,9 @@ func (s *stubSub) Live() <-chan []byte   { return s.data }
 func (s *stubSub) Done() <-chan struct{} { return s.done }
 func (s *stubSub) Ended() bool           { return s.ended }
 func (s *stubSub) Size() (uint16, uint16) {
+	if s.sizeFn != nil {
+		return s.sizeFn()
+	}
 	return s.cols, s.rows
 }
 func (s *stubSub) Release() {
@@ -135,6 +145,65 @@ func TestStreamFrames(t *testing.T) {
 	}
 	if !strings.Contains(body, "event: end\ndata: {}") {
 		t.Fatalf("end frame missing: %q", body)
+	}
+}
+
+// 主机尺寸跟随（P-20261107-4 渲染保真）：主人调整窗口后，新尺寸的 resize 帧
+// 先于其后的数据帧送达（访客按新栅格渲染重绘）；尺寸未变不发、0 尺寸不发
+func TestStreamResizeFrameBeforeData(t *testing.T) {
+	shares := seedTerminalShare(t, fixedToken("resize"), "sess-rs")
+	data := make(chan []byte, 4)
+	done := make(chan struct{})
+	var mu sync.Mutex
+	cols, rows := uint16(100), uint16(30)
+	live := &stubLive{data: data, done: done, sizeFn: func() (uint16, uint16) {
+		mu.Lock()
+		defer mu.Unlock()
+		return cols, rows
+	}}
+	svc := NewService(shares, fakeRoots{}, nil).WithTerminalLive(live)
+
+	req := httptest.NewRequest("GET", "/s/"+fixedToken("resize")+"/stream", nil)
+	rec := httptest.NewRecorder()
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		svc.Handler().ServeHTTP(rec, req)
+	}()
+
+	data <- []byte("same-size")
+	time.Sleep(30 * time.Millisecond)
+	mu.Lock()
+	cols, rows = 0, 0 // 会话不可读：不下发 0 尺寸
+	mu.Unlock()
+	data <- []byte("zero-size")
+	time.Sleep(30 * time.Millisecond)
+	mu.Lock()
+	cols, rows = 160, 48 // 主人调整窗口
+	mu.Unlock()
+	data <- []byte("after-resize")
+	time.Sleep(50 * time.Millisecond)
+	close(done)
+	select {
+	case <-handlerDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stream handler did not return after feed end")
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `data: {"cols":100,"rows":30,"ended":false}`) {
+		t.Fatalf("hello must carry the subscribe-time size: %q", body)
+	}
+	if n := strings.Count(body, "event: resize"); n != 1 {
+		t.Fatalf("resize frames = %d, want exactly 1 (unchanged/zero sizes are not sent): %q", n, body)
+	}
+	resizeAt := strings.Index(body, "event: resize\ndata: {\"cols\":160,\"rows\":48}")
+	afterAt := strings.Index(body, "event: data\ndata: "+base64.StdEncoding.EncodeToString([]byte("after-resize")))
+	if resizeAt < 0 || afterAt < 0 || resizeAt > afterAt {
+		t.Fatalf("resize frame must precede post-resize bytes (resize=%d data=%d): %q", resizeAt, afterAt, body)
+	}
+	if strings.Index(body, base64.StdEncoding.EncodeToString([]byte("same-size"))) > resizeAt {
+		t.Fatalf("pre-resize bytes must not be preceded by the resize frame: %q", body)
 	}
 }
 

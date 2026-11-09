@@ -107,6 +107,9 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
 | `frontend.clipboard` | `sc-ops:frontend.clipboard`（`OPS_FRONTEND_CLIPBOARD`） | 直通 | agent |
 | `frontend.open` | `sc-ops:frontend.open`（`OPS_FRONTEND_OPEN`） | 直通 | agent |
 | `share.drop` | `sc-ops:share.drop`（`OPS_SHARE_DROP`） | 直通 | 服务端 |
+| `share.wtyping` | `sc-ops:share.wtyping`（`OPS_SHARE_WTYPING`） | 直通 | 服务端 |
+| `share.paste-review` | `sc-ops:share.paste-review`（`OPS_SHARE_PASTE_REVIEW`） | 直通 | 服务端 |
+| `notes.updated` | `sc-ops:notes.updated`（直通，无常量） | 直通 | 服务端 |
 | `system:rate-limited` | （无常量）`sc-ops:system:rate-limited` | 直通 | 服务端 |
 | `<自定义 type>` | `sc-ops:<type>` | 直通 | agent |
 
@@ -484,6 +487,53 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
   （`useShareDrop.ts`，与通知中心行内动作双出口同一链）；agent 监听同一
   事件自动感知协作素材到达（读清单 → 按主人确认读绝对路径分析）
 
+### share.wtyping
+
+- **window 事件**：`sc-ops:share.wtyping`（`OPS_SHARE_WTYPING`，直通分发）
+- **广播点**：`server/api/share/module.go`（Module.Start 装配 `WithWritableEvents`
+  回调——可写分享（P-20261106-8）的访客 WS 上行连接首条建立（active=true）与
+  末条断开/开关关闭清场（active=false）各广播一次）
+- **payload**：`{token, shareName, terminalId, active, visitors, nick?, visitorTail?}`
+  （仅元数据；visitorTail 是访客 visitorId 前 8 位摘要）
+- **消费方**：owner 工作台「访客输入中」会话行徽标
+  （`useDirectInputShares.ts` bump 即时对账，GET /api/share 行 wtyping 投影
+  是 15s 轮询兜底）；agent 监听同一事件可感知「锚定终端正被访客键入」
+  （避免与访客并发写同一会话——owner 键盘已被 directInputHold 反向闸让位）
+
+### share.paste-review
+
+- **window 事件**：`sc-ops:share.paste-review`（`OPS_SHARE_PASTE_REVIEW`，直通分发）
+- **广播点**：`server/api/share/module.go`（Module.Start 装配
+  `WithPasteReviewEvents` 回调——可写分享的访客粘贴块命中 commandrisk danger
+  档挂待批面时一次；未批不注入 PTY，60s 不决自动拒绝）
+- **payload**：`{token, shareName, terminalId, pasteId, summary, preview, visitorTail, at}`
+  （preview 是粘贴块头部 ≤200 rune 原样——访客输入不脱敏，owner 审批要看真实
+  命令才能裁决；summary 是 RiskSummary 一行命中摘要）
+- **消费方**：owner 工作台粘贴审批卡（批准/拒绝两动作，调 POST
+  /api/share/:token/paste/:pid/decision，幂等 404——已决/超时决策卡零副作用）
+### notes.updated
+
+- **window 事件**：`sc-ops:notes.updated`（直通分发——前端无常量，笔记面板
+  经统一接收链消费，见下）
+- **广播点**（P-20261108-3 单库化后）：`server/api/project/notesmulti.go`
+  （`/api/notes` 笔记库族 create/update/delete/restore/purge 成功路径——
+  notesCreate/notesPut/notesDelete/notesRestore 实现体）+
+  `server/api/project/notesmigrate.go`（单库化存量迁移有迁入时——启动期/手动
+  续迁/项目删除前三入口，noteId 空的作用域级广播，action=`migrated`）。
+  **已下线的广播点**：项目兼容端点 PUT /projects/:id/notes 与 notes-multi 项目族
+  随端点退役；sync notes/notes-multi 单元落位广播随单元退役——**单库化后笔记
+  不再随实例同步**（旧对端回流的笔记单元落位侧拒收，不再产生本事件）
+- **payload**：`{projectId, noteId?, action}`——action ∈ `saved|created|
+  renamed|trashed|restored|purged|migrated`；`noteId` 缺省 = 作用域级（清单可能
+  已变，重拉列表）。`projectId` 为作用域键：恒为笔记库保留哨兵 `_global`
+  （字段名沿用多篇时代的项目维度命名，载荷形状不变）。仅元数据上广播面（标题/
+  内容不上——terminal.message 同纪律），消费方收到即拉服务端真值，不信任载荷内容
+- **消费方**：笔记面板（单库引擎 useNotesMulti）合并到既有内部事件
+  `sc:notes-external-update` 消费——per-note 粒度（P-20261107-2 起）：当前篇被
+  外部改写且无未保存编辑时即时重读；清单变化重拉列表。只认 `_global` 键（旧服务端
+  /旧形态带项目 id 的事件忽略——单库化无项目库可对位）。「沉淀到笔记」等人侧写
+  路径继续走前端内部事件（同窗口无服务端往返，可携 `focus` 让视图聚焦该篇）
+
 ### system:rate-limited
 
 - **window 事件**：`sc-ops:system:rate-limited`（直通分发，无常量——前端无
@@ -541,7 +591,7 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
 | `OPS_AGENT_GROUPS_CHANGED` | `sc-ops:agent-groups-changed` | 无（收到即拉全量） | useWorkspaceSnapshot.ts（工作区预设恢复链 applyAgentGroups 落盘成功后，P-20261004-79） | useAgentTerminalGroups.ts（live 挂载中的会话管理页重读 agentTerminal.groups 即时重应用；home overlay 与 project 内嵌双实例各自监听） |
 | `OPS_WORKTREES_CHANGED` | `sc-ops:worktrees-changed` | 无（收到即拉全量） | CommitsPanel.vue:341 等跨组件创建/清理动作（历史检视 worktree 落档后，P-20261005-179） | GitWorktreesSection.vue（收到即重拉列表——面板自身只挂项目切换 watch，同项目异组件创建对其不可见） |
 | `OPS_AGENT_CRONS_CHANGED` | `sc-ops:agent-crons-changed` | 无（收到即拉全量） | useCronRetry.ts:77（cron-retry 一键重试成功后，P-20261006-14） | AgentCronSettings.vue（设置·定时任务分区收到即重拉列表） |
-| `NOTES_EXTERNAL_UPDATE` | `sc:notes-external-update`（**`sc:` 前缀历史命名**，非 `sc-ops:`） | `{projectId}` | useNotesDeposit.ts（任务终态「沉淀到笔记」写回后） | NotesPanel.vue（无未保存编辑时从服务端重读，防旧内容覆盖沉淀节） |
+| `NOTES_EXTERNAL_UPDATE` | `sc:notes-external-update`（**`sc:` 前缀历史命名**，非 `sc-ops:`） | `{projectId, noteId?, action?, focus?}`（projectId 恒为笔记库哨兵 `_global`，P-20261108-3） | useNotesDeposit.ts（任务终态「沉淀到笔记」追加进「[项目名] 交接」篇后，focus=true 聚焦该篇） | NotesPanel.vue（无未保存编辑时从服务端重读，防旧内容覆盖沉淀节；focus 时聚焦并重读该篇） |
 
 ---
 

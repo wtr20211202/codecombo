@@ -284,6 +284,10 @@ test.describe('share-collab', () => {
     await page.addInitScript(() => localStorage.setItem('sc.share.visitorId', 'e2e-visitor-ui-1'))
     await page.goto(`${visitor}/s/${agent.token}`)
     await expect(page.getByTestId('cl-root')).toBeVisible()
+    // 协作条缺省收起（P-20261107-4：展开内容浮于终端区之上，不再进列流挤压
+    // 终端卡片）——展开后见上传位与直通位
+    await expect(page.getByTestId('cl-drop')).toBeHidden()
+    await page.getByTestId('cl-toggle').click()
     await expect(page.getByTestId('cl-drop')).toBeVisible()
     await expect(page.getByTestId('cl-direct-request')).toBeVisible()
 
@@ -385,5 +389,66 @@ test.describe('share-collab', () => {
     await expect(page.getByTestId('cl-root')).toHaveCount(0)
     await expect(page.getByTestId('cl-drop')).toHaveCount(0)
     await expect(page.getByTestId('cl-direct-request')).toHaveCount(0)
+  })
+
+  test('素材富输入：协作条不挤压终端 → 文字素材成 .txt 直达收件区 → HTML 内联图片粘贴上行 → 只读页纯文字粘贴进素材框', async ({ page, request }) => {
+    test.setTimeout(120_000)
+    const headers = await unlockHeaders(request)
+    const visitor = await getShareBase(request, headers)
+    const live = await createTerminalShare(request, headers, 'shell', 'rich')
+    createdSessions.push(live.sessionId)
+    expect((await setCollab(request, headers, live.token, true)).ok()).toBeTruthy()
+
+    await page.goto(`${visitor}/s/${live.token}`)
+    await expect(page.locator('#badge[data-state="live"]')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByTestId('cl-root')).toBeVisible()
+
+    // ③ 不挤压：展开协作浮层前后终端卡片高度不变（浮层覆于终端区之上，不进列流）
+    const cardH = () => page.locator('.card').evaluate(el => el.getBoundingClientRect().height)
+    const before = await cardH()
+    await page.getByTestId('cl-toggle').click()
+    await expect(page.getByTestId('cl-panel')).toBeVisible()
+    expect(Math.abs((await cardH()) - before)).toBeLessThan(2)
+
+    // ④ 文字素材：输入 → 提交 → 完成态行 + 主人侧收件区出现 .txt 素材
+    const marker = `文字素材-${Date.now()}`
+    await page.getByTestId('cl-text').fill(`复现步骤：${marker}\n第二行`)
+    await page.getByTestId('cl-text-send').click()
+    await expect(page.getByTestId('cl-text-status')).toContainText('已上传', { timeout: 15_000 })
+    const waitInbox = async (pred: (d: { name: string; absPath: string }) => boolean) => {
+      for (let i = 0; i < 30; i++) {
+        const res = await request.get(`${BASE}/api/share/${live.token}/drops`, { headers })
+        const list = ((await res.json()) as { data?: Array<{ name: string; absPath: string; kind: string }> }).data || []
+        const hit = list.find(pred)
+        if (hit) return hit
+        await new Promise(r => setTimeout(r, 300))
+      }
+      return undefined
+    }
+    const textDrop = await waitInbox(d => d.name.endsWith('.txt'))
+    expect(textDrop, 'text material should land in the owner inbox as a .txt file').toBeTruthy()
+    expect(textDrop!.absPath).toContain('share-drops')
+
+    // ④ 粘贴失败形态②实勘修复：剪贴板只有 text/html 内联 <img src="data:image/png…">
+    //（.files 为空——网页/办公软件复制图片的常见形态）→ 解码成文件走同一上行链
+    await page.getByTestId('cl-toggle').click() // 先收起，验证粘贴从折叠态也能上行
+    await page.evaluate((b64) => {
+      const dt = new DataTransfer()
+      dt.setData('text/html', `<meta charset="utf-8"><img src="data:image/png;base64,${b64}">`)
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    }, PNG_1PX.toString('base64'))
+    const imgDrop = await waitInbox(d => d.name.endsWith('.png'))
+    expect(imgDrop, 'html-inline image paste should upload a png material').toBeTruthy()
+    // 折叠态摘要给反馈（已收份数）
+    await expect(page.getByTestId('cl-summary')).toContainText('已收', { timeout: 10_000 })
+
+    // 只读页上的纯文字粘贴：送进文字素材框待确认（不直接上传）
+    await page.evaluate(() => {
+      const dt = new DataTransfer()
+      dt.setData('text/plain', 'pasted-into-material-box')
+      document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    })
+    await expect(page.getByTestId('cl-panel')).toBeVisible()
+    await expect(page.getByTestId('cl-text')).toHaveValue('pasted-into-material-box')
   })
 })

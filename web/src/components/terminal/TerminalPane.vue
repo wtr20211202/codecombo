@@ -10,6 +10,12 @@ import { useI18n } from '../../composables/useI18n'
 import { termInstances, safeFit } from '../../composables/useTerminalInstances'
 import { terminalLru } from '../../composables/terminalLru'
 import { useTerminalClipboard, writeClipboard, isCopyOnSelectEnabled } from '../../composables/useTerminalClipboard'
+import {
+  isMouseReporting,
+  isMouseModeHintDismissed,
+  dismissMouseModeHintForever,
+} from '../../composables/terminalMouseModeHint'
+import { hasOsc52ClipboardProof } from '../../composables/terminalOsc52Clipboard'
 import { useTerminalSearch } from '../../composables/useTerminalSearch'
 import { useTerminalDnd } from '../../composables/useTerminalDnd'
 import { useTerminalSession, terminalHasReceivedOutput, type OscEvent } from '../../composables/useTerminalSession'
@@ -360,6 +366,30 @@ function attachCopyOnSelect(): void {
   containerRef.value.addEventListener('mouseup', onPaneMouseUp)
 }
 
+// ============== 应用接管鼠标提示条（P-20261106-6；触发精确化 P-20261107-6） ==============
+// claude code 等 TUI 开启鼠标上报后，普通拖选被应用消费，Shift+拖选才走本地
+// 选择进剪贴板。应用自报「已复制」是否真进剪贴板取决于应用是否走 OSC 52 且
+// 终端侧写入成功（不支持 OSC 52 的应用/非安全上下文写入失败 = 剪贴板无内容）。检测
+// 是 registerCsiHandler 旁观（恒透传、协议不动，见 terminalMouseModeHint），
+// 这里只做可视化：提示条随「鼠标上报模式在位」显隐（模式关闭即自动隐藏）。
+// 「不再提示」读模块级反应式镜像（非本地快照）：任一 pane 点 ✕ 全部已挂载
+// pane 同帧收起、设置页重置后已挂载 pane 即时恢复（safeStorage 持久化）。
+// onPaneMouseUp 既有延后取选区逻辑不感知本状态（鼠标模式下 xterm 不产生选区，
+// 天然不触发）
+// 粘性抑制（P-20261107-6）：应用经 OSC 52 成功写入过剪贴板（claude code 应用内
+// 复制的真实路径，terminalOsc52Clipboard 接管记账）= 复制本就可用、无需 Shift
+// 旁路——本会话恒不再显示（簿记随会话 id 存活：重连/驱逐重见/面板交接重建
+// term 均不清），防教育条反复复现
+const mouseModeHintVisible = computed(
+  () =>
+    isMouseReporting(props.sessionId) &&
+    !isMouseModeHintDismissed() &&
+    !hasOsc52ClipboardProof(props.sessionId),
+)
+function dismissMouseModeHint(): void {
+  dismissMouseModeHintForever()
+}
+
 // ============== Ctrl/Cmd+滚轮 字号手势（对标编辑器 Monaco 的缩放手感） ==============
 // 经 fontStore.stepTerminalSize 改全局终端字号（与设置页滑条/字号快捷键同源联动），
 // 随动 fit 由本组件与 useTerminalInstances 的字号 watch 天然承接。
@@ -658,6 +688,26 @@ const {
         <RefreshOutline />
       </n-icon>
     </button>
+    <!-- 应用接管鼠标提示条（P-20261106-6）：鼠标上报模式在位时显示——普通拖选
+         被应用消费，按住 Shift 拖选才走本地选择进剪贴板。模式关闭即自动隐藏；
+         本会话应用经 OSC 52 写剪贴板成功过即粘性不显示（P-20261107-6）；
+         ✕ = 永久不再提示（safeStorage，设置页可重置） -->
+    <div
+      v-if="mouseModeHintVisible"
+      class="term-mouse-hint"
+      data-testid="term-mouse-mode-hint"
+    >
+      <span class="term-mouse-hint-text">{{ t('terminal.mouseModeHint.text') }}</span>
+      <button
+        class="term-mouse-hint-close"
+        :title="t('terminal.mouseModeHint.dismiss')"
+        :aria-label="t('terminal.mouseModeHint.dismiss')"
+        data-testid="term-mouse-mode-hint-dismiss"
+        @click.stop.prevent="dismissMouseModeHint"
+      >
+        &times;
+      </button>
+    </div>
     <div
       v-if="session.connecting.value"
       class="term-pane-loading"

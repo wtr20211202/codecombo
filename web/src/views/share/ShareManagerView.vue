@@ -13,7 +13,7 @@ import {
   CheckboxOutline, CopyOutline, EllipsisHorizontalOutline, OpenOutline, QrCodeOutline, RefreshOutline, ShareSocialOutline, SearchOutline, KeyOutline,
   FolderOutline, DocumentOutline, TextOutline, TrashOutline, TerminalOutline, TimeOutline, PlayCircleOutline, LockClosedOutline,
   ChatbubbleEllipsesOutline, ChatbubblesOutline, PaperPlaneOutline, AddOutline, LocateOutline, RepeatOutline,
-  CloudCircleOutline, CloudUploadOutline, HandLeftOutline,
+  CloudCircleOutline, CloudUploadOutline, HandLeftOutline, CreateOutline,
 } from '@vicons/ionicons5'
 import {
   shareApi, quickdropApi, buildDropUrl,
@@ -24,6 +24,7 @@ import { useI18n } from '../../composables/useI18n'
 import { useShareAddressPlan } from '../../composables/useShareAddressPlan'
 import { bumpTerminalLiveShares } from '../../composables/useTerminalLiveShares'
 import { bumpDirectInputShares } from '../../composables/useDirectInputShares'
+import { confirmDialog, promptDialog } from '../../composables/useDialog'
 import { confirmSensitiveFiles } from '../../composables/useShareDialog'
 import { useShareNewShare } from '../../composables/useShareNewShare'
 import ShareTtlModal from '../../components/share/ShareTtlModal.vue'
@@ -677,6 +678,102 @@ async function applyDirectInput(s: ShareInfo, on: boolean) {
   } catch { /* 拦截器处理 */ }
 }
 
+// ── 可写分享开关（P-20261106-8「对方可直接输入」模式） ──
+// 泄露半径从「看输出」抬到「打 shell」——开启走三步：警示确认（远程协助
+// 语义 + 主人随时可收回）→ 口令门强制（未设口令先补设，token 链接会在
+// 聊天中转发，一道口令是成比例补偿）→ 落盘携 confirm（服务端硬闸）。
+// 关闭零摩擦（回收永远是安全方向：上行连接即刻断开、访客页回落只读）
+
+/** onWritableToggle 可写开关行内入口（仅 kind=terminal 行挂菜单项） */
+async function onWritableToggle(s: ShareInfo) {
+  if (s.writable) {
+    await applyWritable(s, false)
+    return
+  }
+  const confirmed = await confirmDialog({
+    title: t('share.writable.enableTitle'),
+    content: t('share.writable.enableConfirm', { name: s.name }),
+    type: 'warning',
+  })
+  if (!confirmed) return
+  let passphrase = ''
+  if (!s.hasPassphrase) {
+    // 口令门强制（修订点5）：无门记录先补设——promptDialog password 档
+    // 打码输入；取消 = 放弃开启（半途摩擦不是开启失败）
+    const pass = await promptDialog({
+      title: t('share.writable.passTitle'),
+      label: t('share.writable.passLabel'),
+      inputType: 'password',
+      placeholder: t('share.writable.passPh'),
+      hint: t('share.writable.passHint'),
+      validate: (v) => (v.length > 0 ? null : t('share.writable.passRequired')),
+      confirmText: t('share.writable.enable'),
+    })
+    if (pass == null) return
+    passphrase = pass
+  }
+  await applyWritable(s, true, passphrase)
+}
+
+/** applyWritable 单条开关落盘：on=true 携 confirm+passphrase（服务端三闸
+ *  对应面）；ttlHint=true 提示缩短 TTL（响应级约定，提示非强制） */
+async function applyWritable(s: ShareInfo, on: boolean, passphrase = '') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res: any = await shareApi.setWritable(s.token, on, on, passphrase)
+    applyRow(res?.data)
+    message.success(t(on ? 'share.writable.on' : 'share.writable.off'))
+    if (on && res?.ttlHint) message.warning(t('share.writable.ttlHint'), { duration: 5000 })
+    bumpDirectInputShares()
+    void fetchAll()
+  } catch { /* 拦截器处理 */ }
+}
+
+/** 一键收回访客输入（可写分享的 wtyping 在场行）：动作与开关关闭同一下游
+ *  （WritableDown——断上行连接 + 访客页回落只读），徽标随 bump 即时摘 */
+async function onRevokeWritable(s: ShareInfo) {
+  await applyWritable(s, false)
+}
+
+/** onBulkWritable 批量开/关可写（管理列表多选）：调专用批量端点（逐条独立
+ *  结算——无口令条目 passphrase_required 跳过，开启方向不摊薄口令补偿），
+ *  逐项明细入通知中心（runBulkRevoke 同款对账面） */
+async function onBulkWritable(on: boolean) {
+  const picked = shares.value.filter((s) => checkedKeys.value.includes(s.token))
+  if (picked.length === 0) return
+  const confirmed = await confirmDialog({
+    title: t(on ? 'share.writable.bulkOnTitle' : 'share.writable.bulkOffTitle'),
+    content: t(on ? 'share.writable.bulkOnConfirm' : 'share.writable.bulkOffConfirm',
+      { n: picked.length, names: bulkConfirmNames(picked) }),
+    type: on ? 'warning' : 'info',
+  })
+  if (!confirmed) return
+  bulkBusy.value = true
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res: any = await shareApi.batchWritable(picked.map((s) => s.token), on, on)
+    const rows = (res?.data || []) as Array<{ token: string; ok: boolean; reason?: string }>
+    const ok = rows.filter((r) => r.ok).length
+    const fail = rows.length - ok
+    const nameOf = (r: { token: string }) => picked.find((s) => s.token === r.token)?.name || r.token
+    // 摘要键用可写专用词条（share.bulk.done/partial 是批量撤销语义的文案，
+    // 复用会让可写开关报「已撤销 N 条分享」——文案与动作错位）
+    const doneKey = on ? 'share.writable.bulkDoneOn' : 'share.writable.bulkDoneOff'
+    if (fail === 0) message.success(t(doneKey, { n: ok }))
+    else message.warning(t('share.writable.bulkPartial', { ok, fail }))
+    void notificationStore.add({
+      type: fail === 0 ? 'success' : 'warning',
+      category: 'system',
+      title: t(fail === 0 ? doneKey : 'share.writable.bulkPartial', { n: ok, ok, fail }),
+      body: rows.map((r) => (r.ok ? `✓ ${nameOf(r)}` : `✗ ${nameOf(r)}：${r.reason || 'failed'}`)).join('\n'),
+    })
+  } catch { /* 拦截器处理 */ } finally {
+    bulkBusy.value = false
+  }
+  bumpDirectInputShares()
+  await fetchAll()
+}
+
 /** 批准在途申请（直通握手 owner 半边）：agent 会话限定判定在服务端，
  *  无在途申请 409 如实提示 */
 async function onApproveDirect(s: ShareInfo) {
@@ -876,6 +973,13 @@ const columns = computed<DataTableColumns<ShareInfo>>(() => [
         extra.push(h(NTag, { size: 'small', bordered: false, type: 'warning', title: t('share.viewOnce.badgeTip'), 'data-testid': 'sm-viewonce-badge' },
           { default: () => t('share.viewOnce.typeBadge') }))
       }
+      // 未过滤徽标（P-20261106-9）：创建时显式关闭了敏感值遮蔽——每个管理面
+      // 一眼可辨的出域级标记（error 色与退役访问/消费失效同档显著）；遮蔽开
+      //（缺省）不挂，存量行零噪音
+      if (r.unfiltered) {
+        extra.push(h(NTag, { size: 'small', bordered: false, type: 'error', title: t('share.unfiltered.badgeTip'), 'data-testid': 'sm-unfiltered-badge' },
+          { default: () => t('share.unfiltered.typeBadge') }))
+      }
       if (r.consumed) {
         extra.push(h(NTag, { size: 'small', bordered: false, type: 'error', title: t('share.viewOnce.consumedTip'), 'data-testid': 'sm-consumed-badge' },
           { default: () => t('share.viewOnce.consumedBadge') }))
@@ -1012,6 +1116,15 @@ function moreOptionsFor(r: ShareInfo): Array<DropdownOption | DropdownDividerOpt
       icon: icon(CloudUploadOutline),
       props: r.directInput ? { style: 'color: var(--accent)' } : undefined,
     })
+    // 可写分享（P-20261106-8）：仅 terminal 直播行（组合语义——frozen/cast/
+    // session 天然只读）；wtyping 在场行挂「收回访客输入」危险项（与直通
+    // 持权卡同族的一键收回面）
+    options.push({
+      label: r.writable ? t('share.writable.menuOn') : t('share.writable.menuOff'),
+      key: 'writable',
+      icon: icon(CreateOutline),
+      props: r.writable ? { style: 'color: var(--accent)' } : undefined,
+    })
   }
   if (r.collab) {
     options.push({ label: t('share.drop.menu'), key: 'drops', icon: icon(FolderOutline) })
@@ -1027,6 +1140,14 @@ function moreOptionsFor(r: ShareInfo): Array<DropdownOption | DropdownDividerOpt
     options.push({
       label: t('share.direct.revokeAction', { nick: r.direct.nick || '' }),
       key: 'revokeDirect',
+      icon: icon(HandLeftOutline),
+      props: { style: 'color: var(--accent-red)' },
+    })
+  }
+  if (r.wtyping && (r.wtyping.visitors ?? 0) > 0) {
+    options.push({
+      label: t('share.writable.revokeAction', { n: r.wtyping.visitors }),
+      key: 'revokeWritable',
       icon: icon(HandLeftOutline),
       props: { style: 'color: var(--accent-red)' },
     })
@@ -1056,9 +1177,11 @@ function onMoreSelect(r: ShareInfo, key: string | number) {
     case 'revoke': onRevoke(r); break
     case 'collab': void onCollabToggle(r); break
     case 'directInput': void onDirectInputToggle(r); break
+    case 'writable': void onWritableToggle(r); break
     case 'drops': void onDrops(r); break
     case 'approveDirect': void onApproveDirect(r); break
     case 'revokeDirect': void onRevokeDirect(r); break
+    case 'revokeWritable': void onRevokeWritable(r); break
   }
 }
 
@@ -1311,6 +1434,33 @@ function actionBtn(tooltip: string, icon: typeof CopyOutline, disabled: boolean,
           @click="exitBulkMode"
         >
           {{ t('share.bulk.exit') }}
+        </NButton>
+        <NButton
+          size="small"
+          type="warning"
+          secondary
+          :disabled="checkedKeys.length === 0"
+          :loading="bulkBusy"
+          data-testid="sm-bulk-writable-on"
+          @click="onBulkWritable(true)"
+        >
+          <template #icon>
+            <NIcon><CreateOutline /></NIcon>
+          </template>
+          {{ t('share.writable.bulkOn') }}
+        </NButton>
+        <NButton
+          size="small"
+          secondary
+          :disabled="checkedKeys.length === 0"
+          :loading="bulkBusy"
+          data-testid="sm-bulk-writable-off"
+          @click="onBulkWritable(false)"
+        >
+          <template #icon>
+            <NIcon><CreateOutline /></NIcon>
+          </template>
+          {{ t('share.writable.bulkOff') }}
         </NButton>
         <NButton
           size="small"

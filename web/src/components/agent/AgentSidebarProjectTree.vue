@@ -29,6 +29,9 @@ const props = defineProps<{
   collapsedProjects?: Set<string>
   /** 会话 id → 项目相对 dir（「在文件树中定位」可用性；无条目 = 不可定位置灰） */
   locateDirs?: Record<string, string>
+  /** 直播中会话 id → 徽标 title（P-20261106-7，会话树透传）：行红点徽标 +
+   *  右键「直播分享/结束直播」文案翻转；缺条目 = 未直播 */
+  liveTitles?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -40,6 +43,9 @@ const emit = defineEmits<{
   (e: 'project-action', payload: { projectId: string; key: 'create-session' | 'open' }): void
   /** 项目会话右键菜单：在文件树中定位 / 结束会话（确认由宿主承担） */
   (e: 'project-session-action', payload: { sessionId: string; key: 'destroy' | 'locate-tree' }): void
+  /** 项目会话行能力四件（P-20261106-7 双入口纪律）：与会话树行同事件合流上抛，
+   *  宿主接线 useTerminalShareActions（底部终端 tab 右键同一实现） */
+  (e: 'capability-action', payload: { sessionId: string; key: 'liveShare' | 'frozenShare' | 'replayShare' | 'exportOutput' }): void
 }>()
 
 const { t } = useI18n()
@@ -108,10 +114,17 @@ const projectMenuOptions = computed(() => [
   { label: t('agentTerminal.openProject'), key: 'open' },
 ])
 // 在文件树中定位（P-20261002-125）：会话 dir 不在当前项目内（含项目会话归属
-// 他项目）时无解析值 → 置灰；菜单随 menuProjectSessionId 逐行求可用性
+// 他项目）时无解析值 → 置灰；菜单随 menuProjectSessionId 逐行求可用性。
+// 能力四件（P-20261106-7 双入口纪律）：项目会话同时是底部终端 tab，本树行
+// 右键与 tab 右键同款同序（直播按锚点态翻转「结束直播」/ 快照 / 回放 / 导出），
+// 列表只收存活会话故不设禁用态；动作实现在宿主 useTerminalShareActions
 const projectSessionMenuOptions = computed(() => [
   { label: t('agentTerminal.rename'), key: 'rename' },
   { label: t('terminal.locate.inTree'), key: 'locate-tree', disabled: props.locateDirs?.[menuProjectSessionId.value] === undefined },
+  { label: t(props.liveTitles?.[menuProjectSessionId.value] ? 'terminal.endLiveShare' : 'terminal.liveShare'), key: 'liveShare' },
+  { label: t('terminal.frozenShare'), key: 'frozenShare' },
+  { label: t('terminal.shareReplay'), key: 'replayShare' },
+  { label: t('terminal.exportOutput'), key: 'exportOutput' },
   { label: t('agentTerminal.destroy'), key: 'destroy' },
 ])
 function onProjectMenu(key: string) {
@@ -124,6 +137,10 @@ function onProjectSessionMenu(key: string) {
   if (!id) return
   if (key === 'locate-tree') {
     emit('project-session-action', { sessionId: id, key: 'locate-tree' })
+    return
+  }
+  if (key === 'liveShare' || key === 'frozenShare' || key === 'replayShare' || key === 'exportOutput') {
+    emit('capability-action', { sessionId: id, key })
     return
   }
   if (key === 'rename') {
@@ -223,11 +240,20 @@ function onProjectSessionMenu(key: string) {
             @blur="confirmRenameSession"
             @click.stop
           />
-          <span
-            v-else
-            class="ats-item-title"
-            :title="s.name"
-          >{{ s.name }}</span>
+          <template v-else>
+            <!-- 直播中徽标（P-20261106-7 双入口）：项目会话在底部终端 tab 与本树
+                 两处可见，红点同数据源（useTerminalShareActions.liveTitles）同视觉语 -->
+            <span
+              v-if="props.liveTitles?.[s.id]"
+              class="ats-item-live"
+              :title="props.liveTitles[s.id]"
+              data-test="session-live-badge"
+            />
+            <span
+              class="ats-item-title"
+              :title="s.name"
+            >{{ s.name }}</span>
+          </template>
           <span
             v-if="idleBadge(s.id)"
             class="ats-item-idle"
@@ -339,6 +365,20 @@ function onProjectSessionMenu(key: string) {
 @keyframes ats-pulse {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-running) 45%, transparent); }
   50% { box-shadow: 0 0 0 4px transparent; }
+}
+/* 直播中徽标（P-20261106-7）：与会话树行 / 底部终端 tab 同视觉语（红点缩放呼吸，
+   语义红档 --status-failed）；scoped 样式不跨组件，此处同款复刻 */
+.ats-item-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--status-failed);
+  animation: ats-live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ats-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
 }
 /* 会话静默弱标（P-20261003-53）：灰调小徽标，弱样式不弹窗不打断（与宿主同款） */
 .ats-item-idle {

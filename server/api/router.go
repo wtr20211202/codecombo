@@ -535,7 +535,7 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 		api.GET("/projects/:id", project.GetProject)
 		api.PUT("/projects/:id", project.RelocateProject)
 		// 冻结/解冻（P-20261003-9）：布尔开关走既有 Update 链，PUT 子资源先例
-		// 同 /projects/:id/notes、/projects/:id/git-config
+		// 同 /projects/:id/git-config
 		api.PUT("/projects/:id/frozen", project.SetProjectFrozen)
 		// 硬锁锁定/解锁（P-20261004-3）：locked 归档不可变档开关，双向审计；
 		// 本端点自身不挂 ProjectHardLock 守卫——它是唯一解锁路径
@@ -593,6 +593,13 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 			shareGroup.POST("/:token/direct/approve", shareapi.ApproveShareDirect)
 			shareGroup.POST("/:token/direct/revoke", shareapi.RevokeShareDirect)
 			shareGroup.GET("/:token/direct", shareapi.GetShareDirect)
+			// 可写分享管理面（P-20261106-8，动作化行内端点同族）：单条开关
+			// （口令门强制在此）+ 批量开关（管理列表多选）+ 粘贴审批决策。
+			// 写入面在访客子服务 GET /s/{token}/termws（WS 上行桥，开关缺省
+			// 关，关闭恒 404；升级握手同过 gateGuard）
+			shareGroup.POST("/writable/batch", shareapi.BatchShareWritable)
+			shareGroup.POST("/:token/writable", shareapi.SetShareWritable)
+			shareGroup.POST("/:token/paste/:pid/decision", shareapi.DecideSharePasteReview)
 		}
 
 		// 快投递管理面（P-20261006-51）：收件箱清单/摘除 + 投递凭据生命周期
@@ -632,10 +639,23 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 		api.GET("/projects/:id/search", gitops.SearchProjectRateLimit(), gitops.SearchProjectFiles)
 		// TODO/FIXME 标记聚合（P-20261002-25）：复用内容搜索后端，按文件分组
 		api.GET("/projects/:id/todos", gitops.ProjectTodos)
-		// 项目笔记（P-20261002-110，人机共享便签层）：面板与 agent（ops 手册
-		// 登记）读写同一份；agent 经既有 LockMiddleware 的 SC 锁 token 调用
-		api.GET("/projects/:id/notes", project.GetProjectNotes)
-		api.PUT("/projects/:id/notes", project.PutProjectNotes)
+		// 笔记库（P-20261107-5 独立化 → P-20261108-3 单库化）：项目无关的唯一
+		// notepad 库，/api/notes 族（保留哨兵 _global 作用域）。原项目族
+		// /projects/:id/notes（兼容 shim）与 /projects/:id/notes-multi 七端点随
+		// 「全局库|项目库」双源切换一并退役，存量项目篇经迁移并入本库。挂 api 组
+		// 继承 LockCSRF+锁门+TokenAuth+AgentGuard 四件套（复审#2 钉死，挂错组即绕锁门）
+		api.GET("/notes", project.ListGlobalNotes)
+		api.POST("/notes", project.CreateGlobalNote)
+		// 单库化迁移续迁（P-20261108-3）：滞留计数只读 + 手动续迁（满额中止后
+		// 腾出空间再续）。静态段与 /:noteId 动态段同树共存（gin 静态优先，
+		// /fleet 同款；笔记 id 恒为 uuid/default，不与 migration 撞名）
+		api.GET("/notes/migration", project.GetNotesMigration)
+		api.POST("/notes/migration", project.PostNotesMigration)
+		api.GET("/notes/:noteId", project.GetGlobalNote)
+		api.PUT("/notes/:noteId", project.PutGlobalNote)
+		api.DELETE("/notes/:noteId", project.DeleteGlobalNote)
+		api.POST("/notes/:noteId/restore", project.RestoreGlobalNote)
+		api.GET("/notes/:noteId/export", project.ExportGlobalNote)
 		// 跨项目批量内容搜索（并发池 4，结果按项目分组；不能挂在
 		// /projects/search——与 /projects/:id 通配符冲突，与 ahead-behind 同款独立路径）。
 		// 限流同上（P-20261004-124），按客户端 IP 维度：单请求扇出至多 50 项目，

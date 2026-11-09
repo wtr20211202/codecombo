@@ -96,9 +96,9 @@ describe('useKeymapStore', () => {
     localStorage.clear()
   })
 
-  it('默认表：48 个动作各就位（28 布局 + 17 终端域 + 3 编辑器域），含 P-24 草稿键、P-51 导航后退/前进键、P-38 新建终端键、P-93 分屏键、P-20261005-230 下方分屏键、P-101 全部保存键、P-135 标签线性切换键、P-149 多剪贴板粘贴键、P-20261003-18 Markdown 模式循环键、P-20261003-111 终端域键、P-20261003-269 命令块导航键、P-20261004-16 书签列表键、P-20261004-102 书签间跳转键、P-20261004-111 pane 焦点切换键、P-20261005-201 键盘移动标签键与 P-20261008-14 编辑器域键', () => {
+  it('默认表：51 个动作各就位（28 布局 + 17 终端域 + 3 编辑器域 + 3 笔记面板域），含 P-24 草稿键、P-51 导航后退/前进键、P-38 新建终端键、P-93 分屏键、P-20261005-230 下方分屏键、P-101 全部保存键、P-135 标签线性切换键、P-149 多剪贴板粘贴键、P-20261003-18 Markdown 模式循环键、P-20261003-111 终端域键、P-20261003-269 命令块导航键、P-20261004-16 书签列表键、P-20261004-102 书签间跳转键、P-20261004-111 pane 焦点切换键、P-20261005-201 键盘移动标签键、P-20261008-14 编辑器域键与 P-20261107-5 笔记面板域键', () => {
     const store = useKeymapStore()
-    expect(KEYMAP_ACTION_ORDER).toHaveLength(48)
+    expect(KEYMAP_ACTION_ORDER).toHaveLength(51)
     expect(store.combos.commandPalette).toBe('ctrl+k')
     expect(store.combos.quickOpen).toBe('ctrl+p')
     expect(store.combos.toggleSidebar).toBe('ctrl+b')
@@ -190,6 +190,16 @@ describe('useKeymapStore', () => {
       expect(TERMINAL_DOC_ACTIONS.has(id) || ['terminalSearch', 'terminalCopy', 'terminalPaste', 'terminalSplitH', 'terminalSplitV', 'terminalClosePane', 'termFocusOtherPane', 'terminalCyclePrev', 'terminalCycleNext', 'terminalCmdPrev', 'terminalCmdNext', 'terminalBookmarkList'].includes(id)).toBe(true)
     }
     expect(KEYMAP_ACTION_ORDER.filter(id => KEYMAP_ACTION_DOMAIN[id] === 'editor')).toEqual(['editorSave', 'editorBookmarkToggle', 'editorInlineEdit'])
+    // 笔记面板域（P-20261107-5）：保存/新建/重命名三键；ctrl+s 与编辑器域
+    // editorSave 同默认是焦点域分层共存（Monaco 聚焦 vs 笔记面板聚焦，生效条件
+    // 物理互斥），注册表内不标红——同 editor×terminal 口径
+    expect(KEYMAP_ACTION_ORDER.filter(id => KEYMAP_ACTION_DOMAIN[id] === 'notes')).toEqual(['notesSave', 'notesCreate', 'notesRename'])
+    expect(store.combos.notesSave).toBe('ctrl+s')
+    expect(store.combos.notesCreate).toBe('ctrl+alt+m')
+    expect(store.combos.notesRename).toBe('ctrl+alt+r')
+    expect(store.conflicts.notesSave).toBeNull()
+    expect(store.conflicts.notesCreate).toBeNull()
+    expect(store.conflicts.notesRename).toBeNull()
   })
 
   it('分屏键位匹配：移位字符变体（Shift+\\ 报 |）经别名命中；两键位互不误吞', () => {

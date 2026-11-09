@@ -1,9 +1,19 @@
 import { ref, watch } from 'vue'
 import { useUIStateStore } from '../stores/uiState'
 
-export type SideView = 'files' | 'changes' | 'todos' | 'notes' | 'stream' | 'env' | 'sync'
+// 侧栏视图枚举单一真源：类型由清单派生，归一白名单天然穷尽。'notes' 已随
+// P-20261108-2 退役——笔记成主区/首页独立视图（见 showNotesView），不再走侧栏
+export const SIDE_VIEW_IDS = ['files', 'changes', 'todos', 'stream', 'env', 'sync'] as const
+export type SideView = typeof SIDE_VIEW_IDS[number]
 export type BottomTab = 'git' | 'terminal' | 'commit' | 'console' | 'preview' | 'problems'
 export type CommitLocation = 'sidebar' | 'bottom'
+
+/** 持久化 sideView 归一（P-20261108-2）：旧存档的已退役值（'notes'）或任何未知
+ *  值回落 'files'——不归一则 SidePanel 分发链落到末位 v-else（提交面板），渲染与
+ *  活动栏高亮错位的死分支（bottomTab 'commit'→'git' 归一同款先例） */
+export function normalizeSideView(raw: unknown): SideView {
+  return (SIDE_VIEW_IDS as readonly unknown[]).includes(raw) ? raw as SideView : 'files'
+}
 
 /** 出厂默认布局快照（P-20261002-74）：一键重置与测试态复位共用同一份真源——
  *  面板开合/双栏宽度/底栏高度/最大化态的「初始值」只在此定义一次 */
@@ -70,6 +80,11 @@ const showShareManager = ref(false)
 const showDshConsole = ref(false)
 // dsh 控制台最大化（fixed 全屏覆盖，类似底部终端最大化；关闭控制台即还原）
 const dshMaximized = ref(false)
+// 笔记独立视图（P-20261108-2：笔记脱离侧栏窄条成 notepad 式大区域）：项目页占
+// 主区编辑器位（第六主区占用者，与远程/分享/dsh/仪表盘同层级互斥），首页以近
+// 全屏 overlay 呈现——同一份开态，NotesView 宿主按路由各挂一份。显隐不落
+// uiState（showDashboard 同款定案：纯查看面，刷新回工作形态）
+const showNotesView = ref(false)
 
 // 下次进入项目时若侧栏未打开则兜底打开文件面板：终端会话管理「打开项目」跳转
 // 语义——布局恢复（上次 UI 状态）由 Layout bootstrap 完成，本标志只负责
@@ -121,11 +136,12 @@ function toggleRemoteConsole() {
   // 主区视图被任一最大化态覆盖：先还原再切换（点啥显示啥）
   restoreFromMaximized()
   showRemoteConsole.value = !showRemoteConsole.value
-  // 主区多视图互斥：进远程控制台时关闭分享管理/dsh 控制台/项目仪表盘
+  // 主区多视图互斥：进远程控制台时关闭分享管理/dsh 控制台/项目仪表盘/笔记视图
   if (showRemoteConsole.value) {
     showShareManager.value = false
     closeDshConsole()
     closeDashboard()
+    closeNotesView()
   }
 }
 
@@ -138,9 +154,10 @@ function openRemoteConsole() {
   showShareManager.value = false
   closeDshConsole()
   closeDashboard()
+  closeNotesView()
 }
 
-/** 打开项目仪表盘主区视图（幂等；与远程/分享/dsh 同层级互斥）。
+/** 打开项目仪表盘主区视图（幂等；与远程/分享/dsh/笔记同层级互斥）。
  *  toggle/深链 query/默认落点三入口共用同一互斥与最大化还原前置 */
 function openDashboard() {
   restoreFromMaximized()
@@ -148,6 +165,7 @@ function openDashboard() {
   showRemoteConsole.value = false
   showShareManager.value = false
   closeDshConsole()
+  closeNotesView()
 }
 
 /** 切换项目仪表盘主区视图（活动栏按钮语义：开↔关） */
@@ -164,6 +182,29 @@ function closeDashboard() {
   showDashboard.value = false
 }
 
+/** 打开笔记独立视图（幂等；rail/命令面板/沉淀助力/首页入口共用）：与远程/分享/
+ *  dsh/仪表盘互斥 + 最大化还原前置（openDashboard 同款）；agent docked 的互斥在
+ *  调用方与 AgentTerminal 反向 watch（本模块不能反向引用 useAgentTerminal） */
+function openNotesView() {
+  restoreFromMaximized()
+  showNotesView.value = true
+  showRemoteConsole.value = false
+  showShareManager.value = false
+  closeDshConsole()
+  closeDashboard()
+}
+
+/** 切换笔记独立视图（活动栏按钮/命令面板 toggle-notes 语义：开↔关） */
+function toggleNotesView() {
+  if (showNotesView.value) closeNotesView()
+  else openNotesView()
+}
+
+/** 关闭笔记独立视图（头部关闭钮/首页 Esc/其他主区视图或编辑器意图接管时调用） */
+function closeNotesView() {
+  showNotesView.value = false
+}
+
 /** 切换分享管理主区视图（与远程控制台同层级互斥） */
 function toggleShareManager() {
   restoreFromMaximized()
@@ -172,6 +213,7 @@ function toggleShareManager() {
     showRemoteConsole.value = false
     closeDshConsole()
     closeDashboard()
+    closeNotesView()
   }
 }
 
@@ -184,6 +226,7 @@ function toggleDshConsole() {
     showRemoteConsole.value = false
     showShareManager.value = false
     closeDashboard()
+    closeNotesView()
   } else {
     dshMaximized.value = false // 关闭控制台即还原最大化，下次打开从常态开始
   }
@@ -225,14 +268,15 @@ export async function restoreDshConsoleOnce(): Promise<void> {
   showRemoteConsole.value = false
   showShareManager.value = false
   closeDashboard()
+  closeNotesView()
 }
 
-function togglePanel(panel: 'files' | 'changes' | 'todos' | 'notes' | 'stream' | 'env' | 'sync' | 'git' | 'terminal') {
+function togglePanel(panel: 'files' | 'changes' | 'todos' | 'stream' | 'env' | 'sync' | 'git' | 'terminal') {
   // 「点啥显示啥」通用规则（用户实测：终端最大化后点活动栏其他功能无反应观感）：
   // 目标视图被最大化面板覆盖时，先还原最大化再执行切换——
-  //   侧栏（files/changes/todos/notes/stream/env）：仅被 终端最大化/底部全屏 覆盖（编辑器区最大化保留侧栏可见）
+  //   侧栏（files/changes/todos/stream/env/sync）：仅被 终端最大化/底部全屏 覆盖（编辑器区最大化保留侧栏可见）
   //   底部 tab（git/terminal）：面板自身即被最大化的对象，还原为停靠态并落在该 tab
-  if (panel === 'files' || panel === 'changes' || panel === 'todos' || panel === 'notes' || panel === 'stream' || panel === 'env' || panel === 'sync') {
+  if (panel === 'files' || panel === 'changes' || panel === 'todos' || panel === 'stream' || panel === 'env' || panel === 'sync') {
     if (bottomPanelMaximized.value || terminalMaximized.value) restoreFromMaximized()
     // 侧边栏视图：已激活则关闭，否则切换并打开
     if (showSidePanel.value && sideView.value === panel) {
@@ -412,6 +456,7 @@ export function usePanelLayout() {
     editorGroupMaximized, terminalPaneMaximized,
     showRemoteConsole, showShareManager, showDshConsole, toggleDshConsole, closeDshConsole, dshMaximized,
     showDashboard, openDashboard, toggleDashboard, closeDashboard,
+    showNotesView, openNotesView, toggleNotesView, closeNotesView,
     toggleBottomPanel, toggleSidePanel, togglePanel, toggleRemoteConsole, openRemoteConsole, toggleShareManager,
     maximizeBottomPanel, maximizeBottomPanelEditor, maximizeTerminal,
     toggleEditorGroupMaximized, toggleTerminalPaneMaximized,
@@ -441,6 +486,7 @@ export function resetPanelLayout() {
   terminalPaneMaximized.value = null
   showRemoteConsole.value = false
   showDashboard.value = false
+  showNotesView.value = false
   showShareManager.value = false
   showDshConsole.value = false
   dshMaximized.value = false

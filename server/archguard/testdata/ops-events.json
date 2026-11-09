@@ -303,5 +303,41 @@
       "url"
     ],
     "source": "agent"
+  },
+  "share.wtyping": {
+    "anchor": "share.wtyping",
+    "payload": [
+      "active",
+      "nick",
+      "shareName",
+      "terminalId",
+      "token",
+      "visitorTail",
+      "visitors"
+    ],
+    "source": "server"
+  },
+  "share.paste-review": {
+    "anchor": "share.paste-review",
+    "payload": [
+      "at",
+      "pasteId",
+      "preview",
+      "shareName",
+      "summary",
+      "terminalId",
+      "token",
+      "visitorTail"
+    ],
+    "source": "server"
+  },
+  "notes.updated": {
+    "anchor": "notes.updated",
+    "payload": [
+      "action",
+      "noteId",
+      "projectId"
+    ],
+    "source": "server"
   }
 }

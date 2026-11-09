@@ -17,7 +17,8 @@ func init() {
   - "ahead-behind-all"  GET   /api/ahead-behind              全项目批量 ahead/behind
   - "fetch-all"         POST  /api/fetch-all                一键全部拉取
   - "bulk-agent"        POST  /api/terminals/bulk-agent     舰队批量发起 agent 会话
-  - "notes"             GET/PUT /api/projects/:id/notes      项目笔记
+  - "notes-global"      /api/notes 族                        笔记库（项目无关的唯一笔记库，P-20261108-3 单库化——
+                                                             旧对端可能仍声明已退役的 notes/notes-multi 项目笔记族）
   - "flat-file-list"    GET   /api/projects/:id/file-list    扁平文件清单
   - "file-history"      GET   /api/projects/:id/file/history 本地文件历史
   - "fs-attribution"    GET   /api/projects/:id/fs-attribution 文件改动来源归因
@@ -37,7 +38,7 @@ func init() {
 ` + "```bash" + `
 curl -s {{BASE}}/api/meta
 # {"version":{"version":"1.2.0","commit":"...","buildTime":"...","apiVersion":"1.0.0"},
-#  "capabilities":["ahead-behind-all","fetch-all","flat-file-list","notes","file-history"]}
+#  "capabilities":["ahead-behind-all","fetch-all","flat-file-list","notes-global","file-history"]}
 ` + "```" + `
 
 2) capabilities 含 "ahead-behind-all" → 批量端点一次拿全：
@@ -173,6 +174,16 @@ code 字段——此时按 HTTP status + error 文本降级判断即可。
                                      同时留意 system:rate-limited 回告）。内容搜索
                                      30 次/分钟/项目（P-20261004-124）；终端输出检索
                                      30 次/分钟/会话或令牌/IP（P-20261005-158）
+- notes.not_found               404  笔记篇不存在：GET /api/notes 清单核对 noteId
+- notes.conflict                409  笔记 baseUpdatedAt 过期（响应附 currentContent/
+                                     currentUpdatedAt）：先读现状再决策（覆盖/载入
+                                     服务端版本/另存新篇），勿盲目重试覆盖
+- notes.too_large               413  笔记内容超 256KB：精简后重发
+- notes.global_limit            400  笔记库篇数达上限（100 含回收站）：删减或彻底
+                                     删除回收站篇后重试（P-20261108-3 单库化后唯一
+                                     额度码，项目档 notes.limit_reached 已随项目笔记
+                                     端点退役）
+- notes.title_too_long          400  笔记标题超 200 字节：换短标题
 
 ## git 失败恢复 hint（kind → 建议动作）
 
@@ -1288,9 +1299,14 @@ prompt 首行是任务模板（缺省要求「说明两侧取舍理由，完成�
                                            host:sharePort）
 - POST   /api/share/terminal                开终端只读直播 {"sessionId"(取 $CC_TERMINAL_ID),"ttlMinutes"?,"passphrase"?,"watermark"?}(默认 30 分钟；
                                            幂等同链；访客看遮蔽化只读输出流，无输入端点)
-- POST   /api/share/terminal-frozen         冻结终端输出快照 {"sessionId"(取 $CC_TERMINAL_ID),"watermark"?}（P-20261005-205：
+- POST   /api/share/terminal-frozen         冻结终端输出快照 {"sessionId"(取 $CC_TERMINAL_ID),"watermark"?,"passphrase"?}（P-20261005-205：
                                            创建时刻的输出定格链接，默认 30 天；会话关闭后仍可访问；同一段
-                                           输出重复冻结恒同链；空输出 400）
+                                           输出重复冻结恒同链；空输出 400；passphrase 可选访问口令门，
+                                           幂等命中带新口令=改门、不带=保持既有（P-20261107-4））
+                                           两端点可选 "unfiltered":true 关闭敏感值遮蔽（P-20261106-9：原样
+                                           出域——直播原样转发/快照含原文落盘 24h 强制失效，访客页标「未过滤」，
+                                           与遮蔽链恒不同链、创建时定死）。缺省遮蔽开；agent 令牌带 true 走
+                                           AgentGuard 审批（428）——仅在用户明确要求原样输出时使用，绝不自作主张
 - POST   /api/share/cast                    会话回放分享 {"recordingId"(录制 id，取实况记录列表),"ttlMinutes"?,
                                            "override"?,"passphrase"?,"watermark"?}（P-20261004-103：把一次
                                            过程录制的 cast 快照成只读回放页链接，默认 1 小时、上限 24h；
@@ -1378,7 +1394,9 @@ token+IP 频控），留言随分享生命周期级联删除——新留言入�
 协作通道（P-20261024-1，分享级开关缺省关，动作化行内端点——分享无编辑面）：
 - POST /api/share/:token/collab             开关协作通道 {"collab":true|false}
                                             （开启后访客直播页出现「协作素材」上传位：
-                                            粘贴/拖入/点击三入口，图片 ≤10MB/文件 ≤20MB/
+                                            粘贴/拖入/点击三入口 + 文字素材框（访客文字
+                                            成 .txt 素材走同一收件链，P-20261107-4），
+                                            图片 ≤10MB/文件 ≤20MB/
                                             单批 ≤5 个，per-share 收件区配额 200MB；关闭即
                                             回收上传位，存量素材保留可读；访客留言上限
                                             500→2000 字）
@@ -1397,6 +1415,26 @@ token+IP 频控），留言随分享生命周期级联删除——新留言入�
                                             会话可授——普通终端直通=匿名远程 shell 明确不做；
                                             授予即 owner 侧 WS 键盘挂只读闸）
 - POST   /api/share/:token/direct/revoke    一键收回（幂等；解除只读闸）
+- POST   /api/share/:token/writable         可写分享开关（P-20261106-8「对方可
+                                            直接输入」远程协助档，显式推翻 P-20261024-1
+                                            「普通终端不做直通」红线：owner 逐案开关+
+                                            出域警示+全量审计+实时可见+一键收回五重
+                                            补偿）{"on":true,"confirm":true,"passphrase"?}——
+                                            开启需显式 confirm；强制口令门（记录无
+                                            口令时必携 passphrase 补设，400 stable
+                                            "writable requires a passphrase"）；仅
+                                            terminal live 形态可开（frozen/cast/session
+                                            天然只读 400）；关闭零摩擦（断全部上行）
+- POST   /api/share/writable/batch          可写批量开关 {"tokens":[..],"on":true,
+                                            "confirm":true}（管理列表多选；逐条独立
+                                            结算 per-token {ok,reason}——无口令条目
+                                            passphrase_required 跳过，批量不摊薄口令
+                                            补偿）
+- POST   /api/share/:token/paste/:pid/decision  可写粘贴审批决策 {"approve":bool}
+                                            （访客整块输入命中 commandrisk danger 档
+                                            挂待批面——未批不注入 PTY，60s 不决自动
+                                            拒绝；sc-ops:share.paste-review 审批卡两
+                                            动作的调用端点，未知/已决 404 幂等）
 访客侧握手与输入在 /s/{token}/direct/*（申请 60s 时效、10min 无输入自动回收、
 每批 ≤4KB 全量审计）。素材到达经 ops-channel 广播 sc-ops:share.drop（detail 仅
 元数据：token/文件名/大小/昵称）+ 通知中心入账（行内动作「交给当前会话/新会话
@@ -1425,8 +1463,10 @@ GET 链接只出泛化确认页（不计数、不武装、不渲染内容、不�
 +口令=最严）；frozen/terminal/terminal-frozen 形态不支持（400）。失效不
 可逆（rotate/SetExpiry 救不回），要再发请撤销后重建（重建即全新倒计时）。
 安全边界：访客只能访问分享根内的内容（符号链接不可见），路径穿越被拒绝；
-终端直播严格只读（访客面无分享内容写入端点：/gate 口令验证、/view 一次性
-确认、/messages 留言均不写分享内容）；冻结副本住服务端数据目录隔离区，
+终端直播缺省严格只读（访客面无分享内容写入端点：/gate 口令验证、/view 一次性
+确认、/messages 留言均不写分享内容；唯一例外=可写分享档 POST
+/api/share/:token/writable 显式开启后的 /s/{token}/termws 上行桥——五重补偿
+控制见上文端点行，缺省关即回到只读）；冻结副本住服务端数据目录隔离区，
 不随项目删除联动（撤销/过期才清）。
 
 ## 快投递 quickdrop（P-20261006-51「手机触发 agent」配方）
@@ -1831,9 +1871,11 @@ status=denied 且带 ruleHit 即用户配置的规则拦截，勿原样重试，
 		Section{
 			ID: "sync", Title: "多实例项目同步（跨实例搬运项目与上下文）", Order: 78,
 			Summary: "fleet 巡检可编程化：manifest 对账四态判定 → plan 预览 → pull/push 整项目搬运（含 .gitignore 感知排除/原子落位/覆盖备份）",
-			Body: `把「项目 + 上下文（会话/笔记/定时任务/运行时注册/审批规则/接续链/uiState）」
+			Body: `把「项目 + 上下文（会话/定时任务/运行时注册/审批规则/接续链/uiState）」
 整体在实例间搬运：新实例从零到与源实例体验一致，一次同步完成。对端能力探测：
 GET /api/meta capabilities 含 "sync" 才可用（未声明 = 对端需升级）。
+**笔记不随实例同步**（P-20261108-3 单库化：笔记是项目无关的全局库，notes/
+notes-multi 单元已退役；跨实例需要时单篇 export 后人工搬运）。
 
 ## 端点
 
@@ -1842,7 +1884,9 @@ GET /api/meta capabilities 含 "sync" 才可用（未声明 = 对端需升级）
 - POST /api/sync/plan {"instanceId","projectKeys"?,"contexts"?}
                                              四态判定预览：synced/local-newer/
                                              peer-newer/conflict/new + 建议动作与
-                                             默认勾选（冲突默认不勾需人工裁决）
+                                             默认勾选（冲突默认不勾需人工裁决）；
+                                             旧对端仍带的笔记单元标 retired
+                                             （action=skip 不可勾选——知情不执行）
 - POST /api/sync/pull {"instanceIds":[一个],"units":[键...],"includeIgnored"?,"includeGit"?}
                                              拉取落地本端（自动注册项目）
 - POST /api/sync/push {"instanceIds":[可多台],"units":[...],"resolutions"?{键:local|peer|skip}}
@@ -1866,7 +1910,8 @@ GET /api/meta capabilities 含 "sync" 才可用（未声明 = 对端需升级）
 ## 单元键（跨实例稳定）
 
 - project:<根目录基名>   项目本体（目录树；含 .git 与否是传输档）
-- sessions:/notes:/crons:<基名>   项目上下文
+- sessions:/crons:<基名>   项目上下文（notes:/notes-multi: 已退役——点名即逐个记
+  失败不传输，旧对端推来的笔记单元落地侧拒收回告，结果卡标红）
 - snippets/runtimes/approvals/chains/uistate   全局单元（键即 kind）
 
 ## agent 工作流示例（把项目集推到新实例）

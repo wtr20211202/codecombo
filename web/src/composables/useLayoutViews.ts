@@ -86,7 +86,7 @@ export function useLayoutViews(options: {
    *  （流程编排在 useWorkspaceSnapshot，shell 装配时注入） */
   snapshotSave: () => void
   snapshotOpenManager: () => void
-  togglePanel: (p: 'files' | 'changes' | 'todos' | 'notes' | 'stream' | 'env' | 'sync' | 'git' | 'terminal') => void
+  togglePanel: (p: 'files' | 'changes' | 'todos' | 'stream' | 'env' | 'sync' | 'git' | 'terminal') => void
   toggleRemoteConsole: () => void
   /** 编辑器组临时最大化 toggle（P-20261004-64，命令面板入口）：shell 闭包合成
    *  ——splitOpen 守卫 + activeGroup 取号 + usePanelLayout.toggle 转调 */
@@ -147,7 +147,7 @@ export function useLayoutViews(options: {
   // 编辑规则文件执行链（P-20261006-43）：命令面板 edit-rule:<name> 存在深链
   // 进编辑器、缺失确认后模板创建（同上：setup 期实例化，useRouter 须上下文）
   const { runRuleFileCommand } = useRuleFileLaunch(message)
-  const { toggleDshConsole, closeDshConsole, closeDashboard, openDashboard, openRemoteConsole } = usePanelLayout()
+  const { toggleDshConsole, closeDshConsole, closeDashboard, openDashboard, openRemoteConsole, closeNotesView, toggleNotesView } = usePanelLayout()
   // 一键重置当前项目布局（P-20261002-74）：confirm 后写回出厂默认并就地重应用
   const { resetLayoutWithConfirm } = useLayoutReset()
   // 多实例会话总览弹层（命令面板入口；组件由 Layout 宿主渲染）
@@ -179,6 +179,8 @@ export function useLayoutViews(options: {
     // 项目仪表盘（P-20261005-224）同上：开着仪表盘时 EditorArea v-show 为 false，
     // 打开文件意图必须同时收回仪表盘（「看状态」让位「动手」）
     closeDashboard()
+    // 笔记独立视图（P-20261108-2，第六主区占用者）同理：开文件意图收回笔记视图
+    closeNotesView()
     // 只关 docked 管理页；悬浮窗/悬浮条是全局悬浮层，与编辑器共存
     useAgentTerminal().hideDocked()
   }
@@ -221,16 +223,25 @@ export function useLayoutViews(options: {
   // 通知/agent navigate 的可携参直达入口，与活动栏按钮同链）
   const remoteAutoHost = ref('')
   function consumeViewQuery() {
-    if (route.query.view === 'remote') {
+    const view = route.query.view
+    // 主区深链 = 显式要看该视图，docked 管理页须让位（P-20261108-1）：跨路由进入
+    // （首页结果卡「管理全部」/设置出域总览卡/ops navigate）时本函数在 Layout
+    // setup 期即消费，早于 AgentTerminal 主区互斥反向 watch 的安装（且非
+    // immediate）——首页 overlay 带入或按项目记忆恢复的 docked 页不会收起，与目标
+    // 视图叠成双视图。只收 docked，悬浮窗/悬浮条不动（showEditorMain 同款）；
+    // 项目内深链反向 watch 本也会收，幂等零语义变化
+    if (view === 'remote' || view === 'shares' || view === 'dashboard') useAgentTerminal().hideDocked()
+    if (view === 'remote') {
       showRemoteConsole.value = true
       remoteAutoHost.value = (route.query.host as string) || ''
-      // 深链直写不经 toggle 的互斥分支：仪表盘在场时一并收回（防双视图叠加）
+      // 深链直写不经 toggle 的互斥分支：仪表盘/笔记视图在场时一并收回（防双视图叠加）
       closeDashboard()
+      closeNotesView()
       router.replace({ path: '/project' })
-    } else if (route.query.view === 'shares') {
+    } else if (view === 'shares') {
       toggleShareManager()
       router.replace({ path: '/project' })
-    } else if (route.query.view === 'dashboard') {
+    } else if (view === 'dashboard') {
       openDashboard()
       router.replace({ path: '/project' })
     }
@@ -473,6 +484,9 @@ export function useLayoutViews(options: {
     }
     switch (id) {
       case 'toggle-files': togglePanel('files'); break
+      // 笔记独立视图直达（P-20261107-2 → P-20261108-2 侧栏 notes 视图退役）：主区
+      // 视图 toggle，与活动栏 rail 同链（docked 管理页由 AgentTerminal 反向 watch 收）
+      case 'toggle-notes': toggleNotesView(); break
       // 跨项目实时变更流（P-20261003-232）：打开活动栏独立面板（值班大屏卡
       // 之外的 IDE 内入口；面板自管轮询）
       case 'change-stream': togglePanel('stream'); break

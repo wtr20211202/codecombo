@@ -63,6 +63,7 @@ type Store struct {
 	CronMetric      CronMetricStore
 	RemoteGitPath   RemoteGitPathStore
 	ProjectNotes    ProjectNotesStore
+	MultiNotes      MultiNotesStore
 	FileHistory     FileHistoryStore
 	DailyReport     DailyReportStore
 	ActivityDay     ActivityDayStore
@@ -136,6 +137,7 @@ func New(doc DocumentStore, notifyOut ...func(n notification.Notification)) *Sto
 		CronMetric:      NewCronMetricRepo(doc),
 		RemoteGitPath:   NewRemoteGitPathRepo(doc),
 		ProjectNotes:    NewProjectNotesRepo(doc),
+		MultiNotes:      NewMultiNotesRepo(doc),
 		FileHistory:     NewFileHistoryRepo(doc),
 		DailyReport:     NewDailyReportRepo(doc),
 		ActivityDay:     NewActivityDayRepo(doc),

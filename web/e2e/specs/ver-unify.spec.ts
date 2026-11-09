@@ -31,12 +31,13 @@ test('三处版本入口统一为同一面板', async ({ page }) => {
     test.skip(true, '锁定遮罩在默认密码解锁后仍存在（远程实例锁定态被恢复为活动实例），跳过')
   }
 
-  // ① 首页右上角（uiState 恢复可能直接进项目页——先回首页）
+  // ① 首页 logo（P-20261107-1 版本号位收敛：原右上角 .home-version 徽章移除，
+  // 版本弹窗入口转 logo；uiState 恢复可能直接进项目页——先回首页）
   if (!page.url().endsWith('/')) {
     await page.goto('/')
     await page.waitForTimeout(800)
   }
-  await page.locator('.home-version').click()
+  await page.locator('[data-testid="home-logo"]').click()
   await page.waitForTimeout(500)
   const homeCard = page.locator('.version-card')
   const w1 = await homeCard.evaluate(el => el.getBoundingClientRect().width)

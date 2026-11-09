@@ -52,7 +52,7 @@ func TestCreateTerminalFrozenValidation(t *testing.T) {
 func TestSanitizeTermFrozenOutput(t *testing.T) {
 	raw := []byte("\x1b[32m$ export CC_LOCK_TOKEN=scl_deadbeef001\x1b[0m\r\n" +
 		"password=\"hunter2\"\r\nAKIAABCDEFGHIJKLMNOP\r\n")
-	masked, hash := sanitizeTermFrozenOutput(raw)
+	masked, hash := sanitizeTermFrozenOutput(raw, false)
 
 	// ANSI 序列剥除（净化文本无转义字节）
 	if strings.ContainsRune(masked, 0x1b) {
@@ -71,12 +71,59 @@ func TestSanitizeTermFrozenOutput(t *testing.T) {
 	if len(hash) != 64 {
 		t.Fatalf("hash len = %d, want 64 hex chars", len(hash))
 	}
-	if _, hash2 := sanitizeTermFrozenOutput(raw); hash2 != hash {
+	if _, hash2 := sanitizeTermFrozenOutput(raw, false); hash2 != hash {
 		t.Fatalf("hash not deterministic: %s vs %s", hash, hash2)
 	}
 	// 输入不同（净化后内容不同）→ 哈希不同（不同输出不得共用一条链）
-	if _, hash3 := sanitizeTermFrozenOutput([]byte("other output")); hash3 == hash {
+	if _, hash3 := sanitizeTermFrozenOutput([]byte("other output"), false); hash3 == hash {
 		t.Fatal("different content must derive different hash")
+	}
+}
+
+// TestSanitizeTermFrozenOutputUnfiltered 未过滤模式（P-20261106-9 显式 opt-out）：
+// 只剥 ANSI、敏感值原样保留（内网协作原样输出）；哈希走域分离——即便输出
+// 不含任何敏感值（两模式落盘字节全等），遮蔽/未过滤两条快照也恒不同链，
+// 幂等定位不会把「请求未过滤」落到既有遮蔽记录上（或反之）；同输入确定性
+func TestSanitizeTermFrozenOutputUnfiltered(t *testing.T) {
+	raw := []byte("\x1b[32m$ export CC_LOCK_TOKEN=scl_deadbeef001\x1b[0m\r\npassword=\"hunter2\"\r\n")
+	text, hash := sanitizeTermFrozenOutput(raw, true)
+	if strings.ContainsRune(text, 0x1b) {
+		t.Fatalf("unfiltered output must still strip ANSI (render purification is orthogonal): %q", text)
+	}
+	for _, secret := range []string{"scl_deadbeef001", "hunter2"} {
+		if !strings.Contains(text, secret) {
+			t.Fatalf("unfiltered output must keep %q verbatim: %q", secret, text)
+		}
+	}
+	if _, again := sanitizeTermFrozenOutput(raw, true); again != hash {
+		t.Fatal("unfiltered hash not deterministic")
+	}
+	if _, maskedHash := sanitizeTermFrozenOutput(raw, false); maskedHash == hash {
+		t.Fatal("unfiltered and masked snapshots of sensitive output must not share a link")
+	}
+	// 无敏感值：两模式净化文本全等，哈希仍须不同（域分离）
+	plain := []byte("build ok\r\n")
+	pText, pHash := sanitizeTermFrozenOutput(plain, true)
+	mText, mHash := sanitizeTermFrozenOutput(plain, false)
+	if pText != mText {
+		t.Fatalf("plain output differs between modes: %q vs %q", pText, mText)
+	}
+	if pHash == mHash {
+		t.Fatal("hash must be domain-separated by mode even for byte-identical content")
+	}
+}
+
+// TestShareResponseUnfilteredProjection 管理面投影（P-20261106-9）：未过滤记录
+// 恒携 unfiltered:true（列表徽标/结果卡标注数据源）；遮蔽记录不携带（存量
+// 零迁移语义——缺省即已遮蔽）
+func TestShareResponseUnfilteredProjection(t *testing.T) {
+	on := shareResponse(store.Share{Token: "t1", Kind: store.ShareKindTermFrozen, Unfiltered: true})
+	if v, ok := on["unfiltered"]; !ok || v != true {
+		t.Fatalf("unfiltered record must project unfiltered:true, got %v", on["unfiltered"])
+	}
+	off := shareResponse(store.Share{Token: "t2", Kind: store.ShareKindTerminal})
+	if _, ok := off["unfiltered"]; ok {
+		t.Fatal("masked record must omit the unfiltered projection")
 	}
 }
 

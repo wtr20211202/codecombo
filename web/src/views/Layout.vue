@@ -10,10 +10,8 @@ import RemoveConfirmModal from '../components/layout/RemoveConfirmModal.vue'
 import RemoteConsoleView from './remote/RemoteConsoleView.vue'
 import ShareManagerView from './share/ShareManagerView.vue'
 import DashboardView from './dashboard/DashboardView.vue'
+import NotesView from './notes/NotesView.vue'
 import DshConsoleView from '../components/tools/DshConsoleView.vue'
-import ShareResultDialog from '../components/share/ShareResultDialog.vue'
-import ShareCreateDialog from '../components/share/ShareCreateDialog.vue'
-import ShareSnippetDialog from '../components/share/ShareSnippetDialog.vue'
 import CompareExperimentPanel from '../components/agent/CompareExperimentPanel.vue'
 import AgentChainPanel from '../components/agent/AgentChainPanel.vue'
 import AgentTerminal from '../components/agent/AgentTerminal.vue'
@@ -90,13 +88,15 @@ function onFileClickFromPanel(file: { path: string; name: string }): void {
   if (narrow.value) showSidePanel.value = false
 }
 
-// 智能体 docked 管理页与编辑器/远程控制台三视图互斥（主区同一位置）
+// 智能体 docked 管理页与编辑器/远程控制台/笔记等主区视图互斥（主区同一位置）
 const { visible: agentVisible, mode: agentMode } = useAgentTerminal()
 const agentDockedVisible = computed(() => agentVisible.value && agentMode.value === 'docked')
 // dsh 控制台视图（P6）：懒挂载保活，与编辑器/远程/分享/agent 管理页互斥
+// immediate（P-20261106-4）：showDshConsole 是 usePanelLayout 模块级状态，首页往返
+// 重挂后已为 true——无「变化」可触发 watch，主区空壳而活动栏图标照常选中
 const layoutForDsh = usePanelLayout()
 const dshEverOpened = ref(false)
-watch(() => layoutForDsh.showDshConsole.value, (v) => { if (v) dshEverOpened.value = true })
+watch(() => layoutForDsh.showDshConsole.value, (v) => { if (v) dshEverOpened.value = true }, { immediate: true })
 
 // 项目仪表盘视图（P-20261005-224）：懒挂载保活，与编辑器/远程/分享/dsh 互斥——
 // 首开才挂载（挂载即取数），之后 v-show 切换；visible 直通仪表盘控制取数节奏
@@ -194,11 +194,11 @@ watch(() => instanceStore.pendingSessionJump, (j) => {
         </div>
       </Transition>
 
-      <!-- 编辑器 ↔ 远程控制台/分享管理 ↔ 智能体管理页（互斥主区视图，v-show 保活：
-           编辑器状态/WS 会话不丢）+ 底部面板（常驻：主区视图下底部面板仍可用） -->
+      <!-- 编辑器 ↔ 远程控制台/分享管理/dsh/仪表盘/笔记 ↔ 智能体管理页（互斥主区视图，
+           v-show 保活：编辑器状态/WS 会话不丢）+ 底部面板（常驻：主区视图下底部面板仍可用） -->
       <div class="ide-body">
         <EditorArea
-          v-show="!showRemoteConsole && !showShareManager && !agentDockedVisible && !layoutForDsh.showDshConsole.value && !layoutForDsh.showDashboard.value"
+          v-show="!showRemoteConsole && !showShareManager && !agentDockedVisible && !layoutForDsh.showDshConsole.value && !layoutForDsh.showDashboard.value && !layoutForDsh.showNotesView.value"
           ref="editorAreaRef"
           :groups="groups"
           :active-group="activeGroup"
@@ -266,12 +266,12 @@ watch(() => instanceStore.pendingSessionJump, (j) => {
           class="dashboard-embedded"
           :visible="layoutForDsh.showDashboard.value"
         />
-        <!-- 分享短链结果卡（右键「分享」创建成功后弹出，全局单例状态） -->
-        <ShareResultDialog />
-        <!-- 分享创建弹层（模式选择 live/frozen，P-20261003-320，全局单例状态） -->
-        <ShareCreateDialog />
-        <!-- 文本片段分享弹窗（终端右键/编辑器右键/命令面板三入口，全局单例状态） -->
-        <ShareSnippetDialog />
+        <!-- 笔记独立视图（P-20261108-2，主区第六占用者：占编辑器位，懒挂载保活；
+             开态/互斥在 usePanelLayout，首页 overlay 形态由 HomeView 另挂一份） -->
+        <NotesView />
+        <!-- 分享族弹层四件（P-20261108-1）上提 App 层 ShareDialogsHost：
+             首页/大屏等不经本 Layout 的入口同样弹得出（勿在此回挂——单例
+             状态下双宿主 = 同屏两份弹层） -->
         <!-- 对比实验面板（P-20261003-46，命令面板/agent 管理页头部入口，全局单例状态） -->
         <CompareExperimentPanel />
         <!-- 会话接续链面板（P-20261004-38，agent 管理页头部入口，全局单例状态） -->

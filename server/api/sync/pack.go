@@ -48,7 +48,8 @@ func findProjectByBasename(base string) *config.ProjectConfig {
 // zip 包布局：每单元一个 `u<i>/` 前缀（TransferMeta.Units[i] 与之一一对应）：
 //   - project：工作区文件树（含 .git 与否按请求档）逐文件条目
 //   - sessions：transcripts/<uuid>.jsonl + curation.json
-//   - notes/crons/snippets/runtimes/approvals/chains/uistate：单 JSON 文档
+//   - crons/snippets/runtimes/approvals/chains/uistate：单 JSON 文档（笔记单元
+//     notes/notes-multi 随 P-20261108-3 单库化退役，打包/落位两侧均拒）
 //
 // 落位安全（二审增强③）：项目先写临时目录再原子换名（新项目），已存在项目
 // 逐文件落位且被覆盖文件先移入 `.sync-backup/<时间戳>/`（保留最近 3 份）——
@@ -67,7 +68,7 @@ const (
 type unitPayload struct {
 	entry   UnitEntry             // 本端单元（含绝对 Path）
 	unit    TransferUnit          // 包内单元元数据
-	project *config.ProjectConfig // project/sessions/crons/notes 单元的本端项目
+	project *config.ProjectConfig // project/sessions/crons 单元的本端项目
 	// withGit 项目单元是否含 .git。同步链按请求全局档（packUnitsStream 入口
 	// 统一赋值）；迁移全量包按项目勾选（migration_export 逐单元赋值）——
 	// per-unit 档让一个包里能混装「纯工作区」与「含 .git」两种项目档
@@ -98,6 +99,12 @@ func resolveUnitPayloads(keys []string, includeIgnored bool) ([]unitPayload, []s
 			errs = append(errs, key+": credentials unit moves only via the includeCredentials envelope channel")
 			continue
 		}
+		if IsRetiredKind(kind) {
+			// 笔记单元退役（P-20261108-3）：旧对端拉取/新端误点名均显式拒绝，
+			// 回告文案同落位拒收——对端结果卡标红而非拿到空包静默成功
+			errs = append(errs, key+": "+retiredNotesUnitError)
+			continue
+		}
 		if base == "" {
 			// 全局单元（无内容即拒绝——打包中途失败会拖垮整包）
 			if len(globalUnitPayload(kind)) == 0 {
@@ -114,11 +121,6 @@ func resolveUnitPayloads(keys []string, includeIgnored bool) ([]unitPayload, []s
 		}
 		// 上下文单元无内容即拒绝（打包中途失败会拖垮整包——解析期拒绝干净）
 		switch kind {
-		case UnitNotes:
-			if n, nerr := store.Get().ProjectNotes.Get(p.ID); nerr != nil || strings.TrimSpace(n.Content) == "" {
-				errs = append(errs, key+": notes empty")
-				continue
-			}
 		case UnitCrons:
 			if !hasProjectCrons(p.Path) {
 				errs = append(errs, key+": no project crons")
@@ -198,8 +200,6 @@ func packUnitsInto(ctx context.Context, zw *zip.Writer, payloads []unitPayload, 
 			err = packProjectUnit(ctx, zw, prefix, up, includeIgnored, progress, i)
 		case UnitSessions:
 			err = packSessionsUnit(zw, prefix, up, progress, i)
-		case UnitNotes:
-			err = packNotesUnit(zw, prefix, up)
 		case UnitCrons:
 			err = packCronsUnit(zw, prefix, up)
 		default:
@@ -331,22 +331,6 @@ func countJSONL(entries []os.DirEntry) int {
 		}
 	}
 	return n
-}
-
-// packNotesUnit 笔记打包
-func packNotesUnit(zw *zip.Writer, prefix string, up *unitPayload) error {
-	note, err := store.Get().ProjectNotes.Get(up.project.ID)
-	if err != nil {
-		return errf("notes not found")
-	}
-	b, _ := json.Marshal(note)
-	fw, werr := zw.CreateHeader(&zip.FileHeader{Name: prefix + "notes.json", Method: zip.Deflate})
-	if werr != nil {
-		return werr
-	}
-	_, werr = fw.Write(b)
-	up.unit.Entries = 1
-	return werr
 }
 
 // packCronsUnit 项目域定时任务打包（Dir 保留源形态，落位侧按 SrcPath→dest 重映射）
@@ -539,6 +523,13 @@ func defaultIfEmpty(v, fallback string) string {
 // landOneUnit 单单元落位（分发到 project/上下文/全局/投递各形态）
 func landOneUnit(ctx context.Context, zr *zip.Reader, prefix string, tu *TransferUnit, destRoot string, finalPaths, projectIDs map[string]string, progress func(int, string, int64), unitIdx int) *LandUnitResult {
 	lr := &LandUnitResult{Key: tu.Key}
+	if IsRetiredKind(tu.Kind) {
+		// mixed-version 回流防线（P-20261108-3）：旧对端包携带的笔记单元若照旧
+		// 落位会直写项目作用域键——本端 UI 恒全局库看不见 = 静默半态。显式拒收
+		// 并回告，推送方结果卡标红（单元键同时以 kind 判定，防改名绕过）
+		lr.Error = retiredNotesUnitError
+		return lr
+	}
 	files := prefixFiles(zr, prefix)
 	if len(files) == 0 {
 		lr.Error = "no entries in package for unit"
@@ -560,7 +551,7 @@ func landOneUnit(ctx context.Context, zr *zip.Reader, prefix string, tu *Transfe
 	switch tu.Kind {
 	case UnitProject:
 		landProjectUnit(ctx, zr, prefix, files, tu, destRoot, lr, finalPaths, projectIDs, report)
-	case UnitSessions, UnitNotes, UnitCrons:
+	case UnitSessions, UnitCrons:
 		landContextUnit(ctx, zr, prefix, files, tu, lr, finalPaths, projectIDs, report)
 	case UnitDeliver:
 		landDeliverUnit(ctx, files, prefix, tu, destRoot, lr, report)
@@ -796,8 +787,6 @@ func landContextUnit(ctx context.Context, zr *zip.Reader, prefix string, files [
 	switch tu.Kind {
 	case UnitSessions:
 		err = landSessions(zr, prefix, files, dest, projID)
-	case UnitNotes:
-		err = landNotes(zr, prefix, projID)
 	case UnitCrons:
 		err = landCrons(zr, prefix, tu, dest, projID)
 	}
@@ -871,30 +860,6 @@ func landSessions(zr *zip.Reader, prefix string, files []*zip.File, projectPath,
 	// 重扫），无需在此手动重建
 	_ = projectID
 	return nil
-}
-
-// landNotes 笔记落位（整文档覆盖写——笔记是 last-writer-wins 语义既有口径）
-func landNotes(zr *zip.Reader, prefix string, projectID string) error {
-	members := files1(zr, prefix, "notes.json")
-	if len(members) == 0 {
-		return errf("notes.json missing in package")
-	}
-	rc, err := members[0].Open()
-	if err != nil {
-		return err
-	}
-	b, err := io.ReadAll(rc)
-	rc.Close()
-	if err != nil {
-		return err
-	}
-	var note struct {
-		Content string `json:"content"`
-	}
-	if json.Unmarshal(b, &note) != nil {
-		return errf("notes.json not parseable")
-	}
-	return store.Get().ProjectNotes.Put(projectID, note.Content)
 }
 
 // landCrons 项目域定时任务落位：Dir 源路径→本端落位路径重映射，按（Name+

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { ref, type Ref } from 'vue'
 import { useLayoutBootstrap } from '@/composables/useLayoutBootstrap'
+import type { SideView } from '@/composables/usePanelLayout'
+import type { UIStateData } from '@/stores/uiState'
 
 // bindPendingActionWatch 的分发契约单测（P-20261003-140 补）：
 // bootstrap 本体依赖宿主状态无法在 jsdom 复刻，此处只装配 pendingAction
@@ -223,5 +225,36 @@ describe('useLayoutBootstrap 项目仪表盘默认落点', () => {
     const { openDashboardLanding, deps } = landingDeps({ explicit: true, landing: false })
     await useLayoutBootstrap(deps).bootstrap()
     expect(openDashboardLanding).not.toHaveBeenCalled()
+  })
+})
+
+// 侧栏视图归一（P-20261108-2）：'notes' 随笔记迁出侧栏退役——旧存档残值经
+// restoreLayoutOnly 回落 files（bottomTab 'commit'→'git' 同款），不让 SidePanel
+// 分发链落末位 v-else 渲染提交面板（与活动栏高亮错位的死分支）
+describe('useLayoutBootstrap 布局恢复 sideView 归一', () => {
+  function restoreDeps(savedSideView: string) {
+    const sideView = ref<SideView>('todos')
+    const deps = {
+      ...makeDeps(),
+      sideView,
+      getInstanceState: () => Promise.resolve({ layout: { sideView: savedSideView, showSidePanel: true } } as unknown as UIStateData),
+    }
+    return { sideView, deps }
+  }
+
+  it("旧存档 sideView='notes'（已退役）恢复为 files", async () => {
+    const { sideView, deps } = restoreDeps('notes')
+    await useLayoutBootstrap(deps).bootstrap()
+    expect(sideView.value).toBe('files')
+    expect(deps.showSidePanel.value).toBe(true)
+  })
+
+  it('未知值同样回落 files；合法值原样恢复', async () => {
+    const bad = restoreDeps('no-such-view')
+    await useLayoutBootstrap(bad.deps).bootstrap()
+    expect(bad.sideView.value).toBe('files')
+    const ok = restoreDeps('stream')
+    await useLayoutBootstrap(ok.deps).bootstrap()
+    expect(ok.sideView.value).toBe('stream')
   })
 })

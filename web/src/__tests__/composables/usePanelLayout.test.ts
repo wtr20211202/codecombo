@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { nextTick } from 'vue'
-import { usePanelLayout, resetPanelLayout } from '@/composables/usePanelLayout'
+import { usePanelLayout, resetPanelLayout, normalizeSideView, SIDE_VIEW_IDS } from '@/composables/usePanelLayout'
 
 describe('usePanelLayout', () => {
   beforeEach(() => {
@@ -395,5 +395,84 @@ describe('主区视图互斥（项目仪表盘）', () => {
     panel.openDashboard()
     resetPanelLayout()
     expect(panel.showDashboard.value).toBe(false)
+  })
+})
+
+// 笔记独立视图（P-20261108-2）：笔记脱离侧栏成主区第六占用者——与远程/分享/dsh/
+// 仪表盘双向互斥 + toggle 语义 + 最大化还原前置 + resetPanelLayout 清账
+describe('主区视图互斥（笔记独立视图）', () => {
+  beforeEach(() => {
+    resetPanelLayout()
+  })
+
+  it('openNotesView 关闭远程/分享/dsh/仪表盘并还原最大化，幂等重复开零变化', () => {
+    const panel = usePanelLayout()
+    panel.showRemoteConsole.value = true
+    panel.showShareManager.value = true
+    panel.showDshConsole.value = true
+    panel.showDashboard.value = true
+    panel.terminalMaximized.value = true
+    panel.openNotesView()
+    expect(panel.showNotesView.value).toBe(true)
+    expect(panel.showRemoteConsole.value).toBe(false)
+    expect(panel.showShareManager.value).toBe(false)
+    expect(panel.showDshConsole.value).toBe(false)
+    expect(panel.showDashboard.value).toBe(false)
+    expect(panel.terminalMaximized.value).toBe(false)
+    panel.openNotesView()
+    expect(panel.showNotesView.value).toBe(true)
+  })
+
+  it('toggleNotesView 开↔关；侧栏开合与 sideView 不受影响（不再是侧栏视图）', () => {
+    const panel = usePanelLayout()
+    panel.toggleNotesView()
+    expect(panel.showNotesView.value).toBe(true)
+    expect(panel.sideView.value).toBe('files')
+    expect(panel.showSidePanel.value).toBe(true)
+    panel.toggleNotesView()
+    expect(panel.showNotesView.value).toBe(false)
+  })
+
+  it('反向互斥：其他主区视图打开即收起笔记视图', () => {
+    const panel = usePanelLayout()
+    const openers: Array<() => void> = [
+      () => panel.openDashboard(),
+      () => panel.toggleDashboard(),
+      () => panel.toggleRemoteConsole(),
+      () => panel.openRemoteConsole(),
+      () => panel.toggleShareManager(),
+      () => panel.toggleDshConsole(),
+    ]
+    for (const open of openers) {
+      resetPanelLayout()
+      panel.openNotesView()
+      open()
+      expect(panel.showNotesView.value).toBe(false)
+    }
+  })
+
+  it('closeNotesView 收回；resetPanelLayout 清账', () => {
+    const panel = usePanelLayout()
+    panel.openNotesView()
+    panel.closeNotesView()
+    expect(panel.showNotesView.value).toBe(false)
+    panel.openNotesView()
+    resetPanelLayout()
+    expect(panel.showNotesView.value).toBe(false)
+  })
+})
+
+// 持久化 sideView 归一（P-20261108-2）：'notes' 退役后旧存档残值/未知值回落 files
+describe('normalizeSideView', () => {
+  it('合法侧栏视图原样通过', () => {
+    for (const v of SIDE_VIEW_IDS) expect(normalizeSideView(v)).toBe(v)
+  })
+
+  it("已退役 'notes' 与未知/非字符串值归一为 files", () => {
+    expect(normalizeSideView('notes')).toBe('files')
+    expect(normalizeSideView('commit')).toBe('files')
+    expect(normalizeSideView('')).toBe('files')
+    expect(normalizeSideView(undefined)).toBe('files')
+    expect(normalizeSideView(42)).toBe('files')
   })
 })

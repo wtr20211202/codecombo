@@ -32,7 +32,7 @@ var capabilityRoutes = map[string]string{
 	"ahead-behind-all": "/api/ahead-behind",                // 全项目批量 ahead/behind（独立路径先例）
 	"fetch-all":        "/api/fetch-all",                   // 一键全部拉取（独立路径先例）
 	"bulk-agent":       "/api/terminals/bulk-agent",        // 舰队批量发起 agent 会话（P-20261003-291）
-	"notes":            "/api/projects/:id/notes",          // 项目笔记读写
+	"notes-global":     "/api/notes/:noteId",               // 笔记库 REST 族（P-20261107-5；P-20261108-3 单库化后唯一笔记族——notes/notes-multi 随端点下线修剪）
 	"flat-file-list":   "/api/projects/:id/file-list",      // 扁平文件清单单请求
 	"file-history":     "/api/projects/:id/file/history",   // 本地文件历史
 	"fs-attribution":   "/api/projects/:id/fs-attribution", // 文件改动来源归因（P-20261005-170）

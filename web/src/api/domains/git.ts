@@ -56,10 +56,8 @@ export const projectApi = {
   // TODO/FIXME 注释标记扫描（P-20261002-25）：复用内容搜索后端按文件分组返回；
   // total 为命中行总数，truncated = 超出服务端 500 上限被截断
   projectTodos: (id: string) => api.get(`/projects/${id}/todos`),
-  // 项目笔记（P-20261002-110，人机共享便签层）：面板与 agent（ops 手册通道）
-  // 读写同一份 markdown；服务端 256KB 上限，超限 413
-  projectNotes: (id: string) => api.get(`/projects/${id}/notes`),
-  saveProjectNotes: (id: string, content: string) => api.put(`/projects/${id}/notes`, { content }),
+  // 项目笔记 projectNotes/saveProjectNotes（GET/PUT /projects/:id/notes 兼容 shim）
+  // 随 P-20261108-3 笔记单库化退役——笔记只剩项目无关的 /api/notes 族（notesGlobalApi）
   readFile: (id: string, path: string, config?: AxiosRequestConfig) => api.get(`/projects/${id}/file`, { params: { path }, ...config }),
   // 文件预览策略（text/too-large/binary 分级决策）：打开前查询，超大/二进制不拉内容
   // config 可选（如终端文件链接的存在性探测传 silent：404 是预期结果，不弹错误提示）

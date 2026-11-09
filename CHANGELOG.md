@@ -9,6 +9,64 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.4] - 2026-11-09
+
+### Added
+
+- **Notes become a real multi-document library** — notes leave the sidebar
+  strip: a notepad-style independent view opens as an overlay on the home
+  page or fills the project page's main area; multi-document management with
+  a recycle bin; a single global notes library with automatic migration of
+  existing per-project notes (the old per-project storage and its endpoints
+  are retired); three keyboard shortcuts in the notes domain; new notes
+  start empty; the agent channel is fully open (agents can create, read and
+  edit notes over the ops API).
+- **Writable shares: "let the other side type" remote assistance** — a
+  shared live terminal can now be opened for direct visitor input: the
+  owner grants keyboard access per share behind an explicit confirmation
+  and a mandatory passphrase; visitor keystrokes flow over a WebSocket
+  uplink bridge straight into the PTY with token-bucket rate limiting;
+  pasted blocks (large or multi-line) pass a command-risk pre-check and wait
+  in an approval queue until the owner decides; disconnect releases the
+  grant immediately and the owner's keyboard is restored; one-click revoke
+  from the session badge, the share manager or the notification; the whole
+  flow is audited.
+- **Visitor terminal pages match the in-app terminal** — the three visitor
+  pages (live / frozen / recorded) adapt their layout to the viewport;
+  visitor rendering fidelity is aligned with the product terminal; live and
+  frozen shares gain a server-side sensitivity-redaction toggle (unfiltered
+  mode is labeled end-to-end); the share dialog surfaces TTL and passphrase;
+  the collaboration bar overlays no longer squeeze terminal content; guests
+  can paste images and files.
+- **Mouse-mode Shift-drag selection** — when the terminal captures the mouse
+  (DECSET 1000/1002/1003), holding Shift now still selects and copies text:
+  an OSC 52 exclusive takeover replaces the clipboard addon, a hint bar on
+  the pane marks the mode, insecure contexts fall back gracefully, and
+  app-initiated copies suppress the hint so it does not nag after every
+  successful copy.
+- **Adjustable sidebars** — a generic sidebar resizer (drag, remembered
+  width, min/max clamp, double-click reset, keyboard accessible); the
+  remote-console host list is now adjustable between 200 and 480 px.
+- **Session manager polish** — right-click menus gain the same share/export
+  actions and live badge as the bottom terminal; going home now means a
+  clean home (the session manager closes instead of following you around),
+  while entering a project restores that project's previous layout.
+
+### Changed
+
+- **Home toolbar tidy-up** — lock-related actions get distinct icons
+  (layout lock becomes a pin with two states), the version badge is folded
+  into the logo entry, and the overflow menu gains icons.
+
+### Fixed
+
+- **Share dialogs invisible on the home page** — the four share-family
+  dialogs now host at the app root so they render above any view instead of
+  being trapped under the session-manager overlay.
+- **Session manager blank after a home round-trip** — the selected icon
+  stayed lit while the panel went blank; keep-alive watches now sync
+  immediately with the selection.
+
 ## [0.0.1-beta.3] - 2026-11-06
 
 ### Fixed
@@ -142,7 +200,8 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.3...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.4...HEAD
+[0.0.1-beta.4]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.4
 [0.0.1-beta.3]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.3
 [0.0.1-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.2
 [0.0.1-beta.1]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.1

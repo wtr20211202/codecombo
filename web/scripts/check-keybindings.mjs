@@ -26,6 +26,10 @@
 //              sc-ask.inline-edit，MonacoEditor 经 editorKeymapBindings 按生效值
 //              addAction、改键重注册）——入 monaco 作用域（消费方同 addAction 族）；
 //              消费链锚点对账见 extractEditorKeymapConsumers
+//   notes     = stores/keymap.ts KEYMAP_ACTIONS domain:'notes' 条目（P-20261107-5
+//              笔记面板域：notesSave/notesCreate/notesRename，useNotesKeyboard
+//              document capture 消费、面板根节点包含判定）——独立作用域（焦点域）；
+//              消费链锚点对账见 extractNotesKeymapConsumers
 //   monaco   = editor.addAction({ keybindings: [monaco.KeyMod... | monaco.KeyCode...] })
 //              （全 src 扫描；历史提案写的 addCommand 已演进为 addAction，纯右键菜单项
 //              无 keybindings 不入表；编辑器域注册表动作的键位动态注入后不再有
@@ -138,23 +142,27 @@ function extractKeymap() {
   const ids = []
   let terminalIds = 0
   let editorIds = 0
+  let notesIds = 0
   // P-20261003-111 起注册表条目带 domain 字段（{ id, default, domain }），终端域
   // 动作按 domain 入 terminal 作用域（域内注册序即优先序；跨域同键是分层共存）；
   // P-20261008-14 起编辑器域动作按 domain 入 monaco 作用域（键位消费方是 addAction
-  // 族，与 addAction 提取同层冲突检测）
+  // 族，与 addAction 提取同层冲突检测）；P-20261107-5 起笔记面板域入 notes 作用域
+  //（useNotesKeyboard capture 消费，独立焦点域）
   const re = /\{\s*id:\s*'([a-zA-Z0-9]+)'\s*,\s*default:\s*'([^']+)'\s*,\s*domain:\s*'([a-z]+)'\s*\}/g
   let m
   while ((m = re.exec(text)) !== null) {
     ids.push(m[1])
     if (m[3] === 'terminal') terminalIds++
     if (m[3] === 'editor') editorIds++
+    if (m[3] === 'notes') notesIds++
     // default 捕获的是 TS 源码字面量原文，'ctrl+\\' 须还原为单反斜杠逻辑值
-    const scope = m[3] === 'terminal' ? 'terminal' : m[3] === 'editor' ? 'monaco' : 'global'
+    const scope = m[3] === 'terminal' ? 'terminal' : m[3] === 'editor' ? 'monaco' : m[3] === 'notes' ? 'notes' : 'global'
     reg(unescapeSource(m[2]), scope, `src/stores/keymap.ts:${lineOf(text, m.index)}`, `keymap:${m[1]}`)
   }
   need(ids.length > 0, 'keymap.ts KEYMAP_ACTIONS（{ id, default, domain } 表）')
   need(terminalIds >= 13, `keymap.ts 终端域动作（domain:'terminal'，实提 ${terminalIds}，基线 13）`)
   need(editorIds >= 3, `keymap.ts 编辑器域动作（domain:'editor'，实提 ${editorIds}，基线 3）`)
+  need(notesIds >= 3, `keymap.ts 笔记面板域动作（domain:'notes'，实提 ${notesIds}，基线 3）`)
   return ids
 }
 
@@ -283,6 +291,23 @@ function extractEditorKeymapConsumers() {
   const inline = read(path.join('composables', 'useEditorInlineEdit.ts'))
   if (!inline) return
   need(/actionDescriptor\(\)/.test(inline), 'useEditorInlineEdit actionDescriptor（sc-ask.inline-edit 键位注册收敛编辑器域注册表）')
+}
+
+// ---- ③b notes-keymap：笔记面板域消费链对账（P-20261107-5） --------------------
+//
+// notesSave/notesCreate/notesRename 三动作键位经 keymap notes 域注册表生效值消费
+//（useNotesKeyboard document capture + 面板根包含判定），此处对账消费链在位
+//（锚点漂移说明接线被改断）
+
+function extractNotesKeymapConsumers() {
+  const host = read(path.join('views', 'notes', 'NotesPanel.vue'))
+  if (!host) return
+  need(/useNotesKeyboard\(/.test(host), 'NotesPanel.vue useNotesKeyboard 接线（笔记面板域键位消费链）')
+  const kb = read(path.join('composables', 'useNotesKeyboard.ts'))
+  if (!kb) return
+  for (const id of ['notesSave', 'notesCreate', 'notesRename']) {
+    need(new RegExp(`combos\\.${id}`).test(kb), `useNotesKeyboard.ts ${id} 经 notesActionFor 读 keymap 生效值`)
+  }
 }
 
 // ---- ③ monaco：addAction keybindings（全 src 扫描） --------------------------
@@ -555,11 +580,11 @@ function reconcileHelp(keymapIds) {
 
 // ---- 冲突检测 + 输出 ----------------------------------------------------------
 
-const SCOPE_ORDER = ['global', 'terminal', 'monaco', 'monitor', 'approval', 'vendor']
+const SCOPE_ORDER = ['global', 'terminal', 'monaco', 'notes', 'monitor', 'approval', 'vendor']
 // 失明守卫：各作用域最低提取数（P-20261003-111 后实际 global≈37 / terminal≈31：
 // 终端域含注册表 13 动作 + Alt+1-9 / Ctrl+Shift+1-9 区间键）。低于基线说明
 // 注册模式漂移使提取正则失明——显式失败优于静默漏报（对账只护得住帮助承诺过的键）
-const SCOPE_MIN = { global: 30, terminal: 25, monaco: 2, monitor: 1, approval: 3, vendor: 3 }
+const SCOPE_MIN = { global: 30, terminal: 25, monaco: 2, notes: 3, monitor: 1, approval: 3, vendor: 3 }
 
 function main() {
   const keymapIds = extractKeymap()
@@ -568,6 +593,7 @@ function main() {
   extractTerminalView()
   extractTerminalKeys()
   extractEditorKeymapConsumers()
+  extractNotesKeymapConsumers()
   extractMonaco()
   extractMonitor()
   extractApprovalHotkeys()

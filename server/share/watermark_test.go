@@ -70,20 +70,20 @@ func TestWatermarkBootPayload(t *testing.T) {
 		"sharePage": {renderShare(withWm), renderShare("")},
 		"termPage": func() (p struct{ on, off string }) {
 			var a, b strings.Builder
-			if err := renderTermPage(&a, token, "zh", "sess", withWm, false, false); err != nil {
+			if err := renderTermPage(&a, token, "zh", "sess", withWm, false, false, false, false); err != nil {
 				t.Fatalf("render term page: %v", err)
 			}
-			if err := renderTermPage(&b, token, "zh", "sess", "", false, false); err != nil {
+			if err := renderTermPage(&b, token, "zh", "sess", "", false, false, false, false); err != nil {
 				t.Fatalf("render term page: %v", err)
 			}
 			return struct{ on, off string }{a.String(), b.String()}
 		}(),
 		"termFrozenPage": func() (p struct{ on, off string }) {
 			var a, b strings.Builder
-			if err := renderTermFrozenPage(&a, token, "zh", "sess", withWm, false); err != nil {
+			if err := renderTermFrozenPage(&a, token, "zh", "sess", withWm, false, false); err != nil {
 				t.Fatalf("render term frozen page: %v", err)
 			}
-			if err := renderTermFrozenPage(&b, token, "zh", "sess", "", false); err != nil {
+			if err := renderTermFrozenPage(&b, token, "zh", "sess", "", false, false); err != nil {
 				t.Fatalf("render term frozen page: %v", err)
 			}
 			return struct{ on, off string }{a.String(), b.String()}

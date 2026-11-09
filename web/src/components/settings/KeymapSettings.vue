@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// 快捷键设置分区（P-20261002-28，P-20261003-111 域分组，P-20261008-14 编辑器域收口）：
-// 键位逐条改绑，按 keymap 注册表域分组（全局布局 / 终端 / 编辑器——审批域入表后按序追加）。
+// 快捷键设置分区（P-20261002-28，P-20261003-111 域分组，P-20261008-14 编辑器域
+// 收口，P-20261107-5 笔记面板域）：
+// 键位逐条改绑，按 keymap 注册表域分组（全局布局 / 终端 / 编辑器 / 笔记面板
+// ——审批域入表后按序追加）。
 // - 点击「改键」进入捕获态：下一个组合键经 normalizeLayoutCombo 规范化写入
 //   keymap store（localStorage 持久化，即时生效无保存按钮）
 // - Esc 取消捕获；浏览器保留键（Ctrl+N/T 等）拒绝并提示
@@ -58,12 +60,14 @@ function conflictText(conflict: KeymapConflict, selfId: KeymapAction): string {
   const name = t(`keymap.actions.${conflict.other}`)
   if (conflict.cross === 'takeover') return t('keymap.conflictCrossTakeover', { name })
   if (conflict.cross === 'focus') {
-    // 编辑器域入注册表（P-20261008-14）后焦点域共存从 terminal↔global 扩为三向：
-    // 本方 editor / 本方 terminal / 本方 global × 对方 editor 三条新文案路径
+    // 编辑器域入注册表（P-20261008-14）后焦点域共存从 terminal↔global 扩为三向；
+    // 笔记面板域（P-20261107-5）同享焦点域语义（self/other 两向各取文案）
     const selfDomain = KEYMAP_ACTION_DOMAIN[selfId]
     const otherDomain = KEYMAP_ACTION_DOMAIN[conflict.other!]
     if (selfDomain === 'editor') return t('keymap.conflictCrossFocusEditorSelf', { name })
     if (selfDomain === 'terminal') return t('keymap.conflictCrossFocusTerm', { name })
+    if (selfDomain === 'notes') return t('keymap.conflictCrossFocusNotesSelf', { name })
+    if (otherDomain === 'notes') return t('keymap.conflictCrossFocusNotes', { name })
     return otherDomain === 'editor'
       ? t('keymap.conflictCrossFocusEditor', { name })
       : t('keymap.conflictCrossFocusGlobal', { name })
@@ -100,11 +104,14 @@ function conflictHintLines(action: KeymapAction, conflicts: BindingConflict[]): 
           : t('keymap.line.crossDocShadowed', { name })
       }
       if (c.cross === 'focus') {
-        // 编辑器域入注册表（P-20261008-14）后焦点域共存三向化，按本方域 × 对方域取文案
+        // 编辑器域入注册表（P-20261008-14）后焦点域共存三向化，按本方域 × 对方域
+        // 取文案；笔记面板域（P-20261107-5）同享焦点域语义
         const selfDomain = KEYMAP_ACTION_DOMAIN[action]
         const otherDomain = KEYMAP_ACTION_DOMAIN[c.other!]
         if (selfDomain === 'editor') return t('keymap.line.actionCrossFocusEditorSelf', { name })
         if (selfDomain === 'terminal') return t('keymap.line.actionCrossFocusTerminal', { name })
+        if (selfDomain === 'notes') return t('keymap.line.actionCrossFocusNotesSelf', { name })
+        if (otherDomain === 'notes') return t('keymap.line.actionCrossFocusNotes', { name })
         return otherDomain === 'editor'
           ? t('keymap.line.actionCrossFocusEditor', { name })
           : t('keymap.line.actionCrossFocusGlobal', { name })

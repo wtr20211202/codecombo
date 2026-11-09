@@ -19,12 +19,12 @@ func TestGuestBoardAssetsInjectedAllPages(t *testing.T) {
 		},
 		"term-live": func() (string, error) {
 			var b strings.Builder
-			err := renderTermPage(&b, fixedToken("render2"), "zh", "live", "", false, false)
+			err := renderTermPage(&b, fixedToken("render2"), "zh", "live", "", false, false, false, false)
 			return b.String(), err
 		},
 		"term-frozen": func() (string, error) {
 			var b strings.Builder
-			err := renderTermFrozenPage(&b, fixedToken("render3"), "zh", "frozen", "", false)
+			err := renderTermFrozenPage(&b, fixedToken("render3"), "zh", "frozen", "", false, false)
 			return b.String(), err
 		},
 	} {
@@ -43,11 +43,11 @@ func TestGuestBoardAssetsInjectedAllPages(t *testing.T) {
 // TestTermPageCollabBootAndAssets 协作位挂载回归（P-20261024-1）：开关随 boot
 // 下发的字段名（collab/directInput）与 collabpage.go 消费端（SC.collab/
 // SC.directInput）必须同键——boot 字段改名而消费端漏跟时直通位整体不挂载
-//（e2e 曾因此假败：cl-root/cl-drop 在而 cl-direct-request 永不出现），渲染级
+// （e2e 曾因此假败：cl-root/cl-drop 在而 cl-direct-request 永不出现），渲染级
 // 断言把「开关开 → 页面含协作位资产与 boot 键」钉死在单测层
 func TestTermPageCollabBootAndAssets(t *testing.T) {
 	var b strings.Builder
-	if err := renderTermPage(&b, fixedToken("render4"), "zh", "live", "", true, true); err != nil {
+	if err := renderTermPage(&b, fixedToken("render4"), "zh", "live", "", true, true, false, false); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := b.String()
@@ -72,7 +72,7 @@ func TestTermPageCollabBootAndAssets(t *testing.T) {
 	// 双关（存量语义）：协作资产仍注入模板但 boot 为假——页面脚本首行即退，
 	// 零协作位（资产注入是静态共享，不等于挂载；挂载由 boot 门控）
 	var c strings.Builder
-	if err := renderTermPage(&c, fixedToken("render5"), "zh", "live", "", false, false); err != nil {
+	if err := renderTermPage(&c, fixedToken("render5"), "zh", "live", "", false, false, false, false); err != nil {
 		t.Fatalf("render off: %v", err)
 	}
 	out = c.String()

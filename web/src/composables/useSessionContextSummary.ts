@@ -1,9 +1,10 @@
-import { projectApi } from '../api/client'
+import { notesGlobalApi, projectApi } from '../api/client'
 import { envProfileApi } from '../api/domains/envprofile'
 import { useProjectStore } from '../stores/project'
 import { useSessionContextStore } from '../stores/sessionContext'
 import { useGitStatusSummary } from './useGitStatusSummary'
 import { useI18n } from './useI18n'
+import { hasProjectNotePrefix } from '../utils/notesDeposit'
 import {
   buildEnvSummaryLine,
   buildNotesSummaryLine,
@@ -22,7 +23,7 @@ import type { PromptSection } from '../utils/promptBuilder'
  *
  * 消费方 = useEditorAskAgent.launchAskSession（P-28/P-190/P-73 等 ask 发起族
  * 共用）与 NewSessionDialog（对话框按次覆选传 override）。数据面全部现成缓存
- * 或一次现查（projnotes / todos / env-profile 端点，git 沿 P-176），尽力而为
+ * 或一次现查（笔记库 / todos / env-profile 端点，git 沿 P-176），尽力而为
  * 绝不阻塞发起：任何取数失败该选项静默缺省。
  */
 export function useSessionContextSummary() {
@@ -30,12 +31,18 @@ export function useSessionContextSummary() {
   const { t } = useI18n()
   const { buildCurrentSummary } = useGitStatusSummary()
 
-  /** 项目笔记首段（projnotes 面板同源端点）：不可用/无笔记返回空串 */
+  /** 项目笔记首段（P-20261108-3 单库化改道）：项目兼容端点退役后改读笔记库——
+   *  标题带「[项目名]」前缀的篇（沉淀交接篇 / 存量迁移篇）取最近更新那篇的首段，
+   *  「笔记进上下文」语义保持（不改道则端点 404 → 静默缺省 = 该选项无声消失）。
+   *  清单是元数据面（updatedAt 降序），命中后单篇 GET 取正文：两次请求，尽力而为 */
   async function buildNotesSummary(): Promise<string> {
     const project = useProjectStore().currentProject
     if (!project) return ''
     try {
-      const res = (await projectApi.projectNotes(project.id)) as { data?: { content?: string } }
+      const list = await notesGlobalApi.list()
+      const hit = (list.data ?? []).find(n => hasProjectNotePrefix(n.title, project.name))
+      if (!hit) return ''
+      const res = await notesGlobalApi.get(hit.id)
       return buildNotesSummaryLine({ projectName: project.name, content: res.data?.content ?? '' }, t)
     } catch {
       return ''

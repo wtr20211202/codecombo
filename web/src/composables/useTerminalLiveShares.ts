@@ -16,8 +16,15 @@ import { shareApi, type ShareInfo } from '../api/domains/share'
  * 观看数口径：取分享记录既有 hits（P-20261002-14 累计打开次数）——liveterm
  * hub 的实时订阅计数无 API 出口，前端零 Go 改动约束下这是唯一可得口径。
  *
- * 模块级单例（useShareDialog 同范式）：TerminalView（轮询宿主）、创建/撤销
- * 动作点共享同一份状态，无跨组件接线成本。
+ * 模块级单例（useShareDialog 同范式）：TerminalView（底部终端）、
+ * AgentTerminalView（终端会话管理页）、创建/撤销动作点共享同一份状态，无跨
+ * 组件接线成本。徽标投影（title 文案）收口在 useTerminalShareActions（双入口
+ * 共用件，P-20261106-7 起）。
+ *
+ * 轮询宿主引用计数（P-20261106-7）：start/stop 可被多宿主并存调用（底部终端
+ * tab 挂载与管理页挂载互不同步——BottomPanel 的 TerminalView 是 v-if 惰性
+ * 挂载，管理页开着自己的轮询时卸载底部终端不得掐掉共享定时器），计数归零才
+ * 真正停表。单宿主语义与历史版本一致（挂载 start、卸载 stop）。
  */
 
 // LiveShareActive 单个活跃直播投影（ShareInfo 子集，徽标 title 与撤销动作所需）
@@ -35,8 +42,12 @@ export interface LiveShareActive {
 const POLL_MS = 30_000
 
 const liveBySession = ref<Record<string, LiveShareActive>>({})
+// 倒计时基准（P-20261106-7 起）：与轮询同一定时器同点自 tick——徽标 title 的
+// 剩余时长随轮询周期重算（分钟级展示不需要秒针精度），不再各宿主自备 tick
+const nowTick = ref(Date.now())
 
 let pollTimer: ReturnType<typeof setInterval> | undefined
+let hostCount = 0
 let refreshing = false
 let rerunPending = false
 
@@ -82,19 +93,27 @@ export function bumpTerminalLiveShares(): void {
   void refreshTerminalLiveShares()
 }
 
-/** useTerminalLiveShares 轮询宿主句柄：TerminalView 挂载 start、卸载 stop；
- *  读面只有 liveBySession（title/徽标/菜单态均由宿主投影） */
+/** useTerminalLiveShares 轮询宿主句柄：宿主挂载 start、卸载 stop（引用计数，
+ *  多宿主并存共享同一定时器——最后一个宿主离场才真正停表）；读面
+ *  liveBySession（锚点表）与 now（倒计时基准，徽标 title 投影用），投影文案
+ *  由宿主侧（useTerminalShareActions.liveTitles）收口 */
 export function useTerminalLiveShares() {
   function start(): void {
-    if (pollTimer) return
+    hostCount++
+    if (hostCount > 1) return
+    nowTick.value = Date.now()
     void refreshTerminalLiveShares()
-    pollTimer = setInterval(() => { void refreshTerminalLiveShares() }, POLL_MS)
+    pollTimer = setInterval(() => {
+      nowTick.value = Date.now()
+      void refreshTerminalLiveShares()
+    }, POLL_MS)
   }
   function stop(): void {
-    if (pollTimer) {
+    if (hostCount > 0) hostCount--
+    if (hostCount === 0 && pollTimer) {
       clearInterval(pollTimer)
       pollTimer = undefined
     }
   }
-  return { liveBySession, start, stop, bump: bumpTerminalLiveShares }
+  return { liveBySession, now: nowTick, start, stop, bump: bumpTerminalLiveShares }
 }

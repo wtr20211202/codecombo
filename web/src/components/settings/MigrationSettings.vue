@@ -386,6 +386,11 @@ watch(expMode, (m) => {
         >
           {{ t('settings.migration.globalContexts') }}
         </NCheckbox>
+        <!-- 笔记单元 P-20261108-3 退役提示：上下文包不再含笔记（项目无关单库，
+             不随实例/迁移包搬运），UI 明示防误解「笔记丢了」 -->
+        <p class="mig-notes-retired">
+          {{ t('settings.migration.notesRetiredHint') }}
+        </p>
         <NAlert
           v-if="oversizeChecked.length > 0"
           type="warning"
@@ -857,6 +862,12 @@ watch(expMode, (m) => {
 
 .mig-global {
   margin-top: 2px;
+}
+
+.mig-notes-retired {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .mig-pass {

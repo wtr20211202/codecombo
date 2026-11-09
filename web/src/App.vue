@@ -93,6 +93,12 @@
           v-model:show="remoteOps.showDiagCompare"
           @retry="asyncRetryTick++"
         />
+        <!-- 分享族弹层宿主（P-20261108-1）：结果卡/创建/终端选项/片段四件单例状态的
+             唯一消费者——首页会话管理 overlay、值班大屏等不经 Layout 的入口同样弹得出 -->
+        <ShareDialogsHost
+          :key="'share-' + asyncRetryTick"
+          @retry="asyncRetryTick++"
+        />
         <!-- 实例切换过渡遮罩 -->
         <InstanceSwitchOverlay />
         <!-- 全局锁定遮罩：覆盖在所有内容之上，store.isLocked 控制显隐 -->
@@ -173,6 +179,7 @@ const DiagnoseDialog = safeAsync(() => import('./components/deploy/DiagnoseDialo
 const RemoteExecDialog = safeAsync(() => import('./components/deploy/RemoteExecDialog.vue'))
 const RemoteGitCompareDialog = safeAsync(() => import('./components/remote/RemoteGitCompareDialog.vue'))
 const RemoteDiagCompareDialog = safeAsync(() => import('./components/remote/RemoteDiagCompareDialog.vue'))
+const ShareDialogsHost = safeAsync(() => import('./components/share/ShareDialogsHost.vue'))
 
 const themeStore = useThemeStore()
 const localeStore = useLocaleStore()

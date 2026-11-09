@@ -24,11 +24,12 @@ import (
 // lockAllowlist 硬锁放行的项目级写路由（方法+路径模板）：管理面/元数据层，
 // 不触达归档内容
 var lockAllowlist = map[string]bool{
-	"PUT:/api/projects/:id/locked":                   true, // 唯一解锁路径
-	"PUT:/api/projects/:id/frozen":                   true, // 呈现层开关，与硬锁独立
-	"PUT:/api/projects/:id":                          true, // 重定位（目录搬家后恢复可读的注册面）
-	"DELETE:/api/projects/:id":                       true, // 移除注册（磁盘内容不动）
-	"PUT:/api/projects/:id/notes":                    true, // 项目笔记是车道 1 元数据，不在归档内
+	"PUT:/api/projects/:id/locked": true, // 唯一解锁路径
+	"PUT:/api/projects/:id/frozen": true, // 呈现层开关，与硬锁独立
+	"PUT:/api/projects/:id":        true, // 重定位（目录搬家后恢复可读的注册面）
+	"DELETE:/api/projects/:id":     true, // 移除注册（磁盘内容不动）
+	// 项目笔记族（/notes 兼容 shim + /notes-multi 多篇族）随 P-20261108-3 单库化
+	// 退役——笔记改挂项目无关的 /api/notes 族，不在项目级写路由枚举面内
 	"POST:/api/projects/:id/terminal-history":        true, // 终端命令历史元数据
 	"DELETE:/api/projects/:id/terminal-history":      true, // 同上
 	"DELETE:/api/projects/:id/terminal-history/:idx": true, // 同上

@@ -317,8 +317,10 @@ registerPanel({
   icon: TerminalOutline,
 })
 
-// 活动栏：项目笔记（P-20261002-110，人机共享便签层）：项目一文档的 markdown
-// 便签，人与 agent（ops 手册 REST 通道）双向读写同一份——散落的项目记忆归位。
+// 活动栏：笔记（P-20261002-110 人机共享便签层 → P-20261108-2 独立视图）：笔记
+// 脱离侧栏窄条成 notepad 式主区视图（占编辑器位，与远程/分享/dsh/仪表盘/agent
+// docked 互斥；首页另有工具条入口走 overlay 形态）——无 controls（主区视图形态，
+// agent-terminal/dashboard 同款），先收 docked 再切（dashboard 同款前置）。
 // order 45 落在终端(40)之后、会话管理(50)之前：不挤占 files..terminal 的既有
 // Ctrl+1..5 数字键位（panel-registry 守护对键位的既有期望保持不变）。
 // 图标 DocumentText（文档+文本行）：便签隐喻，与 todos 清单/文件树文件夹不撞形
@@ -328,9 +330,11 @@ registerPanel({
   order: 45,
   titleKey: 'notes.panel.title',
   icon: DocumentTextOutline,
-  controls: 'side-panel',
-  active: () => layout.showSidePanel.value && layout.sideView.value === 'notes',
-  onClick: () => layout.togglePanel('notes'),
+  active: () => layout.showNotesView.value,
+  onClick: () => {
+    agentTerminalApi().hideDocked()
+    layout.toggleNotesView()
+  },
 })
 
 // 底部 tab：控制台（含未读徽标）

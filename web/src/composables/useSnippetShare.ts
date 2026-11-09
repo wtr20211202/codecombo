@@ -9,7 +9,8 @@ import { useShareDialog } from './useShareDialog'
 // 文本片段分享流程（P-20261002-71）：终端右键/编辑器右键/命令面板三入口
 // 统一走 openShareSnippet——弹窗内确认「将公开此文本」后创建，成功复用
 // useShareDialog 的短链结果卡。模块级单例状态（与 useShareDialog 同范式），
-// 弹窗宿主（Layout 挂载的 ShareSnippetDialog）只消费状态
+// 弹窗宿主（App 层 ShareDialogsHost 挂载的 ShareSnippetDialog，P-20261108-1）
+// 只消费状态
 
 const showDialog = ref(false)
 const draftContent = ref('')
@@ -112,7 +113,8 @@ export function useSnippetShare() {
     submitSnippet,
     // requestCreate 导出供自宿主渲染结果的调用方复用（P-20261005-148 值班
     // 交接包弹窗：创建+子服务状态并行取同原语，结果卡由调用方自渲染——
-    // ShareResultDialog 只挂 Layout，独立路由宿主够不到）
+    // 成因是 ShareResultDialog 当时只挂 Layout、独立路由够不到；P-20261108-1
+    // 上提 App 层后全路由可达，交接包仍内嵌自渲染不叠第二层模态）
     requestCreate,
   }
 }

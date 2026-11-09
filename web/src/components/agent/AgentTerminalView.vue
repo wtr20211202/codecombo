@@ -8,6 +8,9 @@ import AgentTerminalPanes from './AgentTerminalPanes.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useAgentTerminal } from '../../composables/useAgentTerminal'
 import { useDirectInputShares } from '../../composables/useDirectInputShares'
+// 终端能力四件（直播/冻结/回放/导出）+ 直播徽标投影：与底部终端 tab 右键共用
+// 件（P-20261106-7 双入口纪律——动作链与徽标数据面单一实现，本页只做接线）
+import { useTerminalShareActions } from '../../composables/useTerminalShareActions'
 import { useAgentTerminalFloat } from '../../composables/useAgentTerminalFloat'
 import { useAgentTerminalSidebarWidth } from '../../composables/useAgentTerminalSidebarWidth'
 import { useAgentTerminalGroups, buildDestroyConfirmContent } from '../../composables/useAgentTerminalGroups'
@@ -357,16 +360,48 @@ const directHolds = computed(() => {
   return out
 })
 /** 一键收回访客直通输入权（四路回收入口的会话侧）：token 键收回即解除会话
- *  只读闸（owner 键盘即时归还）；bump 即时对账摘徽标 */
+ *  只读闸（owner 键盘即时归还）；bump 即时对账摘徽标。P-20261106-8 起同表
+ *  混入可写上行条目（writable 标记）——收回方向分流为 setWritable off
+ *  （断上行连接，语义等价「主人关掉可写」） */
 async function onDirectRevoke(sessionId: string) {
   const hold = directInputsApi.holdBySession.value[sessionId]
   if (!hold) return
   try {
-    await shareApi.revokeDirect(hold.token)
+    if (hold.writable) {
+      await shareApi.setWritable(hold.token, false)
+    } else {
+      await shareApi.revokeDirect(hold.token)
+    }
     message.success(t('terminal.revokeDirectInputDone'))
   } catch { /* 拦截器已 toast */ } finally {
     directInputsApi.bump()
   }
+}
+
+// ============== 终端能力四件 + 直播徽标（P-20261106-7 双入口纪律） ==============
+// 底部终端 tab 右键的直播分享/冻结分享/分享回放/导出输出 + 直播红点徽标，在本
+// 管理页的会话树行（系统会话 + 项目会话）同款落地——agent/tmux 持久会话的宿主
+// 就是本页，此前四项能力在其主入口缺席。动作链与徽标数据面均收口
+// useTerminalShareActions（单实现）：直播按锚点态分流创建/撤销；导出走服务端
+// 会话层 CaptureScrollback 链（tmux capture-pane / native 环形缓冲），detached
+// 会话无视图缓冲同样可导出、两入口导出内容一致；徽标沿用 useTerminalLiveShares
+// 30s 惰性轮询 + 变更点 bump（引用计数——底部终端 tab 卸载不掐本页轮询）。
+// 【横向纪律】终端会话级能力新增必须两入口（tab 右键 + 本页行右键）同步接线
+const shareActions = useTerminalShareActions()
+const liveTitles = shareActions.liveTitles
+onMounted(shareActions.start)
+onBeforeUnmount(shareActions.stop)
+/** 会话树行能力四件派发：系统会话查 sessions、项目会话查统一 store（两树
+ *  会话集不相交，先后查找即覆盖全量）；名用于导出下载名/出域警示文案 */
+function onCapabilityAction(payload: { sessionId: string; key: 'liveShare' | 'frozenShare' | 'replayShare' | 'exportOutput' }) {
+  const s = sessions.value.find(ss => ss.id === payload.sessionId)
+    || sessionsStore.projectSessions.find(ss => ss.id === payload.sessionId)
+  if (!s) return
+  const target = { id: s.id, name: s.name }
+  if (payload.key === 'liveShare') void shareActions.toggleLiveShare(target)
+  else if (payload.key === 'frozenShare') shareActions.createFrozenShare(target.id)
+  else if (payload.key === 'replayShare') void shareActions.shareReplay(target.id)
+  else void shareActions.exportOutput(target)
 }
 
 // ============== 新建会话对话框（B1：主入口，替代旧 runtime 下拉） ==============
@@ -581,7 +616,9 @@ async function onProjectSessionRename(payload: { sessionId: string; name: string
         :collapsed-projects="collapsedProjects"
         :locate-dirs="dirBySessionId"
         :direct-holds="directHolds"
+        :live-titles="liveTitles"
         @direct-revoke="onDirectRevoke"
+        @capability-action="onCapabilityAction"
         @update:sort-mode="sessionsStore.setSortMode"
         @update:group-mode="sessionsStore.setGroupMode"
         @toggle-runtime-filter="sessionsStore.toggleRuntimeFilter"

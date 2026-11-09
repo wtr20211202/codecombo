@@ -63,6 +63,7 @@ import {
   MoonOutline,
   NotificationsOutline,
   OpenOutline,
+  Pin,
   PinOutline,
   PulseOutline,
   QrCodeOutline,
@@ -101,6 +102,11 @@ export const ACTION_ICONS = {
   'common.hide': EyeOffOutline,
   'common.preview': EyeOutline,
   'common.pin': PinOutline,
+  // 已钉住（P-20261107-1）：PinOutline 的实心态，与 common.pin 构成开/合双态
+  // （同 common.lock/unlock 的双键双态模式）；当前用于顶栏布局锁定的锁定态——
+  // 「钉住布局防误拖」用图钉而不用锁形，与安全域的系统锁（LockClosedOutline）
+  // 拉开同屏语义
+  'common.pinned': Pin,
   'common.lock': LockClosedOutline,
   'common.unlock': LockOpenOutline,
 
@@ -291,12 +297,16 @@ export const NON_ACTION_ICONS = [
   'CubeOutline',
   'FlaskOutline',
   'LogoJavascript',
+  // 品牌标识（装饰）：版本面板 Star 引导行的 GitHub 徽标（P-20261103-4 引入时
+  // 漏登记——动作本体是旁侧文本链接，此处补齐该存量逃逸，非本提案引入面）
   'TerminalOutline',
   'EaselOutline',
   'LayersOutline',
   'AlbumsOutline',
   'BarChartOutline',
   'StatsChartOutline',
+  // 品牌装饰（LogoGithub = 版本面板 Star 引导行的仓库标识，动作本体是旁边链接）
+  'LogoGithub',
   // 状态与反馈
   'AlertCircleOutline',
   'WarningOutline',

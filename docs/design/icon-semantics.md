@@ -51,9 +51,10 @@
 | `common.download` | `DownloadOutline` | 下载/导出（与云同步 fetch 的「云」图形区分） |
 | `common.hide` | `EyeOffOutline` | 隐藏/忽略 |
 | `common.preview` | `EyeOutline` | 预览/显示 |
-| `common.pin` | `PinOutline` | 钉选/固定 |
+| `common.pin` | `PinOutline` | 钉选/固定；布局锁定未锁态也用此枚（「钉住布局防误拖」，P-20261107-1） |
+| `common.pinned` | `Pin` | 已钉住：`PinOutline` 的实心态，开/合双态（同 lock/unlock 双键模式）；当前用于顶栏布局锁定锁定态——布局域用图钉、安全域保留锁形，两语义不同屏混形（P-20261107-1） |
 | `common.lock` | `LockClosedOutline` | 锁定 |
-| `common.unlock` | `LockOpenOutline` | 解锁/布局锁开关展开态 |
+| `common.unlock` | `LockOpenOutline` | 解锁（终端输入锁定等开态；原兼布局锁展开态，P-20261107-1 起布局锁改图钉双态） |
 
 ### 3.2 Git
 
@@ -130,7 +131,7 @@ P-20261022-1 收口的是动作映射面，但**导航/目的地图标（活动�
 | `env` | `ServerOutline` | rail | 项目环境画像 |
 | `git` | `GitBranchOutline` | rail+bottom | Git 面板；**禁止与 ShareSocialOutline 同屏**（§5 禁配对） |
 | `terminal` | `TerminalOutline` | rail+bottom | 终端 |
-| `notes` | `DocumentTextOutline` | rail | 项目笔记；同图注记：动作 `claude.filesWritten` |
+| `notes` | `DocumentTextOutline` | rail | 笔记（项目无关单库，P-20261108-3）；同图注记：动作 `claude.filesWritten` |
 | `agent-terminal` | `ChatbubblesOutline` | rail + 首页工具条 | 终端会话管理（多入口同键）；同图注记：动作 `chat.sessions` |
 | `share-manager` | `LinkOutline` | rail | **首批修复**：链接 = 分享的核心交付物；原 `ShareSocialOutline` 与 git 分支同属「圆点+连线」族 |
 | `remote-console` | `GlobeOutline` | rail + 首页工具条 | 远程控制台（多入口同键） |
@@ -185,7 +186,7 @@ P-20261022-1 收口的是动作映射面，但**导航/目的地图标（活动�
 | `PlayCircleOutline` × `TimeOutline` | 0.858 | 分享管理列表行内状态图标，恒伴随文字行 |
 | `PlayOutline` × `PlaySkipForwardOutline` | 0.850 | 播放器通用惯例（播放/下一曲），伴随 tooltip |
 
-**接受档补注（观察档中的强惯例态对）**：`FolderOpenOutline` × `FolderOutline`（0.830，文件树展开/收起同位互斥）、`EyeOffOutline` × `EyeOutline`（0.773，显隐同位互斥，首批锁定 `common.hide`/`common.preview`）。
+**接受档补注（观察档中的强惯例态对）**：`FolderOpenOutline` × `FolderOutline`（0.830，文件树展开/收起同位互斥）、`EyeOffOutline` × `EyeOutline`（0.773，显隐同位互斥，首批锁定 `common.hide`/`common.preview`）、`Pin` × `PinOutline`（0.877，钉住/已钉住同位互斥态，锁定 `common.pin`/`common.pinned`——图钉开合与锁开合同为强惯例双态，2026-11-07 报告实测）。
 
 **观察档（其余 17 对，0.70~0.85，挂起复核）**：共性为圆环语法共享 + 出现处伴随文字或互斥态，无 icon-only 相邻独立动作对（清单见 `.goal-enhance/icon-similarity-2026-10-22.md`）。后续报告复看时若某对出现在新的 icon-only 相邻场景，升级终审。
 

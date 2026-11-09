@@ -82,6 +82,10 @@ var moduleRouteFamilies = map[string][]string{
 		"/api/commit-templates", "/api/changelists",
 		// 批量 ahead/behind 与一键全拉（独立路径先例；capability 项 ahead-behind-all/fetch-all 同源归属）
 		"/api/ahead-behind", "/api/fetch-all",
+		// 笔记库（P-20261107-5 独立化 → P-20261108-3 单库化）：项目无关的唯一
+		// notepad 库（/api/notes 族，含 /api/notes/migration 续迁端点；原项目族
+		// /api/projects/:id/notes(-multi) 已退役），capability 项 notes-global 同源归属
+		"/api/notes",
 		// 项目级主 WS 通道：file/branch/log.changed 的投递面（此前只登辅助 WS）
 		"/ws/projects/:id",
 	},

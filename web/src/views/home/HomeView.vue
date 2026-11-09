@@ -6,7 +6,7 @@ import {
   AddOutline,
   NotificationsOutline, SettingsOutline, ColorPaletteOutline,
   LockClosedOutline, ChatbubblesOutline, GlobeOutline, HelpCircleOutline, CloudCircleOutline,
-  TimeOutline, FolderOpenOutline, TvOutline, FlashOutline,
+  TimeOutline, FolderOpenOutline, TvOutline, FlashOutline, DocumentTextOutline,
   SnowOutline, ChevronDownOutline, ChevronForwardOutline, WarningOutline,
 } from '@vicons/ionicons5'
 import { useProjectStore, type Project } from '../../stores/project'
@@ -35,6 +35,7 @@ import CloneModal from '../../components/layout/CloneModal.vue'
 import PathInput from '../../components/common/PathInput.vue'
 import RemoteConsoleOverlay from '../../components/remote/RemoteConsoleOverlay.vue'
 import AgentTerminal from '../../components/agent/AgentTerminal.vue'
+import NotesView from '../notes/NotesView.vue'
 import DshConsoleView from '../../components/tools/DshConsoleView.vue'
 import DshIcon from '../../components/common/DshIcon.vue'
 import HomeProjectCard from '../../components/home/HomeProjectCard.vue'
@@ -90,8 +91,24 @@ const agentTerminal = useAgentTerminal()
 // dsh 控制台（首页浮层）：与项目页共用 usePanelLayout 单例状态——
 // 视图内部关闭（Esc/×）直接写 layout.showDshConsole；开状态 watch 懒挂载保活
 const panelLayout = usePanelLayout()
+// immediate（P-20261106-4）：showDshConsole 是 usePanelLayout 模块级状态，项目页
+// 打开后回首页重挂组件时已为 true——无「变化」可触发 watch，首页浮层空壳
 const dshEverOpened = ref(false)
-watch(() => panelLayout.showDshConsole.value, (v) => { if (v) dshEverOpened.value = true })
+watch(() => panelLayout.showDshConsole.value, (v) => { if (v) dshEverOpened.value = true }, { immediate: true })
+
+// 笔记独立视图（P-20261108-2）：首页=纯首页（P-20261107-3 同口径）——开态是
+// usePanelLayout 模块级单例，项目页开着笔记返回首页时不得以 overlay 自动展开，
+// 到达首页即路过收起（setup 期同步收：早于 NotesView 宿主挂载判定，免一帧闪现）
+panelLayout.closeNotesView()
+
+/** 首页笔记入口：近全屏 overlay，与远程控制台/agent docked overlay 交叉关闭
+ *  （同为 z 900 全屏层；dsh 由 openNotesView 互斥收起）。笔记是项目无关的单库
+ *  （P-20261108-3），首页与项目页两宿主同库同数据，无数据源可选 */
+function openNotes() {
+  showRemoteConsole.value = false
+  agentTerminal.hideDocked()
+  panelLayout.openNotesView()
+}
 
 const loading = ref(true)
 const aheadBehindMap = ref<Record<string, { ahead: number; behind: number }>>({})
@@ -107,6 +124,17 @@ const sortOptions = computed(() => [
 
 // 版本信息（useHomeBuildInfo：拉取 + 弹窗开关 + 复制）
 const { buildInfo, showVersionModal, fetchBuildInfo, copyCommitId } = useHomeBuildInfo()
+
+// 版本弹窗入口 = 左上 logo（P-20261107-1）：原工具条最左版本徽章与目的地图标族
+// 视觉不同类，收敛后版本信息只在状态栏右下与设置→关于两路常驻。handler 写在
+// .home-logo 调用点外层——AppLogo 是纯 SVG 零交互组件（全仓多处复用，含本弹窗
+// 头部/远程控制台/设置关于页），交互进组件内会连带漂移
+function openVersionFromLogo() {
+  // buildInfo 未载（静默请求失败/竞态）时顺手重拉，防「点了没反应」死点击——
+  // 弹窗 :show 是 showVersionModal && !!buildInfo 双条件，拉到即现
+  if (!buildInfo.value) void fetchBuildInfo()
+  showVersionModal.value = true
+}
 
 async function fetchAllAheadBehind() {
   // 批量接口一次拉全项目（旧实现 N 个请求扇出；旧版本对端 404 时自动退回扇出）；
@@ -241,7 +269,7 @@ watch(() => lockStore.isLocked, (newVal, oldVal) => {
     // 仅处理 true → false 的解锁转换，避免首次 checkStatus 通过时与 onMounted 重复
     projectStore.fetchProjects().then(() => fetchAllAheadBehind())
     // 锁定态挂载时 settings 请求被 423 拒（silent），buildInfo 一直是 null——
-    // 版本号入口（v-if="buildInfo"）永不显示，解锁后需补拉
+    // 版本弹窗（logo 入口 + :show="showVersionModal && !!buildInfo" 双条件）开不出来，解锁后需补拉
     fetchBuildInfo()
   }
 })
@@ -266,7 +294,14 @@ useHomeGlobalListeners({
           @expand="showInstanceDetail = true"
           @collapse="showInstanceDetail = false"
         />
-        <div class="home-logo">
+        <!-- 版本弹窗入口（P-20261107-1）：logo 即「关于与版本」位，title + pointer
+             保可发现性；点击区随内容不随 flex 拉伸，空白头部不做意外热区 -->
+        <div
+          class="home-logo"
+          :title="t('home.aboutVersion')"
+          data-testid="home-logo"
+          @click="openVersionFromLogo"
+        >
           <AppLogo
             :size="28"
             :animated="true"
@@ -281,11 +316,6 @@ useHomeGlobalListeners({
         class="home-header-actions"
         data-nav-surface="home-toolbar"
       >
-        <span
-          v-if="buildInfo"
-          class="home-version"
-          @click="showVersionModal = true"
-        >v{{ buildInfo.version }}</span>
         <!-- 值班大屏：独立全屏监控路由（第二块显示器/平板盯机群）。
              图标 TvOutline（盯屏/大屏）：原 SpeedometerOutline 与活动栏「仪表盘」
              面板一图两目的地（P-20261022-2 首批），仪表盘归还 Speedometer 专用 -->
@@ -326,7 +356,7 @@ useHomeGlobalListeners({
         <button
           class="home-action-btn"
           :title="t('remoteConsole.title')"
-          @click="panelLayout.showDshConsole.value = false; showRemoteConsole = true"
+          @click="panelLayout.showDshConsole.value = false; panelLayout.closeNotesView(); showRemoteConsole = true"
         >
           <n-icon
             size="16"
@@ -334,6 +364,22 @@ useHomeGlobalListeners({
           >
             <!-- 与项目页活动栏注册表（panels/registry.ts）同源：远程控制台=地球 -->
             <GlobeOutline />
+          </n-icon>
+        </button>
+        <!-- 笔记独立视图（P-20261108-2）：notepad 式近全屏 overlay，可达性对齐远程控制台 -->
+        <button
+          class="home-action-btn"
+          :title="t('notes.panel.title')"
+          :aria-label="t('notes.panel.title')"
+          data-testid="home-notes"
+          @click="openNotes()"
+        >
+          <n-icon
+            size="16"
+            data-icon-nav="notes"
+          >
+            <!-- 与项目页活动栏注册表（panels/registry.ts）同源：笔记=文档 -->
+            <DocumentTextOutline />
           </n-icon>
         </button>
         <button
@@ -694,6 +740,10 @@ useHomeGlobalListeners({
          悬浮窗/悬浮条 Teleport 常驻；组件全局唯一，路由间互斥挂载） -->
     <AgentTerminal context="home" />
 
+    <!-- 笔记独立视图（P-20261108-2，首页近全屏 overlay 形态；Esc/头部 × 关闭，
+         与项目页主区形态共用 usePanelLayout 开态与 NotesPanel 主体） -->
+    <NotesView context="home" />
+
     <!-- 删除项目确认弹窗 -->
     <n-modal
       v-model:show="showRemoveConfirm"
@@ -840,11 +890,14 @@ useHomeGlobalListeners({
   min-width: 0;
 }
 
+/* logo 即版本弹窗入口（P-20261107-1）：pointer 提示可点；不再 flex:1 撑满——
+   点击命中区收敛到 logo+标题+副标题内容本身，header 剩余空白不做意外热区
+   （header-left 自身 flex:1 继续把工具条推到右侧，布局不变） */
 .home-logo {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1;
+  cursor: pointer;
 }
 
 .home-title {
@@ -977,23 +1030,6 @@ useHomeGlobalListeners({
 }
 .frozen-chevron {
   margin-left: 2px;
-}
-
-/* 版本号 */
-.home-version {
-  font-size: 12px;
-  color: var(--text-dim);
-  cursor: pointer;
-  padding: 3px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--border-default);
-  font-family: monospace;
-  transition: all var(--motion-base);
-}
-.home-version:hover {
-  color: var(--accent-blue);
-  border-color: var(--accent-blue);
-  background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
 }
 
 /* 顶部功能按钮（AI 助手/远程控制台/设置 / 主题 / 通知）通用样式 */

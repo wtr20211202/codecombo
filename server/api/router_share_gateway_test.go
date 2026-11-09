@@ -48,6 +48,9 @@ func TestShareSameOriginGatewayRoutes(t *testing.T) {
 		{http.MethodGet, "/assets/xterm.js", "203.0.113.5"},
 		{http.MethodGet, "/assets/addon-fit.js", "203.0.113.5"},
 		{http.MethodGet, "/assets/xterm.css", "203.0.113.5"},
+		{http.MethodGet, "/assets/addon-unicode11.js", "203.0.113.5"},
+		{http.MethodGet, "/assets/JetBrainsMono-Regular.woff2", "203.0.113.5"},
+		{http.MethodGet, "/assets/JetBrainsMono-Bold.woff2", "203.0.113.5"},
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(tc.method, tc.path, nil)

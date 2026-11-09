@@ -90,6 +90,14 @@ const (
 	// 长留存档（长期留档走 md/JSONL 导出或冻结文件分享）
 	SessionShareTTLMax = 24 * time.Hour
 
+	// UnfilteredTTLMax 未过滤分享（P-20261106-9）的 TTL 强制上限：冻结快照含
+	// 敏感原文落盘（打破「快照本体即净本」不变量的显式 opt-out），暴露窗必须
+	// 强制收敛——创建时定死、SetExpiry 不可越过（钳制，拒绝变相永久）。直播
+	// 不落盘，自身 TerminalLiveTTLMax 同值上限，SetExpiry 经同一钳制收敛。
+	// 24h 与 cast/session 上限同档：覆盖「内网协作当天看」的节奏，又不给含原文
+	// 的落盘数据留长期尾巴；清理走既有 CleanupExpired + 快照孤儿对账同管线
+	UnfilteredTTLMax = 24 * time.Hour
+
 	// snippetTokenNamespace snippet token 派生的保留命名空间（DeriveShareToken
 	// 的 projectID 入参）。含 NUL 字节而真实项目 ID 不可能包含 → 与文件分享的
 	// token 空间物理隔离，不存在同 token 双形态歧义
@@ -107,6 +115,12 @@ const (
 	// 派生（同一会话重复开直播得到同一短链，与文件分享「同目标恒同链」
 	// 语义同构）；NUL 隔离同上
 	terminalTokenNamespace = "\x00terminal"
+
+	// terminalUnfilteredKeySuffix 未过滤直播（P-20261106-9）的派生键后缀：同一
+	// 会话的遮蔽直播与未过滤直播恒为不同短链——已分发的遮蔽链接即使在撤销后、
+	// 同会话以未过滤重开，也绝不会接到原样输出（「已分发链接的遮蔽语义不可
+	// 翻转」跨撤销重建仍成立）。遮蔽直播键 = 会话 ID 原值（存量短链零变化）
+	terminalUnfilteredKeySuffix = "\x00unfiltered"
 
 	// frozenTokenNamespace 冻结快照分享（P-20261003-320）的保留命名空间：
 	// 键 = projectID\x00path。独立命名空间让同一目标可同时存在 live 与 frozen
@@ -271,10 +285,19 @@ type Share struct {
 	// DirectInput 直通输入档开关（P-20261024-1 第二档独立开关，缺省关，与
 	// Collab 互不联动）：true = 访客可经申请-批准握手（单持有者）向本分享
 	// 锚定的 agent 会话直接输入补充信息（文字批次，≤4KB/批）。v1 限定 agent
-	// 会话——普通终端直通 = 匿名远程 shell 等价，明确不开放（批准面判定
-	// session kind，非 agent 会话 400）；开启不等于持权（还要 owner 批准
-	// 握手），关闭即回收持权并级联摘除会话侧只读闸
+	// 会话（P-20261106-8 可写分享档开放普通终端键入后，本档仍是「无 shell
+	// 面、批次补信息」的低授权位，两档语义正交并存）；开启不等于持权（还要
+	// owner 批准握手），关闭即回收持权并级联摘除会话侧只读闸
 	DirectInput bool `json:"directInput,omitempty"`
+	// Writable 可写分享开关（P-20261106-8「对方可直接输入」模式，缺省关）：
+	// true = 访客经 WS 上行桥（/s/{token}/termws）把键入直接注入锚定终端的
+	// PTY——远程协助语义，把泄露半径从「看输出」抬到「打 shell」，故开启
+	// 只能走 owner 动作面（POST /api/share/:token/writable：显式 confirm +
+	// 强制口令门），创建面一律兜底清零（可写从不悄悄出生）。仅 kind=terminal
+	// 直播形态可开（frozen/cast/session/file 定格或静态语义天然只读）；开关
+	// 只管记录字段，持权/连接态在 server/share 进程内（重启即清，直通档
+	// 同款保守侧语义），关闭即断全部上行连接并级联摘除会话侧输入闸
+	Writable bool `json:"writable,omitempty"`
 	// RetiredTokens 退役短链台账（P-20261008-2，Rotate 专有）：历次轮换被
 	// 替换的旧 token 及其退役后的命中观测（条目内含计数与最近命中时点）。
 	// 泄露应对的观测面——旧链对访客面已死（404 与不存在同观感，存在性不可
@@ -285,6 +308,18 @@ type Share struct {
 	// 与宿主一致，无独立清理面）。旧文档无此字段 → 零值 nil = 无退役史，
 	// 零迁移
 	RetiredTokens []RetiredToken `json:"retiredTokens,omitempty"`
+	// Unfiltered 敏感值遮蔽关闭标记（P-20261106-9，终端输出的直播/冻结两形态
+	// 专有：terminal / terminal-frozen）：true = 创建时显式关闭服务端源头遮蔽
+	// 链——直播 feeder 原样转发、冻结快照含敏感原文落盘。零值 false = 遮蔽开
+	//（安全默认，存量记录零迁移语义不变）。cast 回放不适用：其源数据在录制层
+	// 写盘前已强制遮蔽（recording 安全硬约束，原文不落盘），分享层无原文可放。
+	// 创建时定死：幂等重建不覆写（已分发链接的内容语义不可翻转，改配置须撤销
+	// 重建；两模式恒不同链——直播派生键加后缀 terminalTokenKey、冻结内容哈希
+	// 域分离，遮蔽链接跨撤销重建也接不到原样输出）；冻结快照的
+	// ExpiresAt 强制钳 UnfilteredTTLMax（SetExpiry 同钳）——「快照本体即净本」
+	// 不变量对本类快照显式失效，短 TTL 是替代收敛防线。旧文档无此字段 → 零值
+	// = 过滤开，零迁移
+	Unfiltered bool `json:"unfiltered,omitempty"`
 }
 
 // RetiredToken 一条退役短链的台账条目（P-20261008-2）：Rotate 换链时把被
@@ -380,6 +415,12 @@ type ShareStore interface {
 	// 互不联动）：on=true 开启申请-批准握手面，false 关闭即回收（持权立刻
 	// 失效，由装配层级联摘除会话侧只读闸——store 只管记录字段）。RMW 同款
 	SetDirectInput(token string, on bool) (*Share, error)
+	// SetWritable 可写分享开关（P-20261106-8，动作化行内端点用）：on=true 开启
+	// 访客 WS 键入上行面（仅 kind=terminal 有意义，调用面先行 400——store 不
+	// 复核形态，与 DirectInput 同取态），false 关闭即回收（上行连接由装配层
+	// 断开、会话侧输入闸级联摘除）。口令门强制（开启前必须持口令）在 API 面
+	// 判定——本方法只覆写 Writable 单字段。RMW 同款
+	SetWritable(token string, on bool) (*Share, error)
 	// RecordHits 访问计数累加（P-20261002-14）：Hits += n 并刷新
 	// LastAccessAt = at。供访客面内存聚合的批量落盘回调（见 share.HitCounter
 	// ——计数先攒内存、定时冲刷，访客响应路径零磁盘 I/O）；记录已撤销/
@@ -569,6 +610,15 @@ func (r *shareRepo) Create(s Share) (*Share, error) {
 	if s.Kind == "" {
 		s.Kind = ShareKindFile
 	}
+	// 未过滤标记只对终端输出的直播/冻结两形态有语义（P-20261106-9：可参数化
+	// 的源头遮蔽链只有直播 feeder 与冻结净化链两处——cast 的源数据在录制层
+	// 写盘前已强制遮蔽、原文不落盘，无从「不过滤」）：其余形态兜底清，防未来
+	// 调用方误置让记录挂上名不副实的「未过滤」徽标与短 TTL 钳制
+	switch s.Kind {
+	case ShareKindTerminal, ShareKindTermFrozen:
+	default:
+		s.Unfiltered = false
+	}
 	switch s.Kind {
 	case ShareKindSnippet:
 		return r.createSnippet(s)
@@ -599,6 +649,10 @@ func (r *shareRepo) createTerminal(s Share) (*Share, error) {
 	// 直播是持续流语义，与「看一眼即焚」相斥（P-20261006-27：创建面已拒绝，
 	// 这里兜底清防未来调用方绕过 API 直入 store——一次性字段对直播无意义）
 	s.ViewOnce, s.ViewedAt = false, time.Time{}
+	// 可写分享只能经 owner 动作面开启（confirm + 强制口令门，P-20261106-8）：
+	// 创建请求携带即清零——可写从不悄悄出生，比提案底线（清非 terminal kind）
+	// 更严一档
+	s.Writable = false
 	if s.Name == "" {
 		s.Name = s.TerminalID
 	}
@@ -608,11 +662,17 @@ func (r *shareRepo) createTerminal(s Share) (*Share, error) {
 	if d := time.Until(s.ExpiresAt); d > TerminalLiveTTLMax {
 		s.ExpiresAt = time.Now().Add(TerminalLiveTTLMax)
 	}
+	// 未过滤直播（P-20261106-9）独立钳制：与 TerminalLiveTTLMax 当前同值，但
+	// 不随直播上限未来放宽而放宽——原样暴露的上限是独立安全边界
+	clampUnfilteredExpiry(&s)
 	if old := r.findTerminalBySession(s.TerminalID); old != nil {
 		if !old.Expired(time.Now()) {
 			// 幂等命中：请求带新口令哈希 = 主动加/改门，覆写生效（与 snippet
 			// 同款；不带 = 保持既有口令）；watermark 同为可变展示设置，请求值
-			// 覆写（管理面缺省传 true——不带该字段的重建回到缺省开基线）
+			// 覆写（管理面缺省传 true——不带该字段的重建回到缺省开基线）。
+			// Unfiltered 刻意不覆写（P-20261106-9 创建时定死）：已分发直播链
+			// 的遮蔽语义不可在访客不知情下翻转，改配置须撤销重建——调用方按
+			// 返回记录（非请求值）接线馈线，生效配置单一事实源在记录
 			changed := false
 			if s.PassphraseHash != "" && s.PassphraseHash != old.PassphraseHash {
 				old.PassphraseHash = s.PassphraseHash
@@ -633,7 +693,7 @@ func (r *shareRepo) createTerminal(s Share) (*Share, error) {
 		// 落回零代际 token）——snippet 同款，不给过期直播借尸还魂
 		_ = r.doc.Delete(shareKind, old.Token)
 	}
-	s.Token = DeriveShareToken(config.MasterKey(), terminalTokenNamespace, s.TerminalID, 0)
+	s.Token = DeriveShareToken(config.MasterKey(), terminalTokenNamespace, terminalTokenKey(&s), 0)
 	if s.CreatedAt.IsZero() {
 		s.CreatedAt = time.Now()
 	}
@@ -647,8 +707,20 @@ func (r *shareRepo) createTerminal(s Share) (*Share, error) {
 	return &s, nil
 }
 
+// terminalTokenKey 终端直播 token 派生键（创建/轮换/幂等重建三处同源，
+// P-20261106-9）：遮蔽直播 = 会话 ID 原值（存量短链零变化）；未过滤直播追加
+// terminalUnfilteredKeySuffix——两模式恒不同链
+func terminalTokenKey(s *Share) string {
+	if s.Unfiltered {
+		return s.TerminalID + terminalUnfilteredKeySuffix
+	}
+	return s.TerminalID
+}
+
 // findTerminalBySession 按 (kind=terminal, TerminalID) 定位存活直播记录
-// （轮换感知的 get-or-create 定位；按 token 找会漏掉已轮换记录）
+// （轮换感知的 get-or-create 定位；按 token 找会漏掉已轮换记录）。刻意不按
+// 遮蔽模式区分：一个会话同一时刻至多一条直播（主播侧徽标/「结束直播」一键
+// 撤销都以会话为单位），模式不同的重复请求命中既有记录（创建时定死）
 func (r *shareRepo) findTerminalBySession(terminalID string) *Share {
 	shares, err := r.List()
 	if err != nil {
@@ -680,6 +752,8 @@ func (r *shareRepo) createTermFrozen(s Share) (*Share, error) {
 	s.Paths = nil
 	// 定格快照与一次性相斥（P-20261006-27，createTerminal 同款兜底清）
 	s.ViewOnce, s.ViewedAt = false, time.Time{}
+	// 定格形态天然只读（P-20261011-8 组合语义：可写仅 live 形态），创建面兜底清
+	s.Writable = false
 	if s.Name == "" {
 		s.Name = s.TerminalID
 	}
@@ -687,7 +761,9 @@ func (r *shareRepo) createTermFrozen(s Share) (*Share, error) {
 		if !old.Expired(time.Now()) {
 			// 会话改名（重命名终端后重复定格同一段输出）：刷新展示名；watermark
 			// 同为可变展示设置，请求值覆写（管理面缺省传 true）。其余字段原样
-			//（CreatedAt/ExpiresAt/Hits 同属记录而非请求，幂等不清零）
+			//（CreatedAt/ExpiresAt/Hits 同属记录而非请求，幂等不清零；Unfiltered
+			// 创建时定死不覆写——遮蔽/未过滤两模式的内容哈希经调用方域分离，
+			// 正常不会命中异模式记录，此处原样保持是防御纵深）
 			changed := false
 			if old.Name != s.Name {
 				old.Name = s.Name
@@ -695,6 +771,13 @@ func (r *shareRepo) createTermFrozen(s Share) (*Share, error) {
 			}
 			if s.Watermark != old.Watermark {
 				old.Watermark = s.Watermark
+				changed = true
+			}
+			// 口令门（P-20261107-4，与 createTerminal 同款合并语义）：请求带新
+			// 口令哈希 = 主动加/改门，覆写生效；不带 = 保持既有（重复定格不会
+			// 悄悄摘掉已设的门——摘门只经管理面 /passphrase 显式动作）
+			if s.PassphraseHash != "" && s.PassphraseHash != old.PassphraseHash {
+				old.PassphraseHash = s.PassphraseHash
 				changed = true
 			}
 			if changed {
@@ -713,10 +796,16 @@ func (r *shareRepo) createTermFrozen(s Share) (*Share, error) {
 		s.CreatedAt = time.Now()
 	}
 	// 默认 30 天保留窗口（FrozenTTL 同值）：创建即定倒计时；显式调整走
-	// SetExpiry（与 frozen 文件快照同构）
+	// SetExpiry（与 frozen 文件快照同构）。未过滤快照（P-20261106-9）含敏感
+	// 原文落盘，缺省窗口直接取 UnfilteredTTLMax 并钳上限（clampUnfilteredExpiry）
 	if s.ExpiresAt.IsZero() {
-		s.ExpiresAt = time.Now().Add(FrozenTTL)
+		if s.Unfiltered {
+			s.ExpiresAt = time.Now().Add(UnfilteredTTLMax)
+		} else {
+			s.ExpiresAt = time.Now().Add(FrozenTTL)
+		}
 	}
+	clampUnfilteredExpiry(&s)
 	data, err := json.Marshal(s)
 	if err != nil {
 		return nil, fmt.Errorf("marshal share: %w", err)
@@ -725,6 +814,21 @@ func (r *shareRepo) createTermFrozen(s Share) (*Share, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// clampUnfilteredExpiry 未过滤分享的 TTL 强制收敛（P-20261106-9）：Unfiltered
+// 记录的 ExpiresAt 不得为零值（永久）也不得越过 now+UnfilteredTTLMax——冻结
+// 创建路径与 SetExpiry 共用同一钳制，让「含原文快照强制短 TTL」只有一处判定
+// （直播自身已有 TerminalLiveTTLMax 同值上限，SetExpiry 经此同样收敛）。
+// 非 Unfiltered 记录原样不动
+func clampUnfilteredExpiry(s *Share) {
+	if !s.Unfiltered {
+		return
+	}
+	limit := time.Now().Add(UnfilteredTTLMax)
+	if s.ExpiresAt.IsZero() || s.ExpiresAt.After(limit) {
+		s.ExpiresAt = limit
+	}
 }
 
 // findTermFrozen 按 (kind=terminal-frozen, TerminalID, ContentHash) 全等定位
@@ -761,6 +865,8 @@ func (r *shareRepo) createCast(s Share) (*Share, error) {
 	// 回放是异步观看语义，与「看一眼即焚」相斥（P-20261006-27：创建面已拒绝，
 	// 这里兜底清防未来调用方绕过 API 直入 store——一次性字段对回放无意义）
 	s.ViewOnce, s.ViewedAt = false, time.Time{}
+	// 回放形态天然只读（P-20261106-8 组合语义），创建面兜底清
+	s.Writable = false
 	if old := r.findCastByRecording(s.RecordingID); old != nil {
 		if !old.Expired(time.Now()) {
 			// 幂等命中：名称/大小随录制内容刷新（重分享可能已重写快照）；
@@ -855,6 +961,8 @@ func (r *shareRepo) createSession(s Share) (*Share, error) {
 	s.Paths = nil
 	// 回放是异步观看语义，与「看一眼即焚」相斥（createCast 同款兜底清）
 	s.ViewOnce, s.ViewedAt = false, time.Time{}
+	// 回放形态天然只读（P-20261106-8 组合语义），创建面兜底清
+	s.Writable = false
 	if old := r.findSessionBySession(s.SessionID); old != nil {
 		if !old.Expired(time.Now()) {
 			// 幂等命中：名称/大小随会话内容刷新（重分享可能已重写快照）；
@@ -938,6 +1046,9 @@ func (r *shareRepo) createFile(s Share) (*Share, error) {
 	if s.ProjectID == "" {
 		return nil, fmt.Errorf("%w: share requires projectId", ErrInvalidArg)
 	}
+	// 可写位仅 terminal 直播形态有意义（P-20261106-8 组合语义）：文件/目录
+	// 分享创建面一律兜底清零，防未来调用方绕过 API 直入 store
+	s.Writable = false
 	// 批量冻结分享（P-20261008-1）：paths 非空即集合语义，与单路径分支完全
 	// 分立（独立命名空间派生，单路径 batch 也不会与单文件分享撞链）。MVP 仅
 	// frozen：live 的实时多根锚定语义未定义，store 兜底拒绝防调用方绕过 API
@@ -1049,7 +1160,7 @@ func (r *shareRepo) createFile(s Share) (*Share, error) {
 	if s.Kind == ShareKindSnippet {
 		ns, key = snippetTokenNamespace, s.Content
 	} else if s.Kind == ShareKindTerminal {
-		ns, key = terminalTokenNamespace, s.TerminalID
+		ns, key = terminalTokenNamespace, terminalTokenKey(&s)
 	} else if s.Kind == ShareKindTermFrozen {
 		ns, key = termFrozenTokenNamespace, s.TerminalID+"\x00"+s.ContentHash
 	} else if s.Kind == ShareKindCast {
@@ -1157,6 +1268,8 @@ func (r *shareRepo) createSnippet(s Share) (*Share, error) {
 	s.ProjectID, s.Path, s.IsDir = "", "", false
 	s.Paths = nil
 	s.Size = int64(len(s.Content))
+	// 片段形态无输入面（P-20261106-8 组合语义），可写位兜底清零
+	s.Writable = false
 	s.Token = DeriveShareToken(config.MasterKey(), snippetTokenNamespace, s.Content, 0)
 	if s.ExpiresAt.IsZero() {
 		s.ExpiresAt = time.Now().Add(SnippetTTL)
@@ -1274,6 +1387,10 @@ func (r *shareRepo) SetExpiry(token string, expiresAt time.Time) (*Share, error)
 		return nil, ErrNotFound
 	}
 	s.ExpiresAt = expiresAt
+	// 未过滤分享（P-20261106-9）的强制短 TTL 不因显式调整失效：零值（恢复
+	// 永久）与越过上限一律钳到 now+UnfilteredTTLMax——与创建路径同一钳制，
+	// 「含原文快照强制短 TTL」只有一处判定；响应回传生效值，管理面据此展示
+	clampUnfilteredExpiry(s)
 	data, err := json.Marshal(s)
 	if err != nil {
 		return nil, fmt.Errorf("marshal share: %w", err)
@@ -1343,6 +1460,29 @@ func (r *shareRepo) SetDirectInput(token string, on bool) (*Share, error) {
 		return nil, ErrNotFound
 	}
 	s.DirectInput = on
+	data, err := json.Marshal(s)
+	if err != nil {
+		return nil, fmt.Errorf("marshal share: %w", err)
+	}
+	if err := r.doc.Update(shareKind, s.Token, data); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// SetWritable 可写分享开关（P-20261106-8）：RMW 同款，只覆写 Writable 单字段。
+// 上行连接与会话侧输入闸是进程内状态（server/share 持有），由装配层在调用
+// 后级联断开/摘除——store 只管记录字段。口令门强制与形态限定在 API 面
+// （动作语义需要可编程感知的 400 形态，store 层静默清零会掩盖误用）
+func (r *shareRepo) SetWritable(token string, on bool) (*Share, error) {
+	s, err := r.Get(token)
+	if err != nil {
+		return nil, err
+	}
+	if s.Expired(time.Now()) {
+		return nil, ErrNotFound
+	}
+	s.Writable = on
 	data, err := json.Marshal(s)
 	if err != nil {
 		return nil, fmt.Errorf("marshal share: %w", err)
@@ -1491,7 +1631,7 @@ func (r *shareRepo) Rotate(token string) (*Share, error) {
 	if s.Kind == ShareKindSnippet {
 		ns, key = snippetTokenNamespace, s.Content
 	} else if s.Kind == ShareKindTerminal {
-		ns, key = terminalTokenNamespace, s.TerminalID
+		ns, key = terminalTokenNamespace, terminalTokenKey(s)
 	} else if s.Kind == ShareKindTermFrozen {
 		ns, key = termFrozenTokenNamespace, s.TerminalID+"\x00"+s.ContentHash
 	} else if s.Kind == ShareKindCast {

@@ -23,6 +23,7 @@ import (
 	"codecombo/server/api"
 	ai "codecombo/server/api/ai"
 	"codecombo/server/api/opschannel"
+	"codecombo/server/api/project"
 	"codecombo/server/api/system"
 	"codecombo/server/api/watchapi"
 	"codecombo/server/api/whatsnew"
@@ -228,6 +229,14 @@ func Run(opts Options) {
 		slog.Warn("deployconfig legacy model fields migration failed", "err", err)
 	} else if n > 0 {
 		slog.Info("deployconfig legacy model fields migrated", "count", n)
+	}
+	// 笔记单库化启动迁移（P-20261108-3，前置 P-20261107-2 单篇 → 多篇迁移同链）：
+	// 旧项目笔记（projnotes 单篇旧键 + notes-multi 项目作用域篇）并入全局笔记库，
+	// 标题带「[项目名] 」前缀——幂等（确定性目标 id，重跑/残留只删源），读路径
+	// 零副作用红线下的启动期写盘例外。全局库满额即中止（零丢弃）：滞留告警进
+	// 通知中心一条（动作直达笔记视图，面板横幅可续迁）
+	if res := project.MigrateNotesOnStartup(); res.Full && res.Pending > 0 {
+		store.Get().Notification.Add(notesMigrationPendingNotification(res))
 	}
 	// config.json 损坏显式降级告知（P-20261006-10）：Load 期已保全坏文件并登记
 	// 降级态，store 就绪后在此入账通知中心（构造与时机依据见 config_corrupt.go）。

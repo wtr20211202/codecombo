@@ -2,14 +2,15 @@
 // 分享结果卡：右键「分享」创建成功后的短链展示（复制/打开/去管理）。
 // 状态在 useShareDialog 单例中，任意入口（文件树右键等）创建后即弹出；
 // 服务未就绪时 url 为空——给出可行动提示而非报错堆栈。
-// 有效期行（P-20261003-29 / P-20261020-5）：文件分享 opt-in TTL——默认「永久」
-// 不动即零变化（不发请求），选择预设或自定义日期即刻生效；档位与创建弹层/
-// 管理器共用 utils/shareTtl（1 小时/1 天/7 天/30 天/永久/自定义）；
+// 有效期行（P-20261003-29 / P-20261020-5；P-20261107-4 扩终端输出快照）：opt-in
+// TTL——默认档不动即零变化（不发请求），选择预设或自定义日期即刻生效；档位与
+// 创建弹层/管理器共用 utils/shareTtl（1 小时/1 天/7 天/30 天/永久/自定义）；
 // snippet 的 24h 固定窗口不提供此行（服务端拒绝调整）
 // 二维码与邀请信息（P-20261020-6）：码/复制统一走地址计划（回环入口改局域
 // 网候选，三色徽标提示可达性）；设了口令时额外提供「复制邀请信息」——明文
 // 口令只在本次创建会话内存里，关闭结果卡即丢弃，绝不进 URL/二维码。
 import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { NModal, NButton, NIcon, NInput, NSelect, NDatePicker, useMessage } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import { CopyOutline, OpenOutline, ShareSocialOutline } from '@vicons/ionicons5'
@@ -30,6 +31,8 @@ const { t } = useI18n()
 const message = useMessage()
 const { showResult: show, resultShare, resultPassphrase, resultPlan, clearResultSecret } = useShareDialog()
 const { toggleShareManager } = usePanelLayout()
+const route = useRoute()
+const router = useRouter()
 
 const share = computed(() => resultShare.value)
 const plan = computed(() => resultPlan.value)
@@ -46,10 +49,16 @@ watch(show, (v) => {
 // 强调只读遮蔽 + 默认 30 分钟过期——访客看得见、改不了；冻结快照强调内容
 // 定格不可变 + 30 天保留，P-20261003-320；终端输出快照强调时点定格 + 会话
 // 关闭后仍可访问，P-20261005-205）
+// 关闭过滤的分享（P-20261106-9）描述走专属键：通用描述写死「敏感值已遮蔽 + 默认
+// 窗口」，与未过滤语义直接矛盾，不能只靠下方警示条对冲
 const desc = computed(() => {
   if (share.value?.kind === 'snippet') return t('share.snippet.resultDesc')
-  if (share.value?.kind === 'terminal') return t('share.terminal.resultDesc')
-  if (share.value?.kind === 'terminal-frozen') return t('share.termFrozen.resultDesc')
+  if (share.value?.kind === 'terminal') {
+    return t(share.value.unfiltered ? 'share.unfiltered.resultDescLive' : 'share.terminal.resultDesc')
+  }
+  if (share.value?.kind === 'terminal-frozen') {
+    return t(share.value.unfiltered ? 'share.unfiltered.resultDescFrozen' : 'share.termFrozen.resultDesc')
+  }
   if (share.value?.kind === 'cast') return t('share.cast.resultDesc')
   if (share.value?.kind === 'session') return t('share.session.resultDesc')
   // 多路径冻结分享（P-20261008-1）：先说清「集合 + 定格」，再走 frozen 通用说明
@@ -72,13 +81,16 @@ const hitsLine = computed(() => {
 // http 拦截器统一弹出，这里不重复报） ──
 const ttlChoice = ref<ShareTtlChoice>('permanent')
 const ttlDate = ref<number | null>(null)
-// TTL 行仅文件分享提供（opt-in TTL）：snippet 24h 固定、terminal 默认 30 分钟
-// 固定（直播是临时暴露面，服务端钳制不提供永久档）——两者的过期时点直接展示
-const isFileShare = computed(() => share.value?.kind === 'file')
+// TTL 行可调形态（P-20261020-5 文件 opt-in TTL；P-20261107-4 扩终端输出快照）：
+// snippet 24h 固定（服务端拒绝调整）；terminal 默认 30 分钟固定（直播是临时暴露
+// 面，弹层档位上限 24h）；terminal-frozen 默认 30 天、创建后经既有 expiry 端点
+// 即可调整（关闭遮蔽的快照服务端钳 24h）——过期时点直接展示
+const canAdjustTtl = computed(() => share.value?.kind === 'file' || share.value?.kind === 'terminal-frozen')
 
 /** 从记录当前状态回填选择器（弹窗打开 / 失败回落共用） */
 function syncTtl() {
-  const next = shareTtlFromExpiresAt(share.value?.kind === 'file' ? share.value.expiresAt : null)
+  const adjustable = share.value?.kind === 'file' || share.value?.kind === 'terminal-frozen'
+  const next = shareTtlFromExpiresAt(adjustable ? share.value?.expiresAt : null)
   ttlChoice.value = next.choice
   ttlDate.value = next.date
 }
@@ -160,6 +172,15 @@ function onOpen(target: string) {
 
 function onManage() {
   show.value = false
+  // 分享管理是项目页主区视图（宿主 Layout），而结果卡自 P-20261108-1 起挂 App 层、
+  // 首页/值班大屏同样弹出——非项目路由直接 toggle 只翻转无宿主的模块态（点了
+  // 无反应，进项目才突然冒出管理器）。改走 ?view=shares 既有深链进项目页打开
+  // （设置页出域总览卡同款；useLayoutViews.consumeViewQuery 消费并清 query）；
+  // 项目内保持原 toggle 语义不变
+  if (route.name !== 'project') {
+    void router.push({ path: '/project', query: { view: 'shares' } })
+    return
+  }
   toggleShareManager()
 }
 </script>
@@ -187,6 +208,15 @@ function onManage() {
         <div class="result-desc">
           {{ desc }}
         </div>
+        <!-- 未过滤标注（P-20261106-9）：关闭遮蔽的分享在结果卡显式回告——
+             链接分发前的最后一道知情位（访客页与管理列表另有同标） -->
+        <div
+          v-if="share?.unfiltered"
+          class="result-unfiltered"
+          data-testid="share-result-unfiltered"
+        >
+          {{ t('share.unfiltered.resultNote') }}
+        </div>
         <div
           class="result-hits"
           data-testid="share-result-hits"
@@ -194,8 +224,8 @@ function onManage() {
           {{ hitsLine }}
         </div>
 
-        <!-- 有效期（opt-in TTL）：文件分享可选（默认永久 = 零变化），snippet 固定 24h 不提供 -->
-        <template v-if="isFileShare">
+        <!-- 有效期（opt-in TTL）：文件分享 / 终端输出快照可选（默认 = 零变化），snippet 固定 24h 不提供 -->
+        <template v-if="canAdjustTtl">
           <div
             class="ttl-row"
             data-testid="share-ttl-row"
@@ -324,6 +354,17 @@ function onManage() {
   word-break: break-all;
 }
 .result-desc { margin-top: 4px; font-size: 12.5px; color: var(--text-secondary); }
+/* 未过滤标注（P-20261106-9）：危险色边框条与出域警示同语义——显著但非错误卡 */
+.result-unfiltered {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-red);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
 /* 访问指标行：紧随描述，弱化但可见（未访问同样展示，暴露量 0 也是信息） */
 .result-hits { margin-top: 3px; font-size: 12px; color: var(--text-muted); }
 /* 有效期行：标签 + 预设选择（+ 自定义日期），与卡内输入控件同小尺寸 */

@@ -511,7 +511,12 @@ func HasSessionSnapshot(nativeToken string) bool {
 // WriteTermFrozenSnapshot 把终端输出的净化文本写入单文件快照（P-20261005-205；
 // P-320 目录快照的单文件形态，同一 SnapshotsRoot 隔离区与清账通道）。
 // 调用方契约：data 已完成 ANSI 剥离与敏感值遮蔽（快照本体即净本，访客面
-// 零二次处理）；nativeToken 必须是 TermFrozenNativeToken 派生值（调用方
+// 零二次处理）——**唯一例外**：未过滤分享（P-20261106-9，记录 Unfiltered，
+// 分享者创建时显式 opt-out）的 data 只剥 ANSI、含敏感原文。该不变量对此类
+// 快照显式失效，由三道替代防线收敛：记录 TTL 强制钳 store.UnfilteredTTLMax
+// （24h，SetExpiry 同钳）、到期随 CleanupExpired + 孤儿对账（gcFrozenOrphans）
+// 删副本、访客页横幅位标注「未过滤」；本函数不感知模式（落盘原语与模式正交）。
+// nativeToken 必须是 TermFrozenNativeToken 派生值（调用方
 // 保证，目录名无注入面）。同 token 重复写入 = 同内容幂等重写（哈希派生
 // 键的直推），兼作「记录在而副本丢失」的修复通道。
 // 体积护栏：单份沿 MaxFrozenBytes（scrollback 历史天然有界 ≤16MB，护栏

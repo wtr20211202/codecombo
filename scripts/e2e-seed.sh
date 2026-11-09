@@ -17,7 +17,11 @@
 set -e
 BASE_URL="${1:-http://localhost:9999}"
 PASSWORD="${2:-admin}"
+# REPO_ROOT 归一为绝对路径（调用方传相对路径时按调用 cwd 展开）：注册进实例的
+# 项目路径必须绝对——claude 项目级会话的存储目录按注册路径逐字编码（服务端
+# EncodePath 原样替换分隔符），相对路径会让项目级 fixture 落错目录、范围查询落空
 REPO_ROOT="${3:-$(cd "$(dirname "$0")/.." && pwd)}"
+REPO_ROOT="$(cd "$REPO_ROOT" 2>/dev/null && pwd || echo "$REPO_ROOT")"
 PORT="${BASE_URL##*:}"
 
 # ---- 1. 锁定初始化（全新数据面首启未设密码：先 setup admin）----

@@ -1,10 +1,35 @@
 /**
- * 项目笔记「结论沉淀」模板构建（P-20261003-292，纯函数）：
- * 任务终态（done/failed）把结论追加进项目笔记的人机共享约定——
+ * 笔记「结论沉淀」模板构建（P-20261003-292，纯函数）：
+ * 任务终态（done/failed）把结论追加进笔记的人机共享约定——
  * 标题「## <日期> <任务简称>」+ 3~5 行结论（结果/做了什么/关键决定/遗留项）。
  * 标签文案由调用方经 labels 传入（本模块不依赖 i18n，可在 jsdom 单测）；
  * 追加语义与 ops 手册约定一致：写前先读、整份写回（last-writer-wins）。
+ *
+ * P-20261108-3 单库化：笔记是项目无关的单库，项目归属靠标题前缀「[项目名] 」——
+ * 沉淀落「[项目名] <交接词>」单篇（handoverNoteTitle），会话启动上下文按同一
+ * 前缀找项目篇（notesTitlePrefix / hasProjectNotePrefix）；与服务端存量迁移的
+ * 前缀格式（store.migratedTitle「[项目名] 原标题」）同构
  */
+
+/** 项目篇标题前缀「[项目名]」（不含尾随空格——前缀判定兼容迁移篇「[项目名]」
+ *  空标题形态）。项目名两端空白剥除 */
+export function notesTitlePrefix(projectName: string): string {
+  return `[${projectName.trim()}]`
+}
+
+/** 标题是否属于该项目（「[项目名]」整段前缀，其后为空或空白分隔——防
+ *  「[app]」误中「[app2] …」这类前缀子串） */
+export function hasProjectNotePrefix(title: string, projectName: string): boolean {
+  const prefix = notesTitlePrefix(projectName)
+  if (!title.startsWith(prefix)) return false
+  const rest = title.slice(prefix.length)
+  return rest === '' || /^\s/.test(rest)
+}
+
+/** 项目交接篇标题「[项目名] <交接词>」（交接词由调用方经 i18n 传入） */
+export function handoverNoteTitle(projectName: string, handoverWord: string): string {
+  return `${notesTitlePrefix(projectName)} ${handoverWord.trim()}`
+}
 
 /** 模板节内各字段的本地化文案（调用方从 i18n 取值后传入） */
 export interface DepositTemplateLabels {

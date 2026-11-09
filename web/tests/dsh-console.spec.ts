@@ -165,7 +165,14 @@ test.describe('dsh 控制台（P6）', () => {
       return now !== null && now !== beforeF5
     }, { timeout: 15000 }).toBeTruthy()
 
-    // Esc：关闭视图（v-show 保活 → hidden）
+    // Esc：关闭视图（v-show 保活 → hidden）。Esc 走布局逐层退出链（P-20261004-12），
+    // dsh 是链上顶层——前序用例（如 claude-sessions 的项目底部终端浮层）经服务端
+    // uiState 泄漏的「底栏面板开着」会让第一层 Esc 先收底栏并 preventDefault，
+    // dsh 收不到：先关掉泄漏层钉住前置，断言才不随共享实例的层状态漂移
+    if (await page.getByTestId('bottom-panel').isVisible().catch(() => false)) {
+      await page.getByTestId('bottom-panel-close').click()
+      await expect(page.getByTestId('bottom-panel')).toBeHidden()
+    }
     await page.keyboard.press('Escape')
     await expect(view).toBeHidden()
   })

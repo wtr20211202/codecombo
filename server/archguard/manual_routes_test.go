@@ -81,6 +81,10 @@ var manualWhitelist = map[string]string{
 	"/assets/xterm.js":     "分享访客页 vendored 资产（终端直播/回放页 xterm 运行时）",
 	"/assets/addon-fit.js": "分享访客页 vendored 资产（xterm addon-fit）",
 	"/assets/xterm.css":    "分享访客页 vendored 资产（xterm 样式）",
+	// P-20261107-4 渲染保真：宽字符宽度表 + 产品同款终端字体（同为访客渲染资源）
+	"/assets/addon-unicode11.js":          "分享访客页 vendored 资产（xterm addon-unicode11 宽度表）",
+	"/assets/JetBrainsMono-Regular.woff2": "分享访客页 vendored 资产（终端字体 JetBrains Mono，OFL）",
+	"/assets/JetBrainsMono-Bold.woff2":    "分享访客页 vendored 资产（终端字体 JetBrains Mono 粗体，OFL）",
 	// —— 管理/设置 UI 数据面（agent 能力域之外；agent 自持 CC_LOCK_TOKEN，不管理凭据令牌）——
 	"/api/ui-state":    "前端 UI 状态持久化面（浏览器工作台专用，GET/PUT/PATCH/export 同族）",
 	"/api/updates":     "应用自更新链路（更新器/设置 UI 消费，agent 不触碰升级）",

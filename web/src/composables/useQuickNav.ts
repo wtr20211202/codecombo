@@ -15,6 +15,7 @@ import { OPS_FILES_EXTERNAL_CHANGE } from '../utils/opsEvents'
 import type { PaletteCommand, PaletteRemoteFile } from '../components/search/CommandPalette.vue'
 import {
   FolderOutline,
+  BookOutline,
   GitBranchOutline,
   TerminalOutline,
   CloudDownloadOutline,
@@ -320,6 +321,10 @@ export function useQuickNav(openFiles?: MaybeRefOrGetter<readonly PaletteOpenFil
   /** 命令面板：命令列表（基础命令 + 按已配置主机动态生成的远程运维命令） */
   const paletteCommands = computed<PaletteCommand[]>(() => [
     { id: 'toggle-files', title: t('layout.files'), category: t('layout.view'), icon: FolderOutline, keywords: 'files tree sidebar', shortcut: ['Ctrl', '1'] },
+    // 笔记独立视图直达（P-20261107-2 多篇笔记库 → P-20261108-2 独立视图：主区
+    // 占编辑器位，toggle 语义同活动栏）：rail 之外的键盘/扫读入口；分发见
+    // useLayoutViews.handlePaletteCommand
+    { id: 'toggle-notes', title: t('notes.panel.title'), category: t('layout.view'), icon: BookOutline, keywords: 'notes notepad 项目笔记 全局笔记 笔记 便签 markdown' },
     { id: 'toggle-git', title: t('layout.git'), category: t('layout.view'), icon: GitBranchOutline, keywords: 'git panel changes', shortcut: ['Ctrl', '3'] },
     { id: 'toggle-terminal', title: t('layout.terminal'), category: t('layout.view'), icon: TerminalOutline, keywords: 'terminal console shell', shortcut: ['Ctrl', '`'] },
     { id: 'new-terminal', title: t('terminal.newTerminal'), category: t('layout.view'), icon: AddOutline, keywords: 'new terminal create shell 新建 终端' },

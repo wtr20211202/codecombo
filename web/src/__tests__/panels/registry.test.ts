@@ -3,6 +3,7 @@ import {
   registerPanel, unregisterPanel, getPanel, panelList, toggleablePanelIds,
   moveRailPanel, restoreRailTopOrder, railTopIds,
 } from '../../panels/registry'
+import { usePanelLayout, resetPanelLayout } from '../../composables/usePanelLayout'
 
 describe('panelRegistry', () => {
   // 手动序是模块级单例状态：每例后归一，防污染同文件的自然序断言
@@ -40,6 +41,22 @@ describe('panelRegistry', () => {
   it('getPanel 返回已注册定义（跨组同名取先注册的活动栏定义）', () => {
     expect(getPanel('files')?.titleKey).toBe('layout.projectFiles')
     expect(getPanel('nope')).toBeUndefined()
+  })
+
+  // 笔记独立视图（P-20261108-2）：notes 项 re-target 为主区视图形态——无 controls
+  //（agent-terminal/dashboard 同款），激活态跟随 showNotesView 而非侧栏 sideView
+  it('notes 面板为主区视图形态：无 controls，激活态跟随 showNotesView', () => {
+    const notes = getPanel('notes')
+    expect(notes?.controls).toBeUndefined()
+    const layout = usePanelLayout()
+    resetPanelLayout()
+    expect(notes?.active?.()).toBe(false)
+    layout.openNotesView()
+    expect(notes?.active?.()).toBe(true)
+    // 侧栏开合/视图与笔记无关（sideView 'notes' 已退役）
+    expect(layout.sideView.value).toBe('files')
+    resetPanelLayout()
+    expect(notes?.active?.()).toBe(false)
   })
 })
 

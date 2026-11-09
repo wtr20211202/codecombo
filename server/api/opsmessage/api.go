@@ -10,7 +10,7 @@ package opsmessage
 //
 // 事件：投递成功广播 terminal.message（载荷 from/to/摘要，不含全文），目标会话
 // 的 tab 未读徽标 + 通知中心弱条目由此驱动；收件箱被拉取后广播
-// terminal.message.read，前端徽标随之清除。与项目笔记分工：定向瞬态用消息、
+// terminal.message.read，前端徽标随之清除。与笔记库分工：定向瞬态用消息、
 // 共享持久用笔记（见手册 agent-message 节）。
 
 import (

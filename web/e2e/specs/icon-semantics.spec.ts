@@ -94,7 +94,9 @@ test.describe('动作图标语义', () => {
     // 基线扩容留痕：NAV_ICONS 新增 'sync'（P-20261023-1 多实例同步中心，
     // CloudCircleOutline 云+环）画廊多一行，基线随注册表有意重生成（非图形漂移）；
     // ACTION_ICONS 新增 'share.directApprove'（P-20261024-1 直通输入握手，
-    // HandLeftOutline 举手）再多一行（基线 1997px→2027px 恰一行高 30px），同法重生成
+    // HandLeftOutline 举手）再多一行（基线 1997px→2027px 恰一行高 30px），同法重生成；
+    // ACTION_ICONS 新增 'common.pinned'（P-20261107-1 布局锁定锁定态实心图钉 Pin，
+    // 与 common.pin 描边构成开/合双态）再多一行，同法重生成
     await page.setViewportSize({ width: 360, height: 720 })
     for (const theme of ['dark', 'light'] as const) {
       await page.setContent(await galleryHtml(theme))

@@ -2,7 +2,10 @@
 // 与追加语义（空笔记起头/缺尾换行衔接/已有空行不重复）——i18n 文案注入式
 // 设计让本文件无需挂 i18n 实例即可断言结构。
 import { describe, expect, it } from 'vitest'
-import { appendDepositSection, buildDepositSection, isDepositStatus, localDateStr } from './notesDeposit'
+import {
+  appendDepositSection, buildDepositSection, handoverNoteTitle, hasProjectNotePrefix,
+  isDepositStatus, localDateStr, notesTitlePrefix,
+} from './notesDeposit'
 
 const LABELS = {
   result: '结果',
@@ -64,5 +67,27 @@ describe('appendDepositSection', () => {
   it('已有尾换行/多余空行：归一为单个空行分隔', () => {
     expect(appendDepositSection('# 交接说明\n', section)).toBe(`# 交接说明\n\n${section}`)
     expect(appendDepositSection('# 交接说明\n\n\n', section)).toBe(`# 交接说明\n\n${section}`)
+  })
+})
+
+// 单库化（P-20261108-3）项目归属标题前缀：沉淀交接篇 / 会话上下文按前缀找篇 /
+// 服务端存量迁移篇三处同一格式「[项目名] …」
+describe('项目篇标题前缀', () => {
+  it('notesTitlePrefix 剥名两端空白、方括号包裹', () => {
+    expect(notesTitlePrefix(' demo ')).toBe('[demo]')
+  })
+
+  it('handoverNoteTitle 前缀 + 空格 + 交接词', () => {
+    expect(handoverNoteTitle('demo', ' 交接 ')).toBe('[demo] 交接')
+    expect(handoverNoteTitle('demo', 'Handover')).toBe('[demo] Handover')
+  })
+
+  it('hasProjectNotePrefix：整段前缀后为空或空白才算（防 [app] 误中 [app2]/[app]x）', () => {
+    expect(hasProjectNotePrefix('[demo] 交接', 'demo')).toBe(true)
+    expect(hasProjectNotePrefix('[demo]', 'demo')).toBe(true) // 迁移的空标题默认篇
+    expect(hasProjectNotePrefix('[demo]\t会议', 'demo')).toBe(true)
+    expect(hasProjectNotePrefix('[demo2] 交接', 'demo')).toBe(false)
+    expect(hasProjectNotePrefix('[demo]x', 'demo')).toBe(false)
+    expect(hasProjectNotePrefix('随手记', 'demo')).toBe(false)
   })
 })

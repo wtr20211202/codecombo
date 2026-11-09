@@ -44,7 +44,7 @@ test.describe('panel registry', () => {
       '提交',         // changes
       'Git 管理',     // git
       '终端',         // terminal
-      '项目笔记',     // notes（P-20261002-110）
+      '笔记',         // notes（P-20261002-110；P-20261107-5 起文案「笔记」，P-20261108-2 起主区独立视图）
       '终端会话管理', // agent-terminal
       '远程管理',     // remote-console
     ]

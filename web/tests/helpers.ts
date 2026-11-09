@@ -148,11 +148,27 @@ export function projectCardByName(page: Page, name: string): Locator {
   })
 }
 
+// 量树尾留白并给出右键点（容器内相对 y）：末行底缘之下留白 ≥16px 才算可用
+//（过窄的缝量测微差就会点到行上），否则返回 -1。evaluate 直传，内聚无闭包。
+function measureTreeTailGap(el: HTMLElement): number {
+  const box = el.getBoundingClientRect()
+  let bottom = box.top
+  el.querySelectorAll('.tree-item').forEach((item) => {
+    bottom = Math.max(bottom, item.getBoundingClientRect().bottom)
+  })
+  const gap = box.bottom - bottom
+  return gap >= 16 ? Math.round(bottom - box.top + gap / 2) : -1
+}
+
 // 文件树空白区右键（= 项目根上下文菜单，「生成分享链接」path 为空串）。
 // 禁止用固定坐标（如 position:{x:60,y:120}）：该 y 随树内容/行高/头部按钮
 // 变化会落到某个目录行上，右键变成「分享该目录」（run24：share-ttl 等用例
 // 误分享了 web 目录，「（项目根）」行自然找不到）。这里按实测最后一行底缘
 // 之下取空白点——树行占满无空白时回落到容器底部留白并如实报错。
+// 树内容高过容器（种子项目文件数增长，可见行撑满滚动区）时，先把树内
+// overflow:auto 的滚动容器（FileTreeView 的 .virtual-list-container）滚到底
+// 再量尾部留白——虚拟列表按行高记账的收尾差额会落成末行之下的可视留白，
+// 语义仍是真实用户的「滚动后右键空白区」，滚动后仍无留白才如实报错。
 // 文件树面板开合是服务端 uiState（跨用例共享）：前序用例可能收起侧栏，
 // 用例不能假定它是开的（实测复跑时侧栏为收起态，树 0×0、行全部 hidden）；
 // 按活动栏 active 类归一化到打开态，再等树量到尺寸。
@@ -171,16 +187,25 @@ export async function rightClickTreeBackground(page: Page, selector = '.tree-lis
   // 等首行落地再量底缘：加载窗口内量到空树会按整幅高度取点，落点可能在随后
   // 渲染出的行上
   await expect(tree.locator('.tree-item').first()).toBeVisible()
-  const y = await tree.evaluate((el) => {
-    const box = el.getBoundingClientRect()
-    let bottom = box.top
-    el.querySelectorAll('.tree-item').forEach((item) => {
-      bottom = Math.max(bottom, item.getBoundingClientRect().bottom)
+  let y = await tree.evaluate(measureTreeTailGap)
+  if (y < 0) {
+    await tree.evaluate((el) => {
+      const scrollable = (s: Element) => {
+        const oy = getComputedStyle(s).overflowY
+        return (oy === 'auto' || oy === 'scroll') && s.scrollHeight > s.clientHeight
+      }
+      const scroller = [el, ...el.querySelectorAll('*')].find(scrollable)
+      if (scroller) scroller.scrollTop = scroller.scrollHeight
     })
-    const gap = box.bottom - bottom
-    return gap >= 16 ? Math.round(bottom - box.top + gap / 2) : -1
-  })
-  if (y < 0) throw new Error(`${selector} 无空白区域可右键（树已撑满容器）`)
+    // 滚动事件触发虚拟窗口切片重算后 Vue 才重排行（异步 flush），短轮询等重排
+    // 落定再量——轮询耗尽仍无留白才如实报错
+    const deadline = Date.now() + 5000
+    while (y < 0 && Date.now() < deadline) {
+      await page.waitForTimeout(100)
+      y = await tree.evaluate(measureTreeTailGap)
+    }
+    if (y < 0) throw new Error(`${selector} 无空白区域可右键（滚动到底后树尾仍无留白）`)
+  }
   await tree.click({ button: 'right', position: { x: 60, y } })
 }
 

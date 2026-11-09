@@ -24,10 +24,11 @@ const keymap = useKeymapStore()
 //   terminal xterm 聚焦时生效（customKeyEventHandler 拦截域）
 //   approval 待裁决审批卡在屏时生效（焦点不在输入面且无模态让位，useApprovalHotkeys）
 //   monitor  仅值班大屏路由页内生效（裸 R 刷新）
+//   notes    笔记面板聚焦时生效（事件 target 在面板根内，useNotesKeyboard，P-20261107-5）
 // 标注与实际注册的一致性由 scripts/check-keybindings.mjs 单向对账兜底
 // （帮助承诺键 ⊆ 实际注册；approval 作用域同样在审计面内），静态行改动须同步。
-type ShortcutScope = 'global' | 'editor' | 'terminal' | 'approval' | 'monitor'
-const SCOPES: ShortcutScope[] = ['global', 'editor', 'terminal', 'approval', 'monitor']
+type ShortcutScope = 'global' | 'editor' | 'terminal' | 'approval' | 'monitor' | 'notes'
+const SCOPES: ShortcutScope[] = ['global', 'editor', 'terminal', 'approval', 'monitor', 'notes']
 
 // keys=键盘行键帽数组；trigger=鼠标/拖拽行触发短语（P-20261005-184）。鼠标交互
 // 无键位注册表，check-keybindings 的单向对账（帮助承诺键 ⊆ 实际注册，静态提取
@@ -115,6 +116,18 @@ const groups = computed<ShortcutGroup[]>(() => [
       { keys: keysOf('mdModeCycle'), scope: 'global', desc: t('shortcuts.mdModeCycle') },
     ],
   },
+  // 笔记面板组（P-20261107-5）：notes 域三键（keymap 注册表动态行，改绑跟随）——
+  // 焦点域 = 事件 target 在笔记面板根节点内（useNotesKeyboard 包含判定），
+  // 面板外按键零影响（同编辑器/终端焦点域口径）
+  {
+    title: t('shortcuts.groupNotes'),
+    items: [
+      // 未命名且有内容时保存顺带弹命名（notepad「保存即命名」；取消不再追问）
+      { keys: keysOf('notesSave'), scope: 'notes', desc: t('shortcuts.notesSave') },
+      { keys: keysOf('notesCreate'), scope: 'notes', desc: t('shortcuts.notesCreate') },
+      { keys: keysOf('notesRename'), scope: 'notes', desc: t('shortcuts.notesRename') },
+    ],
+  },
   {
     title: t('shortcuts.groupTerminal'),
     items: [
@@ -193,6 +206,7 @@ const scopeLabels = computed<Record<ShortcutScope, string>>(() => ({
   terminal: t('shortcuts.scopeTerminal'),
   approval: t('shortcuts.scopeApproval'),
   monitor: t('shortcuts.scopeMonitor'),
+  notes: t('shortcuts.scopeNotes'),
 }))
 
 // 过滤（P-20261003-31）：按条目描述文案 + 键位/触发短语串不分大小写子串匹配

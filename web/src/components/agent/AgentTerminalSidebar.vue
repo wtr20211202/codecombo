@@ -69,6 +69,9 @@ const props = defineProps<{
   /** 直通输入持权投影（P-20261024-1，透传 AgentSidebarSessionTree）：会话行
    *  橙点徽标与右键「收回访客输入」项的数据面 */
   directHolds?: Record<string, { nick?: string; visitorTail?: string }>
+  /** 直播中会话 id → 徽标 title（P-20261106-7，透传 AgentSidebarSessionTree）：
+   *  会话行红点徽标与右键「直播分享/结束直播」翻转的数据面 */
+  liveTitles?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -105,6 +108,9 @@ const emit = defineEmits<{
   (e: 'toggle-sensitive', sessionId: string): void
   /** 会话行「收回访客输入」（P-20261024-1，透传宿主处理） */
   (e: 'direct-revoke', sessionId: string): void
+  /** 会话行能力四件（P-20261106-7，透传宿主接线 useTerminalShareActions）：
+   *  直播分享/冻结分享/分享回放/导出输出——与底部终端 tab 右键同一实现 */
+  (e: 'capability-action', payload: { sessionId: string; key: 'liveShare' | 'frozenShare' | 'replayShare' | 'exportOutput' }): void
   /** 会话行「重新发起」（宿主解析源会话并预填新建对话框，P-20261003-146） */
   (e: 'relaunch', sessionId: string): void
   /** 会话行「复盘报告」（宿主写 postmortem store 打开 App 层弹层，P-20261004-60） */
@@ -521,11 +527,14 @@ function openSortMenu(e: MouseEvent) {
         :unread-map="unreadMap"
         :collapsed-projects="collapsedProjects"
         :locate-dirs="locateDirs"
+        :direct-holds="directHolds"
+        :live-titles="liveTitles"
         @select="(id) => emit('select', id)"
         @attach-project="(id) => emit('attach-project', id)"
         @toggle-project="(projectId) => emit('toggle-project', projectId)"
         @project-action="(payload) => emit('project-action', payload)"
         @project-session-action="(payload) => emit('project-session-action', payload)"
+        @capability-action="(payload) => emit('capability-action', payload)"
         @session-action="(payload) => emit('session-action', payload)"
         @locate-tree="(id) => emit('locate-tree', id)"
         @cross-review="(id) => emit('cross-review', id)"

@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
-import { DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, projectCardByName } from '../../tests/helpers'
+import { closeDshConsoleAndClearState, DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, projectCardByName } from '../../tests/helpers'
 import { serverPath } from '../../tests/dualpath'
 
 /**
@@ -179,6 +179,99 @@ test('智能体：管理页新建会话 → 悬浮窗多会话/调大小 → 悬
   await dialog.getByRole('button', { name: '确认' }).click()
   await expect(floatBox.locator('.agt-tab')).toHaveCount(0, { timeout: 5000 })
   await expect(floatBox.locator('.xterm').first()).toBeVisible({ timeout: 15000 })
+})
+
+// P-20261106-4 失联回归 + P-20261107-3 导航语义改版：打开→回首页→再进项目。
+// visible/mode 是 useAgentTerminal 模块级状态（跨路由存活）；P-20261107-3 起
+// 回首页=纯首页（路由路过收起 docked，首页 overlay 不因模块态残留自动展开），
+// 再进项目=恢复项目此前布局（会话级 per-项目记忆）。重挂实例的 everDocked
+// watch immediate（P-20261106-4）仍在此序列上回归：无 immediate 时再进项目
+// 面板 v-if 空壳。「再进项目」走 history 后退（SPA 回路由，浏览器返回键路径）
+test('终端会话管理：打开→回首页=纯首页→再进项目=布局还原且面板非空', async ({ page, request }) => {
+  await fixedLocale(page)
+  // dsh 开状态经 uiState 服务端持久化，跨 spec 残留会在进项目时经主区互斥
+  // watch 关掉 docked 管理页——先清场保证确定性（页面卸载后 API 清，见 helper 注释）
+  await closeDshConsoleAndClearState(page, request, BASE)
+  await enterProject(page)
+
+  // 活动栏打开 docked 管理页（beforeEach 已清会话 → 空态引导）
+  const railBtn = page.locator('[data-testid="rail-agent-terminal"]')
+  await railBtn.click()
+  await expect(page.locator('.atv-root')).toBeVisible({ timeout: 10000 })
+  await expect(railBtn).toHaveClass(/active/)
+
+  // 回首页=纯首页：导航路过收起 docked，overlay 不自动展开（P-20261107-3 前此处
+  // 呈现 home overlay 管理页）。先等首页工具条出现再断言 overlay 缺席，防导航
+  // 未完成时计数断言空过
+  await page.locator('.ide-header button[title="返回首页"]').click()
+  await expect(page.locator('.home-action-btn').first()).toBeVisible({ timeout: 10000 })
+  await expect(page.locator('.agt-home-overlay')).toHaveCount(0)
+
+  // 再进项目=布局还原：图标选中（registry 读模块态）且面板内容非空——
+  // everDocked immediate 保证重挂实例面板非空壳（P-20261106-4 回归面）
+  await page.goBack()
+  await page.waitForURL('**/project')
+  await expect(railBtn).toHaveClass(/active/)
+  await expect(page.locator('.atv-root')).toBeVisible({ timeout: 10000 })
+  await expect(page.locator('.atv-empty-hint')).toContainText('操作本系统', { timeout: 10000 })
+})
+
+// P-20261107-3 导航语义补面：①记忆为关也恢复——项目内关掉管理页，回首页再进
+// 项目不误展开（per-项目记忆记的是开合不是只记开）；②首页工具条图标=主动开，
+// overlay 打开是用户动作而非导航残留
+test('终端会话管理导航语义：关态记忆不误展开 + 首页主动开', async ({ page, request }) => {
+  await fixedLocale(page)
+  await closeDshConsoleAndClearState(page, request, BASE)
+  await enterProject(page)
+
+  // 打开再收起：项目记忆=关（toggleDocked 再点=收起；内嵌保活仅 v-show 隐藏）
+  const railBtn = page.locator('[data-testid="rail-agent-terminal"]')
+  await railBtn.click()
+  await expect(page.locator('.atv-root')).toBeVisible({ timeout: 10000 })
+  await railBtn.click()
+  await expect(page.locator('.atv-root')).toBeHidden()
+
+  // 回首页=纯首页；再进项目=关态记忆恢复（不开、图标不选中）
+  await page.locator('.ide-header button[title="返回首页"]').click()
+  await expect(page.locator('.home-action-btn').first()).toBeVisible({ timeout: 10000 })
+  await expect(page.locator('.agt-home-overlay')).toHaveCount(0)
+  await page.goBack()
+  await page.waitForURL('**/project')
+  await expect(railBtn).not.toHaveClass(/active/)
+  await expect(page.locator('.atv-root')).toHaveCount(0)
+
+  // 回首页后点工具条图标主动开：overlay 打开（主动开语义不受导航收起误伤）
+  await page.locator('.ide-header button[title="返回首页"]').click()
+  await expect(page.locator('.home-action-btn').first()).toBeVisible({ timeout: 10000 })
+  await page.locator('.home-action-btn[title="终端会话管理"]').click()
+  await expect(page.locator('.agt-home-overlay .atv-root')).toBeVisible({ timeout: 10000 })
+})
+
+// P-20261106-4 横向同族回归：dsh 控制台（Layout dshEverOpened，模块级
+// showDshConsole）与终端管理页同病——打开→回首页→再进项目面板空壳。
+// 断言面一致：活动栏选中态与主区视图内容同步出现
+test('dsh 控制台：打开→回首页→再进项目，主区视图随选中态非空', async ({ page, request }) => {
+  await fixedLocale(page)
+  await closeDshConsoleAndClearState(page, request, BASE)
+  await enterProject(page)
+
+  const railDsh = page.locator('[data-testid="rail-dsh-console"]')
+  await railDsh.click()
+  await expect(page.locator('.dsh-console-embedded')).toBeVisible({ timeout: 10000 })
+  await expect(railDsh).toHaveClass(/active/)
+
+  await page.locator('.ide-header button[title="返回首页"]').click()
+  // 回首页：首页浮层随模块态呈现（HomeView dshEverOpened 挂载即同步）
+  await expect(page.locator('.dsh-console-home')).toBeVisible({ timeout: 10000 })
+
+  await page.goBack()
+  await page.waitForURL('**/project')
+  await expect(railDsh).toHaveClass(/active/)
+  await expect(page.locator('.dsh-console-embedded')).toBeVisible({ timeout: 10000 })
+
+  // 收尾清场：dsh 开状态已 persist 到 uiState（persistDshConsoleOpen watch），
+  // 不清会以全屏/浮层形态污染后续 spec（见 closeDshConsoleAndClearState 注释）
+  await closeDshConsoleAndClearState(page, request, BASE)
 })
 
 // B4 约定式审批流：API 造 pending → 全局卡片出现 → 「允许一次」→ 状态机落账 + 卡片消失

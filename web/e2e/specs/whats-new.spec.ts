@@ -33,10 +33,12 @@ test('版本差播种：首启弹层显示新版段落 → 关闭 → 刷新不�
   await seedSeen(page, '0.0.0')
   await gotoAndUnlock(page, '/')
 
-  // 弹层亮起且 delta 含文档现有段落（v0.0.1）：版本徽标 + 段落要点可见
+  // 弹层亮起且 delta 含文档现有段落：版本徽标 + 段落要点可见。
+  // 徽标锚定精确版本号（^v0\.0\.1$）：文档随版本新增段落（v0.0.1-beta.x 预
+  // 发布叙事段），hasText 'v0.0.1' 子串会同时命中多枚徽标触发 strict 违例
   const modal = popup(page)
   await expect(modal).toBeVisible({ timeout: 10000 })
-  await expect(modal.locator('.wn-badge', { hasText: 'v0.0.1' })).toBeVisible()
+  await expect(modal.locator('.wn-badge', { hasText: /^v0\.0\.1$/ })).toBeVisible()
   await expect(modal.locator('.wn-body').first()).toBeVisible()
 
   // 关闭即记已读：基线推进到最新段版本
@@ -75,11 +77,13 @@ test('帮助中心「更新内容」节：历史版本可回看', async ({ page 
   const drawer = page.locator('.n-drawer').filter({ hasText: '帮助中心' })
   await expect(drawer).toBeVisible({ timeout: 5000 })
 
-  // 「更新内容」分组出现（后端 help.Get 并入 whatsnew 段落），展开可见历史段落
+  // 「更新内容」分组出现（后端 help.Get 并入 whatsnew 段落），展开可见历史段落。
+  // h2 锚定完整段落标题：文档新增 v0.0.1-beta.x 段后 hasText 'v0.0.1' 子串命中
+  // 多个历史 h2 触发 strict 违例，精确标题恒唯一
   const group = drawer.locator('.help-group').filter({ hasText: '更新内容' })
   await expect(group).toBeVisible({ timeout: 5000 })
   await group.locator('.help-q').first().click()
   const answer = drawer.locator('.help-a').first()
   await expect(answer).toBeVisible()
-  await expect(answer.locator('h2', { hasText: 'v0.0.1' })).toBeVisible()
+  await expect(answer.locator('h2', { hasText: 'v0.0.1 首个公开版本' })).toBeVisible()
 })

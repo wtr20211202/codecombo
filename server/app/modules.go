@@ -142,8 +142,12 @@ func builtinModules(cfg *config.Config, rt runtimeInfo, routes api.RouteTable) [
 			Routes: manifestRoutes(routes, "project"),
 			Topics: []string{opschannel.EventProjectsChanged, project.TopicProjectAdded, project.TopicProjectRemoved},
 			// 能力项（P-20261004-4）：独立路径端点家族（发现面白名单同源——
-			// 旧对端 404 回退的协议化探测点，前端 stores/meta hasCap 消费）
-			Capabilities: []string{"ahead-behind-all", "fetch-all", "notes"},
+			// 旧对端 404 回退的协议化探测点，前端 stores/meta hasCap 消费）。
+			// notes-global（P-20261107-5）：笔记库 REST 族（/api/notes）。
+			// P-20261108-3 单库化：notes（项目兼容 shim）/notes-multi（项目多篇族 +
+			// sync notes-multi 单元推送门控值）随端点族退役同步下线——旧对端探测
+			// 不到即按缺席降级（老客户端对新实例的 sync 笔记单元由落地侧显式拒收）
+			Capabilities: []string{"ahead-behind-all", "fetch-all", "notes-global"},
 		}},
 		{files.NewModule(), kernel.Manifest{
 			Name:   "files",

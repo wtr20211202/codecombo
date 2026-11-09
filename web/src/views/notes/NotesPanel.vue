@@ -1,263 +1,461 @@
 <script setup lang="ts">
-// 项目笔记面板（P-20261002-110，人机共享便签层）：项目一文档的 markdown 便签，
-// 人机共享——人写交接说明/待办/决策记录，agent 经 ops 手册登记的 REST 通道
-// 读写同一份（服务端 GET/PUT /projects/:id/notes）。
-// 编辑形态：textarea + 预览切换（MVP 不上 Monaco，与提案一致），防抖自动保存
-// （停顿 800ms 落盘；切项目/卸载前 flush）。并发策略为 last-writer-wins
-// （面板与 agent 后写覆盖，无版本协商——面板每次挂载重读磁盘最新内容）。
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NEmpty, NIcon, NSpin, useMessage } from 'naive-ui'
-import { CreateOutline, EyeOutline } from '@vicons/ionicons5'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
-import { projectApi } from '../../api/client'
-import { useProjectStore } from '../../stores/project'
+// 笔记面板（P-20261002-110 单篇便签 → P-20261107-2 多篇笔记库 → P-20261107-5
+// 独立化 → P-20261108-2 独立视图 → P-20261108-3 单库化）：快捷新建 + 管理侧栏 +
+// markdown 编辑/预览双栏 + 续迁横幅。笔记只有项目无关的一个库（/api/notes 族，
+// 「全局库|项目库」双源切换退役），项目归属靠标题「[项目名] 」前缀——侧栏标题
+// 搜索即按项目筛。数据面收在 useNotesMulti 单例引擎，本组件只做呈现与事件接线。
+// 宿主 = NotesView（项目页主区 / 首页 overlay 两形态，closable 时头部出关闭钮，
+// 关闭语义归宿主）。
+//
+// 快捷键（keymap notes 域，useNotesKeyboard 焦点域消费——按面板根 contains 判定，
+// 宿主无关）：保存（未命名且有内容时顺带命名——notepad「保存即命名」心智，取消
+// 即本会话不再追问）/新建（命名后置：空标题建篇即激活进编辑，「无标题笔记」占位）/
+// 重命名。
+//
+// 兼容端点协议保持：notes-editor/notes-preview/notes-mode-*/notes-status 等
+// data-testid 与单文档时代一致（e2e 既有契约面）。
+// 覆盖保护三件套：自动保存默认带 baseUpdatedAt，409 挂起冲突条三动作
+// （用我的覆盖/载入服务端版本/另存为新篇）；丢失上界 = 防抖窗（诚实声明，
+// beforeunload keepalive fetch 尽力而为）。
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { NButton, NEmpty, NIcon, NSpin } from 'naive-ui'
+import { CloseOutline } from '@vicons/ionicons5'
+import { getUnlockToken } from '../../stores/lock'
 import { useI18n } from '../../composables/useI18n'
-import { NOTES_EXTERNAL_UPDATE, type NotesExternalUpdateDetail } from '../../utils/opsEvents'
+import { promptDialog } from '../../composables/useDialog'
+import { useNarrowLayout } from '../../composables/useNarrowLayout'
+import { useNotesKeyboard } from '../../composables/useNotesKeyboard'
+import { suggestNoteTitle } from '../../utils/noteTitle'
+import { NOTES_EXTERNAL_UPDATE, notesSaveUrl, useNotesMulti } from '../../composables/useNotesMulti'
+import { OPS_NOTES_UPDATED, type NotesExternalUpdateDetail } from '../../utils/opsEvents'
+import NotesMigrationBanner from './NotesMigrationBanner.vue'
+import NotesPanelHeader from './NotesPanelHeader.vue'
+import NotesPreviewPane from './NotesPreviewPane.vue'
+import NotesSidebar from './NotesSidebar.vue'
 
-const projectStore = useProjectStore()
+defineProps<{
+  /** 宿主提供关闭语义（NotesView 两形态）：头部出关闭钮，点击抛 close */
+  closable?: boolean
+}>()
+const emit = defineEmits<{ (e: 'close'): void }>()
+
 const { t } = useI18n()
-const message = useMessage()
 
-const loading = ref(false)
-const loadFailed = ref(false)
-const content = ref('')
+// 单例引擎（单库：全部读写走 /api/notes 族，无作用域切换）
+const notes = useNotesMulti()
+
 // edit | preview——切换不重置编辑态，仅换呈现层
 const mode = ref<'edit' | 'preview'>('edit')
-// 保存状态：idle（已同步）| dirty（待存）| saving | error
-const saveState = ref<'idle' | 'dirty' | 'saving' | 'error'>('idle')
-const statusText = computed(() => ({
-  idle: '',
-  dirty: t('notes.panel.dirty'),
-  saving: t('notes.panel.saving'),
-  error: t('notes.panel.saveFailed'),
-})[saveState.value])
+// 管理侧栏（列表/搜索/回收站，子组件 NotesSidebar）显隐——独立视图大区域默认常显
+// （P-20261108-2，notepad 文档列表心智）；窄屏（≤700px）放不下列表+编辑面默认收起
+const sidebarOpen = ref(!useNarrowLayout().narrow.value)
 
-// 刷新令牌：项目切换/快速重开时旧请求的过期响应不落地（TodoPanel 同款，
-// 避免 A 项目笔记滞留在 B 项目面板里）
-let reqToken = 0
-// 防抖定时器与挂起写入的目标项目：闭包捕获输入时的 pid，项目切换后
-// 迟到的 flush 仍写回原项目（内容归属正确）
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-let pendingPid = ''
+const panelRoot = ref<HTMLElement | null>(null)
+const editorRef = ref<HTMLTextAreaElement | null>(null)
 
-const NOTES_SAVE_DEBOUNCE_MS = 800
+// 「已保存」闪示（快捷保存的可见反馈——自动保存走既有 dirty/saving 态徽标）
+const justSaved = ref(false)
+let savedFlashTimer: ReturnType<typeof setTimeout> | null = null
+// 本会话内拒绝命名的篇（Ctrl+S 命名追问取消一次即不再问——显式取消是意图）
+const namingDeclined = new Set<string>()
 
-/** markdown → 消毒后的 HTML（changelog/帮助中心同一条 marked+DOMPurify 管线；
- *  笔记是 agent 也可写的内容，消毒不可省） */
-function renderPreview(md: string): string {
-  const html = marked.parse(md || '', { async: false }) as string
-  return DOMPurify.sanitize(html)
+const statusText = computed(() => {
+  if (justSaved.value) return t('notes.panel.saved')
+  return ({
+    idle: '',
+    dirty: t('notes.panel.dirty'),
+    saving: t('notes.panel.saving'),
+    error: t('notes.panel.saveFailed'),
+  })[notes.activeSaveState.value]
+})
+
+/** markdown 预览渲染收口 NotesPreviewPane 子组件（marked+DOMPurify 消毒管线） */
+
+/** tab 条关闭钮：与侧栏行「移入回收站」同动作（软删可恢复） */
+function onTrash(id: string): void {
+  void notes.trashNote(id)
 }
 
-async function load(): Promise<void> {
-  const pid = projectStore.currentProjectId
-  if (!pid) return
-  const token = ++reqToken
-  loading.value = true
-  loadFailed.value = false
-  try {
-    const res = (await projectApi.projectNotes(pid)) as { data?: { content?: string } }
-    if (token !== reqToken) return
-    content.value = res.data?.content ?? ''
-    saveState.value = 'idle'
-  } catch {
-    if (token !== reqToken) return
-    loadFailed.value = true
-    saveState.value = 'idle'
-  } finally {
-    if (token === reqToken) loading.value = false
-  }
+function noteTitle(n: { title: string }): string {
+  return n.title || t('notes.panel.untitled')
 }
 
-function scheduleSave(): void {
-  const pid = projectStore.currentProjectId
-  if (!pid) return
-  pendingPid = pid
-  saveState.value = 'dirty'
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => { void flushSave() }, NOTES_SAVE_DEBOUNCE_MS)
+function focusEditor(): void {
+  void nextTick(() => editorRef.value?.focus())
 }
 
-function isTooLarge(e: unknown): boolean {
-  const err = e as { status?: number; response?: { status?: number } }
-  return err?.status === 413 || err?.response?.status === 413
+function flashSaved(): void {
+  justSaved.value = true
+  if (savedFlashTimer) clearTimeout(savedFlashTimer)
+  savedFlashTimer = setTimeout(() => { justSaved.value = false }, 1200)
 }
 
-/** 立即落盘挂起的修改（防抖到期 / 失焦 / 切项目 / 面板卸载共用）。
- *  全量覆盖写（last-writer-wins）：写挂起时捕获的 pid，不写当前项目 */
-async function flushSave(): Promise<void> {
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
-  if (saveState.value !== 'dirty' || !pendingPid) return
-  const pid = pendingPid
-  saveState.value = 'saving'
-  try {
-    await projectApi.saveProjectNotes(pid, content.value)
-    // 项目已切走时只终结状态，不碰新项目的编辑态（新项目已由 load 接管）
-    if (projectStore.currentProjectId === pid && saveState.value === 'saving') {
-      saveState.value = 'idle'
+/** 快捷新建：空标题建篇即激活进编辑（命名后置——侧栏「+」/头部「+」/快捷键
+ *  三入口同此链），焦点落编辑面立即可打字 */
+async function createNoteAndFocus(): Promise<void> {
+  const created = await notes.createNote('')
+  if (created) focusEditor()
+}
+
+/** 重命名当前篇（头部动作 + notesRename 快捷键共用）：promptDialog 与侧栏行
+ *  内重命名同款 */
+async function renameActiveNote(): Promise<void> {
+  const cur = notes.activeNote.value
+  if (!cur) return
+  const next = await promptDialog({
+    title: t('notes.panel.rename'),
+    label: t('notes.panel.renamePrompt'),
+    defaultValue: cur.title,
+  })
+  if (next === null) return
+  const ok = await notes.renameNote(cur.id, next.trim())
+  if (ok && next.trim()) flashSaved()
+}
+
+/** 保存当前篇（notesSave 快捷键 + 头部未来入口共用）：先落挂起修改，未命名
+ *  且有内容时弹命名框（预填正文首行建议——「快捷键保存命名」；取消 = 本会话
+ *  不再追问该篇，内容照常已保存）。冲突挂起时跳过命名追问（冲突条是模态裁决
+ *  面，不叠第二张弹窗） */
+async function saveActiveNote(): Promise<void> {
+  const id = notes.activeId.value
+  if (!id) return
+  await notes.flushSave(id)
+  const meta = notes.activeNote.value
+  const content = notes.contents[id] ?? ''
+  if (!notes.conflict.value && meta && !meta.title && content.trim() && !namingDeclined.has(id)) {
+    const suggested = suggestNoteTitle(content)
+    const next = await promptDialog({
+      title: t('notes.panel.saveNameTitle'),
+      label: t('notes.panel.renamePrompt'),
+      defaultValue: suggested,
+    })
+    if (next === null || !next.trim()) {
+      namingDeclined.add(id) // 取消/空名：本会话不再追问（内容已保存，不受影响）
+    } else {
+      await notes.renameNote(id, next.trim())
     }
-  } catch (e) {
-    if (projectStore.currentProjectId !== pid) return
-    saveState.value = 'error'
-    message.error(
-      (e as { userMessage?: string }).userMessage
-      || (isTooLarge(e) ? t('notes.panel.tooLarge') : t('notes.panel.saveFailed')),
-    )
   }
+  // 反馈门：落盘收口到 idle 才闪「已保存」（error 态不谎报成功；占位空篇没有
+  // 「已保存」事实）
+  if (notes.saveStates[id] === 'idle' && !notes.isPlaceholder(id)) {
+    flashSaved()
+  }
+  focusEditor()
 }
 
-/** 项目切换：先落盘旧项目挂起修改，再读新项目（token 令牌保证乱序响应不落地） */
-watch(() => projectStore.currentProjectId, () => { void flushSave().then(load) })
+useNotesKeyboard(panelRoot, {
+  save: () => { void saveActiveNote() },
+  create: () => { void createNoteAndFocus() },
+  rename: () => { void renameActiveNote() },
+})
 
-/** 笔记被外部整份写回（P-20261003-292「沉淀到笔记」等）：无未保存编辑时从
- *  服务端重读——否则面板旧内容会在下次防抖保存时整体覆盖外部写入（
- *  last-writer-wins 无版本协商）；有挂起编辑时不动本面板（人的输入优先，
- *  外部内容下次挂载自然可见），面板未挂载时事件落空由挂载 load() 兜底 */
+/** 管理侧栏展开时拉取软删清单（回收站徽标与恢复/彻底删除动作的数据面）——
+ *  immediate：大区域侧栏默认常显，挂载即拉 */
+watch(sidebarOpen, (side) => {
+  if (side) void notes.loadTrash()
+}, { immediate: true })
+
+/** 续迁横幅迁入了旧项目笔记：重拉清单（服务端 notes.updated 广播同样会到，
+ *  这里是同窗口确定性收口，不依赖 WS 时序） */
+function onMigrated(): void {
+  void notes.loadList()
+  if (sidebarOpen.value) void notes.loadTrash()
+}
+
+/** 笔记被外部写回（服务端 notes.updated 直通分发 + 前端内部事件统一消费口）。
+ *  服务端事件的 projectId = 笔记库哨兵 '_global'，引擎按其对位 */
 function onExternalUpdate(e: Event): void {
   const detail = (e as CustomEvent<NotesExternalUpdateDetail>).detail
-  if (!detail || detail.projectId !== projectStore.currentProjectId) return
-  if (saveState.value === 'dirty' || saveState.value === 'saving') return
-  void load()
+  void notes.onExternalUpdate(detail)
+}
+
+/** 页面隐藏（切 tab/最小化）：防抖窗内的编辑全部落盘——多端/多标签场景
+ *  隐藏面是高频丢失窗 */
+function onVisibility(): void {
+  if (document.visibilityState === 'hidden') void notes.flushAll()
+}
+
+/** 卸载前的尽力而为：keepalive fetch 直发（uiState 关页补丁同款——sendBeacon
+ *  只支持 POST，本族单篇保存只有 PUT 路由；且 sendBeacon 无法携 X-Lock-Token，
+ *  锁定实例会被 401 拒收）。诚实边界：浏览器不保证送达、>64KB 载荷被浏览器
+ *  截拒，丢失上界 = 防抖窗 */
+function onBeforeUnload(): void {
+  for (const id of notes.dirtyIds.value) {
+    const content = notes.contents[id] ?? ''
+    const base = notes.bases[id]
+    const body = JSON.stringify({ content, baseUpdatedAt: base || undefined })
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const token = getUnlockToken()
+      if (token) headers['X-Lock-Token'] = token
+      fetch(notesSaveUrl(id), {
+        method: 'PUT',
+        headers,
+        body,
+        keepalive: true,
+      })
+    } catch { /* 尽力而为：失败落回防抖窗丢失上界（诚实声明） */ }
+  }
 }
 
 onMounted(() => {
   window.addEventListener(NOTES_EXTERNAL_UPDATE, onExternalUpdate)
-  void load()
+  window.addEventListener(OPS_NOTES_UPDATED, onExternalUpdate)
+  document.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('beforeunload', onBeforeUnload)
+  void notes.loadList()
 })
 onBeforeUnmount(() => {
   window.removeEventListener(NOTES_EXTERNAL_UPDATE, onExternalUpdate)
-  void flushSave()
+  window.removeEventListener(OPS_NOTES_UPDATED, onExternalUpdate)
+  document.removeEventListener('visibilitychange', onVisibility)
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  if (savedFlashTimer) clearTimeout(savedFlashTimer)
+  void notes.flushAll()
 })
 </script>
 
 <template>
   <div
+    ref="panelRoot"
     class="notes-panel"
     data-testid="notes-panel"
   >
-    <div class="np-header">
-      <span class="np-title">{{ t('notes.panel.title') }}</span>
-      <span
-        v-if="statusText"
-        class="np-status"
-        :class="'st-' + saveState"
-        data-testid="notes-status"
-      >{{ statusText }}</span>
-      <div class="np-mode">
-        <NButton
-          quaternary
-          size="tiny"
-          :type="mode === 'edit' ? 'primary' : 'default'"
-          :title="t('notes.panel.edit')"
-          :aria-label="t('notes.panel.edit')"
-          data-testid="notes-mode-edit"
-          @click="mode = 'edit'"
-        >
-          <template #icon>
-            <NIcon data-icon-action="common.edit"><CreateOutline /></NIcon>
-          </template>
-        </NButton>
-        <NButton
-          quaternary
-          size="tiny"
-          :type="mode === 'preview' ? 'primary' : 'default'"
-          :title="t('notes.panel.preview')"
-          :aria-label="t('notes.panel.preview')"
-          data-testid="notes-mode-preview"
-          @click="mode = 'preview'"
-        >
-          <template #icon>
-            <NIcon data-icon-action="common.preview"><EyeOutline /></NIcon>
-          </template>
-        </NButton>
-      </div>
-    </div>
+    <NotesPanelHeader
+      :status-text="statusText"
+      :status-kind="notes.activeSaveState.value"
+      :sidebar-open="sidebarOpen"
+      :mode="mode"
+      :closable="closable"
+      @create="createNoteAndFocus"
+      @toggle-sidebar="sidebarOpen = !sidebarOpen"
+      @set-mode="mode = $event"
+      @close="emit('close')"
+    />
+    <!-- 单库化续迁横幅（P-20261108-3）：仍有旧项目笔记滞留（笔记库满额中止）才出现 -->
+    <NotesMigrationBanner @migrated="onMigrated" />
+
     <NSpin
-      v-if="loading"
+      v-if="notes.loading.value"
       class="np-loading"
       size="small"
     />
     <NEmpty
-      v-else-if="loadFailed"
+      v-else-if="notes.loadFailed.value"
       class="np-empty"
       size="small"
       :description="t('notes.panel.loadFailed')"
     />
-    <NEmpty
-      v-else-if="!projectStore.currentProjectId"
-      class="np-empty"
-      size="small"
-      :description="t('notes.panel.noProject')"
-    />
     <template v-else>
       <div class="np-body">
-        <textarea
-          v-show="mode === 'edit'"
-          v-model="content"
-          class="np-editor"
-          :placeholder="t('notes.panel.placeholder')"
-          :aria-label="t('notes.panel.title')"
-          data-testid="notes-editor"
-          @input="scheduleSave"
-          @blur="flushSave"
+        <!-- 管理侧栏（列表/搜索/回收站，子组件持有过滤与确认态） -->
+        <NotesSidebar
+          v-if="sidebarOpen"
+          :notes="notes"
         />
-        <!-- eslint-disable-next-line vue/no-v-html —— marked+DOMPurify 消毒后渲染（agent 亦可写，消毒不可省） -->
-        <div
-          v-if="mode === 'preview'"
-          class="np-preview"
-          data-testid="notes-preview"
-          v-html="renderPreview(content)"
-        />
+
+        <!-- 主编辑区 -->
+        <div class="np-main">
+          <div
+            v-if="notes.notes.value.length > 0"
+            class="np-tabs"
+            data-testid="notes-tabs"
+          >
+            <button
+              v-for="n in notes.notes.value"
+              :key="n.id"
+              class="np-tab"
+              :class="{ active: n.id === notes.activeId.value }"
+              :data-testid="'notes-tab-' + n.id"
+              @click="notes.select(n.id)"
+            >
+              <span class="np-tab-title">{{ noteTitle(n) }}</span>
+              <span
+                v-if="notes.saveStates[n.id] === 'dirty' || notes.saveStates[n.id] === 'error'"
+                class="np-tab-dot"
+                :class="{ error: notes.saveStates[n.id] === 'error' }"
+              />
+              <NIcon
+                class="np-tab-close"
+                size="12"
+                :component="CloseOutline"
+                :aria-label="t('notes.panel.trash')"
+                @click.stop="onTrash(n.id)"
+              />
+            </button>
+          </div>
+
+          <!-- 冲突条（覆盖保护三件套②：409 不静默覆盖，三动作裁决） -->
+          <div
+            v-if="notes.conflict.value"
+            class="np-conflict"
+            data-testid="notes-conflict"
+          >
+            <span class="np-conflict-text">{{ t('notes.panel.conflictDetected') }}</span>
+            <span class="np-conflict-actions">
+              <NButton
+                size="tiny"
+                type="warning"
+                secondary
+                data-testid="notes-conflict-overwrite"
+                @click="notes.resolveConflictOverwrite()"
+              >{{ t('notes.panel.conflictOverwrite') }}</NButton>
+              <NButton
+                size="tiny"
+                secondary
+                data-testid="notes-conflict-load"
+                @click="notes.resolveConflictLoadServer()"
+              >{{ t('notes.panel.conflictLoad') }}</NButton>
+              <NButton
+                size="tiny"
+                secondary
+                data-testid="notes-conflict-saveas"
+                @click="notes.resolveConflictSaveAsNew()"
+              >{{ t('notes.panel.conflictSaveAs') }}</NButton>
+            </span>
+          </div>
+
+          <!-- 编辑面恒在（空库时占位默认篇承载——「打开即可打字」单篇时代契约，
+               首写经服务端 default-upsert 落真身） -->
+          <div class="np-editor-area">
+            <textarea
+              v-show="mode === 'edit' && notes.activeId.value"
+              ref="editorRef"
+              :value="notes.activeContent.value"
+              class="np-editor"
+              :placeholder="t('notes.panel.placeholder')"
+              :aria-label="t('notes.panel.title')"
+              data-testid="notes-editor"
+              @input="notes.edit(notes.activeId.value, ($event.target as HTMLTextAreaElement).value)"
+              @blur="notes.flushSave(notes.activeId.value)"
+            />
+            <NotesPreviewPane
+              v-if="mode === 'preview'"
+              :content="notes.activeContent.value"
+            />
+          </div>
+        </div>
       </div>
     </template>
   </div>
 </template>
 
 <style scoped>
+/* 根自带弹性填充：宿主两形态（主区 flex 列 / overlay 卡片）直接撑满 */
 .notes-panel {
   position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   user-select: text;
 }
-.np-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border-default);
-}
-.np-title {
-  font-weight: 600;
-  font-size: 12px;
-}
-.np-status {
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-.np-status.st-error {
-  color: var(--accent-red, #e05561);
-}
-.np-mode {
-  margin-left: auto;
-  display: flex;
-  gap: 2px;
-}
 .np-loading,
 .np-empty {
   margin: auto;
 }
 .np-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+/* ── 主区 ── */
+.np-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.np-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px 0;
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: thin;
+}
+.np-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.np-tab:hover {
+  background: var(--bg-hover);
+}
+.np-tab.active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+.np-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.np-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  flex-shrink: 0;
+}
+.np-tab-dot.error {
+  background: var(--accent-red, #e05561);
+}
+.np-tab-close {
+  border-radius: 3px;
+  opacity: 0.4;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.np-tab-close:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+}
+/* ── 冲突条 ── */
+.np-conflict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: var(--bg-warn, var(--bg-hover));
+  border-bottom: 1px solid var(--border-default);
+  flex-shrink: 0;
+}
+.np-conflict-text {
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.np-conflict-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+/* ── 编辑面 ── */
+.np-editor-area {
   position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
+/* 编辑面：大区域形态字号/留白上调一档（窄条时代 12px 在主区宽度下过挤） */
 .np-editor {
   flex: 1;
   min-height: 0;
@@ -265,54 +463,15 @@ onBeforeUnmount(() => {
   border: none;
   outline: none;
   resize: none;
-  padding: 10px 12px;
+  padding: 14px 18px;
   background: transparent;
   color: var(--text-primary);
   font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.65;
 }
 .np-editor::placeholder {
-  /* --text-tertiary 从未定义（回退继承正文色）；占位符统一走辅助文字档
-     （P-20261019-4），在双底 ≥4.5 且与 Naive 输入框占位符同源 */
+  /* 占位符统一走辅助文字档（P-20261019-4），双底 ≥4.5 */
   color: var(--text-muted);
-}
-.np-preview {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.6;
-  word-break: break-word;
-}
-.np-preview :deep(h1),
-.np-preview :deep(h2),
-.np-preview :deep(h3) {
-  font-size: 13px;
-  margin: 8px 0 4px;
-}
-.np-preview :deep(p) {
-  margin: 4px 0;
-}
-.np-preview :deep(ul),
-.np-preview :deep(ol) {
-  padding-left: 20px;
-  margin: 4px 0;
-}
-.np-preview :deep(code) {
-  background: var(--bg-hover);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-size: 11px;
-}
-.np-preview :deep(pre) {
-  background: var(--bg-hover);
-  padding: 8px;
-  border-radius: 4px;
-  overflow: auto;
-}
-.np-preview :deep(a) {
-  color: var(--accent-blue);
 }
 </style>

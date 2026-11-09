@@ -9,7 +9,8 @@ import (
 // 终端输出时点冻结快照访客页（P-20261005-205）：直播访客页（termpage.go）
 // 的定格变体——同一套零外部依赖单文件形态 + vendored xterm 三件 + 遮蔽
 // 声明横幅 + 严格只读三层保证；差异只在数据面：无 SSE 接线，页面加载时
-// 一次性取 /raw（快照落盘前已完成遮蔽净化，快照本体即净本）写入 xterm
+// 一次性取 /raw（快照落盘前已完成遮蔽净化，快照本体即净本——未过滤记录
+// P-20261106-9 例外：快照为原样输出，横幅位换「未过滤」警示）写入 xterm
 // 定格 buffer，此后不再有任何网络活动。快照与源会话生命周期解耦：会话
 // 关闭/进程重启都不影响本页（内容读自服务端快照文件，独立 TTL 管理）。
 
@@ -22,17 +23,21 @@ type termFrozenBootState struct {
 	// MsgMax 留言板上限（协作通道 2000 / 缺省 500，P-20261024-1 boardMsgMax
 	// 同源下发——本页无协作位（v1 只挂终端直播页），留言升档生效）
 	MsgMax int `json:"msgMax,omitempty"`
+	// Unfiltered 未过滤标记（P-20261106-9）：true = 快照创建时关闭了遮蔽（含
+	// 原文、TTL 强制 24h），横幅位换「未过滤」警示。缺省省略 = 已遮蔽净本
+	Unfiltered bool `json:"unfiltered,omitempty"`
 }
 
 var termFrozenDictZh = map[string]string{
-	"appTitle":    "终端输出快照",
-	"frozenBadge": "快照",
-	"loadingTip":  "快照加载中…",
-	"maskBanner":  "这是创建时刻的输出定格快照，不会随会话更新。输出已经敏感值遮蔽（sc 令牌 / password 赋值 / 云密钥 key → ***）。遮蔽靠模式启发式，非绝对。",
-	"frozenTip":   "本页是定格快照：内容固定于创建时刻，无实时推流、无任何输入通道",
-	"loadError":   "快照读取失败，链接可能已被撤销或过期",
-	"emptyTip":    "快照为空（创建时刻会话暂无输出）",
-	"poweredBy":   "由 Codecombo 提供",
+	"appTitle":         "终端输出快照",
+	"frozenBadge":      "快照",
+	"loadingTip":       "快照加载中…",
+	"maskBanner":       "这是创建时刻的输出定格快照，不会随会话更新。输出已经敏感值遮蔽（sc 令牌 / password 赋值 / 云密钥 key → ***）。遮蔽靠模式启发式，非绝对。",
+	"unfilteredBanner": "这是创建时刻的输出定格快照，不会随会话更新。未过滤：分享者已关闭敏感值遮蔽，快照为原样输出（可能含令牌 / 密码 / 密钥等敏感信息），链接 24 小时内失效。请勿转发本链接。",
+	"frozenTip":        "本页是定格快照：内容固定于创建时刻，无实时推流、无任何输入通道",
+	"loadError":        "快照读取失败，链接可能已被撤销或过期",
+	"emptyTip":         "快照为空（创建时刻会话暂无输出）",
+	"poweredBy":        "由 Codecombo 提供",
 	// 访客留言板（P-20261006-13）：页底留言区文案（三形态访客页同表）
 	"gbTitle":   "留言",
 	"gbNick":    "昵称（可选）",
@@ -48,14 +53,15 @@ var termFrozenDictZh = map[string]string{
 }
 
 var termFrozenDictEn = map[string]string{
-	"appTitle":    "Terminal Snapshot",
-	"frozenBadge": "SNAPSHOT",
-	"loadingTip":  "Loading snapshot…",
-	"maskBanner":  "This is a snapshot of the output frozen at creation time; it does not update with the session. Output is masked for sensitive values (sc tokens / password assignments / cloud keys → ***). Masking is heuristic, not absolute.",
-	"frozenTip":   "This page is a frozen snapshot: fixed at creation time, no live stream, no input channel",
-	"loadError":   "Failed to load the snapshot; the link may have been revoked or expired",
-	"emptyTip":    "Snapshot is empty (the session had no output at creation time)",
-	"poweredBy":   "Powered by Codecombo",
+	"appTitle":         "Terminal Snapshot",
+	"frozenBadge":      "SNAPSHOT",
+	"loadingTip":       "Loading snapshot…",
+	"maskBanner":       "This is a snapshot of the output frozen at creation time; it does not update with the session. Output is masked for sensitive values (sc tokens / password assignments / cloud keys → ***). Masking is heuristic, not absolute.",
+	"unfilteredBanner": "This is a snapshot of the output frozen at creation time; it does not update with the session. Unfiltered: the sharer turned off sensitive-value masking — the snapshot is verbatim output and may contain tokens, passwords or keys; the link expires within 24 hours. Do not forward this link.",
+	"frozenTip":        "This page is a frozen snapshot: fixed at creation time, no live stream, no input channel",
+	"loadError":        "Failed to load the snapshot; the link may have been revoked or expired",
+	"emptyTip":         "Snapshot is empty (the session had no output at creation time)",
+	"poweredBy":        "Powered by Codecombo",
 	// 访客留言板（P-20261006-13）：页底留言区文案（三形态访客页同表）
 	"gbTitle":   "Messages",
 	"gbNick":    "Nickname (optional)",
@@ -85,6 +91,11 @@ type termFrozenPageData struct {
 	// 单一事实源——三形态访客页同一段脚本挂载）
 	BoardCSS template.CSS
 	BoardJS  template.JS
+	// LayoutCSS/LayoutJS 终端访客页共用布局件（P-20261106-9，termlayout.go）
+	LayoutCSS template.CSS
+	LayoutJS  template.JS
+	// Unfiltered 未过滤标记（P-20261106-9）：横幅位服务端直出 .unfiltered 类
+	Unfiltered bool
 }
 
 // 模板与 termpage.go 同族（头/横幅/卡片/主题化样式逐段对齐），差异：
@@ -113,8 +124,8 @@ font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microso
 .blob{position:fixed;border-radius:50%;filter:blur(90px);z-index:0;pointer-events:none}
 .b1{width:380px;height:380px;background:rgba(106,92,255,.30);top:-90px;right:-70px}
 .b2{width:320px;height:320px;background:rgba(61,123,253,.26);bottom:-90px;left:-60px}
-.wrap{position:relative;z-index:1;height:100vh;max-width:1180px;margin:0 auto;padding:22px 22px 10px;
-display:flex;flex-direction:column}
+/* .wrap 列容器 / 未过滤横幅 / 窄屏断点由 termLayoutCSS 注入（P-20261106-9，
+   termlayout.go 单一事实源，三终端访客页共用） */
 .header{flex-shrink:0;display:flex;align-items:center;gap:14px;
 background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:14px;
 padding:13px 20px;color:#fff;box-shadow:var(--shadow)}
@@ -156,6 +167,7 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 .sc-wm .wm-a{top:16%;left:5%}
 .sc-wm .wm-b{bottom:16%;right:5%}
 {{.BoardCSS}}
+{{.LayoutCSS}}
 </style>
 </head>
 <body>
@@ -169,7 +181,7 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
     </div>
     <div class="badge" id="badge" data-state="loading"><span id="badgeText"></span></div>
   </div>
-  <div class="banner">
+  <div class="banner{{if .Unfiltered}} unfiltered{{end}}" id="maskBanner" data-testid="share-mask-banner">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <span id="bannerText"></span>
   </div>
@@ -182,13 +194,18 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 </div>
 <script src="/assets/xterm.js"></script>
 <script src="/assets/addon-fit.js"></script>
+<script src="/assets/addon-unicode11.js"></script>
 <script>
 const SC = {{.Boot}};
+// 终端访客页共用布局件（P-20261106-9 / P-20261107-4，termlayout.go 单一事实源：
+// 渲染常量 SC_TERM_*、scTermOptions、scTermNeed/scTextCols 等）
+{{.LayoutJS}}
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
 document.title = t('appTitle');
 $('badgeText').textContent = t('loadingTip');
-$('bannerText').textContent = t('maskBanner');
+// 横幅位：遮蔽声明 / 未过滤警示二选一（P-20261106-9，记录配置随 boot 下发）
+$('bannerText').textContent = t(SC.unfiltered ? 'unfilteredBanner' : 'maskBanner');
 $('roTip').textContent = t('frozenTip');
 $('powered').textContent = t('poweredBy');
 
@@ -207,33 +224,26 @@ $('powered').textContent = t('poweredBy');
   document.body.appendChild(box);
 })();
 
-// ── xterm 只读实例：与直播页同款禁输入配置；convertEol 开启——快照是
-// 剥离 ANSI 后的净化文本（裸 \n），非 PTY 原始字节流 ──
+// ── xterm 只读实例：与直播页同款禁输入配置与产品对齐渲染参数（P-20261107-4，
+// scTermOptions 单一出口）；convertEol 开启——快照是剥离 ANSI 后的净化文本
+// （裸 \n），非 PTY 原始字节流。定格文本无光标定位语义，栅格按容器 fit 软折行
+// （与直播/回放的主机栅格模式刻意不同）──
 const dark = matchMedia('(prefers-color-scheme: dark)');
-const term = new Terminal({
-  disableStdin: true,
-  cursorBlink: false,
-  cursorInactiveStyle: 'outline',
-  convertEol: true,
-  scrollback: 5000,
-  fontSize: 13.5,
-  fontFamily: 'ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace',
-  theme: termTheme(),
-  allowProposedApi: true
-});
+const term = new Terminal(scTermOptions({ convertEol: true, theme: termTheme() }));
 function termTheme(){
   return dark.matches
     ? { background: 'rgba(0,0,0,0)', foreground: '#e6eaf3', cursor: 'transparent' }
     : { background: 'rgba(0,0,0,0)', foreground: '#24292f', cursor: 'transparent' }
 }
 dark.addEventListener('change', () => { term.options.theme = termTheme(); });
+scTermUnicode(term);
 const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
 // 只读保险丝（直播页同款）：页面不存在任何把输入发回服务端的代码路径。
 // open 放到定格内容就绪后（容器先处于隐藏态铺加载卡，隐藏容器上 open
-// 的渲染器尺寸不成立，显示后不重开只 fit）
-function doFit(){ try { fit.fit(); } catch (e) { /* 容器未布局完成时忽略 */ } }
-window.addEventListener('resize', doFit);
+// 的渲染器尺寸不成立，显示后不重开只 fit）；重排由终端容器尺寸驱动
+function doFit(){ try { if (term.element) fit.fit(); } catch (e) { /* 容器未布局完成时忽略 */ } }
+const relayout = scObserve($('termBox'), doFit);
 
 function setBadge(text){ $('badgeText').textContent = text; }
 function showState(title, desc){
@@ -257,14 +267,20 @@ function showState(title, desc){
     if (!res.ok) { setBadge(t('frozenBadge')); showState(t('frozenBadge'), t('loadError')); return; }
     const text = await res.text();
     if (!text) { setBadge(t('frozenBadge')); showState(t('frozenBadge'), t('emptyTip')); return; }
+    // 内容自适应列宽（P-20261106-9）：按快照行宽 p95 定列容器宽度，再 open/fit
+    //（定格文本无主机尺寸元数据，行宽即内容所需）
+    scTermNeed(scTextCols(text));
     $('stateBox').style.display = 'none';
     $('termBox').style.display = '';
-    term.open($('termBox'));
-    term.onData(() => {});
-    term.write(text);
-    setBadge(t('frozenBadge'));
-    $('sub').textContent = t('frozenTip');
-    doFit();
+    // 产品同款字体就绪再 open（xterm 在 open 时测字宽）；字体晚到则重测重排
+    scFontsReady(() => {
+      term.open($('termBox'));
+      term.onData(() => {});
+      term.write(text);
+      setBadge(t('frozenBadge'));
+      $('sub').textContent = t('frozenTip');
+      doFit();
+    }, () => { scRemeasure(term); relayout(); });
   } catch (e) {
     setBadge(t('frozenBadge'));
     showState(t('frozenBadge'), t('loadError'));
@@ -282,18 +298,22 @@ var termFrozenPageTmpl = template.Must(template.New("termfrozen").Parse(termFroz
 
 // renderTermFrozenPage 输出终端输出冻结快照访客页（已知 token；调用方已做
 // lookup）。wm 为溯源水印文本（P-20261005-193，空串 = 未开水印）。collab 为
-// 记录上的协作开关（P-20261024-1，仅影响留言上限档位——本页无协作位）
-func renderTermFrozenPage(w io.Writer, token, lang, title, wm string, collab bool) error {
+// 记录上的协作开关（P-20261024-1，仅影响留言上限档位——本页无协作位）。
+// unfiltered 为记录的未过滤标记（P-20261106-9）——横幅位换「未过滤」警示
+func renderTermFrozenPage(w io.Writer, token, lang, title, wm string, collab, unfiltered bool) error {
 	boot, err := json.Marshal(termFrozenBootState{Token: token, Lang: lang, Dict: termFrozenDictFor(lang), Wm: wm,
-		MsgMax: boardMsgMax(collab)})
+		MsgMax: boardMsgMax(collab), Unfiltered: unfiltered})
 	if err != nil {
 		return err
 	}
 	return termFrozenPageTmpl.Execute(w, termFrozenPageData{
-		Lang:     lang,
-		Title:    "Codecombo " + title,
-		Boot:     template.JS(boot),
-		BoardCSS: template.CSS(guestBoardCSS),
-		BoardJS:  template.JS(guestBoardJS),
+		Lang:       lang,
+		Title:      "Codecombo " + title,
+		Boot:       template.JS(boot),
+		BoardCSS:   template.CSS(guestBoardCSS),
+		BoardJS:    template.JS(guestBoardJS),
+		LayoutCSS:  template.CSS(termLayoutCSS),
+		LayoutJS:   template.JS(termLayoutJS),
+		Unfiltered: unfiltered,
 	})
 }

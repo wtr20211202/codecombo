@@ -39,7 +39,20 @@ const direction = ref<'pull' | 'push'>('push')
 const selectedPeerIds = ref<string[]>([])
 // ── 项目选择与上下文勾选 ──
 const selectedProjectKeys = ref<string[]>([])
-const selectedContexts = ref<string[]>(['notes'])
+// 上下文默认集：原默认 ['notes']（只带笔记）随 P-20261108-3 笔记单元退役改为
+// 定时任务（同为小 JSON 单元）——服务端 contexts 空 = 全部上下文（含可达数百 MB
+// 的会话单元），默认必须是非空的轻量集
+const DEFAULT_SYNC_CONTEXTS = ['crons']
+// 退役上下文 kind（笔记单元不再随实例同步）：uiState 记忆里的旧值读入即剔除
+const RETIRED_SYNC_CONTEXTS = new Set(['notes', 'notes-multi'])
+/** 上下文集归一：剔除退役 kind；剔除后为空（旧记忆只勾了笔记）回落默认集——
+ *  不能让空集被服务端解读成「全部上下文」 */
+function sanitizeContexts(list: string[] | undefined): string[] {
+  if (!list?.length) return [...DEFAULT_SYNC_CONTEXTS]
+  const kept = list.filter(k => !RETIRED_SYNC_CONTEXTS.has(k))
+  return kept.length ? kept : [...DEFAULT_SYNC_CONTEXTS]
+}
+const selectedContexts = ref<string[]>([...DEFAULT_SYNC_CONTEXTS])
 const includeIgnored = ref(false)
 const includeGit = ref(false)
 // 手动携密同步（P-20261024-3）：开关缺省关；勾选即确认对话框 + 服务端核对
@@ -199,9 +212,9 @@ function toggleAll() {
   }
 }
 
-// 上下文 chips（红线项不在词表——凭据/令牌永不同步，UI 说明区灰显注记）
+// 上下文 chips（红线项不在词表——凭据/令牌永不同步，UI 说明区灰显注记；笔记
+// notes/notes-multi 单元随 P-20261108-3 单库化退役，不再提供勾选）
 const contextChips = computed(() => [
-  { kind: 'notes', label: t('sync.ctxNotes') },
   { kind: 'sessions', label: t('sync.ctxSessions') },
   { kind: 'crons', label: t('sync.ctxCrons') },
 ])
@@ -536,7 +549,7 @@ async function rerunLast() {
   direction.value = prefs.direction
   selectedPeerIds.value = prefs.peers
   selectedProjectKeys.value = prefs.projects ?? []
-  selectedContexts.value = prefs.contexts ?? ['notes']
+  selectedContexts.value = sanitizeContexts(prefs.contexts)
   await execute()
 }
 
@@ -574,7 +587,7 @@ onMounted(async () => {
   if (prefs?.direction) direction.value = prefs.direction
   if (prefs?.peers?.length) selectedPeerIds.value = prefs.peers.filter(id => remoteInstances.value.some(i => i.id === id))
   if (prefs?.projects?.length) selectedProjectKeys.value = prefs.projects
-  if (prefs?.contexts?.length) selectedContexts.value = prefs.contexts
+  if (prefs?.contexts?.length) selectedContexts.value = sanitizeContexts(prefs.contexts)
   canRerunLast.value = !!(prefs?.direction && prefs.peers?.length)
   void loadCrons()
   // 进度快照兜底 + WS 广播监听
@@ -1014,7 +1027,7 @@ function openCronDialog() {
           </div>
         </section>
 
-        <!-- 上下文勾选 chips（默认会话+笔记全局组合默认关） -->
+        <!-- 上下文勾选 chips（默认定时任务；笔记单元 P-20261108-3 退役不再列出；全局组合默认关） -->
         <section class="sync-section">
           <h3 class="sync-section-title">
             {{ t('sync.contextTitle') }}
@@ -1172,15 +1185,20 @@ function openCronDialog() {
             class="sync-plan"
             data-testid="sync-plan"
           >
+            <!-- retired 行（P-20261108-3）：旧对端仍带的笔记单元——显式成行标红、
+                 勾选禁用（知情不执行，不留静默半态） -->
             <label
               v-for="row in actionRows"
               :key="row.key"
               class="sync-plan-row"
-              :class="{ 'is-conflict': row.state === 'conflict' }"
+              :class="{ 'is-conflict': row.state === 'conflict', 'is-retired': row.state === 'retired' }"
+              :title="row.state === 'retired' ? t('sync.retiredHint') : undefined"
+              :data-testid="row.state === 'retired' ? 'sync-plan-retired' : undefined"
             >
               <input
                 type="checkbox"
                 :checked="row.selected"
+                :disabled="row.state === 'retired'"
                 @change="setRowSelected(row, !row.selected)"
               >
               <span
@@ -1696,6 +1714,13 @@ function openCronDialog() {
 }
 .sync-plan-state[data-state='new'] {
   color: var(--brand-accent);
+}
+/* 退役单元（P-20261108-3）：对账红点——笔记不再随实例同步，行降透明度 + 状态红字 */
+.sync-plan-row.is-retired {
+  opacity: 0.75;
+}
+.sync-plan-state[data-state='retired'] {
+  color: var(--accent-red);
 }
 .sync-plan-name {
   color: var(--text-primary);

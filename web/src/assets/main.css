@@ -518,6 +518,7 @@ body.sc-layout-locked .bottom-resize-handle,
 body.sc-layout-locked .split-divider,
 body.sc-layout-locked .git-sidebar-resizer,
 body.sc-layout-locked .term-split-divider,
-body.sc-layout-locked .atv-side-resizer {
+body.sc-layout-locked .atv-side-resizer,
+body.sc-layout-locked .sidebar-resizer {
   cursor: default;
 }

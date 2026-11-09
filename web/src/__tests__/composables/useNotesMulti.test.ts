@@ -1,0 +1,292 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+
+// naive-ui / vue-i18n 走一站式 mock 工厂（P-20261007-5）：message 记录器 +
+// t=key 直通（断言按 key），原手抄 vi.mock 桩已收编
+vi.mock('naive-ui', async (importOriginal) =>
+  (await import('@/__tests__/mocks/naiveRuntime')).mockNaiveUi(await importOriginal()),
+)
+vi.mock('vue-i18n', async (importOriginal) =>
+  (await import('@/__tests__/mocks/naiveRuntime')).mockVueI18n(await importOriginal()),
+)
+
+// 笔记库 API（P-20261108-3 单库化：唯一 /api/notes 族——项目族 notesMultiApi 已退役）
+const { listMock, getMock, createMock, saveMock, removeMock, restoreMock, purgeMock } = vi.hoisted(() => ({
+  listMock: vi.fn<(trash?: boolean) => Promise<{ data?: Array<{ id: string; title: string; updatedAt: string; size: number; deletedAt?: string; deletedBy?: string }> }>>(),
+  getMock: vi.fn<(noteId: string) => Promise<{ data: { id: string; title: string; content: string; createdAt: string; updatedAt: string } }>>(),
+  createMock: vi.fn<(body: { title?: string; content?: string }) => Promise<{ data: { id: string; title: string; content: string; createdAt: string; updatedAt: string } }>>(),
+  saveMock: vi.fn<(noteId: string, body: { content: string; title?: string; baseUpdatedAt?: string }) => Promise<{ data: { id: string; title: string; content: string; updatedAt: string; size: number } }>>(),
+  removeMock: vi.fn<(noteId: string) => Promise<{ message: string }>>(),
+  restoreMock: vi.fn<(noteId: string) => Promise<{ message: string }>>(),
+  purgeMock: vi.fn<(noteId: string) => Promise<{ message: string }>>(),
+}))
+
+vi.mock('@/api/client', () => ({
+  DEFAULT_NOTE_ID: 'default',
+  GLOBAL_NOTES_SCOPE: '_global',
+  notesGlobalApi: {
+    list: listMock,
+    get: getMock,
+    create: createMock,
+    save: saveMock,
+    remove: removeMock,
+    restore: restoreMock,
+    purge: purgeMock,
+  },
+  notesSaveUrl: (noteId: string) => `/api/notes/${noteId}`,
+}))
+
+import {
+  useNotesMulti, resetNotesEngines, NOTES_SAVE_DEBOUNCE_MS, notesSaveUrl,
+} from '@/composables/useNotesMulti'
+import { messageMock, resetNaiveRuntimeMocks } from '@/__tests__/mocks/naiveRuntime'
+
+const messageError = messageMock.error
+
+const NOW = '2026-11-07T10:00:00.000Z'
+
+function meta(id: string, title: string, updatedAt = NOW) {
+  return { id, title, updatedAt, size: 10 }
+}
+
+function full(id: string, title: string, content: string, updatedAt = NOW) {
+  return { id, title, content, createdAt: NOW, updatedAt }
+}
+
+/** 单库引擎（P-20261108-3：无作用域参数） */
+async function setup(): Promise<ReturnType<typeof useNotesMulti>> {
+  const notes = useNotesMulti()
+  await notes.loadList()
+  return notes
+}
+
+beforeEach(() => {
+  resetNaiveRuntimeMocks()
+  resetNotesEngines() // 单例引擎隔离：每用例全新状态机
+  vi.clearAllMocks()
+  vi.useFakeTimers()
+  setActivePinia(createPinia())
+  // 服务端清单序 = updatedAt 降序（store repo List 排序），mock 按服务端契约给序
+  listMock.mockResolvedValue({ data: [meta('n2', 'B', '2026-11-07T10:00:00Z'), meta('n1', 'A', '2026-11-07T09:00:00Z')] })
+  getMock.mockImplementation((noteId: string) =>
+    Promise.resolve({ data: full(noteId, noteId === 'n1' ? 'A' : 'B', `content of ${noteId}`) }))
+  saveMock.mockImplementation((noteId: string, body: { content: string }) =>
+    Promise.resolve({ data: { id: noteId, title: '', content: body.content, updatedAt: '2026-11-07T11:00:00Z', size: body.content.length } }))
+  createMock.mockResolvedValue({ data: full('n-new', '', '') })
+  removeMock.mockResolvedValue({ message: 'ok' })
+  restoreMock.mockResolvedValue({ message: 'ok' })
+  purgeMock.mockResolvedValue({ message: 'ok' })
+})
+
+describe('useNotesMulti', () => {
+  it('loadList 拉清单并保底选中最新一篇（updatedAt 降序服务端序）', async () => {
+    const notes = await setup()
+    expect(notes.notes.value.map(n => n.id)).toEqual(['n2', 'n1'])
+    expect(notes.activeId.value).toBe('n2')
+    expect(notes.activeContent.value).toBe('content of n2')
+    expect(listMock).toHaveBeenCalledWith()
+  })
+
+  it('edit 走 800ms 防抖保存且恒带 baseUpdatedAt（覆盖保护三件套①）', async () => {
+    const notes = await setup()
+    notes.edit('n2', 'draft v2')
+    expect(notes.saveStates['n2']).toBe('dirty')
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS - 1)
+    expect(saveMock).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+    expect(saveMock).toHaveBeenCalledWith('n2', {
+      content: 'draft v2',
+      baseUpdatedAt: NOW, // 载入时刻的服务端版本——409 防线
+    })
+    expect(notes.saveStates['n2']).toBe('idle')
+  })
+
+  it('blur/flushAll 立即落盘全部挂起篇（防抖窗诚实丢失上界的补偿路径）', async () => {
+    const notes = await setup()
+    notes.edit('n2', 'blur save')
+    await notes.flushSave('n2')
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    notes.edit('n1', 'a')
+    notes.edit('n2', 'b')
+    await notes.flushAll()
+    await flushPromises()
+    expect(saveMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('409 notes.conflict 挂起冲突态，不静默覆盖；三动作各自裁决', async () => {
+    const notes = await setup()
+    notes.edit('n2', 'my local edit')
+    saveMock.mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: { code: 'notes.conflict', currentContent: 'server version', currentUpdatedAt: '2026-11-07T10:30:00Z' },
+      },
+    })
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(notes.conflict.value).toEqual({
+      noteId: 'n2',
+      currentContent: 'server version',
+      currentUpdatedAt: '2026-11-07T10:30:00Z',
+    })
+    expect(notes.activeContent.value).toBe('my local edit') // 本地编辑不被静默替换
+
+    // ②载入服务端版本
+    notes.resolveConflictLoadServer()
+    expect(notes.activeContent.value).toBe('server version')
+    expect(notes.conflict.value).toBeNull()
+  })
+
+  it('冲突动作①用我的覆盖：丢 baseUpdatedAt 直写（显式意图）', async () => {
+    const notes = await setup()
+    saveMock.mockRejectedValueOnce({
+      response: { status: 409, data: { code: 'notes.conflict', currentContent: 'srv', currentUpdatedAt: NOW } },
+    })
+    notes.edit('n2', 'mine')
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(notes.conflict.value).not.toBeNull()
+    saveMock.mockResolvedValueOnce({ data: { id: 'n2', title: '', content: 'mine', updatedAt: '2026-11-07T12:00:00Z', size: 4 } })
+    await notes.resolveConflictOverwrite()
+    expect(saveMock).toHaveBeenLastCalledWith('n2', { content: 'mine' }) // 无 baseUpdatedAt
+    expect(notes.conflict.value).toBeNull()
+  })
+
+  it('冲突动作③另存为新篇：本地内容落新篇、原篇回落服务端版本', async () => {
+    const notes = await setup()
+    saveMock.mockRejectedValueOnce({
+      response: { status: 409, data: { code: 'notes.conflict', currentContent: 'srv', currentUpdatedAt: NOW } },
+    })
+    notes.edit('n2', 'mine')
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    await notes.resolveConflictSaveAsNew()
+    await flushPromises()
+    // 新篇（n-new）收到本地内容（防抖立即触发的保存）
+    expect(saveMock).toHaveBeenCalledWith('n-new', expect.objectContaining({ content: 'mine' }))
+    // 原篇回落服务端内容
+    expect(notes.contents['n2']).toBe('srv')
+    expect(notes.conflict.value).toBeNull()
+  })
+
+  it('createNote 新建即选中并进清单首位', async () => {
+    const notes = await setup()
+    const created = await notes.createNote('灵感')
+    expect(created?.id).toBe('n-new')
+    expect(createMock).toHaveBeenCalledWith({ title: '灵感' })
+    expect(notes.activeId.value).toBe('n-new')
+    expect(notes.notes.value[0]?.id).toBe('n-new')
+  })
+
+  it('空库占位默认篇：清单空时合成 default 占位（零 GET 副作用），首写经 default-upsert 落真身', async () => {
+    listMock.mockResolvedValue({ data: [] })
+    const getBefore = getMock.mock.calls.length
+    const notes = await setup()
+    // 占位合成：activeId=default、编辑面空内容（无单篇 GET——占位无服务端实体）
+    expect(notes.notes.value.map(n => n.id)).toEqual(['default'])
+    expect(notes.activeId.value).toBe('default')
+    expect(notes.isPlaceholder('default')).toBe(true)
+    expect(getMock.mock.calls.length).toBe(getBefore)
+    expect(notes.activeContent.value).toBe('')
+
+    // 首写：PUT /notes/default（无 baseUpdatedAt）→ 落真身并摘占位标记
+    saveMock.mockResolvedValue({ data: { id: 'default', title: '', content: 'scratch', updatedAt: '2026-11-07T12:00:00Z', size: 7 } })
+    notes.edit('default', 'scratch')
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(saveMock).toHaveBeenCalledWith('default', { content: 'scratch', baseUpdatedAt: undefined })
+    expect(notes.saveStates['default']).toBe('idle')
+    expect(notes.isPlaceholder('default')).toBe(false)
+
+    // 占位已落真身：trashNote 走服务端软删（不再走本地弃稿分支）
+    await notes.trashNote('default')
+    expect(removeMock).toHaveBeenCalledWith('default')
+  })
+
+  it('占位篇弃稿（未落盘 trash）：本地清稿并重合成新占位，零 API 调用', async () => {
+    listMock.mockResolvedValue({ data: [] })
+    const notes = await setup()
+    notes.edit('default', 'draft')
+    const removeBefore = removeMock.mock.calls.length
+    await notes.trashNote('default')
+    expect(removeMock.mock.calls.length).toBe(removeBefore) // 未落盘不调服务端
+    expect(notes.notes.value.map(n => n.id)).toEqual(['default']) // 重合成
+    expect(notes.contents['default']).toBe('') // 草稿已弃
+  })
+
+  it('trashNote 软删后清单移除、当前篇悬空时切到相邻篇；restore/purge 走各自端点', async () => {
+    const notes = await setup()
+    listMock.mockResolvedValue({ data: [] }) // 恢复后清单重拉走空态
+    await notes.trashNote('n2')
+    expect(removeMock).toHaveBeenCalledWith('n2')
+    expect(notes.notes.value.map(n => n.id)).toEqual(['n1'])
+    expect(notes.activeId.value).toBe('n1')
+
+    await notes.restoreNote('n2')
+    expect(restoreMock).toHaveBeenCalledWith('n2')
+
+    await notes.purgeNote('n2')
+    expect(purgeMock).toHaveBeenCalledWith('n2')
+  })
+
+  it('onExternalUpdate：无挂起编辑重读当前篇；有挂起编辑只刷清单不动内容', async () => {
+    const notes = await setup()
+    // 事件监听在面板层（onMounted 接线），composable 层直测入口函数
+    const getBefore = getMock.mock.calls.length
+    await notes.onExternalUpdate({ projectId: '_global', noteId: 'n2' })
+    expect(getMock.mock.calls.length).toBeGreaterThan(getBefore)
+
+    // 有挂起编辑：内容让位人的输入（宁欠勿覆盖，冲突由 baseUpdatedAt 兜底）
+    notes.edit('n1', 'typing...')
+    const getCalls = getMock.mock.calls.length
+    await notes.onExternalUpdate({ projectId: '_global' })
+    expect(getMock.mock.calls.length).toBe(getCalls) // 无单篇重读
+    expect(notes.contents['n1']).toBe('typing...')
+  })
+
+  it('onExternalUpdate 只认笔记库作用域键：旧形态带项目 id 的事件忽略（单库化无项目库可对位）', async () => {
+    const notes = await setup()
+    const listCalls = listMock.mock.calls.length
+    const getCalls = getMock.mock.calls.length
+    await notes.onExternalUpdate({ projectId: 'p1' })
+    await notes.onExternalUpdate(undefined)
+    expect(listMock.mock.calls.length).toBe(listCalls)
+    expect(getMock.mock.calls.length).toBe(getCalls)
+  })
+
+  it('onExternalUpdate focus（沉淀写回）：重拉后聚焦该篇并丢缓存重读——刚追加的节可见', async () => {
+    const notes = await setup()
+    expect(notes.activeId.value).toBe('n2')
+    await notes.select('n1') // n1 内容已缓存（旧版本）
+    await notes.select('n2')
+    getMock.mockImplementation((noteId: string) =>
+      Promise.resolve({ data: full(noteId, 'A', noteId === 'n1' ? 'old\n\n## 2026-11-08 沉淀节' : `content of ${noteId}`) }))
+    await notes.onExternalUpdate({ projectId: '_global', noteId: 'n1', action: 'deposit', focus: true })
+    expect(notes.activeId.value).toBe('n1')
+    expect(notes.activeContent.value).toContain('沉淀节')
+  })
+
+  it('focus 遇该篇有挂起编辑：只聚焦不覆盖（人的输入优先，保存时 409 兜底）', async () => {
+    const notes = await setup()
+    notes.edit('n1', 'my typing')
+    await notes.onExternalUpdate({ projectId: '_global', noteId: 'n1', focus: true })
+    expect(notes.activeId.value).toBe('n1')
+    expect(notes.contents['n1']).toBe('my typing')
+  })
+
+  it('保存失败上 toast（按 key 断言）；409 之外的网络错误落 error 态', async () => {
+    const notes = await setup()
+    saveMock.mockRejectedValueOnce(new Error('boom'))
+    notes.edit('n2', 'x')
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(notes.saveStates['n2']).toBe('error')
+    expect(messageError).toHaveBeenCalled()
+  })
+
+  it('notesSaveUrl 单库端点形态（beforeunload keepalive 直发）', () => {
+    expect(notesSaveUrl('abc')).toBe('/api/notes/abc')
+  })
+})

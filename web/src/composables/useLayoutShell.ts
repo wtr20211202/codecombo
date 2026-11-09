@@ -2,13 +2,23 @@
 // 全部装配胶水（store 实例化 / 面板宿主 / 键盘监听 / 引导恢复 / 生命周期挂载）
 // 收敛到一个组合式，Layout.vue 只保留模板编排。
 // 本文件只做「接线」——业务逻辑在各自 composable/store 内，禁止在此新增行为。
-import { onMounted, onBeforeUnmount, ref, computed, watch, nextTick, provide, getCurrentScope, onScopeDispose } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch, nextTick, provide, getCurrentScope, onScopeDispose, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useProjectStore } from '../stores/project'
 import { useNotificationStore } from '../stores/notification'
 import { usePreviewPortStore } from '../stores/previewPort'
-import { OPS_PANEL, OPS_REMOTE_OPEN_IN_EDITOR, OPS_SHARE_DROP, type RemoteOpenInEditorDetail, type ShareDropDetail } from '../utils/opsEvents'
+import {
+  OPS_PANEL,
+  OPS_REMOTE_OPEN_IN_EDITOR,
+  OPS_SHARE_DROP,
+  OPS_SHARE_WTYPING,
+  OPS_SHARE_PASTE_REVIEW,
+  type RemoteOpenInEditorDetail,
+  type ShareDropDetail,
+  type ShareWritableTypingDetail,
+  type SharePasteReviewDetail,
+} from '../utils/opsEvents'
 import { buildRemoteEditorPath } from '../utils/remoteEditorPath'
 import { activateRailPanel, railPanelCount } from '../panels/registry'
 import { toggleablePanelIds } from '../panels/registry'
@@ -38,6 +48,7 @@ import { useStashRecover } from './useStashRecover'
 import { useQuickdrop } from './useQuickdrop'
 import { useShareDrop } from './useShareDrop'
 import { bumpDirectInputShares } from './useDirectInputShares'
+import { confirmDialog } from './useDialog'
 import { useQuickNav } from './useQuickNav'
 import { useOpenFiles, isUntitledPath } from './useOpenFiles'
 import { useRecentFiles } from './useRecentFiles'
@@ -111,6 +122,40 @@ export function useLayoutShell() {
       file: d.name,
       nick: d.nick || t('share.msg.anon'),
     }))
+  }
+  /** 可写分享「访客输入中」直通分发（P-20261106-8）：sc-ops:share.wtyping →
+   *  bump 锚点表即时对账（会话行橙点徽标即现即摘，15s 轮询是断线兜底）。
+   *  本 handler 只做对账不播报——徽标已是常驻可见面，逐次连接 toast 是噪音 */
+  function onShareWTyping(ev: Event): void {
+    const d = (ev as CustomEvent<ShareWritableTypingDetail>).detail
+    if (!d?.terminalId) return
+    bumpDirectInputShares()
+  }
+  /** 可写分享粘贴审批卡直通分发（P-20261106-8）：sc-ops:share.paste-review →
+   *  confirmDialog 双动作卡（批准=注入 PTY / 拒绝=丢弃，60s 不决服务端自动
+   *  拒绝）。粘贴预览原样呈现（访客输入不脱敏——审批要看真实命令才能裁决；
+   *  主界面内呈现，不进任何外发面） */
+  async function onSharePasteReview(ev: Event): Promise<void> {
+    const d = (ev as CustomEvent<SharePasteReviewDetail>).detail
+    if (!d?.token || !d.pasteId) return
+    const approve = await confirmDialog({
+      title: t('share.writable.pasteReviewTitle', { name: d.shareName || d.token }),
+      content: () => h('div', { style: 'display:flex;flex-direction:column;gap:6px;min-width:320px' }, [
+        h('code', {
+          style: 'white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto;padding:8px;background:var(--n-color-embedded,rgba(128,128,128,.12));border-radius:6px;font-size:12px',
+        }, d.preview || ''),
+        d.summary ? h('div', { style: 'font-size:12px;color:var(--n-warning-color, #d48806)' }, d.summary) : null,
+        h('div', { style: 'font-size:12px;color:var(--n-text-color-3,#8b94a9)' },
+          t('share.writable.pasteReviewMeta', { visitor: d.visitorTail || '' })),
+      ]),
+      type: 'warning',
+      confirmText: t('share.writable.approve'),
+      cancelText: t('share.writable.deny'),
+    })
+    try {
+      await shareApi.decidePasteReview(d.token, d.pasteId, approve)
+      message.success(t(approve ? 'share.writable.pasteApproved' : 'share.writable.pasteDenied'))
+    } catch { /* 拦截器已 toast（含 60s 超时后的 404） */ }
   }
   // autoStash 通知「恢复」（P-20261006-48）：条目重定位与 pop 反馈收口
   // useStashRecover（pop 冲突走 stashKept 同款 warning 语义）
@@ -763,6 +808,8 @@ export function useLayoutShell() {
     window.addEventListener(OPS_PANEL, onOpsPanel)
     window.addEventListener(OPS_REMOTE_OPEN_IN_EDITOR, onRemoteOpenInEditor)
     window.addEventListener(OPS_SHARE_DROP, onShareDrop)
+    window.addEventListener(OPS_SHARE_WTYPING, onShareWTyping)
+    window.addEventListener(OPS_SHARE_PASTE_REVIEW, onSharePasteReview)
     // Monaco 语言 worker chunk 空闲预取（P-20261002-103）：仅调度，不占引导/交互时间片
     prefetchMonacoLanguageWorkers()
     startInstanceId = instanceStore.currentInstanceId
@@ -811,6 +858,14 @@ export function useLayoutShell() {
           }
           if (panel === 'share-manager') {
             toggleShareManager()
+            return
+          }
+          // panel:notes（入站 Hook 白名单既有面板，P-20261108-2 起笔记迁出侧栏成
+          // 主区独立视图）：不再落 togglePanel 侧栏分支（那里已无 notes 会静默
+          // no-op）；通知「直达」是目标态动作——ensure-open 不 toggle（重复点
+          // 不收起，导出中心 navigate 同口径），docked 由 AgentTerminal 反向 watch 收
+          if (panel === 'notes') {
+            usePanelLayout().openNotesView()
             return
           }
           togglePanel(panel as 'files' | 'changes' | 'git' | 'terminal' | 'stream')
@@ -904,6 +959,8 @@ export function useLayoutShell() {
     window.removeEventListener(OPS_PANEL, onOpsPanel)
     window.removeEventListener(OPS_REMOTE_OPEN_IN_EDITOR, onRemoteOpenInEditor)
     window.removeEventListener(OPS_SHARE_DROP, onShareDrop)
+    window.removeEventListener(OPS_SHARE_WTYPING, onShareWTyping)
+    window.removeEventListener(OPS_SHARE_PASTE_REVIEW, onSharePasteReview)
   })
 
   // 项目切换时刷新变更状态（路径已失效的项目跳过：git status 必失败，

@@ -67,6 +67,11 @@ const props = defineProps<{
    *  useDirectInputShares 15s 轮询）：会话行橙点徽标 + 右键「收回访客输入」
    *  项的数据面——「谁在输入」的 owner 侧常驻可见性 */
   directHolds?: Record<string, { nick?: string; visitorTail?: string }>
+  /** 直播中会话 id → 徽标 title（P-20261106-7，宿主投影自
+   *  useTerminalShareActions.liveTitles——与底部终端 tab 红点同数据源同文案）：
+   *  会话行红点呼吸徽标 + 右键「直播分享/结束直播」文案翻转的数据面；缺条目
+   *  = 未直播。有效期过滤在投影侧已做，这里只读在否 */
+  liveTitles?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -92,6 +97,10 @@ const emit = defineEmits<{
   /** 会话行「收回访客输入」（P-20261024-1）：直通持权在场才出菜单项，
    *  API 调用与反馈在宿主（本组件只上抛会话 id） */
   (e: 'direct-revoke', sessionId: string): void
+  /** 会话行能力四件（P-20261106-7 双入口纪律）：直播分享/冻结分享/分享回放/
+   *  导出输出——动作实现收口 useTerminalShareActions（与底部终端 tab 右键
+   *  同一实现），本组件只上抛会话 id 与能力键；项目树行的同族项经本事件合流 */
+  (e: 'capability-action', payload: { sessionId: string; key: 'liveShare' | 'frozenShare' | 'replayShare' | 'exportOutput' }): void
   /** 会话行「重新发起」（P-20261003-146）：宿主解析源会话并以 initialPrompt
    *  预填新建对话框（预填组装在宿主 openNewDialog，本组件只上抛 id） */
   (e: 'relaunch', sessionId: string): void
@@ -377,6 +386,15 @@ const menuOptions = computed(() => {
     // 标记审阅基线（P-20261003-217）：本轮改动审完打标记，产出视图可切换
     // diff 范围到该标记，下轮审阅从新基线算
     { label: t('agentTerminal.markBaseline'), key: 'review-mark' },
+    // 能力四件（P-20261106-7 双入口纪律）：与底部终端 tab 右键同款同序——直播
+    // 分享（按锚点态翻转「结束直播」）/ 分享输出快照 / 分享回放 / 导出输出。
+    // 本列表只收 manager 存活会话（退出即摘行），故不设禁用态；能力锚定
+    // TerminalID（会话级），agent/tmux 持久会话 detached 态四项同样可用
+    // ——导出走服务端会话层 CaptureScrollback 链，不依赖本页 pane 挂载
+    { label: t(props.liveTitles?.[menuSessionId.value] ? 'terminal.endLiveShare' : 'terminal.liveShare'), key: 'liveShare' },
+    { label: t('terminal.frozenShare'), key: 'frozenShare' },
+    { label: t('terminal.shareReplay'), key: 'replayShare' },
+    { label: t('terminal.exportOutput'), key: 'exportOutput' },
     // 敏感标记（P-20261003-155）：人工策展的安全标注，导出/分享出域命中时
     // 要求二次确认——文案按当前标记态翻转
     { label: t(menuSensitive ? 'terminal.unmarkSensitive' : 'terminal.markSensitive'), key: 'mark-sensitive' },
@@ -433,6 +451,12 @@ function onSessionMenu(key: string) {
   }
   if (key === 'direct-revoke') {
     emit('direct-revoke', id)
+    return
+  }
+  // 能力四件（P-20261106-7）：动作键与底部终端 tab 菜单同词汇表，宿主接线
+  // useTerminalShareActions
+  if (key === 'liveShare' || key === 'frozenShare' || key === 'replayShare' || key === 'exportOutput') {
+    emit('capability-action', { sessionId: id, key })
     return
   }
   emit('session-action', {
@@ -510,10 +534,12 @@ function emitBatchDestroy() {
     :selected-id="selectedId"
     :collapsed-projects="collapsedProjects"
     :locate-dirs="locateDirs"
+    :live-titles="liveTitles"
     @attach-project="(id) => emit('attach-project', id)"
     @toggle-project="(projectId) => emit('toggle-project', projectId)"
     @project-action="(payload) => emit('project-action', payload)"
     @project-session-action="(payload) => emit('project-session-action', payload)"
+    @capability-action="(payload) => emit('capability-action', payload)"
   />
 
   <!-- 按 runtime 分组视图（P-20261003-238）：组段替换未分组+自定义分组两区
@@ -609,6 +635,15 @@ function emitBatchDestroy() {
             >
               <WarningOutline />
             </n-icon>
+            <!-- 直播中徽标（P-20261106-7 双入口）：会话有活跃 kind=terminal 锚定
+                 即亮红点（与底部终端 tab 徽标同数据源同视觉语），title 携剩余
+                 时长/观看数；右键同位「结束直播」一键撤销 -->
+            <span
+              v-if="props.liveTitles?.[s.id]"
+              class="ats-item-live"
+              :title="props.liveTitles[s.id]"
+              data-test="session-live-badge"
+            />
             <span
               class="ats-item-title"
               :title="s.name"
@@ -768,6 +803,13 @@ function emitBatchDestroy() {
           >
             <WarningOutline />
           </n-icon>
+          <!-- 直播中徽标（P-20261106-7）：同 runtime 视图行 -->
+          <span
+            v-if="props.liveTitles?.[s.id]"
+            class="ats-item-live"
+            :title="props.liveTitles[s.id]"
+            data-test="session-live-badge"
+          />
           <span
             class="ats-item-title"
             :title="s.name"
@@ -953,6 +995,13 @@ function emitBatchDestroy() {
           >
             <WarningOutline />
           </n-icon>
+          <!-- 直播中徽标（P-20261106-7）：同未分组行 -->
+          <span
+            v-if="props.liveTitles?.[s.id]"
+            class="ats-item-live"
+            :title="props.liveTitles[s.id]"
+            data-test="session-live-badge"
+          />
           <span
             class="ats-item-title"
             :title="s.name"
@@ -1137,6 +1186,22 @@ function emitBatchDestroy() {
 .ats-item-sensitive {
   flex-shrink: 0;
   color: var(--accent-orange);
+}
+/* 直播中徽标（P-20261106-7）：红点呼吸，与底部终端 tab 的 .term-tab-live 同视觉语
+ * （缩放呼吸 + 语义红档 --status-failed，访客页「直播中」同源）；与未读灰点/
+ * 直通橙点各自独立判定可并列（三者语义正交：有新输出 / 访客在输入 / 正在直播）。
+ * TTL 到界/撤销由宿主投影摘除，本组件纯指示 */
+.ats-item-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--status-failed);
+  animation: ats-live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ats-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
 }
 /* 项目硬锁徽标（P-20261004-143）：小锁中性呈现（锁是状态不是错误，不走语义红；
  * 首页 .project-locked-badge 同款 accent-orange 语义），敏感角标同色系——

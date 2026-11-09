@@ -209,10 +209,12 @@ func DeleteProject(c *gin.Context) {
 	// projectOrder / projectSessionOrder），防止后续页面布局恢复读到死 id
 	system.CleanupProjectUIState(id)
 
-	// 级联清理：删除项目笔记文档（项目 ID 不复用，孤儿文档无人可达）
-	DeleteProjectNotes(id)
+	// 笔记不随项目删除（P-20261108-3 单库化：笔记独立不合项目关联，原级联删
+	// 项目笔记退役）：若仍有迁移滞留的旧项目篇，趁项目名还在尽力带「[项目名] 」
+	// 前缀并入全局库（满额则残留，下轮启动/手动续迁按原标题并入——零丢弃）
+	migrateNotesOnProjectDelete(c, p)
 
-	// 级联清理：删除项目本地文件历史（版本快照 + 容量台账，同上孤儿语义）
+	// 级联清理：删除项目本地文件历史（版本快照 + 容量台账，项目 ID 不复用的孤儿语义）
 	if err := store.Get().FileHistory.DeleteProject(id); err != nil {
 		slog.Warn("project file history cascade cleanup failed", "projectId", id, "err", err)
 	}

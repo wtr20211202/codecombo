@@ -7,6 +7,7 @@ import { useFontStore, type TerminalCursorStyle } from '../../stores/font'
 import { useTerminalSessionsStore } from '../../stores/terminal-sessions'
 import { useI18n } from '../../composables/useI18n'
 import { isCopyOnSelectEnabled, setCopyOnSelectEnabled } from '../../composables/useTerminalClipboard'
+import { resetMouseModeHintDismissed } from '../../composables/terminalMouseModeHint'
 import { invalidatePastePrecheckCache } from '../../composables/useTerminalDangerGate'
 import { termInstances } from '../../composables/useTerminalInstances'
 import { terminalLru, TERMINAL_LRU_KEEP } from '../../composables/terminalLru'
@@ -324,6 +325,12 @@ async function save() {
 // 与 TerminalView.vue 中的 CLOSE_NO_PROMPT_KEY 保持一致
 function resetCloseConfirm() {
   localStorage.removeItem('sc.terminal.closeNoConfirm')
+}
+
+// 鼠标接管提示「不再提示」重置（P-20261106-6）：清 safeStorage 记忆恢复显示，
+// 存储通道与键名收口在 terminalMouseModeHint 模块内
+function resetMouseModeHint() {
+  resetMouseModeHintDismissed()
 }
 
 // 「选中即复制」开关：立即持久化，所有已挂载终端 pane 下次 mouseup 即生效
@@ -809,6 +816,25 @@ defineExpose({ load, save, isDirty })
       </div>
       <div class="backend-hint">
         {{ t('settings.resetCloseConfirmDesc') }}
+      </div>
+    </div>
+
+    <!-- 鼠标接管提示重置（P-20261106-6）：提示条 ✕ 永久关闭后的恢复入口 -->
+    <div class="form-group">
+      <div class="form-label">
+        {{ t('settings.resetMouseModeHint') }}
+      </div>
+      <div class="slider-row">
+        <n-button
+          size="tiny"
+          quaternary
+          @click="resetMouseModeHint"
+        >
+          {{ t('settings.resetMouseModeHint') }}
+        </n-button>
+      </div>
+      <div class="backend-hint">
+        {{ t('settings.resetMouseModeHintDesc') }}
       </div>
     </div>
 

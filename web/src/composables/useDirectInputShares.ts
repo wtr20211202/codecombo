@@ -10,6 +10,12 @@ import { shareApi, type ShareDirectProjection } from '../api/domains/share'
  * 「访客还在输入吗」的徽标语义绰绰有余；量级 = 分享数个位数，全量拉取
  * 代价可忽略）。
  *
+ * P-20261106-8 起同一次列表拉取顺带重建可写分享的「访客输入中」锚点表
+ *（writableBySession——wtyping 行字段同源投影，零额外请求）：可写上行
+ * 连接在场即入表，徽标与「收回访客输入」动作复用同一消费面（收回方向
+ * = setWritable off）。sc-ops:share.wtyping 广播是即时对账路，本表轮询
+ * 是断线兜底，两路同源服务端状态。
+ *
  * 消费面：AgentTerminalView（侧栏会话行橙点徽标 + 右键「收回访客输入」
  * ——直通 v1 限定 agent 会话，本管理页就是 owner 侧的会话常驻位）、
  * ShareManagerView（行内持权卡/一键收回）与 useLayoutShell（通知中心
@@ -26,6 +32,9 @@ export interface DirectInputActive {
   nick?: string
   /** 持权剩余秒数（服务端滑动时效投影，<0 = 已过期等下轮对账摘除） */
   expiresIn?: number
+  /** 可写分享来源（P-20261106-8）：true = 本条目来自可写上行连接（收回
+   *  动作走 setWritable off 而非直通 revoke），消费面据此分流 */
+  writable?: boolean
 }
 
 // POLL_MS 惰性轮询周期：对齐直播锚点表的 30s 档再加密一档（15s）——
@@ -39,7 +48,9 @@ let refreshing = false
 let rerunPending = false
 
 /** refresh 拉全量分享列表重建锚点表（对账式整体替换；expiresIn<=0 的持权
- *  视同已回收——服务端惰性时效可能尚未触发，本地先摘） */
+ *  视同已回收——服务端惰性时效可能尚未触发，本地先摘。直通持权与可写
+ *  上行同一张表：可写条目带 writable 标记，直通持权优先——同一会话两态
+ *  并存时直通的「申请-批准」语义更具体） */
 export async function refreshDirectInputShares(): Promise<void> {
   if (refreshing) {
     rerunPending = true
@@ -47,18 +58,30 @@ export async function refreshDirectInputShares(): Promise<void> {
   }
   refreshing = true
   try {
-    const res = (await shareApi.list()) as unknown as { data?: Array<{ token: string; kind?: string; terminalId?: string; direct?: ShareDirectProjection }> }
+    const res = (await shareApi.list()) as unknown as { data?: Array<{ token: string; kind?: string; terminalId?: string; direct?: ShareDirectProjection; wtyping?: { visitors?: number } }> }
     const next: Record<string, DirectInputActive> = {}
     for (const s of res.data || []) {
-      if (!s.direct?.held || !s.terminalId) continue
-      if ((s.direct.expiresIn ?? 1) <= 0) continue
-      if (!next[s.terminalId]) {
+      if (!s.terminalId) continue
+      if (s.direct?.held) {
+        if ((s.direct.expiresIn ?? 1) > 0 && !next[s.terminalId]) {
+          next[s.terminalId] = {
+            token: s.token,
+            sessionId: s.terminalId,
+            visitorTail: s.direct.visitorTail,
+            nick: s.direct.nick,
+            expiresIn: s.direct.expiresIn,
+          }
+        }
+        continue
+      }
+      // 可写分享上行在场（P-20261106-8）：visitors>0 即「访客输入中」
+      if ((s.wtyping?.visitors ?? 0) > 0 && !next[s.terminalId]) {
         next[s.terminalId] = {
           token: s.token,
           sessionId: s.terminalId,
-          visitorTail: s.direct.visitorTail,
-          nick: s.direct.nick,
-          expiresIn: s.direct.expiresIn,
+          nick: undefined,
+          expiresIn: undefined,
+          writable: true,
         }
       }
     }

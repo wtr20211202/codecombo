@@ -33,10 +33,9 @@ import { useApprovalsStore } from '../../stores/approvals'
 import { useRunbookDraftStore } from '../../stores/runbookDraft'
 import { OPS_ACTIVATE_TERMINAL } from '../../utils/opsEvents'
 import { useTerminalSettings } from '../../composables/useTerminalSettings'
-import { useShareDialog } from '../../composables/useShareDialog'
-import { fetchWithEgressGate } from '../../composables/useEgressGate'
-import { useTerminalLiveShares } from '../../composables/useTerminalLiveShares'
-import { useSensitiveMarkHint } from '../../composables/useSensitiveMarkHint'
+// 终端能力四件（直播/冻结/回放/导出）+ 直播徽标投影：会话管理页双入口共用件
+// （P-20261106-7 双入口纪律——动作链与徽标数据面单一实现，本组件只做 tab 接线）
+import { useTerminalShareActions } from '../../composables/useTerminalShareActions'
 import { useTerminalToolbarActions } from '../../composables/useTerminalToolbarActions'
 import { useTerminalTreeLocate } from '../../composables/useTerminalTreeLocate'
 import { useTerminalOscBridge } from '../../composables/useTerminalOscBridge'
@@ -49,11 +48,8 @@ import {
   toggleBookmarkAtLine,
 } from '../../composables/terminalBookmarks'
 import { terminalApi, getTerminalWsUrl } from '../../api/client'
-import { shareApi } from '../../api/domains/share'
-import { recordingApi } from '../../api/domains/recording'
 import { matchShortcut } from '../../utils/shortcut'
 import { copyText } from '../../utils/clipboard'
-import { exportFileName } from '../../utils/exportFileName'
 import { useTerminalThemeStore } from '../../stores/terminal-theme'
 import { rememberActiveTab, recallActiveTab } from '../../utils/terminalActiveTab'
 import { safeStorage } from '../../utils/storage'
@@ -312,13 +308,15 @@ const {
 
 // 5. tab 右键菜单（重命名 / 关闭 / 批量关闭 / 拖出浮动窗）
 const floatApi = useTerminalFloat({ tabs })
-// 直播分享结果卡与文件/片段分享共用（useShareDialog 模块级单例，弹窗宿主
-// 挂 Layout）；tab.id 即终端会话 ID，创建链在 useShareDialog.createTerminalLive
-const shareDialog = useShareDialog()
+// 终端能力四件（直播分享/冻结分享/分享回放/导出输出）+ 直播徽标投影：
+// 会话管理列表行右键（AgentTerminalView）与本 tab 右键共用同一动作链
+// （useTerminalShareActions 单实现，P-20261106-7 双入口纪律——新增终端能力
+// 必须两入口同步，宿主只做接线；直播/冻结创建链带选项弹层（遮蔽/水印，
+// P-20261106-9），在共用件内走 useTermShareDialog）
+const shareActions = useTerminalShareActions()
+const { toggleLiveShare, createFrozenShare, shareReplay, exportOutput, liveBySession, liveTitles, start: startLivePolling, stop: stopLivePolling } = shareActions
 // 终端会话统一 store（P1）：敏感标记行操作与角标读数同源（P-20261003-155）
 const sessionsStore = useTerminalSessionsStore()
-// 敏感内容自动检测建议（P-20261003-207）：导出落地后异步扫描，命中即建议标记
-const { suggestSensitiveMarking } = useSensitiveMarkHint()
 
 // ============== split 关闭保全弹层展示数据（P-20261004-145） ==============
 // pane 名取服务端权威会话名（splitTab 创建时的「<主名>-split」）；命令文本取
@@ -347,58 +345,14 @@ function onFloatDockBack(tabId: string): void {
   floatApi.dockBack(tabId)
   void nextTick(() => fitPane(tabId))
 }
-// 导出输出（P-20261003-100）：服务端 scrollback 链剥 ANSI 直出 txt 留档附件。
-// blob 下载名客户端合成（响应拦截器不透 Content-Disposition，claude 导出同款）；
-// 失败由 axios 拦截器统一 toast。与「更多」菜单的客户端导出文本（xterm 当前
-// 缓冲直下）互补：本链路不依赖 pane 挂载，tmux 下 capture-pane 为权威缓冲。
-// 出域闸（P-20261003-155 会话标记 + P-20261004-113 内容敏感）合并为同一警示
-// 响应：统一经 fetchWithEgressGate 弹一次确认，确认后同时带 override=1&
-// confirm=1 重取——JSON 永不落盘（半真文件比失败更糟）
-async function exportOutputTabFile(tab: TermTab): Promise<void> {
-  try {
-    const blob = await fetchWithEgressGate(
-      confirm => terminalApi.exportOutput(
-        tab.id,
-        confirm ? { params: { override: '1', confirm: '1' } } : undefined,
-      ) as unknown as Promise<Blob>,
-      tab.name,
-    )
-    if (!blob) return
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = exportFileName(tab.name, new Date(), 'txt', 'terminal')
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 10_000)
-    message.success(t('terminal.exportOutputDone'))
-    // 敏感内容自动检测建议（P-20261003-207）：下载已落地才扫描，void 不 await
-    //（blob 本身已在内存，读取整包文本只为取样——尾窗抽样有界在 util 内收口）
-    void suggestSensitiveMarking(tab.id, tab.name, () => blob.text())
-  } catch { /* 拦截器处理 */ }
-}
 // 敏感标记（P-20261003-155）：tab 右键行操作切换，成功反馈按方向分文案
 async function toggleTabSensitive(tab: TermTab): Promise<void> {
   const next = !(sessionsStore.sessions.find(s => s.id === tab.id)?.sensitive === true)
   await sessionsStore.setSensitive(tab.id, next)
   message.success(t(next ? 'terminal.markSensitiveDone' : 'terminal.unmarkSensitiveDone'))
 }
-// 直播分享/结束直播（P-20261003-306 + P-20261005-161）：右键同位项按直播态
-// 分流——无锚点走创建弹链；有锚点一键 DELETE 即时断流（撤销从分享管理器两跳
-// 变一跳）。不弹确认：同链幂等（重建得回同一短链），误触代价对称可逆；失败
-// toast 归拦截器，成功失败都对账（失败时摘除陈旧锚点同理）
-async function toggleLiveShareTab(tab: TermTab): Promise<void> {
-  const live = liveSharesApi.liveBySession.value[tab.id]
-  if (!live) {
-    void shareDialog.createTerminalLive(tab.id)
-    return
-  }
-  try {
-    await shareApi.remove(live.token)
-    message.success(t('terminal.endLiveShareDone'))
-  } catch { /* 拦截器已 toast；下面对账会摘掉已失效的锚点 */ } finally {
-    liveSharesApi.bump()
-  }
-}
+// 直播分享/结束直播等四件动作实现已收口 useTerminalShareActions（本组件与
+// 会话管理页接线共用，P-20261106-7；06-9 选项弹层在共用件内保持）
 // 复制会话 ID（P-20261004-123）：tab.id 即终端会话 ID——协作协议的地址（agent
 // 收件箱/接续链/ui.snapshot 归属/任务进度跳转全用它），一键入剪贴板免手工抓取。
 // copyText 惯例（非 secure context 自动降级 execCommand），反馈按返回值分支 toast
@@ -406,23 +360,6 @@ async function copyTabSessionId(tab: TermTab): Promise<void> {
   const ok = await copyText(tab.id)
   if (ok) message.success(t('terminal.copySessionIdDone'))
   else message.error(t('terminal.copySessionIdFailed'))
-}
-// 分享回放（P-20261004-103）：tab 右键「分享回放」——取该会话最近一次过程
-// 录制生成只读回放短链（异步 walkthrough，默认 1 小时）。录制由审批窗口自动
-// 开启（设置默认关），无录制时给出可行动提示而非静默失败；结果卡由
-// useShareDialog 单例弹出（服务端敏感模式扫描命中时走确认流）
-async function shareReplayTab(tab: TermTab): Promise<void> {
-  try {
-    const res = (await recordingApi.list({ sessionId: tab.id, limit: 1 })) as unknown as {
-      data?: { id?: string }[]
-    }
-    const latest = res?.data?.[0]
-    if (!latest?.id) {
-      message.warning(t('terminal.replayShareNone'))
-      return
-    }
-    await shareDialog.createRecordingShare(latest.id)
-  } catch { /* 拦截器处理 */ }
 }
 const tabMenuApi = useTerminalTabMenu({
   tabs,
@@ -436,11 +373,14 @@ const tabMenuApi = useTerminalTabMenu({
     if (floatApi.isFloating(tab.id)) onFloatDockBack(tab.id)
     else floatApi.floatTab(tab)
   },
-  liveShareTab: (tab) => { void toggleLiveShareTab(tab) },
-  frozenShareTab: (tab) => { void shareDialog.createTerminalFrozen(tab.id) },
+  // 能力四件（P-20261106-7）：动作实现收口 useTerminalShareActions——与会话
+  // 管理列表行右键完全同源（直播按锚点态分流创建/撤销；导出走服务端会话层
+  // CaptureScrollback 链，detached 会话同样可导出）
+  liveShareTab: (tab) => { void toggleLiveShare(tab) },
+  frozenShareTab: (tab) => { createFrozenShare(tab.id) },
   // 分享回放（P-20261004-103）：取该会话最近一次录制的 cast 生成只读回放链
-  replayShareTab: (tab) => { void shareReplayTab(tab) },
-  exportOutputTab: (tab) => { void exportOutputTabFile(tab) },
+  replayShareTab: (tab) => { void shareReplay(tab.id) },
+  exportOutputTab: (tab) => { void exportOutput(tab) },
   // 对比输出（P-20261005-210）：tab.id 即终端会话 ID——diff 左侧固定为当前会话，
   // 右侧由弹层内的会话选择浮层决定（本地/agent/远程），双取数进快照 diff
   compareOutputTab: (tab) => {
@@ -505,7 +445,7 @@ const tabMenuPinned = computed(() => menuTabPinned())
 /** 右键菜单目标 tab 的直播态（P-20261005-161）：「直播分享/结束直播」文案翻转 */
 const tabMenuLive = computed(() => {
   const id = tabContextMenu.value?.tabId
-  return !!id && !!liveSharesApi.liveBySession.value[id]
+  return !!id && !!liveBySession.value[id]
 })
 const floatingTabIds = floatApi.floatingIds
 
@@ -867,45 +807,13 @@ const lockedTabIds = computed(() => {
 })
 
 // ============== 直播中徽标（P-20261005-161 主播侧可见性） ==============
-// 数据面在 useTerminalLiveShares（30s 惰性轮询 + 创建/撤销点即时 bump，详见
-// 该模块头注）；这里只做投影：tab 名字前红点呼吸徽标（访客页「直播中」同视觉
-// 语）+ title 携剩余时长/累计观看数——「忘了直播在跑」的隐私边界在 tab 常驻位
-// 可见，撤销同位一键可达
-const liveSharesApi = useTerminalLiveShares()
-// 剩余时长倒计时基准：30s 粒度自 tick（分享管理页倒计时同款驱动，分钟级展示
-// 不需要秒针精度），TTL 到界同链驱动徽标摘除（本地先于服务端 CleanupExpired）
-const liveNow = ref(Date.now())
-let liveNowTimer: ReturnType<typeof setInterval> | undefined
-onMounted(() => {
-  liveSharesApi.start()
-  liveNowTimer = setInterval(() => { liveNow.value = Date.now() }, 30_000)
-})
-onBeforeUnmount(() => {
-  liveSharesApi.stop()
-  if (liveNowTimer) clearInterval(liveNowTimer)
-})
-/** tab 直播徽标投影：sessionId → 徽标 title（「直播中·剩 HH:MM·N 次观看」）。
- *  空记录的会话不进表 = 无徽标；观看数取分享记录 hits（累计打开，唯一前端
- *  可得口径——hub 实时订阅计数无 API 出口） */
-const liveTabTitles = computed<Record<string, string>>(() => {
-  const src = liveSharesApi.liveBySession.value
-  if (!Object.keys(src).length) return {}
-  const out: Record<string, string> = {}
-  for (const sessionId of Object.keys(src)) {
-    const remainMs = src[sessionId]!.expiresAt
-      ? new Date(src[sessionId]!.expiresAt!).getTime() - liveNow.value
-      : NaN
-    // 到界（含轮询间隙内的过期）不产 title = 摘徽标；无 TTL 记录（理论不出现）
-    // 以 --:-- 兜底不误导
-    if (!Number.isNaN(remainMs) && remainMs <= 0) continue
-    const totalMin = Number.isNaN(remainMs) ? 0 : Math.ceil(remainMs / 60_000)
-    const time = `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`
-    out[sessionId] = Number.isNaN(remainMs)
-      ? t('terminal.liveBadgeTitle', { time: '--:--', n: src[sessionId]!.hits ?? 0 })
-      : t('terminal.liveBadgeTitle', { time, n: src[sessionId]!.hits ?? 0 })
-  }
-  return out
-})
+// 数据面在 useTerminalLiveShares（30s 惰性轮询 + 创建/撤销点即时 bump + 同点
+// 倒计时 tick，详见该模块头注），投影文案收口 useTerminalShareActions.liveTitles
+//（双入口共用件）。这里只做生命周期：tab 名字前红点呼吸徽标（访客页「直播中」
+// 同视觉语）+ title 携剩余时长/累计观看数——「忘了直播在跑」的隐私边界在 tab
+// 常驻位可见，撤销同位一键可达。终端会话管理页行徽标同数据源（P-20261106-7）
+onMounted(startLivePolling)
+onBeforeUnmount(stopLivePolling)
 
 // ============== 会话恢复 / 联动 watch（reconnect + 跳转 + 实例/解锁）==============
 const reconnectApi = useTerminalReconnect({
@@ -1133,7 +1041,7 @@ defineExpose({
       :unread-ids="unreadTabIds"
       :pinned-ids="sessionsStore.pinnedIds"
       :locked-ids="lockedTabIds"
-      :live-titles="liveTabTitles"
+      :live-titles="liveTitles"
       @locate-in-tree="locateActive"
       @select-tab="onSelectTab"
       @request-close="(id: string) => requestCloseTab(id)"

@@ -293,9 +293,6 @@ func TestRedLineNoCredentialsInPayload(t *testing.T) {
 	src := newProjectDir(t, "alpha")
 	writeTree(t, src, map[string]string{"a.txt": "x"})
 	seedProject(t, "p1", "alpha", src)
-	if err := store.Get().ProjectNotes.Put("p1", "note"); err != nil {
-		t.Fatal(err)
-	}
 	// 播种「永不同步」红线载荷：git 凭据 secret（凭据库不在同步单元词表内，
 	// 红线断言 = 全量可同步载荷中 secret 字节不出现）
 	const secret = "sc-redline-secret-DONT-SYNC-42"
@@ -305,8 +302,9 @@ func TestRedLineNoCredentialsInPayload(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// 打包全部可同步单元（项目本体+上下文+全局），断言 secret 字节不在任何载荷
-	payloads, errs := resolveUnitPayloads([]string{"project:alpha", "notes:alpha",
+	// 打包全部可同步单元（项目本体+全局；笔记单元 P-20261108-3 起退役不在列），
+	// 断言 secret 字节不在任何载荷
+	payloads, errs := resolveUnitPayloads([]string{"project:alpha",
 		"snippets", "runtimes", "approvals", "chains", "uistate"}, false)
 	for _, e := range errs {
 		if !strings.Contains(e, "has no content") && !strings.Contains(e, "not found") &&

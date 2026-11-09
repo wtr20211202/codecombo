@@ -285,11 +285,11 @@ func TestPlanNewWithoutBaseline(t *testing.T) {
 func TestPlanScopeFilter(t *testing.T) {
 	local := &ManifestResponse{Units: []UnitEntry{
 		{Key: "project:a", Kind: UnitProject, Name: "a", Fingerprint: "L1", Exists: true},
-		{Key: "notes:a", Kind: UnitNotes, ProjectKey: "project:a", Fingerprint: "N1", Exists: true},
+		{Key: "crons:a", Kind: UnitCrons, ProjectKey: "project:a", Fingerprint: "C1", Exists: true},
 		{Key: "project:b", Kind: UnitProject, Name: "b", Fingerprint: "L2", Exists: true},
 	}}
 	peer := &ManifestResponse{Units: []UnitEntry{}}
-	plan := planFromManifests(local, peer, nil, []string{"project:a"}, []string{"notes"})
+	plan := planFromManifests(local, peer, nil, []string{"project:a"}, []string{"crons"})
 	if len(plan.Rows) != 2 {
 		t.Fatalf("scope 过滤应只留 a 的两行，got %d", len(plan.Rows))
 	}
@@ -679,14 +679,11 @@ func TestSyncCronStoreRoundTrip(t *testing.T) {
 
 // ── 上下文单元载荷 ──
 
-func TestNotesAndCronsUnitRoundTrip(t *testing.T) {
+func TestCronsUnitRoundTrip(t *testing.T) {
 	setupSyncEnv(t)
 	src := newProjectDir(t, "alpha")
 	writeTree(t, src, map[string]string{"README.md": "demo"})
 	seedProject(t, "p1", "alpha", src)
-	if err := store.Get().ProjectNotes.Put("p1", "# 交接笔记\n内容"); err != nil {
-		t.Fatal(err)
-	}
 	cron, err := store.Get().AgentCron.Create(store.AgentCron{
 		Name: "nightly build", Hour: 2, Minute: 0, Prompt: "build", Dir: filepath.Join(src, "sub"), Enabled: true,
 	})
@@ -695,13 +692,13 @@ func TestNotesAndCronsUnitRoundTrip(t *testing.T) {
 	}
 	destRoot := t.TempDir()
 
-	// 打包 project + notes + crons 三个单元
-	payloads, errs := resolveUnitPayloads([]string{"project:alpha", "notes:alpha", "crons:alpha"}, false)
+	// 打包 project + crons 两个单元（笔记单元 P-20261108-3 起退役，见 retired_test.go）
+	payloads, errs := resolveUnitPayloads([]string{"project:alpha", "crons:alpha"}, false)
 	if len(errs) != 0 {
 		t.Fatalf("resolve errs: %v", errs)
 	}
-	if len(payloads) != 3 {
-		t.Fatalf("应有 3 个载荷: %d", len(payloads))
+	if len(payloads) != 2 {
+		t.Fatalf("应有 2 个载荷: %d", len(payloads))
 	}
 	sortPayloads(payloads)
 	var buf bytes.Buffer
@@ -718,12 +715,6 @@ func TestNotesAndCronsUnitRoundTrip(t *testing.T) {
 		if u.Error != "" {
 			t.Fatalf("单元落位失败: %+v", u)
 		}
-	}
-	// notes 落到注册项目
-	landedID := lr.Units[0].ProjectID
-	note, err := store.Get().ProjectNotes.Get(landedID)
-	if err != nil || !strings.Contains(note.Content, "交接笔记") {
-		t.Fatalf("笔记应落位到新项目: %v %q", err, note.Content)
 	}
 	// crons Dir 重映射到落位路径
 	crons, _ := store.Get().AgentCron.List()
@@ -751,7 +742,8 @@ func TestManifestBuildsUnits(t *testing.T) {
 	src := newProjectDir(t, "alpha")
 	writeTree(t, src, map[string]string{"main.go": "package main"})
 	seedProject(t, "p1", "alpha", src)
-	if err := store.Get().ProjectNotes.Put("p1", "note"); err != nil {
+	// 笔记库有内容也不产出笔记单元（P-20261108-3：笔记不随实例同步）
+	if _, err := store.Get().MultiNotes.Create(store.GlobalNotesScope, "随手记", "note"); err != nil {
 		t.Fatal(err)
 	}
 	m := buildLocalManifest()
@@ -764,9 +756,12 @@ func TestManifestBuildsUnits(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"project:alpha", "notes:alpha"} {
-		if !found[want] {
-			t.Errorf("manifest 缺单元 %s: %v", want, found)
+	if !found["project:alpha"] {
+		t.Errorf("manifest 缺单元 project:alpha: %v", found)
+	}
+	for k := range found {
+		if isRetiredUnitKey(k) {
+			t.Errorf("manifest 不应再产出退役笔记单元: %s", k)
 		}
 	}
 	if m.DestRoot == "" {

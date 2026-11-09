@@ -32,6 +32,15 @@ fi
 AUTH=()
 [ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
 
+# 短 SHA 展开：head_sha 过滤器只认全量 40 位（8 位短 SHA 恒空→假超时实锚），
+# 开发仓无发布仓提交、本地 git 展不开，经 commits API 回全量
+full_sha=$(curl -sf -m 30 "${AUTH[@]}" "https://api.github.com/repos/$REPO/commits/$SHA" 2>/dev/null \
+  | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).sha||'')}catch(e){console.log('')}})" 2>/dev/null || true)
+if [ -n "$full_sha" ]; then
+  [ "$full_sha" != "$SHA" ] && echo "==> SHA 展开：${SHA} → ${full_sha:0:12}…"
+  SHA="$full_sha"
+fi
+
 echo "==> CI 绿门禁：repo=$REPO sha=${SHA:0:7} 超时=${TIMEOUT}s 轮询=${INTERVAL}s"
 deadline=$(( $(date +%s) + TIMEOUT ))
 while :; do

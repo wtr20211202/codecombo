@@ -208,6 +208,11 @@ test.describe('share-terminal-frozen', () => {
     await expect(frozenItem).toBeVisible({ timeout: 5000 })
     await expect(frozenItem).toContainText('分享输出快照')
     await frozenItem.click()
+    // 选项弹层（P-20261106-9）：遮蔽缺省开（安全基线），直接确认创建
+    const options = page.locator('[data-testid="share-term-options"]')
+    await expect(options).toBeVisible({ timeout: 5000 })
+    await expect(options).toHaveAttribute('data-kind', 'frozen')
+    await page.locator('[data-testid="share-term-confirm"]').click()
     // 结果卡弹出（useShareDialog 单例 → ShareResultDialog）：快照形态描述 + 有效期提示
     const dialog = page.locator('.share-result-modal')
     await expect(dialog).toBeVisible({ timeout: 15_000 })

@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-// ── mock 边界：本组合式的外部依赖只有 ① projectApi 笔记/TODO 取数 ② settings
+// ── mock 边界：本组合式的外部依赖只有 ① 笔记库（P-20261108-3 单库化：按
+// 「[项目名]」前缀篇取首段）/ projectApi TODO 取数 ② settings
 // 读取（store ensureLoaded）③ git 摘要取数面（独立测，本文件按注入值断言装配
 // 与声明序）④ 环境画像端点（P-20261007-14 注入源）⑤ vue-i18n（真模板：t 直接
 // 查 zh-CN 语言包插值）──
-const { notesMock, todosMock, envProfileMock, settingsGetMock, gitSummaryMock } = vi.hoisted(() => ({
+const { notesListMock, notesMock, todosMock, envProfileMock, settingsGetMock, gitSummaryMock } = vi.hoisted(() => ({
+  notesListMock: vi.fn<(trash?: boolean) => Promise<unknown>>(),
   notesMock: vi.fn<(id: string) => Promise<unknown>>(),
   todosMock: vi.fn<(id: string) => Promise<unknown>>(),
   envProfileMock: vi.fn<(id: string) => Promise<unknown>>(),
@@ -14,7 +16,8 @@ const { notesMock, todosMock, envProfileMock, settingsGetMock, gitSummaryMock } 
 }))
 
 vi.mock('../api/client', () => ({
-  projectApi: { projectNotes: notesMock, projectTodos: todosMock },
+  projectApi: { projectTodos: todosMock },
+  notesGlobalApi: { list: notesListMock, get: notesMock },
   settingsApi: { get: settingsGetMock },
 }))
 
@@ -59,6 +62,14 @@ beforeEach(() => {
   seedProject()
   // 默认无摘要/无笔记/无待办 + store 默认 git 档：既有语义（git-only 注入）
   gitSummaryMock.mockResolvedValue('')
+  // 笔记库：本项目（demo）有一篇前缀篇 + 他项目/随手记干扰篇（前缀判定整段匹配）
+  notesListMock.mockResolvedValue({
+    data: [
+      { id: 'other', title: '[demo2] 交接', updatedAt: '2026-11-08T10:00:00Z', size: 1 },
+      { id: 'free', title: '随手记', updatedAt: '2026-11-08T09:30:00Z', size: 1 },
+      { id: 'n1', title: '[demo] 交接', updatedAt: '2026-11-08T09:00:00Z', size: 1 },
+    ],
+  })
   notesMock.mockResolvedValue({ data: { content: '' } })
   todosMock.mockResolvedValue({ data: [], total: 0, truncated: false })
   envProfileMock.mockResolvedValue({ data: { projectId: 'p1', devPorts: [] } })
@@ -98,6 +109,21 @@ describe('useSessionContextSummary 上下文装配（P-20261006-47）', () => {
     expect(sections[0]).toEqual({ id: 'notes', kind: 'atomic', text: '项目笔记（demo）：笔记首段' })
     expect(sections[1]).toEqual({ id: 'todos', kind: 'atomic', text: 'TODO 概要（demo）：1 处待办，如 src/a.ts:12' })
     expect(sections[2]?.text).toBe('GIT 行')
+    // 单库化取数面（P-20261108-3）：清单里「[demo]」整段前缀篇（非 [demo2]/随手记）
+    expect(notesMock).toHaveBeenCalledWith('n1')
+  })
+
+  it('笔记库无本项目前缀篇：笔记段缺省、不读单篇（随手记/他项目篇不冒充）', async () => {
+    useSessionContextStore().hydrate({ sessionContext: 'notes' })
+    notesListMock.mockResolvedValue({
+      data: [{ id: 'other', title: '[demo2] 交接', updatedAt: '2026-11-08T10:00:00Z', size: 1 }],
+    })
+    const { buildContextSections } = useSessionContextSummary()
+
+    const sections = await buildContextSections()
+
+    expect(sections).toEqual([])
+    expect(notesMock).not.toHaveBeenCalled()
   })
 
   it('override（对话框按次覆选）优先于设置：未勾选的 git 也不注入', async () => {
@@ -166,6 +192,7 @@ describe('useSessionContextSummary 上下文装配（P-20261006-47）', () => {
     const sections = await buildContextSections()
 
     expect(sections).toEqual([])
+    expect(notesListMock).not.toHaveBeenCalled()
     expect(notesMock).not.toHaveBeenCalled()
     expect(todosMock).not.toHaveBeenCalled()
     expect(envProfileMock).not.toHaveBeenCalled()

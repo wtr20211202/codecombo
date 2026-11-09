@@ -96,6 +96,14 @@ describe('useNotifyDnd 免打扰域（P-20261003-64 自组件迁入）', () => {
     const store = { isSnoozed: (n: NotificationItem) => !!n.snoozeUntil }
     const dnd = useNotifyDnd({ store, prefs: () => prefs.value, baseItems: () => baseItems.value })
     dnd.nowMs.value = new Date(2026, 9, 24, 11, 30, 0).getTime()
+    // 先跑一拍对齐 watch 旧值基线：composable 内部 nowMs 初值取真实墙钟
+    // （Date.now()），自动退出 watch 以注册时刻的采样为基线——若套件恰在
+    // 本夹具窗口（10:00–11:00）内运行，基线为 [null, 0]，随后的「置钟出窗→
+    // 禁用偏好」落在同一 flush 周期内，净效果仍是 [null, 0]，watch 逐元素
+    // 比较判无变化不触发，自动退出不会发生（生产中窗口状态只随用户动作
+    // 推进、动作间逐次 flush 采样，无此盲区）。对齐后基线恒为 [窗口, 1]，
+    // 后续断言与运行时刻解耦
+    await nextTick()
     dnd.toggleDndOnly()
     expect(dnd.dndOnly.value).toBe(true)
 

@@ -225,6 +225,22 @@ const (
 	// 降低检索频次。与 errmarkers.SearchRateLimited 文本标记成对附挂（前端
 	// KNOWN_ERROR_I18N 正则映射与 agent code 分支双轨并存，git/remote 域同款）
 	CodeSearchRateLimited ErrCode = "search.rate_limited"
+
+	// notes 域（笔记库 /api/notes 族：P-20261107-2 多篇 → P-20261108-3 单库化）
+	// CodeNotesNotFound 篇不存在：GET /api/notes 清单核对 noteId
+	CodeNotesNotFound ErrCode = "notes.not_found"
+	// CodeNotesConflict baseUpdatedAt 过期（覆盖保护三件套①）：响应附
+	// currentContent/currentUpdatedAt——先读现状再决策（用我的覆盖 / 载入
+	// 服务端版本 / 另存为新篇），勿盲目重试覆盖
+	CodeNotesConflict ErrCode = "notes.conflict"
+	// CodeNotesTooLarge 内容超 256KB：精简后重发
+	CodeNotesTooLarge ErrCode = "notes.too_large"
+	// CodeNotesGlobalLimit 笔记库篇数达上限（100 含回收站，只挡新增）：删减或
+	// 彻底删除回收站篇后重试。P-20261108-3 单库化后唯一额度码——项目档
+	// notes.limit_reached 随项目笔记端点族退役出注册表（再无产出点）
+	CodeNotesGlobalLimit ErrCode = "notes.global_limit"
+	// CodeNotesTitleTooLong 标题超 200 字节：换短标题
+	CodeNotesTitleTooLong ErrCode = "notes.title_too_long"
 )
 
 // errCodeStatus 错误码 → HTTP status 绑定（唯一事实源，迁移端点 status 由这里
@@ -301,6 +317,15 @@ var errCodeStatus = map[ErrCode]int{
 
 	// 第三批（P-20261004-124）：搜索限流
 	CodeSearchRateLimited: http.StatusTooManyRequests,
+
+	// 第四批（P-20261107-2）：多篇笔记（P-20261108-3 单库化后即 /api/notes 族）
+	CodeNotesNotFound:     http.StatusNotFound,
+	CodeNotesConflict:     http.StatusConflict,
+	CodeNotesTooLarge:     http.StatusRequestEntityTooLarge,
+	CodeNotesTitleTooLong: http.StatusBadRequest,
+
+	// 第五批（P-20261107-5）：全局笔记库独立额度（/api/notes 族，notes 域增量）
+	CodeNotesGlobalLimit: http.StatusBadRequest,
 }
 
 // StatusFor 返回错误码绑定的 HTTP status。未登记码防御性回退 500 并记日志

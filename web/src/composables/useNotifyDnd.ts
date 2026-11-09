@@ -74,10 +74,16 @@ export function useNotifyDnd(options: {
     if (dndWindow.value) dismissedWindowEnd.value = dndWindow.value.endMs
   }
   // 窗口失效（偏好改/禁用）或窗口内条目清零时自动退出过滤并消隐——同项目维
-  // 过滤「选中项清空自动回落」的既有惯例，避免空列表无解释、过滤态不可见
-  watch([dndWindow, dndMissedCount], ([w, n]) => {
+  // 过滤「选中项清空自动回落」的既有惯例，避免空列表无解释、过滤态不可见。
+  // 源取上游输入（prefs/baseItems getter + 时钟锚）而非计算值本身：值 diff 型
+  // watch 对「同 tick 批量变更后计算值净差为零」的序列（如启用窗恰好覆盖注册
+  // 时刻、随后批量改 prefs+items 两端回同值）不触发——上午 10-11 点跑测试的
+  // 时间条带实证（注册时 nowMs=真实现在恰在窗内 → 初始 [null,0]，用例批量变更
+  // 后仍 [null,0]，元素级 hasChanged 全等 → 回调被跳过）。改盯上游输入身份，
+  // 触发后重读计算值判定——语义恢复「任一输入变即重验」，与跑测时刻无关
+  watch([() => options.prefs(), () => options.baseItems(), nowMs], () => {
     if (!dndOnly.value) return
-    if (!w || n === 0) closeDndSummary()
+    if (!dndWindow.value || dndMissedCount.value === 0) closeDndSummary()
   })
 
   return {

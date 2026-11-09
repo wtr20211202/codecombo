@@ -5,7 +5,6 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon as WebGLAddon } from '@xterm/addon-webgl'
-import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { ImageAddon } from '@xterm/addon-image'
 import { registerTerminalFileLinks } from './useTerminalFileLinks'
 import type { TerminalCursorStyle } from '../stores/font'
@@ -57,8 +56,9 @@ export interface TerminalWithAddons {
 }
 
 // 创建终端实例并装配全部 addon（自 useTerminalSession.connect 原样搬运）：
-// fit / web-links / clipboard(OSC 52) / image / unicode11 / webgl(含上下文丢失降级)
-// / search / 文件路径链接层。宿主拿到实例后负责 open 容器与 WS 生命周期。
+// fit / web-links / image / unicode11 / webgl(含上下文丢失降级)
+// / search / 文件路径链接层。宿主拿到实例后负责 open 容器与 WS 生命周期
+// （OSC 52 剪贴板 handler 亦由宿主连接期挂载，见 terminalOsc52Clipboard）。
 export function createTerminalWithAddons(opts: CreateTerminalWithAddonsOptions): TerminalWithAddons {
   const term = new Terminal({
     fontSize: opts.fontSize,
@@ -77,13 +77,12 @@ export function createTerminalWithAddons(opts: CreateTerminalWithAddonsOptions):
   term.loadAddon(fitAddon)
   term.loadAddon(new WebLinksAddon())
 
-  // ClipboardAddon：处理 OSC 52 协议——远程 SSH 程序（vim/tmux+yank 等）
-  // 通过 OSC 52 序列写本机剪贴板。前端 Ctrl+Shift+C/V 与右键粘贴走自实现路径
-  try {
-    term.loadAddon(new ClipboardAddon())
-  } catch (err) {
-    console.warn('clipboard addon load failed', err)
-  }
+  // OSC 52 剪贴板写入不在此装配（P-20261107-6，原 @xterm/addon-clipboard 让位
+  // 并卸载依赖）：ClipboardAddon 写路径无成功/失败回调、且非安全上下文下静默
+  // 哑写——改由宿主连接期挂 terminalOsc52Clipboard 的独占 handler（copyText
+  // 降级链 + 能力已证信号 + 重放门禁短路，需 oscSink 门禁读数故不在本工厂）。
+  // 同一 term 勿再装第二个 OSC 52 handler（独占消费约定，双挂即双写）。
+  // 前端 Ctrl+Shift+C/V 与右键粘贴走 useTerminalClipboard 自实现路径（不变）
 
   // ImageAddon：iTerm2 IIP / Sixel / Kitty Graphics 三种图片协议
   // 让 imgcat / chafa / timg 等工具输出的图片直接在终端内显示

@@ -24,7 +24,8 @@ type UIActiveFile struct {
 
 // UIVisiblePanels 面板可见性投影（side/bottom 两族；主区视图互斥态不在此列）
 type UIVisiblePanels struct {
-	// Side 侧栏当前视图标识（files/changes/todos/notes/stream…，前端面板注册表 id）
+	// Side 侧栏当前视图标识（files/changes/todos/stream/env/sync…，前端面板注册表 id；
+	// 笔记 P-20261108-2 起为主区独立视图，不再出现在此）
 	Side string `json:"side"`
 	// SideOpen 侧栏是否展开
 	SideOpen bool `json:"sideOpen"`

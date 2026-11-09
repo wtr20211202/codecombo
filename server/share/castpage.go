@@ -111,6 +111,9 @@ type castPageData struct {
 	// 单一事实源——四形态访客页同一段脚本挂载）
 	BoardCSS template.CSS
 	BoardJS  template.JS
+	// LayoutCSS/LayoutJS 终端访客页共用布局件（P-20261106-9，termlayout.go）
+	LayoutCSS template.CSS
+	LayoutJS  template.JS
 }
 
 // 模板与 termpage.go/termpagefrozen.go 同族（头/横幅/卡片/主题化样式逐段
@@ -139,8 +142,8 @@ font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microso
 .blob{position:fixed;border-radius:50%;filter:blur(90px);z-index:0;pointer-events:none}
 .b1{width:380px;height:380px;background:rgba(106,92,255,.30);top:-90px;right:-70px}
 .b2{width:320px;height:320px;background:rgba(61,123,253,.26);bottom:-90px;left:-60px}
-.wrap{position:relative;z-index:1;height:100vh;max-width:1180px;margin:0 auto;padding:22px 22px 10px;
-display:flex;flex-direction:column}
+/* .wrap 列容器 / 窄屏断点由 termLayoutCSS 注入（P-20261106-9，termlayout.go
+   单一事实源，三终端访客页共用） */
 .header{flex-shrink:0;display:flex;align-items:center;gap:14px;
 background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:14px;
 padding:13px 20px;color:#fff;box-shadow:var(--shadow)}
@@ -159,8 +162,19 @@ border-radius:10px;padding:9px 14px;font-size:12.5px;line-height:1.55}
 .card{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:12px;
 background:var(--card);border:1px solid var(--border);border-radius:14px;
 box-shadow:var(--shadow);overflow:hidden}
-.toolbar{flex-shrink:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-padding:9px 12px;border-bottom:1px solid var(--border)}
+/* 回放舞台 + 浮层控件条（P-20261106-9 工具栏浮层化）：终端区占满卡片主体，
+   播放控件条悬浮于舞台底部（毛玻璃底，不再独占一行把终端挤矮）；播放中指针
+   静止即淡出（终端末行不被遮挡），指针移动/触摸/键盘聚焦即现，暂停/播完常显
+  （video 播放器同款交互，触屏点按即现）。舞台底部预留控件条高度，终端末行
+   可滚出浮层之上 */
+.stage{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+.toolbar{position:absolute;left:12px;right:12px;bottom:12px;z-index:5;
+display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;
+border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);
+background:var(--card);background:color-mix(in srgb,var(--card) 84%,transparent);
+-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+transition:opacity .25s ease,transform .25s ease}
+body.controls-idle .toolbar{opacity:0;transform:translateY(8px);pointer-events:none}
 .btn{border:1px solid var(--border);background:var(--chip);color:var(--text);
 border-radius:8px;padding:4px 11px;font-size:12.5px;cursor:pointer;font:inherit}
 .btn:disabled{opacity:.45;cursor:default}
@@ -173,6 +187,10 @@ input[type=range]{flex:1;min-width:120px;accent-color:var(--accent)}
 .dl{margin-left:auto;font-size:12px;color:var(--accent);text-decoration:none;white-space:nowrap}
 .dl:hover{text-decoration:underline}
 .term-box{flex:1;min-height:0;padding:8px 10px;overflow:auto}
+/* 舞台内终端区为浮层控件条预留底部空间（双类选择器特异度高于共用窄屏断点的
+   .term-box 内边距覆写，预留不被吞；窄屏控件条可能折两行，预留加高） */
+.stage .term-box{padding-bottom:64px}
+@media (max-width:640px){.stage .term-box{padding-bottom:104px}}
 .term-box .xterm{height:100%}
 .term-box .xterm-viewport{background:transparent!important}
 .chapters{flex-shrink:0;border-top:1px solid var(--border);padding:6px 12px;max-height:150px;overflow-y:auto}
@@ -203,6 +221,12 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 .sc-wm .wm-a{top:16%;left:5%}
 .sc-wm .wm-b{bottom:16%;right:5%}
 {{.BoardCSS}}
+{{.LayoutCSS}}
+/* 回放主机栅格渲染（P-20261106-9 / P-20261107-4，须在共用布局件之后才能覆盖）：
+   终端按录制 cols×rows 精确渲染、字号在产品同款上限内缩放装进舞台（scFitGrid，
+   xterm 元素按栅格定宽居中）；列放宽只多留白——流式下限收回 1180，录制更宽才随
+   --term-need 放宽；字号到下限仍装不下时舞台内滚动查看（不折行不裁切） */
+:root{--col-floor:1180px}
 </style>
 </head>
 <body>
@@ -221,15 +245,17 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
     <span id="bannerText"></span>
   </div>
   <div class="card">
-    <div class="toolbar" id="toolbar" style="display:none">
-      <button class="btn primary" id="playBtn" disabled></button>
-      <button class="btn" id="replayBtn" disabled></button>
-      <div class="speeds" id="speeds"></div>
-      <input type="range" id="seek" min="0" max="1" step="0.1" value="0" disabled>
-      <span class="clock" id="clock">0:00 / 0:00</span>
-      <a class="dl" id="download" href="#" download> </a>
+    <div class="stage" id="stage" style="display:none">
+      <div class="term-box" id="termBox"></div>
+      <div class="toolbar" id="toolbar" data-testid="cast-toolbar">
+        <button class="btn primary" id="playBtn" disabled></button>
+        <button class="btn" id="replayBtn" disabled></button>
+        <div class="speeds" id="speeds"></div>
+        <input type="range" id="seek" min="0" max="1" step="0.1" value="0" disabled>
+        <span class="clock" id="clock">0:00 / 0:00</span>
+        <a class="dl" id="download" href="#" download> </a>
+      </div>
     </div>
-    <div class="term-box" id="termBox" style="display:none"></div>
     <div class="chapters" id="chapters" style="display:none">
       <div class="chapters-head" id="chaptersHead"></div>
       <div id="chapterList"></div>
@@ -241,8 +267,12 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 </div>
 <script src="/assets/xterm.js"></script>
 <script src="/assets/addon-fit.js"></script>
+<script src="/assets/addon-unicode11.js"></script>
 <script>
 const SC = {{.Boot}};
+// 终端访客页共用布局件（P-20261106-9 / P-20261107-4，termlayout.go 单一事实源：
+// 渲染常量 SC_TERM_*、scTermOptions、scFitGrid 等）
+{{.LayoutJS}}
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
 document.title = t('appTitle');
@@ -271,26 +301,18 @@ $('download').href = '/s/' + SC.token + '/cast?dl=1';
 })();
 
 // ── xterm 只读实例：disableStdin + 页面无输入通道代码 = 双层只读保证。
-// 固定 cast header 尺寸渲染（忠实实况，不做容器自适应重排——与回放器
-// CastReplayer 同口径），容器滚动查看超出部分 ──
+// 按 cast header 的录制栅格渲染（忠实实况，不按容器改写列数——与回放器
+// CastReplayer 同口径），渲染参数与产品内终端对齐（P-20261107-4，scTermOptions
+// 单一出口），字号随舞台缩放装下整格（scFitGrid）──
 const dark = matchMedia('(prefers-color-scheme: dark)');
 function termTheme(){
   return dark.matches
     ? { background: 'rgba(0,0,0,0)', foreground: '#e6eaf3', cursor: 'transparent' }
     : { background: 'rgba(0,0,0,0)', foreground: '#24292f', cursor: 'transparent' };
 }
-const term = new Terminal({
-  disableStdin: true,
-  cursorBlink: false,
-  cursorInactiveStyle: 'outline',
-  convertEol: false,
-  scrollback: 5000,
-  fontSize: 13.5,
-  fontFamily: 'ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace',
-  theme: termTheme(),
-  allowProposedApi: true
-});
+const term = new Terminal(scTermOptions({ convertEol: false, theme: termTheme() }));
 dark.addEventListener('change', () => { term.options.theme = termTheme(); });
+scTermUnicode(term);
 let termOpened = false;
 function openTerm(){
   if (termOpened) return;
@@ -298,11 +320,14 @@ function openTerm(){
   term.onData(() => {}); // 只读保险丝：不存在把输入送回服务端的路径
   termOpened = true;
 }
+// 录制栅格 + 舞台尺寸驱动的重排（舞台/章节区/窗口任何变化都按栅格重新定字号）
+let castCols = 0, castRows = 0;
+function castLayout(){ if (termOpened && castCols > 0) scFitGrid(term, $('termBox'), castCols, castRows); }
+const relayout = scObserve($('termBox'), castLayout);
 
 function setBadge(text){ $('badgeText').textContent = text; }
 function showState(title, desc){
-  $('toolbar').style.display = 'none';
-  $('termBox').style.display = 'none';
+  $('stage').style.display = 'none';
   const box = $('stateBox');
   box.style.display = '';
   box.replaceChildren();
@@ -391,7 +416,30 @@ function setPlaying(on){
   $('playBtn').textContent = on ? t('pause') : t('play');
   if (on) setBadge(t('playingBadge'));
   else if (elapsed < duration) setBadge(t('pausedBadge'));
+  // 浮层控件条：播放中进入静止计时，暂停/播完常显
+  if (on) wakeControls(); else showControls();
 }
+// ── 浮层控件条隐现（P-20261106-9）：播放中指针静止 2.5s 淡出，任何指针/触摸/
+// 键盘活动即现；悬停或键盘焦点在控件条内时不淡出（拖动进度条/调倍速不被打断）──
+let idleTimer = null;
+function showControls(){
+  clearTimeout(idleTimer);
+  idleTimer = null;
+  document.body.classList.remove('controls-idle');
+}
+function wakeControls(){
+  showControls();
+  if (!playing) return;
+  idleTimer = setTimeout(() => {
+    const bar = $('toolbar');
+    if (playing && !bar.matches(':hover') && !bar.contains(document.activeElement)) {
+      document.body.classList.add('controls-idle');
+    }
+  }, 2500);
+}
+['pointermove', 'pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
+  document.addEventListener(ev, wakeControls, { passive: true });
+});
 function play(){
   if (playing || duration <= 0) return;
   if (elapsed >= duration) seekTo(0);
@@ -488,11 +536,17 @@ $('seek').addEventListener('input', (e) => { pause(); seekTo(parseFloat(e.target
     document.body.dataset.castChapters = String(chapters.length);
     const cols = Math.max(2, Math.min(Number(parsed.header.width) || 80, 500));
     const rows = Math.max(2, Math.min(Number(parsed.header.height) || 24, 300));
-    $('stateBox').style.display = 'none';
-    $('termBox').style.display = '';
-    openTerm();
+    // 内容自适应列宽（P-20261106-9）：按 cast 录制宽度定列容器；终端按录制栅格
+    // 精确渲染，字号缩放装进舞台（P-20261107-4 scFitGrid，视口够宽即产品字号居中）
+    castCols = cols; castRows = rows;
+    scTermNeed(cols);
     term.resize(cols, rows);
-    $('toolbar').style.display = '';
+    $('stateBox').style.display = 'none';
+    $('stage').style.display = '';
+    // 产品同款字体就绪再 open（xterm 在 open 时测字宽）；字体晚到则重测重排
+    await new Promise((resolve) => scFontsReady(resolve, () => { scRemeasure(term); relayout(); }));
+    openTerm();
+    castLayout();
     $('playBtn').disabled = false;
     $('replayBtn').disabled = false;
     $('seek').disabled = false;
@@ -526,10 +580,12 @@ func renderCastPage(w io.Writer, token, lang, title, wm string) error {
 		return err
 	}
 	return castPageTmpl.Execute(w, castPageData{
-		Lang:     lang,
-		Title:    "Codecombo " + title,
-		Boot:     template.JS(boot),
-		BoardCSS: template.CSS(guestBoardCSS),
-		BoardJS:  template.JS(guestBoardJS),
+		Lang:      lang,
+		Title:     "Codecombo " + title,
+		Boot:      template.JS(boot),
+		BoardCSS:  template.CSS(guestBoardCSS),
+		BoardJS:   template.JS(guestBoardJS),
+		LayoutCSS: template.CSS(termLayoutCSS),
+		LayoutJS:  template.JS(termLayoutJS),
 	})
 }

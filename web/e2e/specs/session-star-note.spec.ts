@@ -129,6 +129,13 @@ test.describe('会话星标与备注（P-20261003-67）', () => {
     // （点击前先布好 refreshList 响应等待：toggleStar 成功后服务端置顶重取，
     // 列表重排窗口内的后续行内点击会随 DOM 行替换落空——P-114 检索态误触
     // 同族先例，fulle2e run7 取消星标点击实测丢失效）
+    // P-20261031-1 后六钮静息态 display:none（hover/键盘活动行才显形）：
+    // C 基线在更新的 A 之后非首行（fetchPage 全量刷新把键盘活动位固定在
+    // 首行，ClaudeSessionPicker fetchPage activeIdx=0），星钮未显形不可点
+    // （Playwright 可见性门禁先于鼠标移动，不 hover 直接点必超时）——
+    // 先 hover 行走真实用户「移入行→星钮显现→点星」路径（session-relay
+    // relayAndCapture 同款惯例），产品 hover 显现语义无回归
+    await starRow.hover()
     const starRefresh = page.waitForResponse(r => r.url().includes('/claude/sessions?') && !r.url().includes('/search'))
     await starRow.locator('[data-test="session-star"]').click()
     await expect(picker.locator('[data-test="session-star-bucket"]')).toBeVisible({ timeout: 10000 })
@@ -157,6 +164,8 @@ test.describe('会话星标与备注（P-20261003-67）', () => {
     expect(afterList.find(s => s.id === SESSION_STAR)?.starred ?? false).toBe(false)
 
     // 恢复星标（UI 正向切换回归）：置顶分组与实心星回归
+    // 取消星标重取后 C 落回 A 之后非首行，星钮回静息 display:none——同上先 hover
+    await starRow.hover()
     await starRow.locator('[data-test="session-star"]').click()
     await expect(starRow.locator('[data-test="session-star"]')).toHaveClass(/is-on/)
     await expect(picker.locator('[data-test="session-star-bucket"]')).toBeVisible({ timeout: 10000 })

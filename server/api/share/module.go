@@ -161,6 +161,17 @@ func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 				// 不会再有输入触发惰性清扫——会话侧只读闸必须就地解除）
 				if svc := shareSvc; svc != nil {
 					svc.CascadeRelease(keep)
+					// 可写上行连接级联清场（P-20261106-8）：同 keep 集判据，
+					// 记录死亡后上行桥不能残留（writable.go 头注级联语义）
+					svc.CascadeWritableDown(keep)
+				}
+				// 直播馈线收口（P-20261106-9）：TTL 到期的直播记录刚被
+				// CleanupExpired 直接删除（不经 Unwire），其馈线若不收口会挂着
+				// tap 直到会话关闭——未过滤馈线的原文尾流不应驻留到那时
+				if lw := liveWire; lw != nil {
+					if n := lw.Prune(keep); n > 0 {
+						k.Logger().Info("share live feeds pruned", "ended", n)
+					}
 				}
 			} else {
 				k.Logger().Warn("share drops gc skipped: list failed", "err", err)
@@ -203,6 +214,18 @@ func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 	// + 补审计（owner 缘由的审计在 handler 落，不双写）
 	svc = svc.WithDirectSink(directAdapter{})
 	setShareDirectCallbacks(svc)
+	// 可写分享档（P-20261106-8）：WS 上行桥的落点/风险预检/事件三面接线。
+	// 风险预检复用 commandrisk 模式表（按键级不审批的诚实边界与粘贴级
+	// danger 审批的分层见 server/share/writable.go 头注）；事件回调只做
+	// opschannel 非阻塞投递（审批卡的批准/拒绝动作回调在 handlers_writable.go）
+	svc = svc.WithWritableSink(writableAdapter{})
+	svc = svc.WithWritableRiskCheck(pasteRiskCheck)
+	svc = svc.WithWritableEvents(func(ev share.WritableTypingEvent) {
+		opschannel.BroadcastEvent(opschannel.EventShareWritableTyping, ev)
+	})
+	svc = svc.WithPasteReviewEvents(func(ev share.PasteReviewEvent) {
+		opschannel.BroadcastEvent(opschannel.EventSharePasteReview, ev)
+	})
 	// 管理面协作端点（handlers_collab.go）经包级引用触达持权状态机
 	//（liveWire 同款装配契约：Stop 必须摘除，防停机后旧服务被管理端点命中）
 	setShareSvc(svc)
@@ -302,13 +325,18 @@ func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 
 // Stop 优雅关闭子服务（关停后兜底冲一次访问计数——Shutdown 等在途访客
 // 请求收尾，此时冲刷拿到的才是完整增量）。终端直播馈线一并收尾：
-// Shutdown 已等在途 SSE 请求退出，之后摘对账回调、终结全部馈线
+// Shutdown 已等在途 SSE 请求退出，之后摘对账回调、终结全部馈线。
+// 可写上行 WS 连接是 hijacked 长连接（Shutdown 不等待），显式全量清场：
+// 空keep 集即「存活的集合为空」——全部上行断开（会话闸随各连接 defer 解除）
 func (m *Module) Stop(_ context.Context, _ kernel.Kernel) error {
 	// 同源入口先收回：主应用后续的 /s/* 请求走 503，不落到正在关闭的
 	// Handler（Stop 末尾会兜底冲一次访问计数，期间无新访客请求更干净）
 	share.ClearSameOriginHandler()
 	// 管理面协作端点同步摘除（setShareSvc 装配契约）：停机后 GetShareDirect
 	// 等端点不再触达旧服务实例
+	if svc := shareSvc; svc != nil {
+		svc.CascadeWritableDown(map[string]bool{})
+	}
 	setShareSvc(nil)
 	if m.srv != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -348,8 +376,8 @@ func (m *Module) publish(running bool, port int) {
 // 返回类型不变量决定了需要装配层显式桥接——concrete 返回值同时满足两侧
 type liveAdapter struct{ h *liveterm.Hub }
 
-func (a liveAdapter) Subscribe(token, sessionID string) (share.LiveSubscription, error) {
-	s, err := a.h.Subscribe(token, sessionID)
+func (a liveAdapter) Subscribe(token, sessionID string, unfiltered bool) (share.LiveSubscription, error) {
+	s, err := a.h.Subscribe(token, sessionID, unfiltered)
 	if err != nil {
 		return nil, err
 	}
@@ -513,3 +541,48 @@ func (directAdapter) SetDirectGate(sessionID string, locked bool) {
 // errDirectNotAgent 非 agent 会话的直通写拒绝（DirectWrite 的稳定错误——
 // 访客面映射 410 target_gone 的判定输入；不暴露会话形态细节）
 var errDirectNotAgent = fmt.Errorf("direct input is limited to agent sessions")
+
+// writableAdapter 可写分享的输入落点适配（P-20261106-8）：share.WritableSink
+// 的 terminal.DefaultManager 桥（directAdapter 同款装配桥）。与 DirectWrite
+// 刻意分叉的一点：**不做 agent 会话限定**——可写档对普通终端开放正是本提案
+// 对 P-20261024-1 红线的显式推翻（远程协助语义；五重补偿控制见
+// server/share/writable.go 头注，审批分层沿 commandrisk 诚实边界）
+type writableAdapter struct{}
+
+// WritableWrite 把一批访客键入写入锚定会话（字节原样——控制字符是合法
+// 终端输入；owner 侧输入闸不拦本路径：访客上行在场时 owner 的 WS 写已被
+// directInputHold 拒，闸拦的方向是 owner 键盘不是访客桥）
+func (writableAdapter) WritableWrite(sessionID, text string) error {
+	sess := terminal.DefaultManager.GetSession(sessionID)
+	if sess == nil {
+		return fmt.Errorf("terminal session not found: %s", sessionID)
+	}
+	return sess.WriteInput([]byte(text))
+}
+
+// SetWritableGate 会话侧输入互斥闸（复用直通持权闸同一服务端强制面——
+// 首条上行连接置位、末条断开/清场解除；会话已关幂等直通）
+func (writableAdapter) SetWritableGate(sessionID string, held bool) {
+	if sessionID == "" {
+		return
+	}
+	if sess := terminal.DefaultManager.GetSession(sessionID); sess != nil {
+		sess.SetDirectInputHold(held)
+	}
+}
+
+// pasteRiskCheck 粘贴级风险预检（装配层桥 commandrisk 模式表——share 包
+// 不 import terminal 的分层下，判定在装配层收口）：仅 danger 档触发 owner
+// 审批（warning/未命中直接注入，owner 输出侧实时可见兜底）；Summary 沿
+// RiskSummary 一行形态作审批卡证据
+func pasteRiskCheck(text string) share.WritableRisk {
+	matches := terminal.MatchCommandRisk(text)
+	danger := false
+	for _, m := range matches {
+		if m.Level == terminal.RiskDanger {
+			danger = true
+			break
+		}
+	}
+	return share.WritableRisk{Danger: danger, Summary: terminal.RiskSummary(matches)}
+}

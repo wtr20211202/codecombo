@@ -146,10 +146,26 @@ func executeSyncWithCtx(ctx context.Context, req ExecuteRequest, direction strin
 
 	res := &ExecuteResult{JobID: job.ID}
 	start := time.Now()
+	// 退役单元显式失败（P-20261108-3 笔记单库化 mixed-version 防线）：请求点名
+	// 的 notes/notes-multi 单元（旧 UI 记忆的 uiState 上下文集、agent/定时任务
+	// 旧键）不发起传输、不落位，逐个记失败——单元行错误文案 + 结果卡红点让用户
+	// 知情「笔记不再随实例同步」，而不是静默跳过或拉回本端写进看不见的项目作用域
+	runnable := make([]string, 0, len(units))
+	for _, k := range units {
+		if isRetiredUnitKey(k) {
+			job.failUnit(k, retiredNotesUnitError)
+			res.Units = append(res.Units, UnitExecResult{Key: k, Error: retiredNotesUnitError})
+			continue
+		}
+		runnable = append(runnable, k)
+	}
+	if len(runnable) < len(units) {
+		job.touch(hub)
+	}
 	if direction == "pull" {
-		execPull(job, res, req, units, insts[0])
+		execPull(job, res, req, runnable, insts[0])
 	} else {
-		execPush(job, res, req, units, insts)
+		execPush(job, res, req, runnable, insts)
 	}
 	res.Bytes = job.SentBytes
 	res.Elapsed = time.Since(start)
@@ -172,7 +188,7 @@ func unitOrder(kind string) int {
 	switch kind {
 	case UnitProject:
 		return 0
-	case UnitSessions, UnitNotes, UnitCrons:
+	case UnitSessions, UnitCrons:
 		return 1
 	default:
 		return 2

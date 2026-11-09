@@ -4,7 +4,8 @@ import FileTreeView from '../../views/files/FileTreeView.vue'
 import { safeAsync } from '../../utils/async-component'
 const CommitPanel = safeAsync(() => import('../../views/git/CommitPanel.vue'))
 const TodoPanel = safeAsync(() => import('../../views/todos/TodoPanel.vue'))
-const NotesPanel = safeAsync(() => import('../../views/notes/NotesPanel.vue'))
+// 笔记面板已迁出侧栏（P-20261108-2）：成主区/首页独立视图 NotesView，勿在此回挂
+//（单例引擎下双宿主 = 同屏两份面板互抢事件）
 const ChangeStreamPanel = safeAsync(() => import('../../views/stream/ChangeStreamPanel.vue'))
 const EnvProfilePanel = safeAsync(() => import('../../views/env/EnvProfilePanel.vue'))
 const SyncCenterPanel = safeAsync(() => import('../../views/sync/SyncCenterPanel.vue'))
@@ -104,12 +105,6 @@ function startSideResize(e: MouseEvent) {
     <TodoPanel
       v-if="sideView === 'todos'"
       :key="'sp-todo-' + asyncRetryTick"
-      @retry="asyncRetryTick++"
-    />
-    <!-- 项目笔记面板（P-20261002-110）：人机共享便签；自管加载/防抖保存，无对外事件 -->
-    <NotesPanel
-      v-else-if="sideView === 'notes'"
-      :key="'sp-notes-' + asyncRetryTick"
       @retry="asyncRetryTick++"
     />
     <!-- 跨项目变更流面板（P-20261003-232）：file.changed 跨项目聚合时间线，

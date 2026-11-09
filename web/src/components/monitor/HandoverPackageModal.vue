@@ -3,8 +3,9 @@
 // ——生成 markdown 交接文档（useHandoverPackage 装配），双出口：复制
 // （utils/clipboard copyText，健壮性红线通道）/ 分享短链（复用 useSnippetShare
 // 的 requestCreate：snippet 创建与子服务状态并行取，24h 自动过期）。弹窗
-// 自宿主渲染短链结果（ShareResultDialog 只挂在 Layout，值班大屏独立路由
-// 够不到——不跨宿主依赖），失败可重生成恢复，不销毁已生成内容。
+// 自宿主渲染短链结果（成因：ShareResultDialog 当时只挂 Layout、值班大屏独立
+// 路由够不到；P-20261108-1 上提 App 层后已全路由可达，此处仍内嵌渲染——
+// 结果与交接文档同屏、不叠第二层模态），失败可重生成恢复，不销毁已生成内容。
 // 敏感提示是显式常驻注记（提案 MVP 边界：声明含会话名与审批摘要，不做内容级
 // 全量遮蔽；自由文本字段已在上游经 maskApprovalSecrets/maskSensitive 兜底）。
 // 访问口令（P-20261020-6）：交接文档含会话名与审批摘要，分享出口可选设门；

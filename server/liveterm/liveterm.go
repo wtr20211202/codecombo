@@ -1,13 +1,16 @@
 // Package liveterm 终端只读直播馈线（P-20261003-306）：把终端会话的 PTY 输出
 // 经每 token 一枚流式遮蔽器（mask.Masker，P-108 模式集）灌进有界尾流缓冲，
-// 供分享子服务向访客 SSE 只读推流。
+// 供分享子服务向访客 SSE 只读推流。遮蔽是 live 源参数（P-20261106-9）：分享
+// 记录的 Unfiltered 标记在 Wire/Subscribe 时传入，未过滤馈线不挂遮蔽器、字节
+// 原样转发；模式构造期定死，记录与馈线不符即整条替换（绝不复用陈旧模式）。
 //
 // 严格只读契约：对会话只挂 OnOutput 输出 tap（recording 同款挂点），绝不触碰
 // WriteInput/Resize——访客侧不存在任何输入通道。生命周期：
 //
-//	分享创建      → Wire(token, sessionID)（tap 即刻接上，尾流从创建时刻累积）
+//	分享创建      → Wire(token, sessionID, unfiltered)（tap 即刻接上，尾流从创建时刻累积）
 //	访客订阅      → Subscribe（先收尾流快照再接实时；单 token 并发访客 ≤ MaxGuests）
 //	会话关闭/撤销  → reconcile（terminal.AddOnChange 对账）/ Unwire → 馈线终结
+//	记录过期      → Prune（过期清理巡检按存活 token 集收口）→ 馈线终结
 //
 // 锁纪律：hub.mu 只护 feeds map；feed.mu 护遮蔽器状态 + 尾流 + 订阅表，tap 回调
 // （readLoop 单 goroutine）与订阅/终结路径竞争——与 recording.Manager 同款两级锁。
@@ -16,6 +19,7 @@ package liveterm
 import (
 	"errors"
 	"sync"
+	"time"
 
 	"codecombo/server/mask"
 	"codecombo/server/terminal"
@@ -51,19 +55,27 @@ type LiveSession interface {
 // SetSessionLookup 注入桩
 var (
 	lookupMu      sync.Mutex
-	sessionLookup = func(id string) LiveSession {
-		return terminal.DefaultManager.GetSession(id)
-	}
+	sessionLookup = defaultSessionLookup
 )
+
+// defaultSessionLookup 默认会话解析。typed-nil 防线（P-20261107-4 实锚修复）：
+// GetSession 缺失时返回 (*terminal.Session)(nil)，直接装进接口得到「非 nil 接口
+// 包 nil 指针」——reconcile 的「会话已不在」判定永远为假（会话关闭后访客页挂在
+// 「直播中」不收场），wire 对它调 Size 直接 nil 解引用 panic（重启后打开存量
+// 直播链即中）。缺失必须显式回 nil 接口
+func defaultSessionLookup(id string) LiveSession {
+	if s := terminal.DefaultManager.GetSession(id); s != nil {
+		return s
+	}
+	return nil
+}
 
 // SetSessionLookup 覆盖会话解析（测试注入；nil 恢复默认）
 func SetSessionLookup(fn func(id string) LiveSession) {
 	lookupMu.Lock()
 	defer lookupMu.Unlock()
 	if fn == nil {
-		sessionLookup = func(id string) LiveSession {
-			return terminal.DefaultManager.GetSession(id)
-		}
+		sessionLookup = defaultSessionLookup
 		return
 	}
 	sessionLookup = fn
@@ -89,7 +101,10 @@ type Subscription interface {
 	Done() <-chan struct{}
 	// Ended 订阅瞬间馈线是否已终结（会话已不在——访客页据此直接呈现「已结束」）
 	Ended() bool
-	// Size 终端尺寸（馈线已终结时返回 0 值，访客页回落默认 80×24）
+	// Size 终端当前尺寸（P-20261107-4：实时读会话，主人调整窗口后即反映新值——
+	// SSE 端点据此下发 hello/resize 帧，访客栅格与主机一致才不折行错乱）。
+	// 会话不可读/报 0 尺寸/馈线已终结时回落接线时刻尺寸；会话从未存在过则为
+	// 0 值（访客页回落容器自适应）
 	Size() (cols, rows uint16)
 	// Release 释放本路订阅（并发访客计数 -1）；SSE handler 退出必须调用
 	Release()
@@ -127,13 +142,51 @@ func (s *sub) finish() { s.closeSub.Do(func() { close(s.done) }) }
 type feed struct {
 	mu        sync.Mutex
 	sessionID string
-	mask      *mask.Masker
-	tail      []byte
-	subs      map[*sub]struct{}
-	cancel    func() // tap 注销（终结路径调用）
-	ended     bool
-	cols      uint16
-	rows      uint16
+	// sess 直播源会话的尺寸读取面（P-20261107-4：访客 hello/resize 帧取会话
+	// 「当前」尺寸——接线时刻定格的 cols/rows 在主人调整窗口后即过期）。nil =
+	// 会话不在；终结时置 nil 释放引用（f.mu 护）。只读 Size，不碰任何写能力
+	sess LiveSession
+	// mask 流式遮蔽器；nil = 未过滤馈线（P-20261106-9：分享创建时显式关闭
+	// 源头遮蔽，字节原样转发）。构造期定死、终身不变——遮蔽模式切换只能
+	// 经整条馈线替换（Wire 模式不符即重建），不存在运行中翻转
+	mask   *mask.Masker
+	tail   []byte
+	subs   map[*sub]struct{}
+	cancel func() // tap 注销（终结路径调用）
+	ended  bool
+	// cols/rows 接线时刻尺寸：会话不可读/报 0 尺寸时的回落值（构造期定格）
+	cols uint16
+	rows uint16
+	// wiredAt 接通时刻（构造期定格）：Prune 的新馈线豁免窗判据
+	wiredAt time.Time
+}
+
+// unfiltered 馈线是否为未过滤模式（mask 构造期定死，读无需锁）
+func (f *feed) unfiltered() bool { return f.mask == nil }
+
+// size 当前终端尺寸（P-20261107-4）：优先实时读会话，会话不在/报 0 尺寸回落
+// 接线时刻值。锁序纪律：f.mu 内只取引用，Size（取会话锁）在 f.mu 外调用——
+// readLoop 可能持会话侧锁回调 onOutput（取 f.mu），锁内嵌套即 ABBA 反转
+func (f *feed) size() (uint16, uint16) {
+	f.mu.Lock()
+	sess, cols, rows := f.sess, f.cols, f.rows
+	f.mu.Unlock()
+	if sess != nil {
+		if c, r := sess.Size(); c > 0 && r > 0 {
+			return c, r
+		}
+	}
+	return cols, rows
+}
+
+// filter 遮蔽层：遮蔽馈线走流式 Masker；未过滤馈线原样转发但必须拷贝——
+// tap 回调的 data 归 readLoop 复用缓冲所有，尾流与扇出要长期持有（Masker.Write
+// 的返回值本就是独立拷贝，两分支持有语义一致）
+func (f *feed) filter(data []byte) []byte {
+	if f.mask == nil {
+		return append([]byte(nil), data...)
+	}
+	return f.mask.Write(data)
 }
 
 // end 馈线终结：放行遮蔽器滞留字节、断开全部订阅者、注销 tap。幂等
@@ -145,7 +198,11 @@ func (f *feed) end() {
 		return
 	}
 	f.ended = true
-	tail := f.mask.Flush() // 值态滞留补出 ***，扫描态滞留原样放行
+	f.sess = nil // 释放会话引用：终结后尺寸回落接线时刻值，不再读已关闭会话
+	var tail []byte
+	if f.mask != nil {
+		tail = f.mask.Flush() // 值态滞留补出 ***，扫描态滞留原样放行
+	}
 	f.appendTail(tail)
 	subs := make([]*sub, 0, len(f.subs))
 	for s := range f.subs {
@@ -191,9 +248,10 @@ func (f *feed) deliver(s *sub, data []byte) {
 }
 
 // onOutput tap 热路径：遮蔽 → 尾流 → 扇出（readLoop 单 goroutine 调用，
-// 与 recording.activeRec.onOutput 同款纪律）
+// 与 recording.activeRec.onOutput 同款纪律）。未过滤馈线的 filter 只是一次
+// 等长拷贝（与遮蔽路径的输出分配同量级），热路径无额外开销
 func (f *feed) onOutput(data []byte) {
-	masked := f.mask.Write(data)
+	masked := f.filter(data)
 	if len(masked) == 0 {
 		return
 	}
@@ -245,10 +303,21 @@ func (h *Hub) reconcile() {
 	}
 }
 
-// Wire 为 token 接通直播馈线（分享创建路径调用；幂等——已存在即原样返回）。
+// Wire 为 token 接通直播馈线（分享创建路径调用；幂等——同遮蔽模式已存在即
+// 原样返回）。unfiltered 为分享记录的未过滤标记（P-20261106-9，live 源参数
+// 由记录读取，创建时定死）：true = 不挂遮蔽器、字节原样转发。已存在但模式
+// 不符的馈线视为陈旧（TTL 过期记录被 CleanupExpired 直接删除不经 Unwire、
+// 同会话重建落回同一零代际 token），整条替换而非复用——遮蔽模式是安全
+// 边界，复用即让新分享沿用旧配置（尤其「旧未过滤 → 新遮蔽」方向会泄露原文）。
 // 会话已不存在时不报错：建一条立即终结的空馈线，访客订阅到「已结束」——
 // 分享记录仍有效（可撤销/轮换），只是直播源没了
-func (h *Hub) Wire(token, sessionID string) {
+func (h *Hub) Wire(token, sessionID string, unfiltered bool) {
+	h.wire(token, sessionID, unfiltered)
+}
+
+// wire Wire 的实现体，返回生效馈线（Subscribe 直接持有该指针登记订阅，不再
+// 二次查表——并发 Unwire 摘除后指针上的 ended 态即「已结束」语义，无空指针窗）
+func (h *Hub) wire(token, sessionID string, unfiltered bool) *feed {
 	sess := lookupSession(sessionID)
 	// feed 全部字段在入 map（对其他 goroutine 可见）前定格：cols/rows 在
 	// 构造期取定，tap 注册后的注销检查走 f.mu——构造后不再有锁外写
@@ -256,31 +325,44 @@ func (h *Hub) Wire(token, sessionID string) {
 	if sess != nil {
 		cols, rows = sess.Size()
 	}
-	h.mu.Lock()
-	if _, ok := h.feeds[token]; ok {
-		h.mu.Unlock()
-		return
-	}
 	f := &feed{
 		sessionID: sessionID,
-		mask:      mask.NewMasker(),
+		sess:      sess,
 		subs:      make(map[*sub]struct{}),
 		cols:      cols,
 		rows:      rows,
+		wiredAt:   time.Now(),
+	}
+	if !unfiltered {
+		f.mask = mask.NewMasker()
+	}
+	h.mu.Lock()
+	var stale *feed
+	if old, ok := h.feeds[token]; ok {
+		if old.unfiltered() == unfiltered {
+			h.mu.Unlock()
+			return old
+		}
+		stale = old
 	}
 	h.feeds[token] = f
 	h.mu.Unlock()
+	if stale != nil {
+		// 陈旧馈线终结：其访客收 end 帧（访客页呈现「已结束」，刷新即按当前
+		// 记录订阅新馈线），tap 注销——旧模式字节从此不再产出
+		stale.end()
+	}
 
 	if sess == nil {
 		f.end()
-		return
+		return f
 	}
-	// tap 注册在播种之后：播种（遮蔽化的 scrollback 回看）先进尾流，实时
-	// 字节自注册起接续——种子在前、直播在后，时序与终端真实输出一致。
-	// 注册与播种之间的极窄窗口丢字节属可接受 MVP 误差（重连重播种自愈）
+	// tap 注册在播种之后：播种（遮蔽化的 scrollback 回看；未过滤馈线原样）
+	// 先进尾流，实时字节自注册起接续——种子在前、直播在后，时序与终端真实
+	// 输出一致。注册与播种之间的极窄窗口丢字节属可接受 MVP 误差（重连重播种自愈）
 	if sb, err := sess.CaptureScrollback(seedScrollbackLines); err == nil && len(sb) > 0 {
 		f.mu.Lock()
-		f.appendTail(f.mask.Write(sb))
+		f.appendTail(f.filter(sb))
 		f.mu.Unlock()
 	}
 	cancel := sess.OnOutput(f.onOutput)
@@ -290,10 +372,11 @@ func (h *Hub) Wire(token, sessionID string) {
 	if f.ended {
 		f.mu.Unlock()
 		cancel()
-		return
+		return f
 	}
 	f.cancel = cancel
 	f.mu.Unlock()
+	return f
 }
 
 // Unwire 撤销 token 的馈线并从表中摘除（管理面撤销/轮换旧 token 路径）
@@ -307,18 +390,50 @@ func (h *Hub) Unwire(token string) {
 	}
 }
 
+// pruneGrace Prune 的新馈线豁免窗：调用方的 keep 集取自 Prune 之前的一次
+// List 快照，快照之后新建的分享（记录已落库、馈线刚接通）不在集内——豁免
+// 近期接通的馈线，避免「巡检与创建交错」误杀刚开的直播（被误杀也只是首连
+// 惰性重接 + 重播种，豁免窗让常态零扰动）
+const pruneGrace = time.Minute
+
+// Prune 终结并摘除 keep 集外的馈线（P-20261106-9 过期清理管线覆盖：TTL 到期
+// 的直播记录由 CleanupExpired 直接删除、不经 Unwire，其馈线原本要等会话关闭
+// 才经对账终结——未过滤馈线的原文尾流不应驻留到那时，遮蔽馈线的 tap 也不该
+// 白挂）。keep 为存活分享 token 集；nil 拒绝执行（防误调全清，GcOrphanSnapshots
+// 同款护栏）；pruneGrace 内新接通的馈线豁免。返回终结条数
+func (h *Hub) Prune(keep map[string]bool) int {
+	if keep == nil {
+		return 0
+	}
+	cutoff := time.Now().Add(-pruneGrace)
+	h.mu.Lock()
+	var stale []*feed
+	for tok, f := range h.feeds {
+		if keep[tok] || f.wiredAt.After(cutoff) {
+			continue
+		}
+		stale = append(stale, f)
+		delete(h.feeds, tok)
+	}
+	h.mu.Unlock()
+	for _, f := range stale {
+		f.end()
+	}
+	return len(stale)
+}
+
 // Subscribe 为访客开一路只读订阅：先记订阅点（快照覆盖此前、实时通道覆盖
 // 此后，同一把锁内无重叠无缝隙），再发尾流快照。单 token 并发访客超上限
-// 返回 ErrTooManyGuests。馈线不存在时惰性 Wire（轮换新 token 首访 / 服务
-// 重启后的存量短链两路都落到这里）
-func (h *Hub) Subscribe(token, sessionID string) (Subscription, error) {
+// 返回 ErrTooManyGuests。馈线不存在或遮蔽模式与记录不符时惰性 Wire（轮换
+// 新 token 首访 / 服务重启后的存量短链 / 陈旧馈线替换三路都落到这里）；
+// unfiltered 取访客命中的分享记录（记录是遮蔽配置的单一事实源）
+func (h *Hub) Subscribe(token, sessionID string, unfiltered bool) (Subscription, error) {
 	h.mu.Lock()
 	f := h.feeds[token]
-	if f == nil {
+	if f == nil || f.unfiltered() != unfiltered {
 		h.mu.Unlock()
-		h.Wire(token, sessionID)
+		f = h.wire(token, sessionID, unfiltered)
 		h.mu.Lock()
-		f = h.feeds[token]
 	}
 	// 订阅点登记与并发计数同锁（f.mu 护 subs 表）：快照覆盖此前、实时通道
 	// 覆盖此后，同一临界区内无重叠无缝隙
@@ -331,7 +446,6 @@ func (h *Hub) Subscribe(token, sessionID string) (Subscription, error) {
 	s := &sub{ch: make(chan []byte, 256), done: make(chan struct{})}
 	tail := append([]byte(nil), f.tail...)
 	ended := f.ended
-	cols, rows := f.cols, f.rows
 	if !ended {
 		f.subs[s] = struct{}{}
 	}
@@ -343,7 +457,8 @@ func (h *Hub) Subscribe(token, sessionID string) (Subscription, error) {
 		live:  s.ch,
 		done:  s.done,
 		ended: ended,
-		size:  func() (uint16, uint16) { return cols, rows },
+		// 实时尺寸（P-20261107-4）：不在订阅时刻定格——SSE 端点按此下发 resize 帧
+		size: f.size,
 		rele: func() {
 			f.mu.Lock()
 			delete(f.subs, s)

@@ -30,10 +30,13 @@ Additional fonts are installed from npm packages at build time:
 
 Vendored assets
 ---------------
-- server/share/assets/xterm.js, addon-fit.js, xterm.css — vendored from
-  @xterm/xterm and @xterm/addon-fit (MIT License, copyright the xterm.js
-  authors; https://xtermjs.org). Version/provenance registry:
-  server/share/assets/README.md.
+- server/share/assets/xterm.js, addon-fit.js, addon-unicode11.js, xterm.css —
+  vendored from @xterm/xterm, @xterm/addon-fit and @xterm/addon-unicode11
+  (MIT License, copyright the xterm.js authors; https://xtermjs.org).
+  Version/provenance registry: server/share/assets/README.md.
+- server/share/assets/JetBrainsMono-*.woff2 — the same OFL 1.1 JetBrains Mono
+  files as web/public/fonts (see "Embedded fonts" above), redistributed with the
+  share guest pages; license text: server/share/assets/LICENSE-JetBrainsMono.txt.
 - web/src/assets/brands/claude.svg, dsh.svg — brand icon path data from
   Simple Icons (CC0-1.0 path data). Claude and DeepSeek trademarks belong to
   Anthropic / DeepSeek respectively; used solely to identify which agent

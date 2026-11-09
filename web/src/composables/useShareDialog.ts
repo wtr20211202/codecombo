@@ -6,9 +6,7 @@ import {
 } from '../api/domains/share'
 import { settingsApi } from '../api/domains/system'
 import { buildShareAddressPlan, type ShareAddressPlan } from '../utils/shareAddress'
-import { bumpTerminalLiveShares } from './useTerminalLiveShares'
 import { confirmDialog } from './useDialog'
-import { useTerminalSessionsStore } from '../stores/terminal-sessions'
 import { shareTtlExpiresAt, type ShareDefaultTtl, type ShareTtlChoice } from '../utils/shareTtl'
 import i18n from '../i18n'
 
@@ -17,8 +15,9 @@ import i18n from '../i18n'
 // frozen 冻结快照，P-20261003-320），确认后走完整创建链路——服务端敏感文件
 // 扫描命中时弹警示确认框，确认后才带 override 二次请求；创建成功即 openResult
 // 弹出短链卡片。"管理全部分享"跳转主区视图（usePanelLayout.showShareManager
-// 驱动），弹窗宿主（Layout 挂载的 ShareResultDialog / ShareCreateDialog）
-// 只消费状态
+// 驱动），弹窗宿主（App 层 ShareDialogsHost 挂载的 ShareResultDialog /
+// ShareCreateDialog，P-20261108-1——首页/值班大屏等不经 Layout 的入口同样
+// 弹得出）只消费状态
 //
 // 短链一律由 utils/shareAddress 的地址计划生成（P-20261020-2）：settings 的
 // 分享外发基址/外部访问地址 + 当前地址/局域网候选与分享状态同批取，结果卡、
@@ -36,8 +35,9 @@ const resultPlan = ref<ShareAddressPlan | null>(null)
 
 const EMPTY_STATUS: ShareServiceStatus = { running: false, port: 0, scheme: '' }
 
-/** 创建流程的地址上下文：状态与地址两路并行取，失败各自降级 */
-async function loadAddressContext(): Promise<{ status: ShareServiceStatus; extras: ShareAddressExtras }> {
+/** 创建流程的地址上下文：状态与地址两路并行取，失败各自降级（终端输出分享
+ *  选项流 useTermShareDialog 同源复用） */
+export async function loadAddressContext(): Promise<{ status: ShareServiceStatus; extras: ShareAddressExtras }> {
   const [statusRes, extras] = await Promise.all([
     shareApi.status(),
     fetchShareAddressExtras(),
@@ -46,7 +46,7 @@ async function loadAddressContext(): Promise<{ status: ShareServiceStatus; extra
   return { status, extras }
 }
 
-function planFor(token: string, status: ShareServiceStatus, extras: ShareAddressExtras): ShareAddressPlan {
+export function planFor(token: string, status: ShareServiceStatus, extras: ShareAddressExtras): ShareAddressPlan {
   return buildShareAddressPlan(token, {
     currentHref: window.location.href,
     status,
@@ -345,67 +345,6 @@ export function useShareDialog() {
 	}
 
 	/**
-	 * 开终端只读直播（P-20261003-306）：token→会话，访客看遮蔽化只读输出流
-	 * （默认 30 分钟 TTL，撤销/轮换走管理面同族端点）。幂等——同一会话重复
-	 * 开直播拿到同一条短链；会话已关闭 → 404（拦截器 toast 具体原因）。
-	 * 敏感出域闸门（P-20261003-155）：会话被标记敏感且未确认时服务端不创建、
-	 * 响应仅带 warnings——弹「确认出域」后带 override 二次请求（文件分享扫描
-	 * 同一契约）
-	 */
-	async function createTerminalLive(sessionId: string): Promise<void> {
-		if (!sessionId) return
-		try {
-			const [firstRaw, context] = await Promise.all([
-				shareApi.createTerminal(sessionId),
-				loadAddressContext(),
-			])
-			let created = firstRaw as unknown as { data?: ShareInfo; warnings?: string[] }
-			if (!created?.data && created?.warnings?.length) {
-				// 警示文案带会话显示名（store 反查，缺省回落 id——自明即可）
-				const name = useTerminalSessionsStore().sessions.find(s => s.id === sessionId)?.name || sessionId
-				const go = await confirmSensitiveSessionEgress(name)
-				if (!go) return
-				created = await shareApi.createTerminal(sessionId, undefined, true) as unknown as { data?: ShareInfo; warnings?: string[] }
-			}
-			if (created?.data) {
-				openResult(created.data, planFor(created.data.token, context.status, context.extras))
-				// 主播侧直播徽标（P-20261005-161）：创建成功即对账，tab 红点不等轮询
-				bumpTerminalLiveShares()
-			}
-		} catch { /* 拦截器处理 */ }
-	}
-
-	/**
-	 * 冻结当前终端输出为快照链接（P-20261005-205）：服务端在创建时刻取
-	 * scrollback 全量缓冲，净化（剥 ANSI + 敏感值遮蔽）后落单文件快照——
-	 * 会话继续跑、分享内容定格，会话关闭后链接仍可访问（默认 30 天 TTL）。
-	 * 同一段输出重复定格恒同链（内容哈希派生）；会话已关闭 → 404、空输出
-	 * → 400（拦截器 toast 具体原因）。敏感出域闸门（P-20261003-155）：与
-	 * 直播分享同一契约——被标记敏感且未确认时服务端不创建、响应仅带
-	 * warnings，弹「确认出域」后带 override 二次请求
-	 */
-	async function createTerminalFrozen(sessionId: string): Promise<void> {
-		if (!sessionId) return
-		try {
-			const [firstRaw, context] = await Promise.all([
-				shareApi.createTerminalFrozen(sessionId),
-				loadAddressContext(),
-			])
-			let created = firstRaw as unknown as { data?: ShareInfo; warnings?: string[] }
-			if (!created?.data && created?.warnings?.length) {
-				// 警示文案带会话显示名（store 反查，缺省回落 id——与直播分享同款）
-				const name = useTerminalSessionsStore().sessions.find(s => s.id === sessionId)?.name || sessionId
-				const go = await confirmSensitiveSessionEgress(name)
-				if (!go) return
-				created = await shareApi.createTerminalFrozen(sessionId, true) as unknown as { data?: ShareInfo; warnings?: string[] }
-			}
-			if (created?.data) {
-				openResult(created.data, planFor(created.data.token, context.status, context.extras))
-			}
-		} catch { /* 拦截器处理 */ }
-	}
-
-	/**
 	 * 分享会话回放（P-20261004-103）：把一次录制的 cast 以只读回放页短链
 	 * 分享出去（异步 walkthrough——教学/复盘/展示）。服务端在创建时刻快照
 	 * cast（录制继续写不影响访客），默认 1 小时 TTL。敏感模式扫描命中且未
@@ -470,6 +409,8 @@ export function useShareDialog() {
     showCreate, createTarget, createMode, createPassphrase, createWatermark, createViewOnce, createEstimate,
     createTtlChoice, createTtlDate, createTtlTouched, createTtlDefault,
     createShare, createShareBatch, confirmCreate, cancelCreate,
-    createTerminalLive, createTerminalFrozen, createRecordingShare, createSessionShare,
+    // 直播/输出快照创建入口已迁 useTermShareDialog（P-20261106-9 选项弹层；
+    // 它单向依赖本模块的结果卡/地址原语，本模块不反向 import——无环）
+    createRecordingShare, createSessionShare,
   }
 }

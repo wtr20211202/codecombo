@@ -77,7 +77,8 @@ export type SessionContextTranslator = (key: string, params?: Record<string, unk
 export interface NotesSummaryFacts {
   /** 项目名（摘要自带归属标注，git 摘要同款） */
   projectName: string
-  /** 笔记全文（projnotes 面板与 agent 共享的同一份 markdown）；空 = 无笔记 */
+  /** 笔记全文（笔记库里该项目「[项目名]」前缀篇——面板与 agent 共享的同一份
+   *  markdown，P-20261108-3 单库化后取最近更新那篇）；空 = 无笔记 */
   content: string
 }
 
@@ -92,7 +93,7 @@ export function firstNoteParagraph(content: string): string {
 }
 
 /**
- * 拼一行项目笔记摘要：笔记首段（projnotes 首段）截到 NOTES_SUMMARY_MAX_BYTES。
+ * 拼一行项目笔记摘要：笔记首段（项目前缀篇首段）截到 NOTES_SUMMARY_MAX_BYTES。
  * 首段价值密度在开头 → 保头截断（fitByBytes 保尾方向相反，… 尾缀标注）；
  * 无笔记 / 首段完全塞不下返回空串（上游按「无笔记」不注入，不产悬空标签）
  */

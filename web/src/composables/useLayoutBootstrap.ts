@@ -4,7 +4,7 @@ import type { UIStateData } from '../stores/uiState'
 import { useLayoutLockStore } from '../stores/layoutLock'
 import { restoreRailTopOrder } from '../panels/registry'
 import { OPS_FILES_EXTERNAL_CHANGE } from '../utils/opsEvents'
-import type { BottomTab, SideView } from './usePanelLayout'
+import { normalizeSideView, type BottomTab, type SideView } from './usePanelLayout'
 
 /**
  * Layout 引导恢复（自 Layout.vue 抽出）：
@@ -189,7 +189,10 @@ export function useLayoutBootstrap(deps: BootstrapDeps) {
     const pendingTab = deps.consumePendingBottomTab?.() ?? null
     if (pendingTab) deps.showBottomPanel.value = true
     if (state.layout.showBottomPanel !== undefined && !pendingTab) deps.showBottomPanel.value = state.layout.showBottomPanel
-    if (!pendingSide && state.layout.sideView) deps.sideView.value = state.layout.sideView as SideView
+    // sideView 归一（P-20261108-2）：'notes' 随笔记迁出侧栏退役——旧存档残值/未知值
+    // 回落 'files'（下方 bottomTab 'commit'→'git' 同款），防 SidePanel 分发链落末位
+    // v-else 渲染提交面板（与活动栏高亮错位的死分支）
+    if (!pendingSide && state.layout.sideView) deps.sideView.value = normalizeSideView(state.layout.sideView)
     // bottomTab='commit'（底部提交 tab 已移除，与左侧入口重复）：归一为 'git'
     const savedBottomTab = state.layout.bottomTab as string | undefined
     deps.bottomTab.value = pendingTab ??

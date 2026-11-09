@@ -21,17 +21,11 @@ type Module struct {
 	k            kernel.Kernel
 	lastNotified string // 已推送过「新版本可用」通知的版本（进程内去重）
 
-	// currentVerGen 当前版本取值口：默认读包级 currentVersion（main 注入），
+	// currentVerGen 当前版本取值口：组合根 NewModule(rt.Version) 声明式注入
+	//（与 system.NewModule 的 rt.Version 同源；update 包不反向依赖 api 包），
 	// 可整体替换（测试注入）
 	currentVerGen func() string
 }
-
-// currentVersion 当前运行版本（SetCurrentVersion 由 main 注入，与
-// api/system.buildVersion 同源同刻——update 包不反向依赖 api 包）
-var currentVersion = "dev"
-
-// SetCurrentVersion 注入当前运行版本（main 启动期调用，供自动检查对比用）
-func SetCurrentVersion(v string) { currentVersion = v }
 
 // NewModule 创建更新模块（version 由组合根声明式传入，与 system.NewModule
 // 的 rt.Version 同源——自动检查用它对比 ReleaseInfo；"dev"/空 = 无对比语义）

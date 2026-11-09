@@ -135,6 +135,7 @@ domain_specs() {
            web/e2e/specs/activity-bar-drag.spec.ts \
            web/e2e/specs/icon-hit-target.spec.ts \
            web/e2e/specs/esc-layered-dismiss.spec.ts \
+           web/e2e/specs/notes-view.spec.ts web/e2e/specs/notes-global.spec.ts web/e2e/specs/notes-migration.spec.ts \
            web/e2e/specs/uistate-*.spec.ts ;;
     agent)
       echo web/e2e/specs/agent-cron.spec.ts web/e2e/specs/agent-cron-chain.spec.ts web/e2e/specs/agent-cron-prompt-vars.spec.ts web/e2e/specs/agent-cron-relay.spec.ts web/e2e/specs/agent-runtime-guide.spec.ts web/e2e/specs/agent-new-session-draft.spec.ts web/e2e/specs/agent-new-session-focus.spec.ts web/e2e/specs/agent-task-template.spec.ts web/e2e/specs/agent-terminal.spec.ts web/e2e/specs/agent-review-baseline.spec.ts web/e2e/specs/agent-queue.spec.ts web/e2e/specs/agent-chain.spec.ts web/e2e/specs/agent-message.spec.ts \

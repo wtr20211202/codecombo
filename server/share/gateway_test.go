@@ -38,12 +38,32 @@ func TestSameOriginHandlerPublishAndClear(t *testing.T) {
 
 func TestAssetNamesWhitelist(t *testing.T) {
 	names := AssetNames()
-	if len(names) != 3 {
-		t.Fatalf("AssetNames() = %v, want the three vendored assets", names)
+	// xterm 三件 + unicode11 宽度表 + JetBrains Mono 双字重（P-20261107-4 渲染保真）
+	want := map[string]string{
+		"xterm.js":                    "application/javascript; charset=utf-8",
+		"addon-fit.js":                "application/javascript; charset=utf-8",
+		"xterm.css":                   "text/css; charset=utf-8",
+		"addon-unicode11.js":          "application/javascript; charset=utf-8",
+		"JetBrainsMono-Regular.woff2": "font/woff2",
+		"JetBrainsMono-Bold.woff2":    "font/woff2",
+	}
+	if len(names) != len(want) {
+		t.Fatalf("AssetNames() = %v, want the %d vendored assets", names, len(want))
 	}
 	for _, name := range names {
-		if _, _, ok := assetByName(name); !ok {
+		data, ct, ok := assetByName(name)
+		if !ok || len(data) == 0 {
 			t.Fatalf("whitelisted asset %q not servable", name)
+		}
+		if ct != want[name] {
+			t.Fatalf("asset %q content-type = %q, want %q", name, ct, want[name])
+		}
+	}
+	// woff2 魔数（wOF2）：字体文件是真字体而非误拷的文本
+	for _, name := range []string{"JetBrainsMono-Regular.woff2", "JetBrainsMono-Bold.woff2"} {
+		data, _, _ := assetByName(name)
+		if len(data) < 4 || string(data[:4]) != "wOF2" {
+			t.Fatalf("asset %q is not a woff2 font", name)
 		}
 	}
 	if _, _, ok := assetByName("index-abc123.js"); ok {

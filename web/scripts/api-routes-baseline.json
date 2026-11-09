@@ -33,6 +33,9 @@
     "POST /drop/:token": "访客投递页表单提交——同上，页面自包含",
     "GET /assets/xterm.js": "分享访客页 vendored 资产（P-20261020-2）——访客页 <script> 直载，不经前端 api 层",
     "GET /assets/addon-fit.js": "分享访客页 vendored 资产（P-20261020-2）——xterm addon，同上",
-    "GET /assets/xterm.css": "分享访客页 vendored 资产（P-20261020-2）——访客页 <link> 直载，同上"
+    "GET /assets/xterm.css": "分享访客页 vendored 资产（P-20261020-2）——访客页 <link> 直载，同上",
+    "GET /assets/addon-unicode11.js": "分享访客页 vendored 资产（P-20261107-4 渲染保真）——xterm unicode11 宽度表，访客页 <script> 直载，同上",
+    "GET /assets/JetBrainsMono-Regular.woff2": "分享访客页 vendored 终端字体（P-20261107-4，OFL）——访客页 @font-face 直载，同上",
+    "GET /assets/JetBrainsMono-Bold.woff2": "分享访客页 vendored 终端字体粗体（P-20261107-4，OFL）——同上"
   }
 }

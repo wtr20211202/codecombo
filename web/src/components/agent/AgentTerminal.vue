@@ -25,24 +25,38 @@ const dockedVisible = computed(() => visible.value && mode.value === 'docked')
 const floatHere = computed(() => visible.value && mode.value === 'float')
 
 // 启动恢复：刷新前管理页/悬浮窗若处于打开状态，挂载后原样恢复（home/project
-// 路由谁挂载谁消费；open 内部处理形态切换与主区互斥）
+// 路由谁挂载谁消费；open 内部处理形态切换与主区互斥）。
+// home 宿主例外（P-20261107-3「首页=纯首页」boot 定案）：刷新落在首页时不自动
+// 展开 docked overlay（持久化的 docked 开态只消费不生效，防止残留到后续项目
+// 挂载）；float/mini 全局悬浮层照旧恢复（跟随导航既有行为）
 onMounted(() => {
   const pendingMode = consumePendingOpenState()
-  if (pendingMode) void open(pendingMode)
+  if (!pendingMode) return
+  if (props.context === 'home' && pendingMode === 'docked') return
+  void open(pendingMode)
 })
 
 // home overlay：打开过才挂载（保活），Esc 关闭（弹窗打开时让位）
+// immediate（P-20261106-4）：visible/mode 是 useAgentTerminal 模块级状态（跨路由
+// 存活），首页往返卸载重挂后本实例 everDocked=false 且 dockedVisible/floatHere
+// 已为 true——无「变化」可触发 watch，面板 v-if 空壳而活动栏图标（registry 读
+// 模块态）照常选中，须取消再点一次才恢复；挂载即按当前形态同步一次
 const everDocked = ref(false)
-watch([dockedVisible, floatHere], ([d, f]) => { if (d || f) everDocked.value = true })
+watch([dockedVisible, floatHere], ([d, f]) => { if (d || f) everDocked.value = true }, { immediate: true })
 
 // 主区互斥反向兜底（usePanelLayout 无法反向引用 useAgentTerminal）：
-// 远程控制台/分享管理/项目仪表盘经命令面板、URL ?view= 等非 rail 入口打开时也关闭 docked 管理页。
-// useAgentTerminal.open()/setMode 关闭二视图在先，不会与这里形成回环
+// 远程控制台/分享管理/项目仪表盘/笔记视图经命令面板、URL ?view= 等非 rail 入口打开时也关闭 docked 管理页。
+// useAgentTerminal.open()/setMode 关闭这些视图在先，不会与这里形成回环
+const layout = usePanelLayout()
 if (props.context !== 'home') {
-  const layout = usePanelLayout()
-  watch([layout.showRemoteConsole, layout.showShareManager, layout.showDshConsole, layout.showDashboard], ([remote, share, dsh, dashboard]) => {
-    if (remote || share || dsh || dashboard) hideDocked()
+  watch([layout.showRemoteConsole, layout.showShareManager, layout.showDshConsole, layout.showDashboard, layout.showNotesView], ([remote, share, dsh, dashboard, notes]) => {
+    if (remote || share || dsh || dashboard || notes) hideDocked()
   })
+} else {
+  // 首页 overlay 交叉关闭（P-20261108-2）：笔记 overlay 经任意入口打开（首页工具条 /
+  // docked 管理页头部「沉淀到笔记」助力等）即收起 docked overlay——两者同为 z 900
+  // 全屏层，不收则按 DOM 序叠压。反向（docked 打开收笔记）走 closeMainViews
+  watch(layout.showNotesView, (v) => { if (v) hideDocked() })
 }
 
 function onKeyDown(e: KeyboardEvent) {

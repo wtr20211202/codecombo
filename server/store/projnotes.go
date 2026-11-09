@@ -11,6 +11,11 @@ import (
 // 人机双向的项目级共享记忆（面板与 agent 并发为 last-writer-wins：
 // 整文档替换写，filestore 同 kind 串行 + tmp 原子改名保证最终内容必为
 // 某一方的完整版本，无读改写交错面，无需乐观锁版本号）。
+//
+// 存量形态（P-20261107-2 起）：生产面已无写入口——projnotes kind 只作启动迁移
+// 读源（MigrateLegacyProjectNotes → 项目默认篇 → P-20261108-3 单库化并入全局
+// 笔记库）；仓储本体保留给降级窗口兼容与迁移测试播种旧数据面。ErrNotesTooLarge /
+// ProjNotesMaxBytes 仍是笔记库（notesmulti）共用的内容上限常量。
 
 // ErrNotesTooLarge 笔记内容超出 ProjNotesMaxBytes
 var ErrNotesTooLarge = errors.New("project notes too large")

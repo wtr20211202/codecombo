@@ -132,6 +132,14 @@ test.describe('Claude 会话区（P5）', () => {
     const list = ((await (await request.get(`${BASE}/api/projects`, { headers })).json()) as { data?: { id: string; name: string; path: string }[] }).data || []
     const proj = list.find(x => x.id === projectId)
     if (!proj?.path) throw new Error('simple-coding project has no resolvable path')
+    // 注册路径必须绝对（seed 契约 <abs-path>）：相对路径（如实例被以 `.` 落册）
+    // 经 encodeClaudeDir 后 path.join 会被 `.` 分量吞掉、fixture 落进
+    // ~/.claude/projects 根——服务端全局扫描只认子目录（claudesessions.go
+    // 只收 IsDir），项目级 fixture 全体不可见（实测 58 期望 55 实收、p2 检索
+    // 0 命中）。按 spec 自身「显式失败而非落到错误目录」纪律在此拦截
+    if (!path.isAbsolute(proj.path)) {
+      throw new Error(`simple-coding project path is not absolute ("${proj.path}") — 实例注册路径须为绝对路径（e2e-seed.sh 已归一），否则项目级 fixture 编码目录错位`)
+    }
     REAL_PROJECT_ENCODED = encodeClaudeDir(proj.path)
     buildFixtures()
   })
@@ -239,6 +247,14 @@ test.describe('Claude 会话区（P5）', () => {
     expect(resumed!.kind).toBe('agent')
     expect(resumed!.path).toBe('D:\\e2e-claude-fixtures')
     if (resumed) createdSessionIds.push(resumed.id)
+    // 用例不留活进程（零残留纪律的进程面）：claude --resume 是真实 CLI 进程，
+    // 若跨用例存活，其 TUI 持续重绘会抢焦点（后续键盘导航用例的 ↓ 按键被吞进
+    // PTY——本仓 serial 全量实测 A2/A3 两种失败形态），写 fixture 文件还会推
+    // 移会话 lastAt。断言收口即关（afterAll 清理幂等，此处先关只是提前）
+    if (resumed) {
+      await request.delete(`${BASE}/api/terminals/${resumed.id}`, { headers })
+      createdSessionIds.pop()
+    }
   })
 
   test('项目底部终端浮层：项目范围锁定，只列本项目的 fixture', async ({ page }) => {
@@ -272,28 +288,39 @@ test.describe('Claude 会话区（P5）', () => {
     const picker = view.locator('.csp-root')
     await expect(picker).toBeVisible({ timeout: 8000 })
 
-    // 多行列表：↑↓ 移动键盘活动行（搜索框聚焦时按键冒泡到根）
-    const searchResp = page.waitForResponse(r => r.url().includes('/claude/sessions') && r.url().includes('q='))
+    // 多行列表：↑↓ 移动键盘活动行（搜索框聚焦时按键冒泡到根）。
+    // 等待对象必须是**列表端点**（/claude/sessions?q=…，含 limit 参数）而非
+    // 全文检索（/claude/sessions/search?q=…）：fill 同时触发两个请求，若只等
+    // 检索响应就继续，列表响应会迟到落在键盘序列中途——fetchPage 非追加路径
+    // 会把 activeIdx 重置回首行，↓ 的移动被静默吞掉（serial 全量实测 A2/A3
+    // 两种失败形态，5ms 采样探针实锤：按键后 221ms 列表响应落地、activeIdx
+    // 1→0）。列表响应就位后键盘序列内不再有非追加刷新可竞态
+    // 按键前显式回焦搜索框：键盘操作前焦点应在列表上（真实用户同前置）
+    const listResp = page.waitForResponse(r => r.url().includes('/claude/sessions?') && r.url().includes('q='))
     await picker.locator('input').fill(MARK)
-    await searchResp
+    await listResp
     await expect(picker.locator('.csp-row')).toHaveCount(50, { timeout: 15000 })
     // 全量刷新后键盘定位首行
     await expect(picker.locator('.csp-row').first()).toHaveClass(/is-kbd-active/)
+    await picker.locator('input').focus()
     await page.keyboard.press('ArrowDown')
     await expect(picker.locator('.csp-row').nth(1)).toHaveClass(/is-kbd-active/)
     await expect(picker.locator('.csp-row').first()).not.toHaveClass(/is-kbd-active/)
     // ↑×2 钳制在首行
+    await picker.locator('input').focus()
     await page.keyboard.press('ArrowUp')
     await page.keyboard.press('ArrowUp')
     await expect(picker.locator('.csp-row').first()).toHaveClass(/is-kbd-active/)
 
     // Enter 恢复：唯一匹配 p2（3 小时前的 fixture，未被其他用例的恢复触碰过，
-    // 不会因 mtime 落入 activeWindow 被判「进行中」而空操作）
-    const uniqResp = page.waitForResponse(r => r.url().includes('/claude/sessions') && r.url().includes('q='))
+    // 不会因 mtime 落入 activeWindow 被判「进行中」而空操作）。等待对象同上
+    // 键盘序列口径：列表端点
+    const uniqResp = page.waitForResponse(r => r.url().includes('/claude/sessions?') && r.url().includes('q='))
     await picker.locator('input').fill('e2e-fix-p2')
     await uniqResp
     await expect(picker.locator('.csp-row')).toHaveCount(1, { timeout: 15000 })
     await expect(picker.locator('.csp-row').first()).toHaveClass(/is-kbd-active/)
+    await picker.locator('input').focus()
     await page.keyboard.press('Enter')
     // 恢复链路 UI 侧：按会话名唯一子串定位新条目（resumeName = 'Claude · {title}'，
     // p2 的标题只出现在本会话），不依赖侧栏列表的渲染时点与计数基线

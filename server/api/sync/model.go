@@ -10,7 +10,8 @@ import (
 // 单元 = 项目本体（project）+ 可选上下文包。跨实例稳定键 UnitKey：
 //   - 项目本体：project:<rootBasename>（两端各自注册的项目 ID 是本机 uuid，
 //     不跨实例稳定；目录基名是用户可直接对上的自然标识，同名冲突即不同单元）
-//   - 项目上下文：<kind>:<rootBasename>（notes/sessions/crons/uistate）
+//   - 项目上下文：<kind>:<rootBasename>（sessions/crons；notes/notes-multi
+//     已随 P-20261108-3 笔记单库化退役，见 IsRetiredKind）
 //   - 全局单元：snippets / runtimes / approvals / chains（不挂项目）
 //
 // 指纹 = 单元内全部文件（规范化正斜杠相对路径 + size）排序后 sha256——
@@ -22,7 +23,6 @@ import (
 const (
 	UnitProject   = "project"   // 项目本体（目录树；含 .git 与否由 mode 决定）
 	UnitSessions  = "sessions"  // agent 会话记录与策展（claude transcripts + 策展）
-	UnitNotes     = "notes"     // 项目笔记
 	UnitCrons     = "crons"     // 项目域定时任务（agentcron，Dir 在项目内）
 	UnitSnippets  = "snippets"  // 代码/命令片段（global scope；host 域不入）
 	UnitRuntimes  = "runtimes"  // 自定义智能体运行时注册（settings 域）
@@ -41,8 +41,40 @@ const (
 	UnitCredentials = "credentials"
 )
 
-// unitContexts 项目上下文 kind 集（plan/manifest 上下文包勾选的词表）
-var unitContexts = []string{UnitSessions, UnitNotes, UnitCrons, UnitUIState}
+// 退役单元 kind（P-20261108-3 笔记单库化）：notes（项目笔记默认篇）与
+// notes-multi（项目多篇笔记库）随项目作用域笔记整链退役——笔记改为项目无关的
+// 全局笔记库，**不再随实例同步**（跨实例全局库车道明示放弃，用户经导出人工
+// 搬运）。kind 词汇保留只为识别旧对端的回流：
+//   - 本端 manifest 不再产出、resolveUnitPayloads 拒绝打包；
+//   - 落位侧 landOneUnit 显式拒收（旧对端推来的笔记单元经旧 landNotes 链会直写
+//     项目作用域键——新实例 UI 恒全局库看不见 = 静默半态，P-20261107-2a 复审#4
+//     「静默分叉」同类，故拒收并回告错误让对端结果卡标红）；
+//   - plan 遇旧对端 manifest 携带的笔记单元标 PlanRetired（不可勾选、对账红点），
+//     执行请求显式点名的退役单元逐个记失败（结果卡红点 + 单元行错误文案），
+//     不发起传输
+const (
+	UnitNotes      = "notes"
+	UnitNotesMulti = "notes-multi"
+)
+
+// retiredNotesUnitError 退役笔记单元的统一回告（落位拒收/打包拒绝/执行跳过三面
+// 同一文案——对端结果卡与本端单元行可直接对上；英文语言中立稳定串）
+const retiredNotesUnitError = "notes units are retired (P-20261108-3): notes live in the global notes library and no longer sync between instances"
+
+// IsRetiredKind 单元 kind 是否已退役（笔记单库化）
+func IsRetiredKind(kind string) bool {
+	return kind == UnitNotes || kind == UnitNotesMulti
+}
+
+// isRetiredUnitKey 单元键是否指向退役 kind
+func isRetiredUnitKey(key string) bool {
+	kind, _ := ParseUnitKey(key)
+	return IsRetiredKind(kind)
+}
+
+// unitContexts 项目上下文 kind 集（plan/manifest 上下文包勾选的词表）。
+// 笔记单元已退役（P-20261108-3，见上方退役注记），不在词表内
+var unitContexts = []string{UnitSessions, UnitCrons, UnitUIState}
 
 // IsContextKind 单元 kind 是否项目上下文包
 func IsContextKind(kind string) bool {
@@ -83,7 +115,8 @@ func ProjectKeyOf(unitKey string) string {
 // 单元聚合条目（manifest/plan 的公共形状）
 type UnitEntry struct {
 	Key string `json:"key"` // 跨实例稳定单元键
-	// Kind 单元 kind（project/sessions/notes/crons/snippets/runtimes/approvals/chains/uistate/deliver）
+	// Kind 单元 kind（project/sessions/crons/snippets/runtimes/approvals/chains/uistate/deliver；
+	// 旧对端 manifest 可能仍带已退役的 notes/notes-multi）
 	Kind string `json:"kind"`
 	// ProjectKey 所属项目单元键（上下文单元携带；全局单元空）
 	ProjectKey string `json:"projectKey,omitempty"`
@@ -126,6 +159,10 @@ const (
 	PlanPeerNewer  = "peer-newer"  // 对端变+本端未变 → 可安全拉取
 	PlanConflict   = "conflict"    // 两端都变 → 冲突（默认不勾，逐项/批量裁决）
 	PlanNew        = "new"         // 无基线（首次）→ 新增档
+	// PlanRetired 退役单元（P-20261108-3：旧对端 manifest 携带的 notes/notes-multi
+	// 笔记单元）→ 不可执行：action=skip、selected=false，UI 标红让用户知情
+	// 「笔记不再随实例同步」，杜绝静默半态
+	PlanRetired = "retired"
 )
 
 // PlanActionType 单行 plan 建议动作：push / pull / skip（synced 或不可执行）

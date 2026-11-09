@@ -9,7 +9,7 @@ import {
   CloudDownloadOutline, ArrowDownCircleOutline, DuplicateOutline,
   PlayOutline, EllipsisHorizontalOutline,
   TrashOutline, OpenOutline,
-  LockClosedOutline, LockOpenOutline,
+  LockClosedOutline, Pin, PinOutline,
   HelpCircleOutline,
   QrCodeOutline,
   MoonOutline,
@@ -209,7 +209,9 @@ const moreActionsOptions = computed(() => {
     { label: t('taskRunner.title'), key: 'task', icon: () => h(NIcon, null, { default: () => h(PlayOutline) }) },
     { label: t('help.title'), key: 'help', icon: () => h(NIcon, null, { default: () => h(HelpCircleOutline) }) },
     { label: t('qr.relay.title'), key: 'qr', icon: () => h(NIcon, null, { default: () => h(QrCodeOutline) }) },
-    { label: layoutLock.locked ? t('layout.unlockLayoutShort') : t('layout.lockLayoutShort'), key: 'layoutLock' },
+    // 布局锁菜单项补图钉图标（P-20261107-1）：与下一项「锁定系统」的 LockClosed
+    // 拉开同形混淆；实心/描边随当前态，与顶栏布局锁按钮双态一致
+    { label: layoutLock.locked ? t('layout.unlockLayoutShort') : t('layout.lockLayoutShort'), key: 'layoutLock', icon: () => h(NIcon, null, { default: () => h(layoutLock.locked ? Pin : PinOutline) }) },
     { label: t('layout.lock'), key: 'lock', icon: () => h(NIcon, null, { default: () => h(LockClosedOutline) }) },
   ]
   // 免打扰在移动端没有悬浮档位入口，按激活态给「关闭」或两档快捷开启
@@ -445,7 +447,10 @@ defineExpose({ handlePull, handleFetch })
     </ToolButton>
 
     <!-- 布局锁定（P-20261003-180）：锁定时分隔条/tab/树拖拽统一短路，点击与键盘不受影响；
-         active 态 + 开/合图标切换做状态反馈，命令面板「toggle-layout-lock」同源 -->
+         active 态 + 开/合图标切换做状态反馈，命令面板「toggle-layout-lock」同源。
+         图标是图钉双态（P-20261107-1）：「钉住布局防误拖」语义直译（终端 tab 置顶
+         同族），实心 Pin=已钉住 / 描边 PinOutline=未钉；原与安全域「锁定系统」共用
+         LockClosed/LockOpen——两个语义完全不同的锁（锁整机 vs 防误拖）同形易混 -->
     <ToolButton
       size="small"
       variant="ghost"
@@ -456,8 +461,8 @@ defineExpose({ handlePull, handleFetch })
       @click="layoutLock.toggle()"
     >
       <n-icon size="14">
-        <LockClosedOutline v-if="layoutLock.locked" />
-        <LockOpenOutline v-else />
+        <Pin v-if="layoutLock.locked" />
+        <PinOutline v-else />
       </n-icon>
     </ToolButton>
 

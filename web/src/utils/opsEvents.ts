@@ -273,6 +273,48 @@ export interface ShareDropDetail {
   nick?: string
 }
 
+// 可写分享「访客输入中」（P-20261106-8）：访客经可写分享的 WS 上行桥接入/
+// 断开（或开关关闭清场）即服务端广播。前端消费 = 刷新「访客输入中」会话行
+// 徽标（bumpDirectInputShares 即时对账，15s 轮询是断线兜底）。
+// 直通分发语义同 share.drop（sc-ops:share.wtyping）
+export const OPS_SHARE_WTYPING = 'sc-ops:share.wtyping'
+
+/** OPS_SHARE_WTYPING 事件 detail（服务端 share.WritableTypingEvent 广播载荷） */
+export interface ShareWritableTypingDetail {
+  token?: string
+  shareName?: string
+  terminalId?: string
+  /** true = 有访客上行在场；false = 清场（末条断开/开关关闭） */
+  active?: boolean
+  /** 在场上行连接数 */
+  visitors?: number
+  nick?: string
+  visitorTail?: string
+}
+
+// 可写分享粘贴审批（P-20261106-8）：访客整块输入命中 commandrisk danger 档
+// 即服务端广播（未批不注入 PTY，60s 不决自动拒绝）。前端消费 = 审批卡
+//（批准/拒绝两动作，调 POST /api/share/:token/paste/:pid/decision）。
+// 直通分发语义同 share.drop（sc-ops:share.paste-review）
+export const OPS_SHARE_PASTE_REVIEW = 'sc-ops:share.paste-review'
+
+/** OPS_SHARE_PASTE_REVIEW 事件 detail（服务端 share.PasteReviewEvent 广播载荷） */
+export interface SharePasteReviewDetail {
+  token?: string
+  shareName?: string
+  terminalId?: string
+  /** 待批粘贴块 id（决策端点寻址键，crypto/rand 不可预测） */
+  pasteId?: string
+  /** commandrisk 命中摘要（RiskSummary 一行形态） */
+  summary?: string
+  /** 粘贴块头部预览（≤200 rune 原样——访客输入不脱敏，审批要看真实命令） */
+  preview?: string
+  /** 访客摘要（visitorId 前 8 位） */
+  visitorTail?: string
+  /** 时刻（epoch ms） */
+  at?: number
+}
+
 // frontend 动词族三原子（P-20261023-4）：协议从「引导注意力」升维「替用户
 // 执行浏览器动作」——下载框弹出 / 剪贴板直写 / 新标签开外链。三原子都是
 // 用户设备上的即时效应，前端消费链（utils/frontendAtomActions）必带可见
@@ -353,16 +395,30 @@ export interface LocateInTreeDetail {
 // localStorage 展开键再派发，接收方（FileTreeView）挂载中就地处收起全部目录；
 // 树未挂载（侧栏在 changes 视图等）时无人监听，清键已覆盖该形态
 export const OPS_COLLAPSE_TREE = 'sc-ops:collapse-tree'
-// 项目笔记已被外部整份写回（P-20261003-292「沉淀到笔记」等）：detail = { projectId }。
-// 接收方（NotesPanel）在无未保存编辑时从服务端重读——面板若带着旧内容继续编辑，
-// 防抖保存会以旧内容整体覆盖刚写入的沉淀节（last-writer-wins 无版本协商，
-// 重读是唯一防线；有挂起编辑时不动，宁欠勿覆盖）
+// 笔记已被外部写回（P-20261003-292「沉淀到笔记」等前端内部事件 + 服务端
+// notes.updated 直通分发 sc-ops:notes.updated 的统一消费面——P-20261107-2 起
+// 升 per-note 粒度）：detail = { projectId, noteId?, action?, focus? }。接收方
+// （useNotesMulti）在无未保存编辑时从服务端重读清单与当前篇——面板若带着旧
+// 内容继续编辑，防抖保存会整体覆盖外部写入（baseUpdatedAt 409 兜底 + 重读
+// 双防线；有挂起编辑时只刷清单，内容让位人的输入）
 export const NOTES_EXTERNAL_UPDATE = 'sc:notes-external-update'
+// 服务端 notes.updated 直通分发（P-20261107-2）：笔记写路径（/api/notes 族 +
+// P-20261108-3 单库化迁移有迁入时）广播 {projectId,noteId?,action}——面板与
+// NOTES_EXTERNAL_UPDATE 合并消费（onExternalUpdate 统一入口）
+export const OPS_NOTES_UPDATED = 'sc-ops:notes.updated'
 
-/** NOTES_EXTERNAL_UPDATE 事件 detail */
+/** NOTES_EXTERNAL_UPDATE 事件 detail（noteId 缺省 = 作用域级清单变更） */
 export interface NotesExternalUpdateDetail {
-  /** 笔记被写回的项目 id（接收方与当前项目不符时忽略） */
+  /** 作用域键：P-20261108-3 单库化后恒为笔记库哨兵 '_global'（字段名沿用
+   *  多篇时代的项目维度命名——旧服务端/旧形态带项目 id 的事件接收方忽略） */
   projectId: string
+  /** 变更篇 id（服务端 notes.updated 携带；前端内部事件可省 = 作用域级） */
+  noteId?: string
+  /** 变更动作（saved|created|renamed|trashed|restored|purged|migrated；仅观测面，不作为分支依据——消费方一律重拉真值） */
+  action?: string
+  /** 前端内部事件专用：重拉后聚焦 noteId 篇（沉淀写回「点啥显示啥」——刚追加
+   *  的结论节在编辑面可见） */
+  focus?: boolean
 }
 
 /** OPS_COLLAPSE_TREE 事件 detail */

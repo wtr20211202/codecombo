@@ -687,16 +687,28 @@ func ListShares(c *gin.Context) {
 
 // liveWire 终端直播馈线接线口（liveterm.Hub 结构性满足；Module Start 注入、
 // Stop 摘除。nil = 未装配——创建仍成功，馈线在访客订阅时由 hub 惰性接通，
-// 语义不变只是首访多一次播种）
+// 语义不变只是首访多一次播种）。unfiltered 是 live 源参数（P-20261106-9）：
+// 取生效记录（幂等命中时是既有记录，非请求值）的 Unfiltered，模式不符的
+// 陈旧馈线由 hub 整条替换；Prune 供过期清理巡检按存活 token 集收口馈线
 type liveWiring interface {
-	Wire(token, sessionID string)
+	Wire(token, sessionID string, unfiltered bool)
 	Unwire(token string)
+	Prune(keep map[string]bool) int
 }
 
 var liveWire liveWiring
 
 // setLiveWire 注入/摘除接线口（Module Start/Stop 调用；测试可直接置 nil）
 func setLiveWire(h liveWiring) { liveWire = h }
+
+// unfilteredEgressNote 未过滤分享（P-20261106-9）的审计/日志 Detail 后缀：
+// 敏感值遮蔽被显式关闭是出域安全事件的关键维度，审计台账必须一眼可辨
+func unfilteredEgressNote(unfiltered bool) string {
+	if unfiltered {
+		return ", UNFILTERED"
+	}
+	return ""
+}
 
 // createTerminalReq 终端直播分享请求
 type createTerminalReq struct {
@@ -719,6 +731,11 @@ type createTerminalReq struct {
 	// ViewOnce 显式拒绝位（P-20261006-27）：直播是持续流语义，「看一眼即焚」
 	// 不成立——传 true 一律 400（可编程感知，不静默吞）
 	ViewOnce bool `json:"viewOnce"`
+	// Unfiltered 敏感值遮蔽关闭开关（P-20261106-9）：缺省 false = 遮蔽开（安全
+	// 默认不可让步，旧客户端/agent 不带字段即遮蔽）；true = 直播 feeder 原样
+	// 转发（内网协作原样输出场景，访客页标注「未过滤」）。创建时定死：幂等
+	// 命中既有直播时以既有记录为准（改配置须结束直播后重开）
+	Unfiltered bool `json:"unfiltered"`
 }
 
 // CreateTerminalLive POST /api/share/terminal —— 终端只读直播分享（远程结对/
@@ -771,25 +788,28 @@ func CreateTerminalLive(c *gin.Context) {
 		ExpiresAt:      expiresAt,
 		PassphraseHash: passHash,
 		Watermark:      watermarkOrDefault(req.Watermark),
+		Unfiltered:     req.Unfiltered,
 	})
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, "create terminal live share failed", err)
 		return
 	}
 	// 馈线即刻接通：分享创建到访客首连之间的输出也要进遮蔽尾流（否则那段
-	// 输出在访客页只以播种形式晚到，时序错乱）。幂等命中同链时 Wire no-op
+	// 输出在访客页只以播种形式晚到，时序错乱）。幂等命中同链时 Wire no-op。
+	// 遮蔽模式取生效记录（P-20261106-9：幂等命中 = 既有记录的定死配置）
 	if liveWire != nil {
-		liveWire.Wire(created.Token, created.TerminalID)
+		liveWire.Wire(created.Token, created.TerminalID, created.Unfiltered)
 	}
 	slog.Info("terminal live share created", "token", share.TokenSummary(created.Token),
-		"session", created.TerminalID, "ttl", time.Until(created.ExpiresAt).Round(time.Second))
+		"session", created.TerminalID, "ttl", time.Until(created.ExpiresAt).Round(time.Second),
+		"unfiltered", created.Unfiltered)
 	// 审计入账：终端输出暴露到匿名短链，创建即安全事件（与文件分享同族）
 	middleware.AuditAppend(c, store.AuditEvent{
 		Action: store.AuditShareCreate,
 		Result: store.AuditResultSuccess,
 		IP:     c.ClientIP(),
-		Detail: fmt.Sprintf("terminal live: %s (%s, ttl %s)", sess.Name, created.TerminalID,
-			time.Until(created.ExpiresAt).Round(time.Minute)),
+		Detail: fmt.Sprintf("terminal live: %s (%s, ttl %s%s)", sess.Name, created.TerminalID,
+			time.Until(created.ExpiresAt).Round(time.Minute), unfilteredEgressNote(created.Unfiltered)),
 	})
 	c.JSON(http.StatusOK, gin.H{"data": shareResponse(*created)})
 }
@@ -807,15 +827,38 @@ type createTerminalFrozenReq struct {
 	// ViewOnce 显式拒绝位（P-20261006-27）：快照是定格留证语义，与一次性
 	// 相斥（file 冻结模式同款 400）
 	ViewOnce bool `json:"viewOnce"`
+	// Unfiltered 敏感值遮蔽关闭开关（P-20261106-9）：缺省 false = 遮蔽开；
+	// true = 快照不经 mask.MaskText（仍剥 ANSI——渲染净化与敏感遮蔽正交），
+	// 含敏感原文落盘，TTL 强制钳 store.UnfilteredTTLMax（24h）
+	Unfiltered bool `json:"unfiltered"`
+	// Passphrase 可选访问口令（P-20261107-4：终端分享弹层透出口令，快照与直播
+	// 创建面对齐；P-20261006-25 同一守卫族）：非空 = 快照加口令门（访客页与
+	// /raw 同门）；缺省/空 = 无门（存量语义零变化）。幂等命中既有快照时带新
+	// 口令=改门、不带=保持既有（store 合并语义与直播同款）
+	Passphrase string `json:"passphrase"`
 }
+
+// unfilteredHashDomain 未过滤快照的内容哈希域前缀（P-20261106-9）：遮蔽/未过滤
+// 两模式对同一段输出（尤其无敏感值、两模式字节全等时）必须落不同链与不同快照
+// 目录——否则幂等定位会把「请求未过滤」落到既有遮蔽记录上（或反之），访客页
+// 横幅与 TTL 语义错配。遮蔽模式哈希保持原口径（存量链接零变化）。NUL 起首
+// 保证与任何可读文本前缀不碰撞
+const unfilteredHashDomain = "\x00unfiltered\x00"
 
 // sanitizeTermFrozenOutput 终端输出净化链（纯函数，单测锁纪律）：剥 ANSI
 // （P-100 同原语，快照定格可读文本非字节保真）→ mask.MaskText 全量遮蔽
 // （P-108 同源模式表，与 liveterm 流式遮蔽同一张表）。**顺序即纪律：净化
 // 全部完成于哈希/落盘之前**——快照身份与内容都是净化后的形态，快照本体
-// 即净本，访客面零二次处理。返回净化文本与其 sha256（hex，快照身份键）
-func sanitizeTermFrozenOutput(raw []byte) (masked, hash string) {
+// 即净本，访客面零二次处理。返回净化文本与其 sha256（hex，快照身份键）。
+// unfiltered（P-20261106-9 显式 opt-out）：只剥 ANSI、跳过遮蔽——「快照本体
+// 即净本」对该类快照显式失效（由强制短 TTL + 访客页未过滤横幅替代收敛），
+// 哈希走 unfilteredHashDomain 域分离，与遮蔽快照恒不同链
+func sanitizeTermFrozenOutput(raw []byte, unfiltered bool) (masked, hash string) {
 	text := string(terminal.StripANSI(raw))
+	if unfiltered {
+		sum := sha256.Sum256([]byte(unfilteredHashDomain + text))
+		return text, hex.EncodeToString(sum[:])
+	}
 	masked = mask.MaskText(text)
 	sum := sha256.Sum256([]byte(masked))
 	return masked, hex.EncodeToString(sum[:])
@@ -830,7 +873,9 @@ func sanitizeTermFrozenOutput(raw []byte) (masked, hash string) {
 // SnapshotsRoot 隔离区。默认 TTL 30 天（store.FrozenTTL，快照是落盘数据防
 // 磁盘长尾；SetExpiry 可调）。与直播（CreateTerminalLive）刻意区分：直播是
 // 活流（创建后自己的后续输入持续暴露），快照是定格（会话继续跑、内容不更新，
-// 且会话关闭后链接仍可访问——求援场景「人来看」的入口链接化）
+// 且会话关闭后链接仍可访问——求援场景「人来看」的入口链接化）。
+// 未过滤模式（P-20261106-9，unfiltered:true 显式 opt-out）：跳过遮蔽、含原文
+// 落盘，TTL 强制 24h（store 钳制），访客页横幅换「未过滤」警示
 func CreateTerminalFrozen(c *gin.Context) {
 	var req createTerminalFrozenReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -852,14 +897,21 @@ func CreateTerminalFrozen(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"warnings": []string{shared.SensitiveSessionWarning}})
 		return
 	}
+	// 口令门（P-20261107-4，直播同款）：哈希先行、校验先于快照落盘——超长口令
+	// 400 不留半成品快照；明文只存在于本请求内
+	passHash, err := hashPassphrase(req.Passphrase)
+	if err != nil {
+		shared.Error(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
 	raw, err := sess.CaptureScrollback(0)
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, "Terminal operation failed", err)
 		return
 	}
 	// 净化链（见 sanitizeTermFrozenOutput）：空白快照无分享价值，直接拒绝
-	//（snippet 空内容拒绝同构）
-	masked, hash := sanitizeTermFrozenOutput(raw)
+	//（snippet 空内容拒绝同构）。未过滤模式（P-20261106-9）只剥 ANSI 不遮蔽
+	masked, hash := sanitizeTermFrozenOutput(raw, req.Unfiltered)
 	if strings.TrimSpace(masked) == "" {
 		shared.Error(c, http.StatusBadRequest, "terminal output is empty", nil)
 		return
@@ -879,12 +931,14 @@ func CreateTerminalFrozen(c *gin.Context) {
 		}
 	}
 	created, err := store.Get().Share.Create(store.Share{
-		Kind:        store.ShareKindTermFrozen,
-		TerminalID:  req.SessionID,
-		Name:        sess.Name,
-		Size:        int64(len(masked)),
-		ContentHash: hash,
-		Watermark:   watermarkOrDefault(req.Watermark),
+		Kind:           store.ShareKindTermFrozen,
+		TerminalID:     req.SessionID,
+		Name:           sess.Name,
+		Size:           int64(len(masked)),
+		ContentHash:    hash,
+		PassphraseHash: passHash,
+		Watermark:      watermarkOrDefault(req.Watermark),
+		Unfiltered:     req.Unfiltered,
 	})
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, "create terminal frozen share failed", err)
@@ -892,13 +946,15 @@ func CreateTerminalFrozen(c *gin.Context) {
 	}
 	slog.Info("terminal frozen share created", "token", share.TokenSummary(created.Token),
 		"session", created.TerminalID, "bytes", created.Size,
-		"ttl", time.Until(created.ExpiresAt).Round(time.Minute))
+		"ttl", time.Until(created.ExpiresAt).Round(time.Minute), "unfiltered", created.Unfiltered,
+		"passphrase", created.PassphraseHash != "")
 	// 审计入账：终端输出暴露到匿名短链（定格形态），创建即安全事件（同族）
 	middleware.AuditAppend(c, store.AuditEvent{
 		Action: store.AuditShareCreate,
 		Result: store.AuditResultSuccess,
 		IP:     c.ClientIP(),
-		Detail: fmt.Sprintf("terminal frozen: %s (%s, %d bytes)", sess.Name, created.TerminalID, created.Size),
+		Detail: fmt.Sprintf("terminal frozen: %s (%s, %d bytes%s)", sess.Name, created.TerminalID, created.Size,
+			unfilteredEgressNote(created.Unfiltered)),
 	})
 	c.JSON(http.StatusOK, gin.H{"data": shareResponse(*created)})
 }
@@ -1220,6 +1276,9 @@ func DeleteShare(c *gin.Context) {
 	}
 	if shareSvc != nil {
 		shareSvc.RevokeDirect(token, "cascade")
+		// 可写上行级联清场（P-20261106-8）：记录死亡后访客面 404，上行桥
+		// 不能残留（连接断开+待批面清空+会话闸随连接 defer 解除）
+		shareSvc.WritableDown(token)
 	}
 	slog.Info("share revoked", "token", share.TokenSummary(token))
 	middleware.AuditAppend(c, store.AuditEvent{
@@ -1253,9 +1312,13 @@ func RotateShare(c *gin.Context) {
 		liveWire.Unwire(token)
 	}
 	// 直通持权级联回收（P-20261024-1）：轮换代际换 token 键——旧 token 上
-	// 的持权随旧链消亡（新链持权需重新申请-批准），会话侧只读闸同步解除
+	// 的持权随旧链消亡（新链持权需重新申请-批准），会话侧只读闸同步解除。
+	// 可写上行同款级联（P-20261106-8）：旧链上行连接即刻断开，新链从只读
+	// 基线重新开始（可写位随记录迁移，访客重连即恢复——但口令门会话绑定
+	// 旧哈希不变，门语义不受轮换影响）
 	if shareSvc != nil {
 		shareSvc.RevokeDirect(token, "cascade")
+		shareSvc.WritableDown(token)
 	}
 	// 审计入账：轮换是泄露应对动作，谁在何时轮换了哪条短链值得留痕。
 	// 注意与 slog 不同界：审计台账（AuditEvent）是本地持久化的对账凭证
@@ -1514,9 +1577,11 @@ func SetShareExpiry(c *gin.Context) {
 		shared.Error(c, http.StatusInternalServerError, "set share expiry failed", err)
 		return
 	}
+	// 留痕记生效值（P-20261106-9：未过滤记录的「恢复永久/越界延长」被 store
+	// 钳到 UnfilteredTTLMax，请求值≠生效值，台账以落库为准；其余记录两者恒等）
 	target := "permanent"
-	if !expiresAt.IsZero() {
-		target = expiresAt.UTC().Format(time.RFC3339)
+	if !updated.ExpiresAt.IsZero() {
+		target = updated.ExpiresAt.UTC().Format(time.RFC3339)
 	}
 	slog.Info("share expiry set", "token", share.TokenSummary(token), "expiresAt", target)
 	middleware.AuditAppend(c, store.AuditEvent{
@@ -1701,6 +1766,9 @@ func shareResponse(s store.Share) gin.H {
 		// 直通输入档开关（P-20261024-1 第二档）：恒回传布尔；持权/申请态
 		// 单独投影（direct 字段，见下）
 		"directInput": s.DirectInput,
+		// 可写分享开关（P-20261106-8）：恒回传布尔（缺省 false = 关，WS 端点
+		// 对访客恒 404）——管理列表行内开关与批量多选的数据源
+		"writable": s.Writable,
 	}
 	if s.TerminalID != "" {
 		out["terminalId"] = s.TerminalID
@@ -1730,6 +1798,12 @@ func shareResponse(s store.Share) gin.H {
 	// 单点在 store，前端不复制判定逻辑），列表据此挂「已失效」标
 	if s.ViewOnce {
 		out["viewOnce"] = true
+	}
+	// 未过滤标记（P-20261106-9）：管理列表据此挂「未过滤」显式徽标、结果卡
+	// 标注——敏感值遮蔽被关闭的分享必须在每个管理面一眼可辨。遮蔽开（缺省）
+	// 不携带（存量零迁移语义——缺省即已遮蔽）
+	if s.Unfiltered {
+		out["unfiltered"] = true
 	}
 	if s.Consumed(time.Now()) {
 		out["consumed"] = true
@@ -1785,6 +1859,12 @@ func shareResponse(s store.Share) gin.H {
 				"nick":      pending.Nick,
 				"expiresIn": int((share.DirectRequestTTL - time.Since(pending.At)).Seconds()),
 			}
+		}
+		// 可写分享「访客输入中」投影（P-20261106-8）：上行连接数 >0 即在场
+		//（wtyping 徽标的 15s 轮询兜底数据源；sc-ops:share.wtyping 是即时
+		// 对账路）。轮换/开关关闭即清零，零投影零开销
+		if v := shareSvc.WritableState(s.Token); v > 0 {
+			out["wtyping"] = gin.H{"visitors": v}
 		}
 	}
 	return out

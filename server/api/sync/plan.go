@@ -91,6 +91,17 @@ func planFromManifests(local, peer *ManifestResponse, ledger map[string]store.Sy
 			continue // 本端项目目录已消失：不产出行（Invalid 项目不参与同步）
 		}
 		row := PlanRow{UnitEntry: unitEntryFor(k, lu, lok, pu, pok)}
+		if isRetiredUnitKey(k) {
+			// 退役单元（P-20261108-3）：只可能来自旧对端 manifest（本端不再产出）。
+			// 显式成行标 retired（不可执行、不勾选、不计总量）——用户在预览里
+			// 就看到「对端还有笔记单元但不会同步」，不留静默半态；账本旧基线
+			// 不参与判定（单元已无本端对位面）
+			row.State = PlanRetired
+			row.Action = PlanSkip
+			row.Selected = false
+			resp.Rows = append(resp.Rows, row)
+			continue
+		}
 		base, hasBase := ledgerMap[k]
 		row.BaselineMissing = !hasBase
 		if hasBase {

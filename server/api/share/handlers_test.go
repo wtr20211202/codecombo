@@ -221,13 +221,22 @@ func TestRotateShareHandler(t *testing.T) {
 	}
 }
 
-// stubWiring liveWiring 桩：记录 Wire/Unwire 调用序列
+// stubWiring liveWiring 桩：记录 Wire/Unwire/Prune 调用序列（Wire 记录遮蔽
+// 模式——P-20261106-9 live 源参数须取生效记录）
 type stubWiring struct{ calls []string }
 
-func (s *stubWiring) Wire(token, sessionID string) {
-	s.calls = append(s.calls, "wire:"+token+"|"+sessionID)
+func (s *stubWiring) Wire(token, sessionID string, unfiltered bool) {
+	mode := ""
+	if unfiltered {
+		mode = "|unfiltered"
+	}
+	s.calls = append(s.calls, "wire:"+token+"|"+sessionID+mode)
 }
 func (s *stubWiring) Unwire(token string) { s.calls = append(s.calls, "unwire:"+token) }
+func (s *stubWiring) Prune(map[string]bool) int {
+	s.calls = append(s.calls, "prune")
+	return 0
+}
 
 // TestCreateTerminalLiveValidation 创建校验：404 未知会话、400 负 TTL。
 // happy path（真实 PTY 会话）由定向 e2e 覆盖，单测不拉真进程

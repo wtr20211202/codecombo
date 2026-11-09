@@ -165,6 +165,20 @@ func (j *SyncJob) setUnit(key string, sent int64, current, state string) {
 	}
 }
 
+// failUnit 单元直接记失败并写错误文案（Error 字段——面板单元行 .sync-unit-error
+// 红字呈现；退役单元等「未发起即失败」的显式红点口，P-20261108-3）
+func (j *SyncJob) failUnit(key, msg string) {
+	j.rt.mu.Lock()
+	defer j.rt.mu.Unlock()
+	for i := range j.Units {
+		if j.Units[i].Key == key {
+			j.Units[i].State = "failed"
+			j.Units[i].Error = msg
+			return
+		}
+	}
+}
+
 // snapshot 深拷贝（广播/拉取面拿到的是副本，写侧继续推进零竞争）。
 // 共享推进在 rt.mu 内取一致性切片（含 SentBytes/EMA 聚合字段与各单元槽位）
 func (j *SyncJob) snapshot() *SyncJob {

@@ -50,11 +50,15 @@ type ProjectRoots interface {
 
 // TerminalLive 终端只读直播源（liveterm.Hub 的结构性最小面，本包不反向
 // 依赖装配层——ShareLookup/ProjectRoots 同款接口注入先例）。
-// 订阅返回的字节全部经服务端流式遮蔽（mask.Masker，P-108 模式族独立成包），本包不做二次处理
+// 订阅返回的字节经服务端流式遮蔽（mask.Masker，P-108 模式族独立成包），本包不做
+// 二次处理；遮蔽与否是 live 源参数（P-20261106-9）——由访客命中的分享记录
+// Unfiltered 决定，源头 feeder 侧生效，访客面不存在任何渲染过滤（脚本绕过即得
+// 原文的那种「过滤」不成立）
 type TerminalLive interface {
 	// Subscribe 为访客开一路只读订阅（尾流快照 + 实时通道 + 终结信号）；
-	// 单 token 并发访客超限返回错误（SSE 端点映射 429）
-	Subscribe(token, sessionID string) (LiveSubscription, error)
+	// 单 token 并发访客超限返回错误（SSE 端点映射 429）。unfiltered 取分享
+	// 记录（记录是遮蔽配置单一事实源，馈线模式不符由源侧整条替换）
+	Subscribe(token, sessionID string, unfiltered bool) (LiveSubscription, error)
 	// Unwire 撤销 token 的馈线（访客面自身不调用；管理面撤销/轮换经装配层触发）
 	Unwire(token string)
 }
@@ -143,6 +147,22 @@ type Service struct {
 	// directOnRelease 持权回收回调（惰性超时/级联缘由；nil 安全）——装配层
 	// 据此解除会话侧只读闸与补审计，本包不感知 terminal
 	directOnRelease func(token, sessionID, reason string)
+	// writable 可写分享上行状态机（P-20261106-8，进程内短时效状态，
+	// 见 writable.go 头注——连接表/待批粘贴面/帧率桶，重启即清）
+	writable *writableHub
+	// writableSink 可写输入落点（装配层适配 terminal 会话；nil = WS 端点
+	// 503 降级——测试/降级部署零 panic）
+	writableSink WritableSink
+	// writableRisk 粘贴级风险预检（装配层桥 terminal.MatchCommandRisk——
+	// 本包不 import terminal，判定在装配层收口；nil = 不挂审批直接注入，
+	// 仅测试/降级部署会出现）
+	writableRisk func(text string) WritableRisk
+	// writableEvents 「访客输入中」广播回调（连接建立/末条断开两界；装配层
+	// 接 opschannel——本包不反向依赖 api 层，dropEvents 同款回调注入先例）
+	writableEvents func(WritableTypingEvent)
+	// pasteReviewEvents 粘贴审批卡广播回调（命中 danger 挂待批面时一次；
+	// 装配层接 opschannel 同上）
+	pasteReviewEvents func(PasteReviewEvent)
 }
 
 // shareCtxKey 守卫层已解析记录的上下文键（gateGuard 查过一次，handler 内
@@ -174,7 +194,8 @@ func NewService(shares ShareLookup, roots ProjectRoots, logger *slog.Logger) *Se
 		views: &ViewAuditBuffer{}, gate: newGateSessions(), view: newViewSessions(),
 		msgLimit: newMsgRateLimiter(), notes: &GuestNoteBuffer{}, retired: &RetiredHitTracker{},
 		dropLimit: newRatePair(dropMaxPerIP, dropMaxPerToken, dropWindow),
-		direct:    newDirectHub(), directLimit: newRatePair(directMaxPerIP, directMaxPerToken, directWindow)}
+		direct:    newDirectHub(), directLimit: newRatePair(directMaxPerIP, directMaxPerToken, directWindow),
+		writable: newWritableHub()}
 }
 
 // WithTerminalLive 注入终端直播源（链式；装配层在模块 Start 时调用）
@@ -213,6 +234,32 @@ func (s *Service) WithDirectSink(sink DirectSink) *Service {
 // 会话侧只读闸与审计——owner 缘由的审计在带请求上下文的 handler 落）
 func (s *Service) WithDirectRelease(fn func(token, sessionID, reason string)) *Service {
 	s.directOnRelease = fn
+	return s
+}
+
+// WithWritableSink 注入可写输入落点（链式；装配层适配 terminal 会话——
+// P-20261106-8 可写分享档，writable.go 头注五重补偿控制的服务端半边）
+func (s *Service) WithWritableSink(sink WritableSink) *Service {
+	s.writableSink = sink
+	return s
+}
+
+// WithWritableRiskCheck 注入粘贴级风险预检（链式；装配层桥
+// terminal.MatchCommandRisk——命中 danger 档挂 owner 审批，未批不注入）
+func (s *Service) WithWritableRiskCheck(fn func(text string) WritableRisk) *Service {
+	s.writableRisk = fn
+	return s
+}
+
+// WithWritableEvents 注入「访客输入中」广播回调（链式；装配层接 opschannel）
+func (s *Service) WithWritableEvents(fn func(WritableTypingEvent)) *Service {
+	s.writableEvents = fn
+	return s
+}
+
+// WithPasteReviewEvents 注入粘贴审批卡广播回调（链式；装配层接 opschannel）
+func (s *Service) WithPasteReviewEvents(fn func(PasteReviewEvent)) *Service {
+	s.pasteReviewEvents = fn
 	return s
 }
 
@@ -271,6 +318,11 @@ func (s *Service) Handler() http.Handler {
 	mux.Handle("POST /s/{token}/direct/request", s.gateGuard(http.HandlerFunc(s.handleDirectRequest)))
 	mux.Handle("GET /s/{token}/direct/state", s.gateGuard(http.HandlerFunc(s.handleDirectState)))
 	mux.Handle("POST /s/{token}/direct/input", s.gateGuard(http.HandlerFunc(s.handleDirectInput)))
+	// 可写分享上行桥（P-20261106-8）：WS 键入注入 + 状态轮询（开关门禁在
+	// handler——关闭恒 404 与「端点不存在」不可区分；升级握手同过 gateGuard
+	// 口令门 + Origin 同源校验，防线全录 writable.go 头注）
+	mux.Handle("GET /s/{token}/termws", s.gateGuard(http.HandlerFunc(s.handleTermWS)))
+	mux.Handle("GET /s/{token}/writable/state", s.gateGuard(http.HandlerFunc(s.handleWritableState)))
 	mux.HandleFunc("GET /assets/{name}", s.handleAsset)
 	// 全捕获：分享口上任何未匹配路径（/s/、/s/、乱敲的路径）一律渲染
 	// 品牌 404 页，绝不露出默认裸文本
@@ -704,17 +756,19 @@ func (s *Service) handlePage(w http.ResponseWriter, r *http.Request) {
 	}
 	// 终端直播：专属访客页（xterm 只读渲染 + 直播指示 + 遮蔽声明横幅），
 	// 内容经 /stream SSE 推送；标题取记录展示名（缺省会话 ID）。协作开关
-	//（P-20261024-1）随 boot 下发——缺省双关时页面零协作位（存量语义）
+	//（P-20261024-1）随 boot 下发——缺省双关时页面零协作位（存量语义）；
+	// 未过滤标记（P-20261106-9）随 boot 下发，横幅位换「未过滤」警示
 	if sh.Kind == store.ShareKindTerminal {
 		w.WriteHeader(http.StatusOK)
-		_ = renderTermPage(w, token, prefLang(r), sh.Name, wm, sh.Collab, sh.DirectInput)
+		_ = renderTermPage(w, token, prefLang(r), sh.Name, wm, sh.Collab, sh.DirectInput, sh.Unfiltered, sh.Writable)
 		return
 	}
 	// 终端输出冻结快照（P-20261005-205）：xterm 一次性写入定格 buffer 的
-	// 只读变体（无 SSE 接线），内容经 /raw 单文件端点取净本
+	// 只读变体（无 SSE 接线），内容经 /raw 单文件端点取净本（未过滤记录
+	// P-20261106-9 取原文快照，横幅位同标「未过滤」）
 	if sh.Kind == store.ShareKindTermFrozen {
 		w.WriteHeader(http.StatusOK)
-		_ = renderTermFrozenPage(w, token, prefLang(r), sh.Name, wm, sh.Collab)
+		_ = renderTermFrozenPage(w, token, prefLang(r), sh.Name, wm, sh.Collab, sh.Unfiltered)
 		return
 	}
 	// 会话回放（P-20261004-103）：xterm 按时序回放的只读访客页，cast 文本经
@@ -1441,8 +1495,17 @@ func (s *Service) doDownload(w http.ResponseWriter, r *http.Request, res resolve
 // ticker 空转（select 随机就绪，注释帧不挤占数据帧的推送及时性）
 const sseKeepaliveInterval = 15 * time.Second
 
+// sseSizePollInterval 主机尺寸对账周期（P-20261107-4 渲染保真）：主人调整窗口
+// 后访客栅格必须跟随（cols/rows 不符即 TUI 折行/光标定位错乱）。数据帧路径
+// 逐帧对账（resize 引发的 SIGWINCH 重绘必然带输出，新尺寸先于重绘字节到达
+// 访客），本 ticker 兜「调整后无输出」的静默窗口；Size 只是一次会话锁内读，
+// 单 token 访客 ≤5 路，1s 周期开销可忽略
+const sseSizePollInterval = time.Second
+
 // handleStream 终端只读推流（SSE）：hello（尺寸/终态）→ tail（订阅点前
-// 遮蔽尾流快照，base64）→ data*（实时遮蔽字节）→ end（馈线终结）。
+// 遮蔽尾流快照，base64）→ data*（实时遮蔽字节）→ end（馈线终结）；主机
+// 尺寸变化时插入 resize 帧（{"cols","rows"}，P-20261107-4——先于新尺寸下
+// 重绘的字节送达，访客按主机栅格渲染）。
 // 字节帧一律 base64：PTY 输出是任意字节流，多字节 UTF-8 字符可被 4KB 分片
 // 劈开，SSE 的 text 语义要求 UTF-8 合法——base64 让帧边界与字节边界解耦。
 // 访客额度（单 token 并发 ≤ MaxGuestsPerToken）由直播源把守，超限 429。
@@ -1468,7 +1531,7 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 		s.writeSSEEnd(w, r)
 		return
 	}
-	sub, err := s.live.Subscribe(sh.Token, sh.TerminalID)
+	sub, err := s.live.Subscribe(sh.Token, sh.TerminalID, sh.Unfiltered)
 	if err != nil {
 		writeJSONErrorStatus(w, http.StatusTooManyRequests, "guest_limit")
 		return
@@ -1519,15 +1582,41 @@ func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// syncSize 主机尺寸对账（P-20261107-4）：与上次下发值不同即补 resize 帧；
+	// 0 尺寸（会话不可读）不下发——访客保持现栅格，不被打回默认网格
+	type sizeFrame struct {
+		Cols uint16 `json:"cols"`
+		Rows uint16 `json:"rows"`
+	}
+	syncSize := func() bool {
+		c, r := sub.Size()
+		if c == 0 || r == 0 || (c == cols && r == rows) {
+			return true
+		}
+		cols, rows = c, r
+		sb, _ := json.Marshal(sizeFrame{Cols: c, Rows: r})
+		return writeEvent("resize", string(sb))
+	}
+
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()
+	sizePoll := time.NewTicker(sseSizePollInterval)
+	defer sizePoll.Stop()
 	for {
 		select {
 		case data, ok := <-sub.Live():
 			if !ok {
 				return
 			}
+			// 尺寸先于字节：resize 后的重绘按新栅格落屏
+			if !syncSize() {
+				return
+			}
 			if len(data) > 0 && !writeEvent("data", base64.StdEncoding.EncodeToString(data)) {
+				return
+			}
+		case <-sizePoll.C:
+			if !syncSize() {
 				return
 			}
 		case <-sub.Done():

@@ -193,7 +193,8 @@ func buildMigrationPayload(mode string, blocks MigrationBlockSelection, projects
 			unitKeys = append(unitKeys, key)
 			perUnitGit[base] = pc.IncludeGit
 			if pc.IncludeContexts {
-				for _, k := range []string{UnitSessions, UnitNotes, UnitCrons} {
+				// 笔记单元不在列（P-20261108-3 单库化：笔记是全局库、不随实例搬运）
+				for _, k := range []string{UnitSessions, UnitCrons} {
 					unitKeys = append(unitKeys, UnitKey(k, base))
 				}
 			}

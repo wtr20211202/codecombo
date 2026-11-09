@@ -62,6 +62,9 @@ const (
 	AuditShareDirectGrant    = "share.direct.grant"       // 直通输入权授予（P-20261024-1 握手批准；Detail 记 visitorId 摘要/会话/时效元数据）
 	AuditShareDirectRevoke   = "share.direct.revoke"      // 直通输入权收回（owner 一键/超时/关闭级联共用；Detail 记缘由元数据）
 	AuditShareDirectInput    = "share.direct.input"       // 直通输入批次（P-20261024-1；全量批次入账只记长度/visitorId 摘要元数据，文本不入账）
+	AuditShareWritable       = "share.writable"           // 可写分享开关（P-20261106-8 单条/批量动作；Detail 记 on/off/批量摘要——泄露半径抬升到 shell 面，开/关全程留痕）
+	AuditShareWritableInput  = "share.writableInput"      // 可写分享访客输入批次（P-20261106-8；quickdrop 同口径只记长度/visitorId 摘要/IP 元数据，文本不入账；camelCase 扁平键沿 retiredHit 先例——嵌套点分键会与可写开关动作的 locale 树冲突）
+	AuditShareWritablePaste  = "share.writablePaste"      // 可写分享粘贴审批（P-20261106-8；Detail 记批准/拒绝/超时决策与模式摘要元数据，粘贴块不入账）
 	AuditWorkspaceExport     = "workspace.export"         // 工作区状态备份导出
 	AuditClaudeExport        = "claude.export"            // Claude 会话导出 Markdown（数据出域）
 	AuditClaudeBatchZip      = "claude.export_batch"      // Claude 会话批量导出 zip（多选归档，数据出域）
@@ -75,6 +78,10 @@ const (
 	AuditFileBatchArchive    = "file.batcharchive"        // 项目文件多选批量归档下载（zip 数据出域，P-20261003-250）
 	AuditFileRestore         = "file.restore"             // 回收站恢复（P-20261003-304）
 	AuditFilePurge           = "file.purge"               // 回收站彻底删除（不可恢复，P-20261003-304）
+	AuditNotesDelete         = "notes.delete"             // 笔记软删进回收站（P-20261107-2；P-20261108-3 单库化后即全局笔记库，agent 通道同样只软删可恢复）
+	AuditNotesRestore        = "notes.restore"            // 笔记从回收站恢复（全局笔记库，幂等）
+	AuditNotesPurge          = "notes.purge"              // 笔记彻底删除（全局笔记库，不可恢复；仅人侧，agent 令牌硬拒）
+	AuditNotesMigrated       = "notes.migrated"           // 旧项目笔记并入全局笔记库（P-20261108-3 单库化迁移：每轮一条汇总，Detail 记迁入/滞留计数与触发入口，不逐篇）
 	AuditFileSensitiveRead   = "file.sensitive_read"      // 敏感文件读取观测（纯观测不拦截，P-20261003-315）
 	AuditFileReplace         = "file.replace"             // 项目批量替换执行（P-20261004-114，只记文件数/处数/备份名元数据）
 	AuditFileReplaceRestore  = "file.replace_restore"     // 批量替换历史一键还原（P-20261004-66，只记文件数/历史条目元数据）

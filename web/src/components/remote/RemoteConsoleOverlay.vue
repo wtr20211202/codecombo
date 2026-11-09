@@ -10,8 +10,10 @@ import RemoteConsoleView from '../../views/remote/RemoteConsoleView.vue'
  */
 const show = defineModel<boolean>('show', { required: true })
 
+// immediate（P-20261106-4，同族范式统一）：show 为真挂载即保活，防宿主重挂时
+// 「show 已开而 everOpened=false」失联（当前 show 是宿主本地态，此为防御性兜底）
 const everOpened = ref(false)
-watch(show, (v) => { if (v) everOpened.value = true })
+watch(show, (v) => { if (v) everOpened.value = true }, { immediate: true })
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape' && show.value) {

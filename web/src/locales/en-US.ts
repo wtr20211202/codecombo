@@ -391,6 +391,10 @@ export default {
     clipHistoryPaste: 'Multi-clipboard paste (pick from history)',
     // Markdown mode cycle (P-20261003-18): md tri-state shortcut (cheat-sheet row)
     mdModeCycle: 'Cycle Markdown mode (source → preview → split, .md files only)',
+    // Notes panel domain (P-20261107-5): notes cheat-sheet rows (keymap registry dynamic rows)
+    notesSave: 'Save current note (names it when untitled with content)',
+    notesCreate: 'New note (untitled placeholder, name later)',
+    notesRename: 'Rename current note',
     monitorRefresh: 'Refresh dashboard data (on Duty Dashboard)',
     // Scope badges & filter (P-20261003-99): entries tagged by activation context (group = domain, badge = scope)
     scopeAll: 'All',
@@ -399,8 +403,11 @@ export default {
     scopeTerminal: 'Terminal',
     scopeApproval: 'Approval pending',
     scopeMonitor: 'Duty dashboard',
+    scopeNotes: 'Notes panel',
     scopeFilterLabel: 'Filter by scope',
     // Approval keyboard adjudication (P-20261003-1) cheat-sheet rows: active while a pending card is on screen and focus is outside inputs
+    // Notes panel group (P-20261107-5): notes domain keys (useNotesKeyboard focus scope)
+    groupNotes: 'Notes panel',
     groupApproval: 'Approval pending',
     approvalAllowOnce: 'Allow once',
     approvalTier: 'Allow with horizon (1/2/3 in popover)',
@@ -795,6 +802,9 @@ export default {
     terminalCopyOnSelectHint: 'In any terminal (project / session manager / remote host), releasing the mouse after selecting text copies it, matching claude code behavior; when off, use the context menu or Ctrl+Shift+C / Ctrl+C to copy',
     resetCloseConfirm: 'Reset Close Confirmation',
     resetCloseConfirmDesc: 'Click to re-enable the confirmation prompt if you\'ve checked "Don\'t ask again"',
+    // Mouse-takeover hint reset (P-20261106-6)
+    resetMouseModeHint: 'Reset Mouse Selection Hint',
+    resetMouseModeHintDesc: 'Click to show the "app has taken over the mouse" hint again if you\'ve dismissed it (the hint reappears whenever an app enables mouse reporting)',
     // Write-link backpressure diagnostics (P-20261004-47): read-only observation surface
     terminalBackpressureTitle: 'Write Backpressure Diagnostics',
     terminalBackpressureSession: 'Session',
@@ -861,6 +871,8 @@ export default {
       filesCount: '{n} files',
       includeGit: 'Include .git',
       globalContexts: 'Global contexts (snippets/runtimes/approvals/chains/UI state)',
+      // Notes units retired (P-20261108-3): notes are a project-independent library that no longer travels with sync/migration packages
+      notesRetiredHint: 'Notes are not included in migration packages (they now live in a project-independent notes library): copy the notes you want to keep to the new machine before switching',
       oversizeWarn: 'Project {names} is estimated over 2GB — packing and transfer will take a while; uncheck it or switch to workspace-only (uncheck .git) to shrink.',
       oversizeAccept: 'I understand the package includes a 2GB+ project, continue',
       passphrase: 'Passphrase',
@@ -1803,7 +1815,6 @@ export default {
     lastSync: 'Last synced {time} ({dir})',
     behindHint: 'Changed locally after last sync (see plan preview)',
     contextTitle: 'Sync content (context packs)',
-    ctxNotes: 'Notes',
     ctxSessions: 'Sessions',
     ctxCrons: 'Cron tasks',
     ctxSnippets: 'Snippets',
@@ -1821,11 +1832,15 @@ export default {
       'peer-newer': 'Peer newer',
       conflict: 'Conflict',
       new: 'New',
+      // Retired units (P-20261108-3): notes units an older peer still carries — shown, never run
+      retired: 'Retired',
     },
+    retiredHint: 'Notes now live in a project-independent library and no longer sync between instances (older peer; this row will not run)',
     kind: {
       project: 'Project',
       sessions: 'Sessions',
       notes: 'Notes',
+      'notes-multi': 'Notes library',
       crons: 'Cron',
       snippets: 'Snippets',
       runtimes: 'Runtime',
@@ -2716,6 +2731,42 @@ export default {
       consumedBadge: 'Consumed',
       consumedTip: 'This view-once share has been viewed; the grace window has passed and the link is gone',
     },
+    // Unfiltered shares (P-20261106-9): sensitive-value masking was explicitly
+    // turned off at creation (server-side source masking); visible in every
+    // management surface
+    unfiltered: {
+      typeBadge: 'Unfiltered',
+      badgeTip: 'Unfiltered share: sensitive-value masking was turned off at creation — visitors see verbatim output (possibly tokens / passwords / keys). Distribute the link with care',
+      resultNote: 'Sensitive-value masking is off: visitors will see verbatim output (unfiltered) — make sure the recipient environment is trusted before sharing the link',
+      resultDescLive: 'Visitors can watch this terminal’s live output read-only via the link (unfiltered: verbatim output, sensitive values are not masked). Expires after 30 minutes by default; revoke anytime',
+      resultDescFrozen: 'Visitors can view a frozen snapshot of this terminal’s output at creation time via the link (unfiltered: verbatim output, sensitive values are not masked; content does not follow later output). Force-expires within 24 hours; revoke anytime',
+      ttlCapNote: 'Unfiltered shares are capped at 24 hours: longer choices (including permanent) are clamped to 24 hours on save',
+    },
+    // Terminal output share options dialog (P-20261106-9): masking + watermark
+    // chosen before creating a live view / output snapshot
+    termOptions: {
+      liveDesc: 'Visitors watch this terminal’s live output read-only via the link; it expires after 30 minutes by default',
+      frozenDesc: 'Turn the terminal’s current output into a frozen snapshot link; it stays accessible after the session closes, kept 30 days by default',
+      maskLabel: 'Sensitive-value masking',
+      maskNote: 'Tokens / password assignments / cloud keys in the output are replaced with *** (pattern heuristics, not absolute)',
+      maskOffWarn: 'With masking off, output is exposed verbatim to visitors (possibly tokens / passwords / keys) — recommended only for trusted intranet collaboration',
+      maskOffFrozenTtl: 'Unfiltered snapshots contain raw sensitive text; the link is force-expired within 24 hours and cannot be extended',
+      maskFixedNote: 'Masking is fixed at creation: it cannot be toggled while the share is live — to change it, revoke and re-share (a new link is generated)',
+      confirm: 'Create share',
+      confirmUnfiltered: 'Create anyway (unfiltered)',
+      egressTitle: 'Turn off sensitive-value masking?',
+      egressIntroLive: 'The live view of “{name}” will no longer mask output: tokens, passwords and keys will be shown verbatim to everyone who opens the link. Continue only for trusted intranet collaboration.',
+      egressIntroFrozen: 'The output snapshot of “{name}” will no longer mask sensitive values: raw text is written into the snapshot and shown verbatim; the link is force-expired within 24 hours. Continue only for trusted intranet collaboration.',
+      egressConfirm: 'I understand the risk, continue',
+      modeMismatch: 'This session already has a live share; its existing masking setting was kept. To change it, “End live” first and re-share',
+      // TTL / passphrase exposure in the terminal options dialog (P-20261107-4);
+      // live vs snapshot tier semantics: see TERM_LIVE_TTL_OPTIONS note in utils/shareTtl
+      ttlLiveDefault: 'Default (30 minutes)',
+      ttlSixHours: '6 hours',
+      ttlTwentyFourHours: '24 hours (max)',
+      ttlLiveNote: 'Live views are temporary: they end automatically after 30 minutes by default, up to 24 hours; re-sharing the same session does not extend the countdown',
+      ttlFrozenNote: 'Snapshots are kept 30 days by default; pick a different window here (takes effect right after creation). Unfiltered snapshots are capped at 24 hours',
+    },
     // Guest message board owner side (P-20261006-13): "messages N" badge + read-only list panel —
     // one-way flow, replies live in IM; cleanup = single delete / clear. notify.* are the
     // server-side titleKey/bodyKey templates for new-message notifications
@@ -2792,6 +2843,41 @@ export default {
       revoked: 'Visitor input access revoked, session input returned to you',
       approveAction: 'Approve visitor input request ({nick})',
       revokeAction: 'Revoke visitor input ({nick})',
+    },
+    // Writable share (P-20261106-8 "visitor can type" mode): visitor keystrokes
+    // reach the terminal PTY through the WS upstream bridge — remote assistance
+    // semantics. Enabling = egress warning + forced passphrase + confirm; off /
+    // revoke tears down every upstream connection (revocation is always safe)
+    writable: {
+      menuOn: 'Writable input: on',
+      menuOff: 'Writable input: off',
+      enable: 'Enable writable',
+      enableTitle: 'Enable writable input (remote assistance)',
+      enableConfirm: 'Once enabled, visitors holding the link (+passphrase) can type straight into the terminal behind "{name}" — equivalent to handing over your keyboard. Output-side masking stays on; your keyboard yields while a visitor types; you can revoke anytime. Enable now?',
+      passTitle: 'Writable share requires a passphrase',
+      passLabel: 'Set an access passphrase (visitors must verify before opening)',
+      passPh: 'Enter a passphrase (≤64 bytes)',
+      passHint: 'The short link is a bearer credential that gets forwarded in chats — in writable mode the blast radius is "shell access", and a passphrase is the proportionate compensation.',
+      passRequired: 'Passphrase cannot be empty',
+      on: 'Writable input enabled — visitors can type (your keyboard yields while they do)',
+      off: 'Writable input disabled — upstream connections closed, visitor page falls back to read-only',
+      ttlHint: 'Consider shortening this share\'s TTL — exposure window and authorization surface grow together',
+      revokeAction: 'Revoke visitor input ({n} connection(s))',
+      bulkOn: 'Enable writable',
+      bulkOnTitle: 'Batch-enable writable input',
+      bulkOnConfirm: 'Enable writable input on {n} selected share(s): {names}. Entries without a passphrase will be skipped (set one first). Continue?',
+      bulkDoneOn: 'Writable input enabled on {n} share(s)',
+      bulkOff: 'Disable writable',
+      bulkOffTitle: 'Batch-disable writable input',
+      bulkOffConfirm: 'Disable writable input on {n} selected share(s): {names}. Ongoing visitor input connections will close immediately. Continue?',
+      bulkDoneOff: 'Writable input disabled on {n} share(s)',
+      bulkPartial: '{ok} succeeded, {fail} failed — per-item details in the notification center',
+      pasteReviewTitle: 'Visitor paste pending approval — "{name}"',
+      pasteReviewMeta: 'Visitor {visitor} pasted a block (auto-denied after 60 seconds)',
+      approve: 'Approve & inject',
+      deny: 'Deny',
+      pasteApproved: 'Approved — the pasted block was injected into the terminal',
+      pasteDenied: 'Denied — the pasted block was not injected',
     },
     // Retired-link leak watch (P-20261008-2): alert + badge for retired links
     // still being accessed after rotation — a zero-false-positive leak signal;
@@ -2913,6 +2999,7 @@ export default {
     title: 'Remote Manager',
     addHost: 'Add host',
     searchPlaceholder: 'Search hosts',
+    sidebarResizeTip: 'Drag to resize host list width',
     noHosts: 'No remote hosts yet',
     openTerminal: 'Open terminal',
     newTerminal: 'New terminal',
@@ -3351,6 +3438,13 @@ export default {
       promptHeader: 'This terminal command failed (exit {exit}). Locate the cause and fix it:\nCommand: {command}',
       success: 'Agent session created (failed command and output included)',
     },
+    // Mouse-takeover hint bar (P-20261106-6): shown while mouse reporting
+    // (DECSET 1000/1002/1003) is active — plain drag is consumed by the app,
+    // Shift+drag goes through local selection into the clipboard
+    mouseModeHint: {
+      text: 'App has taken over the mouse — hold Shift and drag to select and copy text',
+      dismiss: 'Don\'t show again',
+    },
     exportText: 'Export as text',
     copyDone: 'Copied to clipboard',
     copyFailed: 'Copy failed',
@@ -3729,6 +3823,10 @@ export default {
       notFoundGeneric: 'Resource does not exist or has been removed',
       fileExists: 'File already exists',
       invalidFileName: 'Incompatible file name: reserved Windows device name, or ends with a dot/space',
+      notesConflict: 'The note was modified externally: choose "Overwrite with mine / Load server version / Save as new note" in the conflict bar',
+      notesTooLarge: 'Note content exceeds the 256KB limit: trim it and retry',
+      notesTitleTooLong: 'Note title exceeds the 200-byte limit: use a shorter title',
+      notesGlobalLimit: 'Reached the 100-notes library limit (trash included): delete some or purge trashed notes',
       notGitRepo: 'Not a Git repository (add it as a plain directory project instead)',
       // Hunk discard conflict (P-20261003-49): server marker "hunk no longer applies"
       hunkChanged: 'This change block has changed and cannot be discarded directly (the file was modified after the block was derived)',
@@ -4476,6 +4574,7 @@ export default {
   },
   home: {
     subtitle: 'Lightweight Coding Platform',
+    aboutVersion: 'About & version',
     addProject: 'Add Project',
     noProjects: 'No projects added yet',
     addFirst: 'Add your first project',
@@ -4884,16 +4983,47 @@ export default {
   // Project notes panel (P-20261002-110): human-agent shared scratch layer
   notes: {
     panel: {
-      title: 'Project Notes',
+      title: 'Notes',
       edit: 'Edit',
       preview: 'Preview',
-      placeholder: '# Handoff\n\n- TODO: …\n- Decisions: …\n(agents can read and write this note too)',
+      // P-20261108-4: no template placeholder on new/empty notes — empty values
+      // mean the textarea shows no hint (vue-i18n returns '' for a registered
+      // empty message, no fallback/missing warning). P-20261108-3 single library:
+      // the former placeholder/placeholderGlobal pair collapsed into one key
+      placeholder: '',
       dirty: 'Unsaved…',
       saving: 'Saving…',
       saveFailed: 'Failed to save notes',
       tooLarge: 'Notes exceed the 256KB limit and were not saved',
       loadFailed: 'Failed to load notes',
-      noProject: 'Select a project first',
+      // Multi-doc notes library (P-20261107-2): list/tabs/trash/conflict trio
+      listToggle: 'Notes list',
+      create: 'New note',
+      createFailed: 'Failed to create note',
+      rename: 'Rename',
+      renameFailed: 'Rename failed',
+      renamePrompt: 'New title',
+      untitled: 'Untitled note',
+      searchPlaceholder: 'Search by title…',
+      noNotes: 'No notes yet — click + to create',
+      trash: 'Move to trash',
+      trashFailed: 'Failed to move to trash',
+      trashSection: 'Trash (recoverable for 30 days)',
+      trashEmpty: 'Trash is empty',
+      restore: 'Restore',
+      restoreFailed: 'Restore failed',
+      purge: 'Delete permanently (irreversible)',
+      purgeConfirm: 'Click again to confirm permanent deletion',
+      purgeFailed: 'Permanent deletion failed',
+      conflictDetected: 'The note was modified externally (agent or another device)',
+      conflictOverwrite: 'Overwrite with mine',
+      conflictLoad: 'Load server version',
+      conflictSaveAs: 'Save as new note',
+      conflictCopySuffix: 'conflict copy',
+      // Quick-save flash & naming (P-20261107-5; its Global|Project source-switch
+      // keys retired with the P-20261108-3 single library)
+      saved: 'Saved',
+      saveNameTitle: 'Name this note',
     },
     // "Deposit to notes" secondary entry (P-20261003-292): terminal-state task
     // conclusions appended to the shared project notes on the human's behalf
@@ -4901,12 +5031,25 @@ export default {
       action: 'Deposit to notes',
       noProject: 'No project resolved for this task — select a project first',
       untitledTask: 'Untitled task',
-      saved: 'Deposited to project notes — refine it in the notes panel',
-      failed: 'Failed to write project notes',
+      // P-20261108-3 single library: deposits land in one "[project] Handover" note
+      // (append when found, create only when missing)
+      handoverTitle: 'Handover',
+      saved: 'Deposited to note "{title}" — refine it in Notes',
+      failed: 'Failed to write to notes',
       fieldResult: 'Result',
       fieldWhat: 'What was done',
       fieldDecisions: 'Key decisions',
       fieldLeftovers: 'Leftovers',
+    },
+    // Single-library migration resume banner (P-20261108-3): shown when merging
+    // legacy project notes stopped because the library is full
+    migration: {
+      pending: '{n} legacy project note(s) not yet merged into the notes library',
+      pendingFull: '{n} legacy project note(s) could not be merged because the notes library is full (100 notes, trash included): delete notes or purge the trash, then click "Continue migration"',
+      resume: 'Continue migration',
+      resumed: 'Merged {n} legacy project note(s) (titles prefixed with "[project]")',
+      stillPending: '{n} note(s) still pending: the notes library is full, free up space first',
+      failed: 'Migration failed',
     },
   },
   git: {
@@ -6975,7 +7118,8 @@ export default {
   // Keymap customization (P-20261002-28 layout domain, P-20261003-111 terminal domain,
   // P-20261008-14 editor domain): keymap.* prefix — rebind actions per domain group in
   // Settings → Shortcuts (defaults + localStorage overrides, stores/keymap.ts)
-  keymap: {    desc: 'Global layout, terminal and editor shortcuts. Click "Rebind" then press the new combo to apply (Esc to cancel). Monaco built-in shortcuts (find/replace/multi-cursor etc.) and browser-reserved combos (Ctrl+N/T etc.) are not rebindable; same-domain collisions resolve by list order, cross-domain ones by scope layering — conflicting rows are flagged in red.',
+  keymap: {
+    desc: 'Global layout, terminal and editor shortcuts. Click "Rebind" then press the new combo to apply (Esc to cancel). Monaco built-in shortcuts (find/replace/multi-cursor etc.) and browser-reserved combos (Ctrl+N/T etc.) are not rebindable; same-domain collisions resolve by list order, cross-domain ones by scope layering — conflicting rows are flagged in red.',
     capturePrompt: 'Press the new key combo…',
     captureCancel: 'Esc to cancel',
     reservedBlocked: 'This combo is reserved by the browser and cannot be used',
@@ -6992,6 +7136,8 @@ export default {
     conflictCrossFocusTerm: 'Layers with global action "{name}": this action only fires while the terminal is focused',
     conflictCrossFocusEditor: 'Editor action "{name}" only wins while the editor is focused; this action fires elsewhere',
     conflictCrossFocusEditorSelf: 'Layers with "{name}": this action only fires while the editor is focused',
+conflictCrossFocusNotesSelf: 'Layers with "{name}": this action only fires while the notes panel is focused',
+conflictCrossFocusNotes: 'Notes-panel action "{name}" only wins while the notes panel is focused; this action fires elsewhere',
     // Save-time conflict warning (P-20261003-106): per-entry hint lines + scope/static key labels
     conflictTitle: 'Keybinding conflict',
     conflictSaveAnyway: 'Save anyway',
@@ -6999,6 +7145,7 @@ export default {
       global: 'Global layout',
       terminal: 'Terminal',
       editor: 'Editor',
+      notes: 'Notes panel',
     },
     line: {
       actionShadowed: 'Collides with "{name}": the other binding wins on keypress, this action will not fire',
@@ -7013,6 +7160,8 @@ export default {
       actionCrossFocusTerminal: 'Shares this key with global action "{name}": this action only fires while the terminal is focused, the other fires elsewhere',
       actionCrossFocusEditor: 'Shares this key with editor action "{name}": the other wins while the editor is focused, this action fires elsewhere',
       actionCrossFocusEditorSelf: 'Shares this key with "{name}": this action only fires while the editor is focused, the other fires elsewhere',
+      actionCrossFocusNotesSelf: 'Shares this key with "{name}": this action only fires while the notes panel is focused, the other fires elsewhere',
+      actionCrossFocusNotes: 'Shares this key with notes-panel action "{name}": the other wins while the notes panel is focused, this action fires elsewhere',
     },
     invScope: {
       editor: 'editor',
@@ -7086,6 +7235,10 @@ export default {
       editorSave: 'Save current file (editor)',
       editorBookmarkToggle: 'Toggle bookmark (cursor line)',
       editorInlineEdit: 'Inline AI edit selection (active session)',
+      // Notes panel domain (P-20261107-5): save/create/rename (useNotesKeyboard focus scope)
+      notesSave: 'Save current note (name it if untitled)',
+      notesCreate: 'New note',
+      notesRename: 'Rename current note',
     },
   },
   // UI zoom (P-20261002-2): appearance.zoom.* prefix — in-app zoom levels (mirrors VS Code window.zoomLevel)
@@ -7976,6 +8129,10 @@ export default {
           revoke: 'Visitor direct input revoked',
           input: 'Visitor direct input batch',
         },
+        // Writable share (P-20261106-8): toggle / input batch / paste review audit verbs
+        writable: 'Writable share toggled',
+        writableInput: 'Visitor writable input batch',
+        writablePaste: 'Writable paste review',
       },
       workspace: {
         export: 'Export workspace backup',
@@ -7998,6 +8155,12 @@ export default {
         sensitive_read: 'Sensitive file read',
         replace: 'Batch replace (server-side)',
         replace_restore: 'Replace history restore',
+      },
+      notes: {
+        delete: 'Move note to trash',
+        restore: 'Restore note from trash',
+        purge: 'Permanently delete note',
+        migrated: 'Legacy project notes merged into notes library',
       },
       project: {
         delete: 'Delete project',
@@ -8248,6 +8411,12 @@ export default {
       title: 'Config file corrupted — started with defaults',
       body: 'The original config could not be parsed ({err}); the bad file was preserved at {file}. Settings such as port and proxy fell back to defaults — after fixing, merge the preserved file back into config.json and restart',
       bodyUnpreserved: 'The original config could not be parsed ({err}) and preservation failed; the bad file remains at {file} and settings fell back to defaults — check data directory permissions, repair it manually and restart',
+    },
+    // Single-library notes migration stopped on a full library (P-20261108-3):
+    // startup notice template (action opens the notes view to resume)
+    notesMigration: {
+      title: 'Notes library full: {pending} legacy project note(s) not merged',
+      body: 'After the upgrade, legacy project notes are merged into the project-independent notes library (titles prefixed with "[project]"), but the library has reached its 100-note limit (trash included), so migration stopped and the content is kept as is. Delete notes or purge the trash, then click "Continue migration" in the notes view, or restart the service to resume automatically',
     },
   },
   // Local environment self-check (P-20261003-317: command palette entry, GET

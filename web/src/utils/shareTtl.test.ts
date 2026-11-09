@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   SHARE_TTL_PRESETS, shareTtlDateDisabled, shareTtlExpiresAt, shareTtlFromExpiresAt, shareTtlLabelKey,
+  TERM_LIVE_TTL_OPTIONS,
 } from './shareTtl'
 
 const HOUR = 60 * 60 * 1000
@@ -84,5 +85,18 @@ describe('shareTtlDateDisabled', () => {
     expect(shareTtlDateDisabled(todayStart - DAY)).toBe(true)
     expect(shareTtlDateDisabled(todayStart)).toBe(false)
     expect(shareTtlDateDisabled(todayStart + DAY)).toBe(false)
+  })
+})
+
+describe('TERM_LIVE_TTL_OPTIONS（终端直播档位，P-20261107-4）', () => {
+  it('首档=跟随默认（0 不发字段）、上限 24h、键唯一且可翻译', () => {
+    expect(TERM_LIVE_TTL_OPTIONS[0]).toMatchObject({ minutes: 0, i18nKey: 'share.termOptions.ttlLiveDefault' })
+    expect(TERM_LIVE_TTL_OPTIONS[TERM_LIVE_TTL_OPTIONS.length - 1]!.minutes).toBeLessThanOrEqual(1440)
+    const keys = TERM_LIVE_TTL_OPTIONS.map((p) => p.i18nKey)
+    expect(new Set(keys).size).toBe(keys.length)
+    for (const p of TERM_LIVE_TTL_OPTIONS) {
+      expect(p.i18nKey.startsWith('share.')).toBe(true)
+      expect(p.minutes).toBeGreaterThanOrEqual(0)
+    }
   })
 })

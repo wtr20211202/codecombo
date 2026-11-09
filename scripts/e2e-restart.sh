@@ -19,7 +19,11 @@
 set -e
 BUILD="${1:-}"
 PORT="${2:-9999}"
+# REPO 归一为绝对路径（调用方传相对路径时按调用 cwd 展开）：它既是构建/播种的
+# cd 目标，也会经 e2e-seed.sh 注册进实例成为项目路径——相对路径会让按注册路径
+# 逐字推导的下游（claude 项目级会话编码目录等）整体落空
 REPO="${3:-$(cd "$(dirname "$0")/.." && pwd)}"
+REPO="$(cd "$REPO" 2>/dev/null && pwd || echo "$REPO")"
 FRESH="${SC_E2E_FRESH:-1}"
 DATA="${SC_E2E_DATA_DIR:-.e2e-data}"
 SKIP_SEED="${SC_E2E_SKIP_SEED:-0}"

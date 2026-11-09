@@ -19,6 +19,7 @@ import {
   useRemoteConsoleTabs, type ConsoleTab, type RemotePaneApi,
 } from '../../composables/useRemoteConsoleTabs'
 import { useRemoteHostTransfer } from '../../composables/useRemoteHostTransfer'
+import SidebarResizer from '../../components/common/SidebarResizer.vue'
 import RemoteConsoleHeader from '../../components/remote/RemoteConsoleHeader.vue'
 import RemoteConsoleSessions from '../../components/remote/RemoteConsoleSessions.vue'
 import TerminalPaneContextMenu from '../../components/terminal/TerminalPaneContextMenu.vue'
@@ -70,6 +71,13 @@ const booting = ref(true)
 const showSnippetPanel = ref(false)
 // 主机侧栏折叠（终端全宽模式），持久化到 uiState.remoteConsole
 const sidebarCollapsed = ref(false)
+// 主机侧栏宽度可调（P-20261106-5）：200-480px 拖拽 + localStorage 记忆
+// （sc.remoteConsole.sidebarWidth，键名约定 sc.<panel>.sidebarWidth）；
+// 拖拽/记忆/键盘微调/双击复位全在 SidebarResizer（useSidebarWidth）内，本视图只持值
+const HOST_LIST_W_MIN = 200
+const HOST_LIST_W_MAX = 480
+const HOST_LIST_W_DEFAULT = 260
+const hostListWidth = ref(HOST_LIST_W_DEFAULT)
 
 // 各 tab 终端实例（发送常用命令 + 右键菜单动作下发；能力与项目终端同层）
 const paneRefs = new Map<string, RemotePaneApi>()
@@ -387,15 +395,29 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeyDown))
 
     <div class="remote-body">
       <!-- 左侧主机列表（目录分组 / 复制粘贴 / 拖拽移动 / 页内增删改；可折叠给终端全宽；
-           P-20261030-3 卡片点击 = 编辑弹窗，开终端走卡片快捷钮/菜单 → open 事件） -->
+           P-20261030-3 卡片点击 = 编辑弹窗，开终端走卡片快捷钮/菜单 → open 事件；
+           宽度可调 P-20261106-5：把手拖拽 + localStorage 记忆，pane 区自适应由
+           xterm ResizeObserver 补齐，无需 refit 回调） -->
       <RemoteHostList
         v-show="!sidebarCollapsed"
         v-model:groups="groups"
+        :width="hostListWidth"
         :creating="creating"
         :booting="booting"
         @open="openTerminal"
         @add-host="openCreateHost"
         @manage-host="onManageHost"
+      />
+
+      <!-- 侧栏宽度拖拽把手（折叠时随侧栏隐藏；键盘/双击语义在组件内） -->
+      <SidebarResizer
+        v-show="!sidebarCollapsed"
+        v-model="hostListWidth"
+        storage-key="sc.remoteConsole.sidebarWidth"
+        :min="HOST_LIST_W_MIN"
+        :max="HOST_LIST_W_MAX"
+        :default-width="HOST_LIST_W_DEFAULT"
+        :label="t('remoteConsole.sidebarResizeTip')"
       />
 
       <!-- 右侧主区（空态 / tab 栏 / pane 区；常用命令面板经 slot 注入 main 容器） -->

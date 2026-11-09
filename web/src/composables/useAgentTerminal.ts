@@ -1,5 +1,6 @@
 import { computed, effectScope, ref, watch } from 'vue'
 import type { Router } from 'vue-router'
+import router from '../router'
 import { useAssistantTaskStore } from '../stores/assistantTask'
 import { useTerminalSessionsStore } from '../stores/terminal-sessions'
 import { useTerminalStore } from '../stores/terminal'
@@ -248,15 +249,17 @@ async function setMode(next: AgentTerminalMode) {
   if (next === 'docked') closeMainViews()
 }
 
-/** 主区互斥：docked 管理页打开时关闭远程控制台/分享管理/dsh 控制台/项目仪表盘
- *  视图（usePanelLayout 无法反向引用本模块——方向在其侧经 AgentTerminal 组件的
- *  watch 兜底） */
+/** 主区互斥：docked 管理页打开时关闭远程控制台/分享管理/dsh 控制台/项目仪表盘/
+ *  笔记独立视图（P-20261108-2；首页 overlay 同为本链收起——笔记开态与首页宿主
+ *  共用 usePanelLayout 单例）。usePanelLayout 无法反向引用本模块——方向在其侧经
+ *  AgentTerminal 组件的 watch 兜底 */
 function closeMainViews() {
   const layout = usePanelLayout()
   layout.showRemoteConsole.value = false
   layout.showShareManager.value = false
   layout.closeDshConsole()
   layout.closeDashboard()
+  layout.closeNotesView()
 }
 
 /** 活动栏语义：docked 打开中再点 = 收起；否则以 docked 打开 */
@@ -311,6 +314,10 @@ export function resetAgentTerminalStateForTest() {
   activateIntent.value = ''
   try { localStorage.removeItem(EXPANDED_KEY) } catch { /* ignore */ }
   try { localStorage.removeItem(OPEN_STATE_KEY) } catch { /* ignore */ }
+  projectDockedMem.clear()
+  // 项目切换 watch 重绑当前 active pinia（vitest setup 每用例换 pinia 实例，
+  // 安装期闭包的 store 会被孤立；应用运行期本行不执行，watch 终身有效）
+  if (navLayoutMemoryInstalled) watchProjectSwitch()
   useTerminalSessionsStore().resetForTest()
 }
 
@@ -363,10 +370,90 @@ function consumeActivateIntent(): void {
   activateIntent.value = ''
 }
 
+// ============== 导航语义：回首页=纯首页，进项目恢复此前布局（P-20261107-3） ==============
+// visible/mode 是本模块级状态（跨路由存活），首页 overlay 与项目内嵌双宿主吃同一
+// 份——「项目内开着管理页点回首页」会把开态带进首页（导航动作没有区分「用户主动
+// 开」与「路由切换路过」）。两条导航语义在 useAgentTerminal 首次调用时一次性安装：
+// ①路由切到首页 = 路过收起：hideDocked() 只关 docked 管理页；float/mini 是全局
+//   悬浮层跟随导航（既有行为不动）；用户在首页仍可点工具条图标主动开（open()）。
+// ②进项目 = 恢复该项目此前布局：uiState.layout 是实例级单份（切项目即被新快照
+//   整体覆盖）、工作区 snapshots 是手动存档——per-项目 docked 开合没有既有持久
+//   化，这里自建会话级记忆（页内存，刷新即丢；跨刷新恢复仍走 OPEN_STATE_KEY
+//   全局 boot 语义，二者互补不冲突）。有记忆才恢复（无记忆=本会话首次进入，
+//   沿用现状自然流入，不强改）；记忆为关时也恢复关（TopBar 切项目不再把上一
+//   个项目的开态带过去）。
+const projectDockedMem = new Map<string, boolean>()
+// 键=项目 id、值=单布尔，页生命周期内自然有界；上限仅防极端会话无界增长
+const PROJECT_DOCKED_MEM_MAX = 200
+
+function captureProjectDocked(projectId: string): void {
+  if (!projectId) return
+  projectDockedMem.set(projectId, visible.value && mode.value === 'docked')
+  if (projectDockedMem.size > PROJECT_DOCKED_MEM_MAX) {
+    const oldest = projectDockedMem.keys().next().value
+    if (oldest !== undefined) projectDockedMem.delete(oldest)
+  }
+}
+
+function restoreProjectDocked(projectId: string): void {
+  const mem = projectId ? projectDockedMem.get(projectId) : undefined
+  if (mem === undefined) return
+  if (mem) {
+    // float/mini 是用户当前活跃意图且全局跟随导航（既有行为）——不降级打断
+    if (visible.value && mode.value !== 'docked') return
+    void open('docked')
+  } else {
+    hideDocked()
+  }
+}
+
+let navLayoutMemoryInstalled = false
+// 项目切换 watch 的停止句柄：resetAgentTerminalStateForTest 重绑用（vitest 每用例
+// setActivePinia(createPinia())，安装期闭包的 store 实例会被孤立——应用运行期
+// pinia 终身单例不存在此问题，重绑仅为单测等价性）
+let stopProjectSwitchWatch: (() => void) | null = null
+
+/** 订阅项目切换（TopBar 选择器/实例 smart-stay 同路由换 id）：在项目路由内换
+ *  项目 = 离旧项目采集 + 进新项目恢复。首页 enterProject 先改 id 再 push——
+ *  此刻不采集（旧项目的布局早在离项目路由时已采集，此刻模块态已收起，误采集
+ *  会用「关闭态」覆盖真实记忆），恢复交给 afterEach */
+function watchProjectSwitch(): void {
+  stopProjectSwitchWatch?.()
+  stopProjectSwitchWatch = effectScope(true).run(() => {
+    const projectStore = useProjectStore()
+    return watch(() => projectStore.currentProjectId, (next, prev) => {
+      if (next === prev) return
+      if (router.currentRoute.value.name !== 'project') return
+      captureProjectDocked(prev)
+      restoreProjectDocked(next)
+    })
+  }) ?? null
+}
+
+function installNavLayoutMemory(): void {
+  if (navLayoutMemoryInstalled) return
+  // 全局 setup 把 vue-router 整体 mock（业务单测不触路由惯例）——router 为 undefined
+  // 的环境跳过安装：导航语义不参与纯状态单测，需要它的用例文件级还原真实现
+  // （本文件 useAgentTerminal.test.ts / __tests__/utils/presentAtoms.test.ts 同款）
+  if (!router || typeof router.afterEach !== 'function') return
+  navLayoutMemoryInstalled = true
+  watchProjectSwitch()
+  // boot 首导航（from=null）在安装点之前后到皆可：Map 必空、模块态未恢复，
+  // 采集/恢复/收起均为无操作，boot 恢复仍由 consumePendingOpenState 承担
+  router.afterEach((to, from) => {
+    const projectId = useProjectStore().currentProjectId
+    // 离项目路由：先采集后收起（顺序不可换）
+    if (from.name === 'project' && to.name !== 'project') captureProjectDocked(projectId)
+    if (to.name === 'home') hideDocked()
+    if (to.name === 'project' && from.name !== null && from.name !== 'project') restoreProjectDocked(projectId)
+  })
+}
+
 export function useAgentTerminal() {
   const store = useTerminalSessionsStore()
   installSessionJumpWatcher()
   installOpsActivateListener()
+  installNavLayoutMemory()
   // 系统会话视图（兼容旧 AgentTermSession 形状；launched 仅建会话响应时有意义）
   const sessions = computed<AgentTermSession[]>(() =>
     store.systemSessions.map(s => ({ id: s.id, name: s.name, runtime: s.runtime || '', runtimeVersion: s.runtimeVersion, launched: true, path: s.path || '', currentDir: s.currentDir, sensitive: s.sensitive, initialPrompt: s.initialPrompt, origin: s.origin, createdAt: s.createdAt, derived: s.derived, resumed: s.resumed })),

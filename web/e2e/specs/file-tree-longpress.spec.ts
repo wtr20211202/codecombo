@@ -30,7 +30,11 @@ async function enterProject(page: Page) {
 // 「长按后浏览器补发 click」与手势判定解耦，纯守计时/取消逻辑。
 // 事件派发在 elementFromPoint 命中的行内子元素（.item-name 等）上冒泡到
 // .tree-item（行 @pointerdown 挂行元素，与真实触屏目标路径同形）。
+// 取点前先 scrollIntoViewIfNeeded：树内容高过滚动区时（种子项目文件数增长），
+// 虚拟窗口尾部的行虽已渲染但布局在可视区之下（elementFromPoint 命中 null），
+// 真实触屏用户也须先把目标行滚进可视区才能按——此步即该用户路径。
 async function touchDown(page: Page, row: Locator) {
+  await row.scrollIntoViewIfNeeded()
   const box = await row.boundingBox()
   if (!box) throw new Error('tree item 不可定位')
   const x = box.x + box.width / 2
@@ -44,6 +48,7 @@ async function touchDown(page: Page, row: Locator) {
 }
 
 async function touchUp(page: Page, row: Locator) {
+  await row.scrollIntoViewIfNeeded()
   const box = await row.boundingBox()
   if (!box) throw new Error('tree item 不可定位')
   const x = box.x + box.width / 2

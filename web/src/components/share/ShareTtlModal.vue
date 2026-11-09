@@ -107,6 +107,15 @@ async function onSave() {
       >
         {{ hint() }}
       </div>
+      <!-- 未过滤分享（P-20261106-9）：服务端强制 24h 上限——更长档位（含永久）
+           保存后收敛到 24h，先讲清楚免得「选了 7 天却变 24 小时」的意外 -->
+      <div
+        v-if="props.share?.unfiltered"
+        class="ttl-hint ttl-cap"
+        data-testid="sm-ttl-unfiltered-cap"
+      >
+        {{ t('share.unfiltered.ttlCapNote') }}
+      </div>
     </div>
     <template #footer>
       <div class="ttl-foot">
@@ -137,5 +146,6 @@ async function onSave() {
 .ttl-row { display: flex; align-items: center; gap: 8px; }
 .ttl-label { flex-shrink: 0; font-size: 12.5px; color: var(--text-secondary); }
 .ttl-hint { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.ttl-cap { color: var(--accent-red); }
 .ttl-foot { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

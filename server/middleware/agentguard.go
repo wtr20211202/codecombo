@@ -109,6 +109,15 @@ var guardedRoutes = []guardedRoute{
 	// 未知 action 一律走审批（失败闭合）。档案写入仍走 settings，但隧道
 	// 启动必须过本关口——「agent 私自暴露」的防线在运行态而非配置面。
 	{"/api/remoteaccess/tunnel", http.MethodPost, "远程接入隧道（公网暴露）"},
+	// 终端输出分享关闭敏感值遮蔽（P-20261106-9）：unfiltered=true = 服务端源头
+	// 遮蔽链关闭，终端原文（令牌/密码/密钥）经匿名短链出域（直播原样转发、
+	// 快照含原文落盘）——与远程接入隧道同级的暴露面放大，agent 不得未经审批
+	// 把原文推出去（人类在 UI 侧另有出域警示确认）。**body 感知**：遮蔽（缺省
+	// /false）是既有安全基线直放行——agent 代开直播/冻快照求援的存量语义零
+	// 变化；unfiltered=true 与超限/不可解析体一律走审批（失败闭合，
+	// shareUnfilteredAction）。op 两端点同文案，审批规则一条前缀覆盖
+	{"/api/share/terminal", http.MethodPost, "终端分享关闭敏感值遮蔽（原样出域）"},
+	{"/api/share/terminal-frozen", http.MethodPost, "终端分享关闭敏感值遮蔽（原样出域）"},
 	// 多实例同步推送（P-20261023-1）：一次调用把本端项目/上下文批量写到对端
 	// 文件系统（覆盖/新增面与批量替换同级，且跨机生效）——pull 侧落位是
 	// 本端文件写族（既有文件写面纪律覆盖），push 写对端无既有表项故单列。
@@ -224,6 +233,14 @@ func AgentGuard() gin.HandlerFunc {
 		// 放开写入）与缺失/解析失败一律走下方审批（失败闭合）。读体后原样
 		// 回填，审批重试路径的 handler 仍能解析 JSON（tunnelControlAction 同款）
 		if route.pattern == "/api/terminals/:id/input-lock" && terminalInputLockAction(c) == "lock" {
+			c.Next()
+			return
+		}
+		// 终端输出分享 body 感知豁免（P-20261106-9）：遮蔽（unfiltered 缺省/
+		// false）是安全基线直放行；仅 unfiltered=true（原样出域）与方向未知走
+		// 下方审批。读体后原样回填（同上两例）
+		if (route.pattern == "/api/share/terminal" || route.pattern == "/api/share/terminal-frozen") &&
+			shareUnfilteredAction(c) == "masked" {
 			c.Next()
 			return
 		}
@@ -529,6 +546,44 @@ func tunnelControlAction(c *gin.Context) string {
 // 失败闭合——tunnelControlBodyBytes 同款）
 const inputLockBodyBytes = 4 << 10
 
+// shareUnfilteredBodyBytes 终端分享创建读体上限（P-20261106-9）：载荷是会话 id
+// + 少量开关/口令，4KB 足够；超限按「方向未知」处理（继续审批，失败闭合）
+const shareUnfilteredBodyBytes = 4 << 10
+
+// shareUnfilteredAction 读取终端输出分享创建请求（POST /api/share/terminal |
+// terminal-frozen）的遮蔽方向并归一："masked"（unfiltered 缺省/false = 安全
+// 基线）/ "unfiltered" / ""（未知，P-20261106-9）。只读请求体并原样回填——
+// 直放行与审批重试两条路径的下游 handler 都要 ShouldBindJSON（terminalInputLock
+// Action 同款）。解码刻意用 json.Decoder 而非 Unmarshal：与 gin JSON 绑定同语义
+// （取首个 JSON 值、键名大小写不敏感、重复键取末值），守卫与 handler 对同一份
+// 字节必判出同一方向——Unmarshal 会把「合法 JSON + 尾随垃圾」判为失败，而 handler
+// 照样解出 unfiltered=true。空体判 masked（handler 必 400，不可能产出分享）；
+// 读体失败/超限/解码失败判未知（失败闭合）
+func shareUnfilteredAction(c *gin.Context) string {
+	if c.Request == nil || c.Request.Body == nil {
+		return "masked"
+	}
+	raw, err := io.ReadAll(c.Request.Body)
+	_ = c.Request.Body.Close()
+	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+	if err != nil || len(raw) > shareUnfilteredBodyBytes {
+		return ""
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return "masked"
+	}
+	var req struct {
+		Unfiltered *bool `json:"unfiltered"`
+	}
+	if json.NewDecoder(bytes.NewReader(raw)).Decode(&req) != nil {
+		return ""
+	}
+	if req.Unfiltered != nil && *req.Unfiltered {
+		return "unfiltered"
+	}
+	return "masked"
+}
+
 // terminalInputLockAction 读取 PUT /api/terminals/:id/input-lock 的 locked
 // 方向并归一（"lock"/"unlock"），供 AgentGuard 做加固方向直放行判定
 // （P-20261008-17）。只读请求体并原样回填——审批重试（X-Approval-ID 放行）
@@ -668,6 +723,11 @@ func denyApprovalRule(c *gin.Context, pattern, op, target, detail, ruleHit strin
 		"ruleHit":    ruleHit,
 	})
 }
+
+// IsAgentTokenRequest 请求是否持 sca_ 智能体令牌（导出面：handler 内联的
+// 「agent 无此权限」硬拒分支用——如笔记彻底删除，agent 通道只有可恢复的
+// 软删，不开放硬删）。AgentGuard 中间件内部判定同源
+func IsAgentTokenRequest(c *gin.Context) bool { return isAgentTokenRequest(c) }
 
 // isAgentTokenRequest 请求是否持 sca_ 智能体令牌（header 或 WS 子协议槽位）。
 // 仅机器令牌受限——用户本人的 scl_ 解锁令牌不受审批约束

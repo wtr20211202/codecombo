@@ -378,6 +378,10 @@ export default {
     clipHistoryPaste: '多剪贴板粘贴（从复制历史选一段插入）',
     // Markdown 模式循环（P-20261003-18）：md 三态切换键位（快捷键备忘单行）
     mdModeCycle: 'Markdown 模式循环（源码→预览→分屏，仅 .md 文件）',
+    // 笔记面板域（P-20261107-5）：notes 三键备忘单行（keymap 注册表动态行）
+    notesSave: '保存当前笔记（未命名且有内容时顺带命名）',
+    notesCreate: '新建笔记（未命名占位，命名后置）',
+    notesRename: '重命名当前笔记',
     monitorRefresh: '刷新大屏数据（值班大屏页内）',
     // 作用域标签与筛选（P-20261003-99）：条目按生效条件打标（分组=功能域、徽标=生效域）
     scopeAll: '全部',
@@ -386,7 +390,10 @@ export default {
     scopeTerminal: '终端',
     scopeApproval: '审批等待',
     scopeMonitor: '值班大屏',
+    scopeNotes: '笔记面板',
     scopeFilterLabel: '按作用域筛选',
+    // 笔记面板组（P-20261107-5）：notes 域三键（useNotesKeyboard 焦点域消费）
+    groupNotes: '笔记面板',
     // 审批键盘裁决（P-20261003-1）备忘单行：待裁决卡在屏且焦点不在输入面时生效
     groupApproval: '审批等待',
     approvalAllowOnce: '允许一次',
@@ -775,6 +782,9 @@ export default {
     terminalCopyOnSelectHint: '在任意终端（项目/终端管理/远程主机）中选中文本、松开鼠标即复制，与 claude code 行为一致；关闭后仍可用右键菜单或 Ctrl+Shift+C / Ctrl+C 复制',
     resetCloseConfirm: '重置关闭确认提示',
     resetCloseConfirmDesc: '已勾选「不再提示」时点此恢复二次确认弹窗',
+    // 鼠标接管提示重置（P-20261106-6）
+    resetMouseModeHint: '重置鼠标选择提示',
+    resetMouseModeHintDesc: '已关闭「应用已接管鼠标」提示时点此恢复显示（提示条会在应用开启鼠标上报时再次出现）',
     // 写链路背压诊断（P-20261004-47）：只读观测面
     terminalBackpressureTitle: '写链路背压诊断',
     terminalBackpressureSession: '会话',
@@ -840,6 +850,8 @@ export default {
       filesCount: '{n} 个文件',
       includeGit: '含 .git',
       globalContexts: '全局上下文（片段/运行时/审批规则/接续链/UI 偏好）',
+      // 笔记单元退役（P-20261108-3）：笔记是项目无关的单库，不随实例同步/迁移包搬运
+      notesRetiredHint: '笔记不随迁移包搬运（笔记已是项目无关的笔记库）：换机前请把需要保留的笔记内容复制到新机',
       oversizeWarn: '项目 {names} 预估超 2GB，打包与传输耗时较长；可取消勾选、或改「纯工作区」档（不勾 .git）减小体积。',
       oversizeAccept: '我已知晓包含超 2GB 项目，继续',
       passphrase: '包口令',
@@ -1767,7 +1779,6 @@ export default {
     lastSync: '上次同步 {time}（{dir}）',
     behindHint: '同步后本端又有改动（以 plan 预览为准）',
     contextTitle: '同步内容（上下文包）',
-    ctxNotes: '笔记',
     ctxSessions: '会话',
     ctxCrons: '定时任务',
     ctxSnippets: '片段',
@@ -1785,11 +1796,15 @@ export default {
       'peer-newer': '对端新',
       conflict: '冲突',
       new: '新增',
+      // 退役单元（P-20261108-3）：旧对端仍带的笔记单元——知情不执行
+      retired: '已退役',
     },
+    retiredHint: '笔记已改为项目无关的笔记库，不再随实例同步（对端为旧版本，此项不会执行）',
     kind: {
       project: '项目',
       sessions: '会话',
       notes: '笔记',
+      'notes-multi': '笔记库',
       crons: '定时',
       snippets: '片段',
       runtimes: '运行时',
@@ -2657,6 +2672,40 @@ export default {
       consumedBadge: '已失效',
       consumedTip: '此一次性分享已被查看，宽限窗已过，链接随之失效',
     },
+    // 未过滤分享（P-20261106-9）：创建时显式关闭了敏感值遮蔽（服务端源头遮蔽），
+    // 每个管理面显式可辨
+    unfiltered: {
+      typeBadge: '未过滤',
+      badgeTip: '未过滤分享：创建时关闭了敏感值遮蔽，访客看到原样输出（可能含令牌 / 密码 / 密钥），请谨慎分发链接',
+      resultNote: '已关闭敏感值遮蔽：访客将看到原样输出（未过滤）——请确认接收方环境可信后再分发链接',
+      resultDescLive: '访客可通过短链只读观看该终端的实时输出（未过滤：原样输出，不遮蔽敏感值），默认 30 分钟后自动过期，可随时撤销',
+      resultDescFrozen: '访客可通过短链查看该终端在创建时刻的输出定格快照（未过滤：原样输出，不遮蔽敏感值，内容不随后续输出更新），24 小时内强制失效，可随时撤销',
+      ttlCapNote: '未过滤分享的有效期上限为 24 小时：更长的档位（含永久）保存后会收敛到 24 小时',
+    },
+    // 终端输出分享选项弹层（P-20261106-9）：直播 / 输出快照创建前的遮蔽 + 水印选择
+    termOptions: {
+      liveDesc: '访客通过短链只读观看该终端的实时输出，默认 30 分钟后自动过期',
+      frozenDesc: '把该终端当前输出的定格快照生成为短链，会话关闭后仍可访问，默认 30 天',
+      maskLabel: '敏感值遮蔽',
+      maskNote: '输出中的令牌 / 密码赋值 / 云密钥自动替换为 ***（模式启发式，非绝对）',
+      maskOffWarn: '关闭后输出将原样暴露给访客（可能含令牌 / 密码 / 密钥等敏感信息）——仅建议在内网协作、接收方可信的场景使用',
+      maskOffFrozenTtl: '未过滤的快照含敏感原文，链接将在 24 小时内强制失效且不可延长',
+      maskFixedNote: '遮蔽设置在创建时定死：分享进行中不可切换，需要变更请先撤销后重新分享（将生成新链接）',
+      confirm: '创建分享',
+      confirmUnfiltered: '仍然创建（未过滤）',
+      egressTitle: '确认关闭敏感值遮蔽？',
+      egressIntroLive: '「{name}」的直播将不再遮蔽输出：令牌、密码、密钥等敏感值会原样展示给所有打开链接的人。仅在内网协作、接收方可信时继续。',
+      egressIntroFrozen: '「{name}」的输出快照将不再遮蔽敏感值：原文会写入快照并原样展示，链接 24 小时内强制失效。仅在内网协作、接收方可信时继续。',
+      egressConfirm: '我知道风险，继续创建',
+      modeMismatch: '该会话已有进行中的直播，已沿用其原遮蔽设置；如需更改请先「结束直播」后重新分享',
+      // 有效期/口令（P-20261107-4 终端弹层透出）：直播档位与快照档位的语义差异见
+      // utils/shareTtl TERM_LIVE_TTL_OPTIONS 注
+      ttlLiveDefault: '默认（30 分钟）',
+      ttlSixHours: '6 小时',
+      ttlTwentyFourHours: '24 小时（上限）',
+      ttlLiveNote: '直播是临时暴露面：默认 30 分钟后自动断流，最长可选 24 小时；重复分享同一会话不会续期倒计时',
+      ttlFrozenNote: '快照默认保留 30 天，可在此改期（创建后立即生效）；关闭遮蔽的快照最长保留 24 小时',
+    },
     // 访客留言板主人侧（P-20261006-13）：「留言 N」角标 + 只读列表面板——
     // 单向回流不做回复（IM 的活），出清通道 = 单删/清空；notify.* 为服务端
     // 新留言通知 titleKey/bodyKey 模板
@@ -2731,6 +2780,40 @@ export default {
       revoked: '已收回访客输入权，会话输入权已归还',
       approveAction: '批准访客输入申请（{nick}）',
       revokeAction: '收回访客输入（{nick}）',
+    },
+    // 可写分享（P-20261106-8「对方可直接输入」模式）：访客键入经 WS 上行桥
+    // 直注终端 PTY——远程协助语义。开启 = 警示确认 + 强制口令门 + confirm
+    // 三闸；关闭/收回即断全部上行连接（回收永远是安全方向）
+    writable: {
+      menuOn: '可写输入：已开启',
+      menuOff: '可写输入：关闭',
+      enable: '开启可写',
+      enableTitle: '开启可写输入（远程协助）',
+      enableConfirm: '开启后，持有链接（+口令）的访客可把键入直接写进「{name}」的终端——等价把键盘临时交给对方。输出侧敏感值遮蔽照常；你的键盘在访客输入期间将暂时让位；主人可随时一键收回。确认开启？',
+      passTitle: '可写分享需要访问口令',
+      passLabel: '设置访问口令（访客打开链接需先验证）',
+      passPh: '输入口令（≤64 字节）',
+      passHint: '短链是 bearer 凭据，会在聊天中转发——可写模式下泄露半径是「打 shell」，一道口令是成比例的补偿。',
+      passRequired: '口令不能为空',
+      on: '可写输入已开启——访客可键入（你的键盘将在访客输入期间让位）',
+      off: '可写输入已关闭——上行连接已断开，访客页回落只读',
+      ttlHint: '建议同步缩短该分享的有效期——暴露窗口与授权面成正比',
+      revokeAction: '收回访客输入（{n} 路）',
+      bulkOn: '开启可写',
+      bulkOnTitle: '批量开启可写输入',
+      bulkOnConfirm: '对所选 {n} 条分享开启可写输入：{names}。无口令的条目将被跳过（需先补设口令），确认继续？',
+      bulkDoneOn: '已对 {n} 条分享开启可写输入',
+      bulkOff: '关闭可写',
+      bulkOffTitle: '批量关闭可写输入',
+      bulkOffConfirm: '对所选 {n} 条分享关闭可写输入：{names}。进行中的访客输入连接将立即断开，确认继续？',
+      bulkDoneOff: '已对 {n} 条分享关闭可写输入',
+      bulkPartial: '{ok} 条成功，{fail} 条失败，逐条明细见通知中心',
+      pasteReviewTitle: '访客粘贴待审批——「{name}」',
+      pasteReviewMeta: '访客 {visitor} 粘贴了整块输入（60 秒内不决自动拒绝）',
+      approve: '批准注入',
+      deny: '拒绝',
+      pasteApproved: '已批准——粘贴块已注入终端',
+      pasteDenied: '已拒绝——粘贴块未注入',
     },
     // 退役短链外泄观测（P-20261008-2）：轮换作废的旧链接仍被访问的告警与
     // 徽标——零误报的外泄确认信号；notify.* 为服务端外泄告警 titleKey/bodyKey
@@ -2848,6 +2931,7 @@ export default {
     title: '远程管理',
     addHost: '添加主机',
     searchPlaceholder: '搜索主机',
+    sidebarResizeTip: '拖拽调整主机列表宽度',
     noHosts: '还没有远程主机',
     openTerminal: '开终端',
     newTerminal: '新终端',
@@ -3275,6 +3359,12 @@ export default {
       promptHeader: '终端里这条命令执行失败（exit {exit}），请定位原因并修复：\n命令：{command}',
       success: '智能体会话已创建（已携带失败命令与输出）',
     },
+    // 应用接管鼠标提示条（P-20261106-6）：鼠标上报（DECSET 1000/1002/1003）在位时
+    // 显示——普通拖选被应用消费，Shift+拖选才走本地选择进剪贴板
+    mouseModeHint: {
+      text: '应用已接管鼠标——按住 Shift 拖选可复制文本',
+      dismiss: '不再提示',
+    },
     exportText: '导出为文本',
     copyDone: '已复制到剪贴板',
     copyFailed: '复制失败',
@@ -3647,6 +3737,10 @@ export default {
       notFoundGeneric: '资源不存在或已被删除',
       fileExists: '文件已存在',
       invalidFileName: '文件名不兼容：Windows 保留设备名或以点/空格结尾',
+      notesConflict: '笔记已被外部修改：请在冲突条选择「用我的覆盖 / 载入服务端版本 / 另存为新篇」',
+      notesTooLarge: '笔记内容超出 256KB 上限：请精简后重试',
+      notesTitleTooLong: '笔记标题超出 200 字节上限：请换短标题',
+      notesGlobalLimit: '笔记库已达 100 篇上限（含回收站）：请删减或彻底删除回收站篇',
       notGitRepo: '该目录不是 Git 仓库（可改用「本地目录」方式添加为普通项目）',
       // hunk 回滚冲突（P-20261003-49）：服务端稳定标记 hunk no longer applies
       hunkChanged: '此变更块已变化，无法直接回滚（文件在该块派生后又被修改）',
@@ -4375,6 +4469,7 @@ export default {
   },
   home: {
     subtitle: '轻量级 Coding 平台',
+    aboutVersion: '关于与版本',
     addProject: '添加项目',
     noProjects: '还没有添加任何项目',
     addFirst: '添加第一个项目',
@@ -4781,28 +4876,69 @@ export default {
   // 项目笔记面板（P-20261002-110）：人机共享便签层
   notes: {
     panel: {
-      title: '项目笔记',
+      title: '笔记',
       edit: '编辑',
       preview: '预览',
-      placeholder: '# 交接说明\n\n- 待办：…\n- 决策记录：…\n（agent 也能读写这份笔记）',
+      // P-20261108-4：新建/空笔记不再展示模板占位文案——值留空即 textarea 无占位提示
+      // （vue-i18n 对已注册的空串消息原样返回 ''，不触发 fallback/missing 告警）。
+      // P-20261108-3 单库化：原 placeholder/placeholderGlobal 双键并为单键
+      placeholder: '',
       dirty: '待保存…',
       saving: '保存中…',
       saveFailed: '笔记保存失败',
       tooLarge: '笔记超出 256KB 上限，未能保存',
       loadFailed: '笔记加载失败',
-      noProject: '先选择一个项目',
+      // 多篇笔记库（P-20261107-2）：列表/tab/回收站/冲突三动作
+      listToggle: '笔记列表',
+      create: '新建笔记',
+      createFailed: '新建笔记失败',
+      rename: '重命名',
+      renameFailed: '重命名失败',
+      renamePrompt: '新的标题',
+      untitled: '无标题笔记',
+      searchPlaceholder: '按标题搜索…',
+      noNotes: '暂无笔记，点 + 新建',
+      trash: '移入回收站',
+      trashFailed: '移入回收站失败',
+      trashSection: '回收站（30 天内可恢复）',
+      trashEmpty: '回收站为空',
+      restore: '恢复',
+      restoreFailed: '恢复失败',
+      purge: '彻底删除（不可恢复）',
+      purgeConfirm: '再点一次确认彻底删除',
+      purgeFailed: '彻底删除失败',
+      conflictDetected: '笔记已被外部修改（agent 或其他设备）',
+      conflictOverwrite: '用我的覆盖',
+      conflictLoad: '载入服务端版本',
+      conflictSaveAs: '另存为新篇',
+      conflictCopySuffix: '冲突副本',
+      // 快捷保存反馈与命名（P-20261107-5；同期的「全局库|项目库」数据源切换键随
+      // P-20261108-3 单库化退役）
+      saved: '已保存',
+      saveNameTitle: '为笔记命名',
     },
     // 「沉淀到笔记」次级入口（P-20261003-292）：任务终态结论代写进人机共享笔记
     deposit: {
       action: '沉淀到笔记',
       noProject: '未找到可归属的项目，请先选择项目',
       untitledTask: '未命名任务',
-      saved: '已写入项目笔记，可在笔记面板编辑补充',
-      failed: '写入项目笔记失败',
+      // P-20261108-3 单库化：沉淀落笔记库「[项目名] 交接」单篇（找到即追加、没有才新建）
+      handoverTitle: '交接',
+      saved: '已写入笔记「{title}」，可在笔记中编辑补充',
+      failed: '写入笔记失败',
       fieldResult: '结果',
       fieldWhat: '做了什么',
       fieldDecisions: '关键决定',
       fieldLeftovers: '遗留项',
+    },
+    // 单库化存量迁移续迁横幅（P-20261108-3）：旧项目笔记并入笔记库满额中止时出现
+    migration: {
+      pending: '有 {n} 篇旧项目笔记尚未并入笔记库',
+      pendingFull: '有 {n} 篇旧项目笔记因笔记库已满（100 篇，含回收站）未能并入：删除笔记或彻底清理回收站后点「继续迁移」',
+      resume: '继续迁移',
+      resumed: '已并入 {n} 篇旧项目笔记（标题带「[项目名]」前缀）',
+      stillPending: '仍有 {n} 篇未并入：笔记库已满，请先腾出空间',
+      failed: '迁移失败',
     },
   },
   git: {
@@ -6817,7 +6953,7 @@ export default {
   // 收口编辑器域）：keymap.* 前缀——设置→快捷键分区按域分组改绑（默认表 +
   // localStorage 覆盖，stores/keymap.ts）
   keymap: {
-    desc: '全局布局、终端与编辑器域键位，点击「改键」后按下新组合键即生效（Esc 取消）。Monaco 内建快捷键（查找/替换/多光标等）与浏览器保留键（Ctrl+N/T 等）不可改；同域撞键按列表顺序先到先得，跨域撞键按作用域分层消解，冲突的键位标红提示。',
+    desc: '全局布局、终端、编辑器与笔记面板域键位，点击「改键」后按下新组合键即生效（Esc 取消）。Monaco 内建快捷键（查找/替换/多光标等）与浏览器保留键（Ctrl+N/T 等）不可改；同域撞键按列表顺序先到先得，跨域撞键按作用域分层消解，冲突的键位标红提示。',
     capturePrompt: '按下新组合键…',
     captureCancel: 'Esc 取消',
     reservedBlocked: '该组合为浏览器保留键，无法使用',
@@ -6834,6 +6970,8 @@ export default {
     conflictCrossFocusTerm: '与全局动作「{name}」分层共存：本动作仅终端聚焦时生效',
     conflictCrossFocusEditor: '编辑器动作「{name}」仅编辑器聚焦时优先，其余场景本动作生效',
     conflictCrossFocusEditorSelf: '与「{name}」分层共存：本动作仅编辑器聚焦时生效',
+    conflictCrossFocusNotesSelf: '与「{name}」分层共存：本动作仅笔记面板聚焦时生效',
+    conflictCrossFocusNotes: '笔记面板动作「{name}」仅笔记面板聚焦时优先，其余场景本动作生效',
     // 保存时冲突警示（P-20261003-106）：警示弹窗逐条提示行 + 作用域/静态键功能名
     conflictTitle: '键位冲突警示',
     conflictSaveAnyway: '仍要保存',
@@ -6841,6 +6979,7 @@ export default {
       global: '全局布局',
       terminal: '终端',
       editor: '编辑器',
+      notes: '笔记面板',
     },
     line: {
       actionShadowed: '与「{name}」撞键：按键时对方优先生效，本动作不会触发',
@@ -6855,6 +6994,8 @@ export default {
       actionCrossFocusTerminal: '与全局动作「{name}」共用此键：本动作仅终端聚焦时生效，其余场景对方生效',
       actionCrossFocusEditor: '与编辑器动作「{name}」共用此键：编辑器聚焦时对方优先生效，其余场景本动作生效',
       actionCrossFocusEditorSelf: '与「{name}」共用此键：本动作仅编辑器聚焦时生效，其余场景对方生效',
+      actionCrossFocusNotesSelf: '与「{name}」共用此键：本动作仅笔记面板聚焦时生效，其余场景对方生效',
+      actionCrossFocusNotes: '与笔记面板动作「{name}」共用此键：笔记面板聚焦时对方优先生效，其余场景本动作生效',
     },
     invScope: {
       editor: '编辑器',
@@ -6930,6 +7071,10 @@ export default {
       editorSave: '保存当前文件（编辑器）',
       editorBookmarkToggle: '切换书签（光标行）',
       editorInlineEdit: '选区内联 AI 编辑（活跃会话）',
+      // 笔记面板域（P-20261107-5）：保存/新建/重命名（useNotesKeyboard 焦点域消费）
+      notesSave: '保存当前笔记（未命名时命名）',
+      notesCreate: '新建笔记',
+      notesRename: '重命名当前笔记',
     },
   },
   // 界面缩放（P-20261002-2）：appearance.zoom.* 前缀——应用内 zoom 档位（对标 VS Code window.zoomLevel）
@@ -7805,6 +7950,10 @@ export default {
           revoke: '收回访客直通输入',
           input: '访客直通输入批次',
         },
+        // 可写分享（P-20261106-8）：开关/输入批次/粘贴审批审计动作词条
+        writable: '可写分享开关',
+        writableInput: '访客可写输入批次',
+        writablePaste: '可写粘贴审批',
       },
       workspace: {
         export: '导出工作区备份',
@@ -7827,6 +7976,12 @@ export default {
         sensitive_read: '读取敏感文件',
         replace: '批量替换（服务端执行）',
         replace_restore: '替换历史一键还原',
+      },
+      notes: {
+        delete: '笔记移入回收站',
+        restore: '笔记从回收站恢复',
+        purge: '笔记彻底删除',
+        migrated: '旧项目笔记并入笔记库',
       },
       project: {
         delete: '删除项目',
@@ -8074,6 +8229,11 @@ export default {
       title: '配置文件损坏，已用默认配置启动',
       body: '原配置无法解析（{err}），坏文件已保全于 {file}。端口、代理等设置已回默认——修复后可将保全文件内容合并回 config.json 再重启',
       bodyUnpreserved: '原配置无法解析（{err}）且保全失败，坏文件留于 {file}，设置已回默认——请检查数据目录权限，手工修复后重启',
+    },
+    // 笔记单库化迁移满额中止（P-20261108-3）：启动期告知卡模板（动作直达笔记视图续迁）
+    notesMigration: {
+      title: '笔记库已满：{pending} 篇旧项目笔记尚未并入',
+      body: '升级后旧项目笔记会并入项目无关的笔记库（标题带「[项目名]」前缀），但笔记库已达 100 篇上限（含回收站），迁移已中止、内容原样保留。删除笔记或彻底清理回收站后，在笔记视图点「继续迁移」，或重启服务自动续迁',
     },
   },
   // 本机环境体检（P-20261003-317：命令面板「环境体检」只读浮层，GET /api/selfcheck

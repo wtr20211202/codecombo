@@ -14,6 +14,9 @@ import { notifyUserPrefsDirty } from './userPrefsLink'
 // - editor   编辑器域（P-20261008-14）：Monaco 自定义动作（MonacoEditor 的
 //   save-file / sc-bookmark.toggle、useEditorInlineEdit 的 sc-ask.inline-edit）
 //   按注册表生效值 addAction、变更重注册（views/editor/editorKeymapBindings.ts）
+// - notes    笔记面板域（P-20261107-5）：笔记面板聚焦时的保存/新建/重命名
+//   （useNotesKeyboard document capture 监听 + 面板根节点包含判定——焦点在面板
+//   外即不触发，与 editor/terminal 同为焦点域）
 // 明确不在范围（诚实边界）：
 // - Monaco 内建键（查找 Ctrl+F/替换 Ctrl+H/多光标 Ctrl+F/D、F12 转定义接管等）——
 //   防破坏标准编辑体验，键位仍在静态清单（utils/keyInventory.ts）作冲突扫描面；
@@ -26,7 +29,7 @@ import { notifyUserPrefsDirty } from './userPrefsLink'
 // - 锁定快捷键——已在 安全→锁定 分区独立改绑（useLockStore）
 
 /** 键位作用域域：注册表分组 + 跨域冲突语义的判定轴（设置分区按域分组展示） */
-export type KeymapDomain = 'global' | 'terminal' | 'editor'
+export type KeymapDomain = 'global' | 'terminal' | 'editor' | 'notes'
 
 // 动作注册表：键序即同域匹配优先序（同域撞键先注册者生效，后注册者标红警告）。
 // useLayoutKeyboard 的旧硬编码判定顺序与此一致，改序不会改变默认行为；
@@ -170,6 +173,22 @@ export const KEYMAP_ACTIONS = [
   // precondition editorHasSelection——无选区不接管，放行 Monaco 内建 Ctrl+K
   // chord 前缀（既有行为零变化）；改绑后 precondition 语义不变（无选区不触发）
   { id: 'editorInlineEdit', default: 'ctrl+k', domain: 'editor' },
+
+  // ---- 笔记面板域（P-20261107-5，笔记库独立化：快捷新建 + 快捷键保存命名）----
+  // 消费方 useNotesKeyboard：document capture 相位监听，事件 target 在笔记面板
+  // 根节点内才接管（焦点域——面板外按键零影响，面板未挂载即无监听）；接管后
+  // stopImmediatePropagation，布局链不再收到。与编辑器域 editorSave 同为
+  // ctrl+s 默认：两焦点域生效条件物理互斥（Monaco 聚焦 vs 笔记面板聚焦），
+  // 同 editor×terminal 不标红口径。保存在笔记未命名且有内容时顺带弹命名框
+  //（notepad「保存即命名」心智，取消即本会话不再追问）
+  { id: 'notesSave', default: 'ctrl+s', domain: 'notes' },
+  // 新建笔记：Ctrl+Alt+N 已被全局 newUntitledDraft 占用、Ctrl+N 是浏览器保留
+  // 键，退避同族 M（Memo）——Ctrl+Alt+M 在 Monaco 内核/浏览器/本注册表三面
+  // 均无占用
+  { id: 'notesCreate', default: 'ctrl+alt+m', domain: 'notes' },
+  // 重命名当前笔记：F2（VS Code rename 惯例）是单键无修饰、不在布局键捕获面
+  //（normalizeLayoutCombo 要求 ≥1 修饰符），退避 Ctrl+Alt+R（三面无占用）
+  { id: 'notesRename', default: 'ctrl+alt+r', domain: 'notes' },
 ] as const
 
 export type KeymapAction = (typeof KEYMAP_ACTIONS)[number]['id']
@@ -184,7 +203,7 @@ export const KEYMAP_ACTION_DOMAIN = Object.fromEntries(
 ) as Record<KeymapAction, KeymapDomain>
 
 /** 域展示序（设置→快捷键分组顺序；审批域入注册表时按序追加） */
-export const KEYMAP_DOMAINS: readonly KeymapDomain[] = ['global', 'terminal', 'editor']
+export const KEYMAP_DOMAINS: readonly KeymapDomain[] = ['global', 'terminal', 'editor', 'notes']
 
 /** doc 级终端动作：TerminalView document 监听消费、键位全域生效——跨域撞键是
  *  takeover 语义（终端域优先接管，全局侧让位），与 xterm 焦点域的共存语义相区分 */
@@ -504,16 +523,18 @@ export const useKeymapStore = defineStore('keymap', () => {
     return false
   }
 
-  // 冲突表（P-20261003-111 域感知，P-20261008-14 编辑器域扩展）：
+  // 冲突表（P-20261003-111 域感知，P-20261008-14 编辑器域扩展，P-20261107-5
+  // 笔记面板域扩展）：
   // - 同域同 combo：注册序靠后者被靠前者遮蔽（键序即优先序）
   // - 跨域同 combo：域分层消解，不按注册序——doc 级终端动作（document 全局监听）
   //   撞全局动作时全局侧让位（takeover，无论谁改绑都成立，按域位置定生死）；焦点域
-  //   动作（terminal xterm 级 / editor Monaco 聚焦域）与全局动作是共存（聚焦侧优先，
-  //   其余场景全局侧生效），默认态的同键双默认（ctrl+shift+v / ctrl+k 等白名单）
-  //   是既有审计共存，任一侧改绑才提示。诚实边界：焦点域两两之间（editor × terminal
-  //   / editor × doc 级）同键不在此标——两域生效条件物理互斥（Monaco 聚焦 vs 终端
-  //   聚焦/在场），保存时警示（keyInventory findBindingConflicts）已按 focus 提示，
-  //   行内不重复标红
+  //   动作（terminal xterm 级 / editor Monaco 聚焦域 / notes 笔记面板聚焦域）与全局
+  //   动作是共存（聚焦侧优先，其余场景全局侧生效），默认态的同键双默认
+  //   （ctrl+shift+v / ctrl+k 等白名单）是既有审计共存，任一侧改绑才提示。诚实
+  //   边界：焦点域两两之间（editor × terminal / editor × notes〔ctrl+s 双默认〕/
+  //   editor × doc 级）同键不在此标——生效条件物理互斥（Monaco 聚焦 vs 终端
+  //   聚焦/在场 vs 笔记面板聚焦），保存时警示（keyInventory findBindingConflicts）
+  //   已按 focus 提示，行内不重复标红
   // - 与锁定快捷键撞键时全部动作被遮蔽（useLayoutKeyboard 先判锁定）
   const conflicts = computed<Record<KeymapAction, KeymapConflict | null>>(() => {
     const result = Object.fromEntries(KEYMAP_ACTION_ORDER.map(id => [id, null])) as Record<KeymapAction, KeymapConflict | null>

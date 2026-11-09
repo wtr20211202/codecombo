@@ -33,7 +33,9 @@ const message = useMessage()
 const { resolveReplayTarget } = useApprovalActions()
 // 会话回放分享（P-20261004-103）：与「分享输出快照」同族的异步 walkthrough
 // 入口——把选中录制的 cast 生成为只读回放短链（默认 1 小时），结果卡由
-// useShareDialog 单例弹出（Layout 挂载的 ShareResultDialog 消费）
+// useShareDialog 单例弹出（App 层 ShareDialogsHost 挂载的 ShareResultDialog
+// 消费——本组件经审批卡/值班大屏在首页、大屏等不经 Layout 的路由同样可达，
+// P-20261108-1）
 const { createRecordingShare } = useShareDialog()
 
 const list = ref<RecordingMeta[]>([])

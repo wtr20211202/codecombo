@@ -102,6 +102,18 @@ const (
 	// agent-fix 等人裁决面动作不对 agent 开放。preview.port 特例（前端入账）
 	// 的通用化收编：服务端入账才有多端/webhook 一致性
 	EventNotifyPersist = "notify.persist"
+	// EventNotesUpdated 笔记库已变（P-20261107-2 多篇笔记 → P-20261108-3 单库化）：
+	// 服务端在笔记写路径（/api/notes 族 create/update/delete/restore/purge）与
+	// 单库化迁移有迁入时（启动期/手动续迁/项目删除前）成功后广播，载荷
+	// {projectId,noteId,action}——projectId 为作用域键（全局库恒为保留哨兵
+	// "_global"，字段名沿用多篇时代的项目维度命名、形状不变）；action ∈ saved|
+	// created|renamed|trashed|restored|purged|migrated；noteId 为空 = 作用域全部
+	// 篇可能已变（迁移批量并入，消费方重拉清单）。仅元数据上广播面（标题/内容
+	// 不上——terminal.message 同纪律）；消费方收到即拉取服务端真值，不信任载荷
+	// 内容。前端直通分发 sc-ops:notes.updated，笔记面板合并到既有
+	// sc:notes-external-update 内部事件消费（per-note 粒度）。sync 笔记单元落位
+	// 广播点随单元退役（P-20261108-3）下线
+	EventNotesUpdated = "notes.updated"
 	// EventLocateInTree 文件树定位（P-20261022-3 新增 agent 可发形态）：agent 经
 	// ops-notify 上报，载荷 {path?,projectId,focus?}（path 可空 = 项目根，非空须
 	// 项目相对正斜杠无 .. 段；发布口注册表校验）——文件树逐层展开 + 滚动高亮，
@@ -141,6 +153,20 @@ const (
 	// 消费面独立）；agent 监听同一事件自动感知协作素材到达（读 drops 清单
 	// → 按主人确认读路径分析）
 	EventShareDrop = "share.drop"
+	// EventShareWritableTyping 可写分享访客输入中（P-20261106-8）：访客经
+	// 可写分享的 WS 上行桥接入/断开（或开关关闭清场）即广播，载荷 {token,
+	// shareName,terminalId,active,visitors,nick?,visitorTail?}（仅元数据）。
+	// 前端直通分发 sc-ops:share.wtyping → 刷新「访客输入中」会话行徽标
+	// （useDirectInputShares bump 即时对账，15s 轮询是断线兜底）。与 terminal
+	// 会话的 directInputHold 输入闸同源联动——徽标亮起即 owner 键盘已让位
+	EventShareWritableTyping = "share.wtyping"
+	// EventSharePasteReview 可写分享粘贴审批（P-20261106-8）：访客整块输入
+	// 命中 commandrisk danger 档即广播（未批不注入 PTY），载荷 {token,
+	// shareName,terminalId,pasteId,summary,preview,visitorTail,at}。preview
+	// 是粘贴块头部预览（≤200 rune 原样——访客输入不做脱敏，owner 审批要
+	// 看到真实命令才能裁决）。前端直通分发 sc-ops:share.paste-review →
+	// 审批卡（批准/拒绝两动作，60s 不决自动拒绝）
+	EventSharePasteReview = "share.paste-review"
 
 	// EventRemoteAccessStatus 远程接入（SSH 反向隧道）状态迁移（P-20261019-11）：
 	// 启动/停止/首次失败/断线重连/重连成功/重连失败每次迁移广播一次，载荷为

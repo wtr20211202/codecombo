@@ -22,8 +22,10 @@ const PROJ_NAME = 'e2e-meta-capabilities'
 const MARKER_FILE = 'meta-capability-marker.md'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO_DIR = path.resolve(HERE, '../../../.sc-tmp/e2e-meta-capabilities')
-// 已投用能力项（与 server/app/modules.go 的 manifest 声明一一对应）
-const REGISTERED_CAPS = ['ahead-behind-all', 'fetch-all', 'file-history', 'flat-file-list', 'notes']
+// 已投用能力项（与 server/app/modules.go 的 manifest 声明一一对应）。笔记族
+// P-20261108-3 单库化后只剩 notes-global（项目族 notes/notes-multi 随端点退役下线）
+const REGISTERED_CAPS = ['ahead-behind-all', 'fetch-all', 'file-history', 'flat-file-list', 'notes-global']
+const RETIRED_CAPS = ['notes', 'notes-multi']
 
 let unlockToken = ''
 
@@ -83,6 +85,10 @@ test('meta 公开只读：免 token 返回版本与已注册能力清单', async
   expect([...caps].sort()).toEqual(caps)
   for (const cap of REGISTERED_CAPS) {
     expect(caps).toContain(cap)
+  }
+  // 已退役能力项不再声明（对端探测不到即按缺席降级——单库化 mixed-version 约定）
+  for (const cap of RETIRED_CAPS) {
+    expect(caps).not.toContain(cap)
   }
 })
 

@@ -732,6 +732,35 @@ func TestShareStoreTermFrozen(t *testing.T) {
 	if _, err := st.Create(store.Share{Kind: store.ShareKindTermFrozen, TerminalID: "term-b", ContentHash: "h"}); err != nil {
 		t.Fatalf("create term-b: %v", err)
 	}
+	// 口令门（P-20261107-4）：创建面可带口令；幂等重建不带=保持既有门（重复
+	// 定格不悄悄摘门），带新口令=改门；摘要语义项与 watermark 一样覆写生效
+	hp, err := st.Create(store.Share{Kind: store.ShareKindTermFrozen, TerminalID: "term-pass", ContentHash: "hp", PassphraseHash: "bcrypt-a"})
+	if err != nil {
+		t.Fatalf("create with passphrase: %v", err)
+	}
+	if hp.PassphraseHash != "bcrypt-a" {
+		t.Fatalf("created hash = %q, want set", hp.PassphraseHash)
+	}
+	kept, err := st.Create(store.Share{Kind: store.ShareKindTermFrozen, TerminalID: "term-pass", ContentHash: "hp"})
+	if err != nil {
+		t.Fatalf("idempotent recreate: %v", err)
+	}
+	if kept.Token != hp.Token || kept.PassphraseHash != "bcrypt-a" {
+		t.Fatalf("idempotent recreate must keep the gate (token=%s hash=%q)", kept.Token, kept.PassphraseHash)
+	}
+	rotated, err := st.Create(store.Share{Kind: store.ShareKindTermFrozen, TerminalID: "term-pass", ContentHash: "hp", PassphraseHash: "bcrypt-b"})
+	if err != nil {
+		t.Fatalf("recreate with new passphrase: %v", err)
+	}
+	if rotated.PassphraseHash != "bcrypt-b" {
+		t.Fatalf("recreate with new hash not applied: %q", rotated.PassphraseHash)
+	}
+	if _, err := st.SetPassphrase(hp.Token, ""); err != nil {
+		t.Fatalf("remove gate via management endpoint: %v", err)
+	}
+	if got, _ := st.Get(hp.Token); got.PassphraseHash != "" {
+		t.Fatalf("management removal ignored: %q", got.PassphraseHash)
+	}
 	// 过期记录未及清理时重复定格：删旧重建（新时钟周期，落回零代际 token），
 	// 不给过期快照借尸还魂
 	reborn, err := st.Create(store.Share{Kind: store.ShareKindTermFrozen, TerminalID: "term-a", ContentHash: "hash-1"})

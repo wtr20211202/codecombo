@@ -50,6 +50,8 @@ func allConsts() []ErrCode {
 		CodeTerminalProjectIDsEmpty, CodeTerminalProjectIDsTooMany,
 		CodeTerminalPromptRequired, CodeTerminalQueueFull, CodeTerminalQueueInvalid,
 		CodeSearchRateLimited,
+		CodeNotesNotFound, CodeNotesConflict, CodeNotesTooLarge,
+		CodeNotesTitleTooLong, CodeNotesGlobalLimit,
 	}
 }
 
@@ -140,6 +142,13 @@ func TestStatusForKeyBindings(t *testing.T) {
 		CodeTerminalPromptRequired:         http.StatusBadRequest,
 		CodeTerminalQueueFull:              http.StatusConflict,
 		CodeTerminalQueueInvalid:           http.StatusBadRequest,
+		// 多篇笔记（P-20261107-2；P-20261108-3 单库化后即 /api/notes 族）
+		CodeNotesNotFound:     http.StatusNotFound,
+		CodeNotesConflict:     http.StatusConflict,
+		CodeNotesTooLarge:     http.StatusRequestEntityTooLarge,
+		CodeNotesTitleTooLong: http.StatusBadRequest,
+		// 笔记库额度（P-20261107-5；单库化后唯一额度码）
+		CodeNotesGlobalLimit: http.StatusBadRequest,
 	}
 	for code, want := range cases {
 		if got := StatusFor(code); got != want {

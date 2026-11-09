@@ -40,12 +40,12 @@ test.describe('快捷键作用域标签', () => {
     await openProjectPage(page)
     const help = await openHelp(page)
 
-    // 基线：6 个分组（全局/编辑器/终端/审批等待/值班大屏/鼠标与拖拽 P-20261005-184），
-    // 每行都有作用域徽标（鼠标行的 trigger 短语也带徽标）
-    await expect(help.locator('.sc-help-group')).toHaveCount(6)
+    // 基线：7 个分组（全局/编辑器/终端/笔记面板 P-20261107-5/审批等待/值班大屏/
+    // 鼠标与拖拽 P-20261005-184），每行都有作用域徽标（鼠标行的 trigger 短语也带徽标）
+    await expect(help.locator('.sc-help-group')).toHaveCount(7)
     const rows = help.locator('.sc-help-row')
     const rowCount = await rows.count()
-    expect(rowCount).toBeGreaterThanOrEqual(44)
+    expect(rowCount).toBeGreaterThanOrEqual(47)
     await expect(help.locator('.sc-help-scope')).toHaveCount(rowCount)
 
     // 编辑器组：保存行（Monaco addAction 聚焦域）徽标=编辑器
@@ -71,6 +71,11 @@ test.describe('快捷键作用域标签', () => {
     await expect(
       groupOf(help, '值班大屏').locator('.sc-help-row').filter({ hasText: '刷新大屏数据' }).locator('.sc-help-scope'),
     ).toHaveText('值班大屏')
+
+    // 笔记面板组（P-20261107-5）：notes 域三行（keymap 注册表动态行）全标 笔记面板
+    const notesGroup = groupOf(help, '笔记面板')
+    await expect(notesGroup.locator('.sc-help-row')).toHaveCount(3)
+    await expect(notesGroup.locator('.sc-help-scope').filter({ hasText: '笔记面板' })).toHaveCount(3)
   })
 
   test('作用域筛选 chip：点选只留该域分组、与文本过滤 AND 叠加、全部/再点复位', async ({ page }) => {
@@ -110,14 +115,14 @@ test.describe('快捷键作用域标签', () => {
       editorGroupGlobal.locator('.sc-help-row').filter({ hasText: '保存当前文件' }),
     ).toHaveCount(0)
 
-    // 「全部」chip 复位：6 分组全量回归
+    // 「全部」chip 复位：7 分组全量回归（P-20261107-5 起含笔记面板组）
     await chip('all').click()
-    await expect(help.locator('.sc-help-group')).toHaveCount(6)
+    await expect(help.locator('.sc-help-group')).toHaveCount(7)
 
     // 再点已选 chip 同样复位（二次点击 toggle-off）
     await chip('approval').click()
     await expect(help.locator('.sc-help-group')).toHaveCount(1)
     await chip('approval').click()
-    await expect(help.locator('.sc-help-group')).toHaveCount(6)
+    await expect(help.locator('.sc-help-group')).toHaveCount(7)
   })
 })

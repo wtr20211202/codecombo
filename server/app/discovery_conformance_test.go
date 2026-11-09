@@ -65,6 +65,10 @@ var routeWhitelist = map[string]string{
 	"/assets/xterm.js":     "分享访客页 vendored 资产（xterm 运行时）——浏览器直载，非能力端点",
 	"/assets/addon-fit.js": "分享访客页 vendored 资产（xterm addon）——同上",
 	"/assets/xterm.css":    "分享访客页 vendored 资产（xterm 样式）——同上",
+	// P-20261107-4 渲染保真：unicode11 宽度表 + 产品同款终端字体（访客渲染资源）
+	"/assets/addon-unicode11.js":          "分享访客页 vendored 资产（xterm unicode11 宽度表）——同上",
+	"/assets/JetBrainsMono-Regular.woff2": "分享访客页 vendored 资产（终端字体，OFL）——同上",
+	"/assets/JetBrainsMono-Bold.woff2":    "分享访客页 vendored 资产（终端字体粗体，OFL）——同上",
 }
 
 // manifestWhitelist 清单侧例外：推导覆盖不了的显式 extras 条目（均在码有注释背书）

@@ -262,6 +262,13 @@ export const ERROR_CODE_I18N: Record<string, string> = {
   'remote.host_key_changed': 'errors.known.hostKeyChanged',
   'files.not_found': 'errors.known.fileNotFound',
   'files.name_invalid': 'errors.known.invalidFileName',
+  // 笔记库（P-20261107-2 多篇 → P-20261108-3 单库化 /api/notes 族）：冲突 409 由
+  // 笔记面板冲突条专属消费（三动作），拦截器文案仅兜底非面板场景
+  'notes.conflict': 'errors.known.notesConflict',
+  'notes.too_large': 'errors.known.notesTooLarge',
+  'notes.title_too_long': 'errors.known.notesTitleTooLong',
+  // 笔记库额度（单库化后唯一额度码——项目档 notes.limit_reached 随项目端点族退役出注册表）
+  'notes.global_limit': 'errors.known.notesGlobalLimit',
 }
 
 // 响应拦截器：分类 + 写 Console + 弹友好提示（除非 silent）+ 抛 AppError

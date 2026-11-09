@@ -110,8 +110,11 @@ describe('findBindingConflicts 保存时扫描', () => {
   it('跨域撞键（P-20261008-14）：全局动作改绑到编辑器域键（ctrl+s=editorSave）→ focus 共存语义（编辑器聚焦时对方优先，静态清单条目已移入注册表）', () => {
     const store = useKeymapStore()
     const hits = findBindingConflicts('toggleSidebar', 'ctrl+s', store.combos, '')
+    // ctrl+s 双默认焦点域：编辑器 editorSave + 笔记面板 notesSave（P-20261107-5
+    // notes 域）各自 focus 共存，注册表序即返回序
     expect(hits).toEqual([
       { kind: 'action', other: 'editorSave', cross: 'focus' },
+      { kind: 'action', other: 'notesSave', cross: 'focus' },
     ])
   })
 

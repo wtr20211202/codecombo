@@ -63,8 +63,9 @@ export interface WorkspaceSnapshotDeps {
  *  无限膨胀（关闭栈 10 条/命令面板 usage 50 键 LRU 同款封顶先例） */
 const SNAPSHOTS_MAX = 10
 
-/** 恢复应用的合法枚举（与 bootstrap 恢复的白名单归一口径一致） */
-const SIDE_VIEWS: readonly string[] = ['files', 'changes', 'todos', 'notes']
+/** 恢复应用的合法枚举（与 bootstrap 恢复的白名单归一口径一致）。'notes' 随
+ *  P-20261108-2 退役（笔记迁出侧栏成独立视图）：旧快照残值按枚举外脏值跳过 */
+const SIDE_VIEWS: readonly string[] = ['files', 'changes', 'todos']
 const BOTTOM_TABS: readonly string[] = ['git', 'terminal', 'console', 'preview']
 
 export function useWorkspaceSnapshot(deps: WorkspaceSnapshotDeps) {

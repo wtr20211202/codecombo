@@ -81,3 +81,23 @@ export function shareTtlFromExpiresAt(expiresAt?: string | null, now: number = D
 export function shareTtlDateDisabled(ts: number): boolean {
   return ts < new Date().setHours(0, 0, 0, 0)
 }
+
+/**
+ * 终端直播 TTL 档位（P-20261107-4）：直播是临时暴露面——服务端只收分钟数
+ * （POST /api/share/terminal 的 ttlMinutes；0/缺省 = 默认 30 分钟）、钳 24h
+ * 上限、无永久档，与 SHARE_TTL_PRESETS 的「永久 + 自定义日期」语义不匹配，
+ * 故直播侧用独立档位表。minutes=0 表示「跟随默认」→ 请求不发 ttlMinutes 字段
+ * （服务端默认值变更不需要前端跟随发版）；360/1440 对齐评审定的 6h/24h 实用档。
+ */
+export interface TermLiveTtlOption {
+  /** 0 = 跟随服务端默认（30 分钟）；其余为分钟数 */
+  minutes: number
+  i18nKey: string
+}
+
+export const TERM_LIVE_TTL_OPTIONS: ReadonlyArray<TermLiveTtlOption> = [
+  { minutes: 0, i18nKey: 'share.termOptions.ttlLiveDefault' },
+  { minutes: 60, i18nKey: 'share.ttl.oneHour' },
+  { minutes: 360, i18nKey: 'share.termOptions.ttlSixHours' },
+  { minutes: 1440, i18nKey: 'share.termOptions.ttlTwentyFourHours' },
+]

@@ -61,9 +61,11 @@ const (
 	urlActionPrefix = "url:"
 )
 
-// allowedPanels 通知动作可直达的面板白名单：侧栏六视图 + 底部 git/terminal
-// + deploy/share-manager（非注册面板，前端 togglePanel 分支单独接）。与
-// web/src/composables/useLayoutShell.ts 的 togglePanel 消费面同源维护。
+// allowedPanels 通知动作可直达的面板白名单：侧栏五视图 + 笔记独立视图（notes——
+// P-20261108-2 起迁出侧栏成主区视图，前端 togglePanel 分支单独接 openNotesView，
+// 协议值不变）+ 底部 git/terminal + deploy/share-manager（非注册面板，前端
+// togglePanel 分支单独接）。与 web/src/composables/useLayoutShell.ts 的
+// togglePanel 消费面同源维护。
 var allowedPanels = map[string]struct{}{
 	"files": {}, "changes": {}, "todos": {}, "notes": {}, "stream": {}, "env": {},
 	"git": {}, "terminal": {},

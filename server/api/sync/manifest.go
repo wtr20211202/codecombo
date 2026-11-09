@@ -68,10 +68,9 @@ func projectUnits(p config.ProjectConfig) []UnitEntry {
 	}
 	units = append(units, ent)
 
-	// 上下文单元（存在即列出——空内容单元指纹为空串，plan 按新增档处置）
-	if n, ok := notesUnit(p, pk); ok {
-		units = append(units, n)
-	}
+	// 上下文单元（存在即列出——空内容单元指纹为空串，plan 按新增档处置）。
+	// 笔记单元（notes/notes-multi）随 P-20261108-3 单库化退役不再产出——笔记是
+	// 项目无关的全局库，不随实例同步（model.go 退役注记）
 	if s, ok := sessionsUnit(p, pk); ok {
 		units = append(units, s)
 	}
@@ -79,20 +78,6 @@ func projectUnits(p config.ProjectConfig) []UnitEntry {
 		units = append(units, c)
 	}
 	return units
-}
-
-// notesUnit 项目笔记单元
-func notesUnit(p config.ProjectConfig, projectKey string) (UnitEntry, bool) {
-	note, err := store.Get().ProjectNotes.Get(p.ID)
-	if err != nil || strings.TrimSpace(note.Content) == "" {
-		return UnitEntry{}, false
-	}
-	return UnitEntry{
-		Key: UnitKey(UnitNotes, rootBasename(p.Path)), Kind: UnitNotes,
-		ProjectKey: projectKey, Name: p.Name + " · 笔记",
-		Fingerprint: hashBytes([]byte(note.Content)),
-		Size:        int64(len(note.Content)), Files: 1, Exists: true,
-	}, true
 }
 
 // sessionsUnit agent 会话单元：transcripts（claude projects 下该工作目录对应

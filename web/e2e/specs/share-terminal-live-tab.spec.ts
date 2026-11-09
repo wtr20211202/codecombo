@@ -118,6 +118,11 @@ test.describe('share-terminal-live-tab', () => {
     const liveItem = page.locator('[data-testid="terminal-live-share"]')
     await expect(liveItem).toHaveText('直播分享')
     await liveItem.click()
+    // 选项弹层（P-20261106-9）：遮蔽缺省开（安全基线），直接确认创建
+    const options = page.locator('[data-testid="share-term-options"]')
+    await expect(options).toBeVisible({ timeout: 5000 })
+    await expect(options).toHaveAttribute('data-kind', 'live')
+    await page.locator('[data-testid="share-term-confirm"]').click()
 
     // 创建链即挂徽标（bump 即时对账，不等 30s 轮询）；title 携「直播中」
     await expect(tab.locator('[data-testid="term-tab-live"]')).toBeVisible({ timeout: 10000 })

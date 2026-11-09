@@ -12,7 +12,8 @@ import { serverPath } from '../../tests/dualpath'
  *   1. 设置切「无」（sessionContext=none）→ 新建会话对话框默认全不勾，创建
  *      launchArgs 即指令原文（不含 git 状态行）——P-176 一刀切的关闭口
  *   2. 设置勾笔记（sessionContext=notes）→ 对话框默认勾笔记不勾 git，创建
- *      launchArgs 含笔记首段行（projnotes 工作台记忆通道）
+ *      launchArgs 含笔记首段行（笔记库「[项目名]」前缀篇——P-20261108-3 单库化
+ *      改读，原项目兼容端点已退役）
  *   3. 对话框临时覆选不改设置持久值：设置 notes 下临时加勾 git → 本次创建
  *      git+笔记齐附；GET /settings 复核 sessionContext 仍为 notes
  *   4. ask 发起族读同一设置：none 下右键「在此目录新建 agent 会话」launchArgs
@@ -32,6 +33,8 @@ const DIR_PROMPT = '请先熟悉当前目录的代码结构，然后等待我的
 const NOTES_CONTENT = 'E2E project notes first paragraph for agent context.\n\nSecond paragraph must not be injected.'
 
 let projectId = ''
+// 本 spec 播种的笔记库交接篇（afterAll 彻底删除，不污染笔记库）
+let notesNoteId = ''
 
 function git(cwd: string, args: string[]) {
   return execFileSync(
@@ -84,6 +87,7 @@ test.afterAll(async ({ request }) => {
   const headers = await unlockHeaders(request)
   // 还原默认档：本 spec 的全局设置改动不能泄给后续 spec（P-176 默认 git 语义）
   await request.put(`${API_BASE}/api/settings`, { headers, data: { sessionContext: 'git' } })
+  if (notesNoteId) await request.delete(`${API_BASE}/api/notes/${notesNoteId}?purge=1`, { headers })
   if (projectId) await request.delete(`${API_BASE}/api/projects/${projectId}`, { headers })
   try { fs.rmSync(REPO_DIR, { recursive: true, force: true }) } catch { /* 占用忽略 */ }
 })
@@ -110,11 +114,19 @@ test.beforeAll(async ({ request }) => {
   const body = (await res.json()) as { data?: { id?: string } }
   projectId = body.data?.id || ''
 
-  // 项目笔记（projnotes 人机共享便签层）：首段注入的事实源，第二段不得外泄
-  const notesRes = await request.put(`${API_BASE}/api/projects/${projectId}/notes`, {
-    headers, data: { content: NOTES_CONTENT },
+  // 项目笔记首段注入的事实源（P-20261108-3 单库化：笔记库里标题带「[项目名]」前缀的
+  // 篇——交接篇约定标题「[项目名] 交接」），第二段不得外泄。先清上轮异常中断残留的
+  // 同前缀篇（注入取最近更新那篇，残留不清会让事实源不确定）
+  const prefix = `[${PROJ_NAME}]`
+  const existing = await request.get(`${API_BASE}/api/notes`, { headers })
+  for (const n of (((await existing.json()) as { data?: { id: string; title: string }[] }).data ?? [])) {
+    if (n.title.startsWith(prefix)) await request.delete(`${API_BASE}/api/notes/${n.id}?purge=1`, { headers })
+  }
+  const notesRes = await request.post(`${API_BASE}/api/notes`, {
+    headers, data: { title: `${prefix} 交接`, content: NOTES_CONTENT },
   })
-  expect(notesRes.status()).toBe(200)
+  expect(notesRes.status()).toBe(201)
+  notesNoteId = ((await notesRes.json()) as { data?: { id?: string } }).data?.id || ''
 })
 
 /** 进项目页并打开 docked 管理页 */

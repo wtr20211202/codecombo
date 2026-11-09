@@ -93,8 +93,8 @@ func TestWireTapReceivesOutput(t *testing.T) {
 	h := NewHub()
 	t.Cleanup(h.Stop)
 
-	h.Wire("tok1", "s-1")
-	sub, err := h.Subscribe("tok1", "s-1")
+	h.Wire("tok1", "s-1", false)
+	sub, err := h.Subscribe("tok1", "s-1", false)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -123,11 +123,11 @@ func TestUnwireStopsStream(t *testing.T) {
 	h := NewHub()
 	t.Cleanup(h.Stop)
 
-	h.Wire("tok1", "s-1")
+	h.Wire("tok1", "s-1", false)
 	if sess.handlerCount() != 1 {
 		t.Fatalf("tap not registered: %d", sess.handlerCount())
 	}
-	sub, err := h.Subscribe("tok1", "s-1")
+	sub, err := h.Subscribe("tok1", "s-1", false)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -160,8 +160,8 @@ func TestSessionCloseEndsFeed(t *testing.T) {
 	h := NewHub()
 	t.Cleanup(h.Stop)
 
-	h.Wire("tok1", "s-gone")
-	sub, err := h.Subscribe("tok1", "s-gone")
+	h.Wire("tok1", "s-gone", false)
+	sub, err := h.Subscribe("tok1", "s-gone", false)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -170,8 +170,8 @@ func TestSessionCloseEndsFeed(t *testing.T) {
 		t.Fatal("feed for vanished session should be ended")
 	}
 	// 对账路径：先 Wire 后会话消失
-	h.Wire("tok2", "s-alive")
-	sub2, err := h.Subscribe("tok2", "s-alive")
+	h.Wire("tok2", "s-alive", false)
+	sub2, err := h.Subscribe("tok2", "s-alive", false)
 	if err != nil {
 		t.Fatalf("subscribe2: %v", err)
 	}
@@ -199,8 +199,8 @@ func TestCrossChunkSensitiveZeroResidue(t *testing.T) {
 	h := NewHub()
 	t.Cleanup(h.Stop)
 
-	h.Wire("tok1", "s-1")
-	sub, err := h.Subscribe("tok1", "s-1")
+	h.Wire("tok1", "s-1", false)
+	sub, err := h.Subscribe("tok1", "s-1", false)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -246,14 +246,14 @@ func TestPerTokenMaskerIsolation(t *testing.T) {
 	h := NewHub()
 	t.Cleanup(h.Stop)
 
-	h.Wire("tokA", "s-1")
-	h.Wire("tokB", "s-1")
-	subA, err := h.Subscribe("tokA", "s-1")
+	h.Wire("tokA", "s-1", false)
+	h.Wire("tokB", "s-1", false)
+	subA, err := h.Subscribe("tokA", "s-1", false)
 	if err != nil {
 		t.Fatalf("subscribe A: %v", err)
 	}
 	defer subA.Release()
-	subB, err := h.Subscribe("tokB", "s-1")
+	subB, err := h.Subscribe("tokB", "s-1", false)
 	if err != nil {
 		t.Fatalf("subscribe B: %v", err)
 	}
@@ -289,27 +289,27 @@ func TestGuestLimitPerToken(t *testing.T) {
 	h := NewHub()
 	t.Cleanup(h.Stop)
 
-	h.Wire("tok1", "s-1")
+	h.Wire("tok1", "s-1", false)
 	var subs []Subscription
 	for i := 0; i < MaxGuestsPerToken; i++ {
-		s, err := h.Subscribe("tok1", "s-1")
+		s, err := h.Subscribe("tok1", "s-1", false)
 		if err != nil {
 			t.Fatalf("guest %d rejected: %v", i, err)
 		}
 		subs = append(subs, s)
 	}
-	if _, err := h.Subscribe("tok1", "s-1"); err != ErrTooManyGuests {
+	if _, err := h.Subscribe("tok1", "s-1", false); err != ErrTooManyGuests {
 		t.Fatalf("guest %d: err = %v, want ErrTooManyGuests", MaxGuestsPerToken, err)
 	}
 	// 释放一路后名额即刻回归
 	subs[0].Release()
-	if s, err := h.Subscribe("tok1", "s-1"); err != nil {
+	if s, err := h.Subscribe("tok1", "s-1", false); err != nil {
 		t.Fatalf("subscribe after release: %v", err)
 	} else {
 		s.Release()
 	}
 	// 限流按 token 独立：另一 token 不受影响
-	if s, err := h.Subscribe("tok2", "s-1"); err != nil {
+	if s, err := h.Subscribe("tok2", "s-1", false); err != nil {
 		t.Fatalf("other token should not be limited: %v", err)
 	} else {
 		s.Release()
@@ -325,8 +325,8 @@ func TestSlowConsumerKicked(t *testing.T) {
 	h := NewHub()
 	t.Cleanup(h.Stop)
 
-	h.Wire("tok1", "s-1")
-	slow, err := h.Subscribe("tok1", "s-1")
+	h.Wire("tok1", "s-1", false)
+	slow, err := h.Subscribe("tok1", "s-1", false)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -361,12 +361,12 @@ func TestTailBounded(t *testing.T) {
 	h := NewHub()
 	t.Cleanup(h.Stop)
 
-	h.Wire("tok1", "s-1")
+	h.Wire("tok1", "s-1", false)
 	big := bytes.Repeat([]byte("y"), 32<<10)
 	for i := 0; i < 8; i++ { // 256KB > 128KB 上限
 		sess.emit(big)
 	}
-	sub, err := h.Subscribe("tok1", "s-1")
+	sub, err := h.Subscribe("tok1", "s-1", false)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
@@ -376,5 +376,153 @@ func TestTailBounded(t *testing.T) {
 	}
 	if !strings.Contains(string(sub.Tail()), "yyyy") {
 		t.Fatal("tail lost recent content")
+	}
+}
+
+// ── P-20261106-9：遮蔽是 live 源参数（未过滤馈线原样转发 / 模式不符整条替换 / 过期收口） ──
+
+// 未过滤馈线：播种与实时字节原样转发（敏感值不遮蔽），且实时帧是独立拷贝——
+// tap 回调的 data 归 readLoop 复用缓冲所有，馈线持有后上游改写不得污染尾流/扇出
+func TestUnfilteredFeedPassthrough(t *testing.T) {
+	sess := newFakeSession([]byte("seed password=Seed123\r\n"))
+	SetSessionLookup(func(string) LiveSession { return sess })
+	t.Cleanup(func() { SetSessionLookup(nil) })
+	h := NewHub()
+	t.Cleanup(h.Stop)
+
+	h.Wire("tokU", "s-1", true)
+	sub, err := h.Subscribe("tokU", "s-1", true)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Release()
+	if !bytes.Contains(sub.Tail(), []byte("password=Seed123")) {
+		t.Fatalf("unfiltered seed should be verbatim: %q", sub.Tail())
+	}
+	buf := []byte("export CC_LOCK_TOKEN=sca_Ab12Cd34Ef56Gh78\r\n")
+	sess.emit(buf)
+	// 直接持有通道投递的原始帧（collectFor 会拼接拷贝，测不出别名）
+	var frame []byte
+	select {
+	case frame = <-sub.Live():
+	case <-time.After(2 * time.Second):
+		t.Fatal("no live frame")
+	}
+	if !bytes.Contains(frame, []byte("sca_Ab12Cd34Ef56Gh78")) {
+		t.Fatalf("unfiltered live output should be verbatim: %q", frame)
+	}
+	// 上游复用缓冲改写：已投递帧与尾流不受影响（拷贝语义；Tail 是订阅时刻
+	// 快照，尾流断言走第二路订阅取当前尾流）
+	for i := range buf {
+		buf[i] = 'X'
+	}
+	if !bytes.Contains(frame, []byte("sca_Ab12Cd34Ef56Gh78")) {
+		t.Fatalf("delivered frame aliased upstream buffer: %q", frame)
+	}
+	sub2, err := h.Subscribe("tokU", "s-1", true)
+	if err != nil {
+		t.Fatalf("subscribe2: %v", err)
+	}
+	defer sub2.Release()
+	if !bytes.Contains(sub2.Tail(), []byte("sca_Ab12Cd34Ef56Gh78")) {
+		t.Fatalf("tail aliased upstream buffer: %q", sub2.Tail())
+	}
+}
+
+// 陈旧馈线替换：同 token 已有馈线但遮蔽模式与记录不符（过期记录被直接删除
+// 不经 Unwire、同会话重建落回同一零代际 token）——绝不复用，整条替换并断开
+// 旧访客。重点方向：旧未过滤 → 新遮蔽，新订阅者不得看到原文
+func TestWireReplacesFeedOnModeMismatch(t *testing.T) {
+	sess := newFakeSession(nil)
+	SetSessionLookup(func(string) LiveSession { return sess })
+	t.Cleanup(func() { SetSessionLookup(nil) })
+	h := NewHub()
+	t.Cleanup(h.Stop)
+
+	h.Wire("tok1", "s-1", true)
+	oldSub, err := h.Subscribe("tok1", "s-1", true)
+	if err != nil {
+		t.Fatalf("subscribe old: %v", err)
+	}
+	defer oldSub.Release()
+	sess.emit([]byte("password=Leak1 before\r\n"))
+	collectFor(t, oldSub, func(b []byte) bool { return bytes.Contains(b, []byte("before")) })
+
+	// 同模式重复 Wire：幂等（不替换、旧访客不断）
+	h.Wire("tok1", "s-1", true)
+	select {
+	case <-oldSub.Done():
+		t.Fatal("same-mode Wire must be idempotent")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// 模式不符的订阅：惰性替换为遮蔽馈线，旧访客被断开、旧 tap 注销
+	newSub, err := h.Subscribe("tok1", "s-1", false)
+	if err != nil {
+		t.Fatalf("subscribe new: %v", err)
+	}
+	defer newSub.Release()
+	select {
+	case <-oldSub.Done():
+	case <-time.After(time.Second):
+		t.Fatal("stale unfiltered feed should be ended on mode mismatch")
+	}
+	if sess.handlerCount() != 1 {
+		t.Fatalf("stale tap not unregistered: %d handlers", sess.handlerCount())
+	}
+	if bytes.Contains(newSub.Tail(), []byte("Leak1")) {
+		t.Fatalf("masked feed inherited unfiltered tail: %q", newSub.Tail())
+	}
+	sess.emit([]byte("password=Leak2 after\r\n"))
+	got := collectFor(t, newSub, func(b []byte) bool { return bytes.Contains(b, []byte("after")) })
+	if bytes.Contains(got, []byte("Leak2")) {
+		t.Fatalf("replacement feed must mask: %q", got)
+	}
+	if !bytes.Contains(got, []byte("password=***")) {
+		t.Fatalf("masked form missing: %q", got)
+	}
+}
+
+// Prune：keep 集外且过了豁免窗的馈线终结（过期记录的馈线不再驻留）；keep 集内
+// 与豁免窗内新接通的馈线保留；nil keep 拒绝执行（防误调全清）
+func TestPruneEndsFeedsOutsideKeep(t *testing.T) {
+	sess := newFakeSession(nil)
+	SetSessionLookup(func(string) LiveSession { return sess })
+	t.Cleanup(func() { SetSessionLookup(nil) })
+	h := NewHub()
+	t.Cleanup(h.Stop)
+
+	h.Wire("expired", "s-1", true)
+	h.Wire("alive", "s-1", false)
+	h.Wire("fresh", "s-1", false)
+	// 前两条回拨接通时刻到豁免窗外；fresh 保持「刚接通」
+	h.mu.Lock()
+	h.feeds["expired"].wiredAt = time.Now().Add(-2 * pruneGrace)
+	h.feeds["alive"].wiredAt = time.Now().Add(-2 * pruneGrace)
+	h.mu.Unlock()
+	sub, err := h.Subscribe("expired", "s-1", true)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Release()
+
+	if n := h.Prune(nil); n != 0 {
+		t.Fatalf("nil keep must be a no-op, pruned %d", n)
+	}
+	if n := h.Prune(map[string]bool{"alive": true}); n != 1 {
+		t.Fatalf("pruned = %d, want 1 (expired only; fresh within grace)", n)
+	}
+	select {
+	case <-sub.Done():
+	case <-time.After(time.Second):
+		t.Fatal("pruned feed should end its subscribers")
+	}
+	h.mu.Lock()
+	_, hasExpired := h.feeds["expired"]
+	_, hasAlive := h.feeds["alive"]
+	_, hasFresh := h.feeds["fresh"]
+	h.mu.Unlock()
+	if hasExpired || !hasAlive || !hasFresh {
+		t.Fatalf("feeds after prune: expired=%v alive=%v fresh=%v", hasExpired, hasAlive, hasFresh)
 	}
 }

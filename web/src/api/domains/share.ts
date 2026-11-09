@@ -78,9 +78,39 @@ export interface ShareInfo {
   collab?: boolean
   /** 直通输入档开关（P-20261024-1 第二档独立开关，与 collab 互不联动） */
   directInput?: boolean
+  /** 可写分享开关（P-20261106-8「对方可直接输入」模式）：true = 访客经 WS 上行桥
+   *  把键入直注锚定终端（仅 kind=terminal 可开；旧服务端缺字段 → 按关解读） */
+  writable?: boolean
   /** 直通持权/申请态（P-20261024-1，服务端 shareSvc 投影）：held=true 有人持权
    *  （会话徽标/行内收回的数据源）；pending=true 有待批申请（缺省 = 无态） */
   direct?: ShareDirectProjection
+  /** 未过滤标记（P-20261106-9，kind=terminal / terminal-frozen 专有）：true = 创建时
+   *  关闭了服务端源头敏感值遮蔽，访客看到原样输出（冻结快照 TTL 强制 24h）。
+   *  缺省 = 已遮蔽（旧服务端/存量记录同语义）——管理列表「未过滤」徽标与结果卡标注的数据源 */
+  unfiltered?: boolean
+  /** 可写分享「访客输入中」（P-20261106-8，服务端 shareSvc 投影）：visitors>0
+   *  即有访客上行连接在场（15s 轮询兜底；sc-ops:share.wtyping 是即时对账路） */
+  wtyping?: ShareWritableTyping
+}
+
+/** TermShareOptions 终端输出分享创建选项（P-20261106-9：直播/输出快照共用）。
+ *  缺省即安全基线——遮蔽开（unfiltered 不发字段）、水印开（watermark 不发字段），
+ *  旧服务端不识别字段时同样落到基线 */
+export interface TermShareOptions {
+  /** true = 关闭敏感值遮蔽（显式 opt-out，创建时定死不可切） */
+  unfiltered?: boolean
+  /** false = 关闭访客页溯源水印（缺省开） */
+  watermark?: boolean
+  /** 访问口令（P-20261107-4 终端弹层透出，可选；P-20261006-25 同一守卫族）：
+   *  非空 = 创建面直接设门（live 幂等命中带新口令=改门、不带=保持既有；
+   *  frozen 服务端 P-20261107-4 起创建面同收）。空串缺省不发字段 = 无门 */
+  passphrase?: string
+}
+
+/** ShareWritableTyping 可写分享上行在场投影（GET /api/share 行字段） */
+export interface ShareWritableTyping {
+  /** 在场上行连接数（= 正在键入的访客路数） */
+  visitors: number
 }
 
 /** ShareDirectProjection 直通持权/申请态（P-20261024-1，GET /api/share 行投影） */
@@ -227,20 +257,34 @@ export const shareApi = {
   // createTerminal 终端只读直播分享（token→会话，访客看遮蔽化只读输出流）。
   // ttlMinutes 可选（缺省服务端 30 分钟）；会话不存在 → 404。
   // override 敏感会话出域警示的确认标记（P-20261003-155）：命中且未确认时
-  // 响应不带 data 只带 warnings，确认后带 true 二次请求才创建（文件分享同流）
-  createTerminal: (sessionId: string, ttlMinutes?: number, override = false) =>
+  // 响应不带 data 只带 warnings，确认后带 true 二次请求才创建（文件分享同流）。
+  // opts（P-20261106-9）：unfiltered 关闭源头遮蔽 / watermark 关闭水印；opts.passphrase
+  // 可选访问口令（P-20261107-4 弹层透出）——缺省均不发字段（服务端安全基线）；
+  // 同会话已有直播时服务端沿用既有记录配置（口令带新=改门）
+  createTerminal: (sessionId: string, ttlMinutes?: number, override = false, opts: TermShareOptions = {}) =>
     api.post<{ data: ShareInfo }>('/share/terminal', {
       sessionId,
       override,
       ...(ttlMinutes != null ? { ttlMinutes } : {}),
+      ...(opts.unfiltered ? { unfiltered: true } : {}),
+      ...(opts.watermark === false ? { watermark: false } : {}),
+      ...(opts.passphrase ? { passphrase: opts.passphrase } : {}),
     }),
   // createTerminalFrozen 终端输出时点冻结快照分享（P-20261005-205）：创建
   // 时刻的 scrollback 定格链接——服务端净化（剥 ANSI + 敏感值遮蔽）后落单
   // 文件快照，会话继续跑内容不更新；默认 30 天 TTL、会话关闭后仍可访问。
   // 同一段输出重复定格恒同链（内容哈希派生）；会话不存在 → 404、空输出 → 400。
-  // override 敏感会话出域闸门与 createTerminal 同一契约
-  createTerminalFrozen: (sessionId: string, override = false) =>
-    api.post<{ data: ShareInfo }>('/share/terminal-frozen', { sessionId, override }),
+  // override 敏感会话出域闸门与 createTerminal 同一契约。opts 同 createTerminal
+  //（unfiltered 快照含原文落盘，服务端强制 24h TTL，与遮蔽快照恒不同链；
+  // passphrase 口令门 P-20261107-4 起创建面同收——幂等命中带新=改门）
+  createTerminalFrozen: (sessionId: string, override = false, opts: TermShareOptions = {}) =>
+    api.post<{ data: ShareInfo }>('/share/terminal-frozen', {
+      sessionId,
+      override,
+      ...(opts.unfiltered ? { unfiltered: true } : {}),
+      ...(opts.watermark === false ? { watermark: false } : {}),
+      ...(opts.passphrase ? { passphrase: opts.passphrase } : {}),
+    }),
   // createCast 会话回放分享（P-20261004-103）：把一次录制的 cast 以只读回放页
   // 分享出去——服务端在创建时刻把 cast 快照进隔离区（录制继续写不影响访客），
   // 默认 1 小时 TTL、上限 24h。同一录制重复分享恒同链（倒计时不续期，但会
@@ -304,6 +348,33 @@ export const shareApi = {
   // 不需要 confirm（持权立刻失效 + 会话只读闸解除）
   setDirectInput: (token: string, on: boolean, confirm = false) =>
     api.post<{ data: ShareInfo }>(`/share/${token}/direct-input`, { on, confirm }),
+  // ── 可写分享管理面（P-20261106-8「对方可直接输入」模式，动作化行内端点） ──
+  // setWritable 可写开关：on=true 需 confirm 显式确认 + 口令门就位（记录无
+  // 口令时必携 passphrase 补设，服务端 400 "writable requires a passphrase"
+  // 是前端弹「先设口令」输入框的触发契约）；on=false 回收方向零摩擦（上行
+  // 连接即刻断开）。响应 ttlHint=true 时前端提示缩短 TTL（暴露窗口与授权
+  // 面成正比，提示非强制）
+  setWritable: (token: string, on: boolean, confirm = false, passphrase = '') =>
+    api.post<{ data: ShareInfo; ttlHint?: boolean }>(`/share/${token}/writable`, {
+      on,
+      ...(confirm ? { confirm: true } : {}),
+      ...(passphrase ? { passphrase } : {}),
+    }),
+  // batchWritable 可写批量开关（管理列表多选）：逐条独立结算，响应为
+  // per-token 结果数组（reason: ok/not_found/not_terminal/passphrase_required/
+  // failed——批量方向不携带逐条口令，无门条目跳过待补设后重试）
+  batchWritable: (tokens: string[], on: boolean, confirm = false) =>
+    api.post<{ data: Array<{ token: string; ok: boolean; reason?: string }> }>(
+      '/share/writable/batch',
+      { tokens, on, ...(confirm ? { confirm: true } : {}) },
+    ),
+  // decidePasteReview 粘贴审批决策（审批分层的 owner 半边）：approve=true
+  // 把待批整块注入 PTY；false 丢弃。幂等（未知/已决 404——决策卡只能点一次）
+  decidePasteReview: (token: string, pasteId: string, approve: boolean) =>
+    api.post<{ data: { ok: boolean; approved: boolean } }>(
+      `/share/${token}/paste/${pasteId}/decision`,
+      { approve },
+    ),
   // listDrops 收件清单（新到旧，含 absPath 绝对路径——主人侧唯一带路径出口）
   listDrops: (token: string) =>
     api.get<{ data: ShareDropItem[]; share?: { name?: string; collab?: boolean } }>(`/share/${token}/drops`),

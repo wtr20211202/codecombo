@@ -6,9 +6,10 @@ import type { AxiosRequestConfig } from 'axios'
 
 /** 同步单元 kind 词表（服务端 unitContexts 全集；uiState/runtimes 等是全局单元。
  * credentials 是手动携密同步专用单元——只在 includeCredentials 开关的 E2E 通道走，
- * 不进 plan/定时词表，P-20261024-3） */
+ * 不进 plan/定时词表，P-20261024-3。notes/notes-multi 已随 P-20261108-3 笔记单库化
+ * 退役——本端不再产出，只可能出现在旧对端 manifest 里（plan 行 state=retired） */
 export type SyncUnitKind =
-  | 'project' | 'sessions' | 'notes' | 'crons'
+  | 'project' | 'sessions' | 'notes' | 'notes-multi' | 'crons'
   | 'snippets' | 'runtimes' | 'approvals' | 'chains' | 'uistate' | 'deliver'
   | 'credentials'
 
@@ -36,9 +37,10 @@ export interface SyncManifest {
   version?: string
 }
 
-/** PlanRow plan 预览单行（四态判定） */
+/** PlanRow plan 预览单行（四态判定；retired = 旧对端仍带的退役笔记单元，
+ *  action=skip 不可勾选——P-20261108-3 知情不执行） */
 export interface SyncPlanRow extends SyncUnitEntry {
-  state: 'synced' | 'local-newer' | 'peer-newer' | 'conflict' | 'new'
+  state: 'synced' | 'local-newer' | 'peer-newer' | 'conflict' | 'new' | 'retired'
   action: 'push' | 'pull' | 'skip'
   selected: boolean
   baselineMissing?: boolean

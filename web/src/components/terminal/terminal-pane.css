@@ -378,6 +378,47 @@
   outline-offset: -1px;
 }
 
+/* ============== 应用接管鼠标提示条（P-20261106-6） ============== */
+/* 鼠标上报模式在位时的顶部提示 pill：左上角锚定（右上角已被重绘/锁/最大化
+   按钮与搜索条占据），半透明底不喧宾夺主；显隐随模式序列即时切换（无过渡
+   ——终端输出帧率高，transition 反而闪切）；主题变量取色，无新增语义色 */
+.term-mouse-hint {
+  position: absolute;
+  top: 6px;
+  left: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: min(78%, 460px);
+  padding: 3px 6px 3px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-panel) 85%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.term-mouse-hint-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-mouse-hint-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color var(--motion-fast);
+}
+.term-mouse-hint-close:hover {
+  color: var(--text-body);
+}
+
 /* ============== 命令成败装饰行（P-20261003-150） ============== */
 /* OSC 133 D 帧退出码的命令区间标记：xterm registerDecoration DOM 覆盖层
    （不写 PTY 字节流，输出内容零污染），1 cell 宽左缘条 + 半透明区间底色，
