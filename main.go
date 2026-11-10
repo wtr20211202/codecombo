@@ -4,7 +4,6 @@ import (
 	"codecombo/server/app"
 	"codecombo/server/config"
 	"codecombo/server/git/auth"
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"embed"
@@ -340,7 +339,7 @@ Commands:
   stop        Stop a running server
   restart     Restart the server
   status      Show server status
-  update      Update to the latest version
+  update      Trigger an update via a running server (verified, auto-rollback; npm installs: npm i -g codecombo@latest)
   uninstall   Remove all codecombo data
   reset-lock  Reset global lock config (use when password is forgotten)
   version     Show version information
@@ -933,10 +932,28 @@ func isRunning() bool {
 
 // ==================== Update ====================
 
+// offlineUpdateHint P-20261109-5：CLI 独立换包路径退役后的指引文案。旧离线
+// 实现下载后不做 SHA256/ed25519 校验直接替换二进制（供应链面），且缺 npm 形态
+// 闸/在途闸/通道口径/回滚健康检查，与 manager 形态（下载→验签→替换→重启→
+// 失败回滚）保障缺位——不再保留第二条平行更新链，更新统一收口：运行中的
+// 服务端（cmdUpdate 的 API 分支，与 manager 同保障）或包管理器
+func offlineUpdateHint() string {
+	exePath, _ := os.Executable()
+	if update.IsNpmManaged(exePath) {
+		return "npm-managed install: run `npm i -g codecombo@latest` to update (the in-app self-update yields to npm by design)"
+	}
+	return `codecombo is not running — the standalone CLI update path has been retired (it replaced the binary without signature verification).
+
+To update:
+  1. start codecombo first (codecombo start), then run codecombo update again — the update then runs inside the server (signature verification + auto-rollback on failure); the version panel in the web UI offers the same flow
+  2. installed via a package manager? update through it (npm: npm i -g codecombo@latest)`
+}
+
 func cmdUpdate() {
 	pid, port, err := readPIDPort()
 	if err == nil && port > 0 && isProcessAlive(pid) {
-		// 服务运行中，通过内部 API 触发更新
+		// 服务运行中，通过内部 API 触发更新——服务端 manager 全链承接
+		//（npm 形态闸/在途闸/验签/失败回滚，P-20261109-5 起这是 CLI 唯一更新链）
 		// Token 仅存储哈希，CLI 无法附带明文；但 RequireTokenAuth 在本机无 Token 配置时自动跳过。
 		// TLS 默认开启后主端口是 https（自签），明文请求握手必失败——
 		// 与 gracefulStop 一致优先用 PID 文件第三行的明文回环辅助端口
@@ -945,7 +962,9 @@ func cmdUpdate() {
 		}
 		url := fmt.Sprintf("http://localhost:%d/api/updates/apply", port)
 		req, _ := http.NewRequest(http.MethodPost, url, nil)
-		client := &http.Client{Timeout: 10 * time.Second}
+		// 受理前服务端要先做一次更新源检查（缓存过期时外呼 GitHub API），
+		// 10s 在慢链路上偏紧；受理后即返回，下载在服务端后台进行
+		client := &http.Client{Timeout: 30 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
 			fmt.Printf("failed to trigger update via API: %s\n", err)
@@ -953,8 +972,9 @@ func cmdUpdate() {
 		}
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode == http.StatusOK {
-			fmt.Println("update started")
+		// 202 = 已受理后台进行（P-20261109-10 异步化）；200 兼容旧服务端
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted {
+			fmt.Println("update started (running in background — progress in the web UI version panel; result lands in the notification center)")
 		} else {
 			fmt.Printf("update failed (%d): %s\n", resp.StatusCode, string(body))
 			os.Exit(1)
@@ -962,61 +982,10 @@ func cmdUpdate() {
 		return
 	}
 
-	exePath, _ := os.Executable()
-	dd := config.DataDir()
-	_ = os.MkdirAll(filepath.Join(dd, "tmp"), 0755)
-
-	mgr := update.GetManager()
-	updateURL := config.Get().Server.UpdateURL
-	if updateURL == "" {
-		fmt.Println("update source not configured (server.updateURL)")
-		os.Exit(1)
-	}
-	source, err := update.NewGitHubSource(updateURL)
-	if err != nil {
-		// 更新源非法（非 https / 指向内网）：拒绝执行并说明原因
-		fmt.Printf("error: invalid update source: %v\n", err)
-		os.Exit(1)
-	}
-	mgr.SetSource(source)
-
-	info, err := mgr.CheckUpdate(context.Background(), version)
-	if err != nil {
-		fmt.Printf("check update failed: %s\n", err)
-		os.Exit(1)
-	}
-
-	if !update.HasUpdate(version, info.Version) {
-		fmt.Printf("already up to date (v%s)\n", version)
-		return
-	}
-
-	fmt.Printf("updating from v%s to v%s...\n", version, info.Version)
-
-	tmpDir := filepath.Join(dd, "tmp", "update-"+info.Version)
-	_ = os.MkdirAll(tmpDir, 0755)
-	newBinary := filepath.Join(tmpDir, filepath.Base(exePath))
-
-	fmt.Println("downloading...")
-	if err := mgr.DownloadToFile(context.Background(), info.DownloadURL, newBinary); err != nil {
-		fmt.Printf("download failed: %s\n", err)
-		os.Exit(1)
-	}
-	fmt.Println("download complete")
-
-	_ = os.Chmod(newBinary, 0755)
-
-	backup := exePath + ".bak"
-	_ = os.Rename(exePath, backup)
-	if err := update.CopyFile(newBinary, exePath); err != nil {
-		fmt.Printf("replace failed: %s, restoring backup\n", err)
-		_ = os.Rename(backup, exePath)
-		os.Exit(1)
-	}
-	_ = os.Chmod(exePath, 0755)
-	os.Remove(backup)
-	os.RemoveAll(tmpDir)
-	fmt.Printf("updated to v%s successfully\n", info.Version)
+	// 服务未运行：离线换包路径已退役（P-20261109-5，缘由见 offlineUpdateHint），
+	// 只留指引不再自行下载替换二进制
+	fmt.Println(offlineUpdateHint())
+	os.Exit(1)
 }
 
 func cmdDoUpdate() {

@@ -82,6 +82,7 @@ func TestApplyUpdateCleansTmpOnDownloadFailure(t *testing.T) {
 		t.Fatal("tmp dir should be removed after download failure")
 	}
 }
+
 // R1 守护：下载停滞检测——服务端只发响应头不发 body，60s 内应有进展失败而非挂死
 // （这里用短停滞参数不可行——常量固定；退化为验证 ctx 取消路径快速返回）
 func TestDownloadContextCancel(t *testing.T) {
@@ -99,7 +100,7 @@ func TestDownloadContextCancel(t *testing.T) {
 	t.Cleanup(cancel)
 	dest := filepath.Join(t.TempDir(), "dl.bin")
 	start := time.Now()
-	err := m.download(ctx, srv.URL, dest, nil)
+	err := m.download(ctx, srv.URL, dest, nil, false)
 	if err == nil {
 		t.Fatal("expected cancellation error")
 	}

@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,6 +22,7 @@ import (
 	"codecombo/server/remoteterminal"
 	"codecombo/server/sshclient"
 	"codecombo/server/store"
+	"codecombo/server/terminal"
 	"codecombo/server/wssafe"
 
 	"github.com/gin-gonic/gin"
@@ -88,7 +90,61 @@ func resolveTmuxName(hostID, requested string) (string, error) {
 	return fmt.Sprintf("sc_rtm_%s-%s", hex.EncodeToString(sum[:])[:8], suffix[:6]), nil
 }
 
+// ============== 远程 tmux 版本地板探测（P-20261109-7 A2） ==============
+
+// tmuxFloorProbeTimeout 单次远端 tmux -V 探测上限。探测是教育性提示的数据源，
+// 失败/超时一律静默降级（不阻塞会话创建、横幅缺省），上限收紧到 5s 防挂起
+// 主机拖慢创建链
+const tmuxFloorProbeTimeout = 5 * time.Second
+
+// tmuxFloorProbeCmd 探测命令：tmux 缺席时整条失败（exit 非 0、stdout 空），
+// 解析端按空串静默处理。无状态查询，幂等可重复
+const tmuxFloorProbeCmd = "command -v tmux >/dev/null 2>&1 && tmux -V"
+
+// probeHostTmuxFloor 在远端主机执行 tmux -V 并按版本地板归类。
+// 返回 (原始版本串如 "tmux 3.2a", 地板分类 ok/drag-copy/passthrough)；主机不可达/
+// tmux 缺席/超时返回 ("", "")——调用方静默降级（不提示），绝不作为错误上抛
+func probeHostTmuxFloor(hostID string) (string, string) {
+	rh, err := store.Get().RemoteHost.Get(hostID)
+	if err != nil {
+		return "", ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), tmuxFloorProbeTimeout)
+	defer cancel()
+	var out *sshclient.ExecOutput
+	err = conns.WithLease(hostID, dialOptions(rh), func(client *sshclient.Client) error {
+		var e error
+		out, e = client.Exec(ctx, sshclient.ExecOptions{Cmd: tmuxFloorProbeCmd}, nil)
+		return e
+	})
+	if err != nil || out == nil || out.ExitCode != 0 || len(out.Stdout) == 0 {
+		return "", ""
+	}
+	version := strings.TrimSpace(strings.Join(out.Stdout, " "))
+	floor := terminal.TmuxClipboardFloorKind(version)
+	return version, floor
+}
+
 // ============== 生产 Dialer ==============
+
+// buildTmuxWrapper 远端 tmux 模式的启动命令链（纯函数，单测断言步骤序与关键步骤）。
+// 附带解绑远端 tmux 自带右键菜单（MouseDown3*）：否则右键按下被 tmux 接管、它
+// 画出自带英文菜单，与本系统右键菜单双层同现。
+// 附带 set-option -s set-clipboard on（P-20261109-7）：远端 tmux 是用户自有默认
+// socket server，托管 conf 不到远端——不显式置 on 时 <3.2 默认 off = 拖选
+// copy-pipe 源头即不发 OSC 52（拖选复制死源主因）。影响面比 unbind 更重：该
+// server 上全部会话（含用户自建）的 copy-pipe/OSC 52 行为被对齐到「写入系统
+// 剪贴板」——语义是功能对齐而非限制，评审裁量取 on；幂等可重复执行。
+// 2>/dev/null + `;`：旧 tmux（<3.2 无此键）报 unknown option 静默跳过不阻断
+// 后续步骤。步骤必须分开执行：`new -A -d` 先确保 server+session 存在（已存在
+// 则 no-op），set-option/unbind-key 是 server 级选项/键表操作（幂等），最后才
+// attach 进会话——不带 -d 的 new 会阻塞命令链，排在后面的命令永远执行不到。
+// command -v 守卫：远端缺 tmux 时整链短路回退原生 shell
+func buildTmuxWrapper(tmuxName string) string {
+	return fmt.Sprintf(
+		`command -v tmux >/dev/null 2>&1 && { tmux new -A -d -s %s 2>/dev/null; tmux set-option -s set-clipboard on 2>/dev/null; tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n MouseDown3StatusRight 2>/dev/null; exec tmux attach -t %s; }; exec "${SHELL:-/bin/sh}"`,
+		tmuxName, tmuxName)
+}
 
 // sshDialer 生产 Dialer：解析凭据并建立远程主机的 SSH PTY 连接
 type sshDialer struct{}
@@ -161,16 +217,10 @@ func newSSHPTYConn(client *sshclient.Client, rows, cols uint16, tmuxName string)
 		return nil, fmt.Errorf("request pty: %w", err)
 	}
 	// tmux 模式：attach-or-create，远端缺 tmux 时回退原生 shell——
-	// 整条命令经 sh -c 执行，tmuxName 字符集已校验（[A-Za-z0-9_-]）可安全内嵌。
-	// 附带解绑远端 tmux 自带右键菜单（MouseDown3*）：否则右键按下被 tmux 接管、它
-	// 画出自带英文菜单，与本系统右键菜单双层同现。步骤必须分开执行：`new -A -d`
-	// 先确保 server+session 存在（已存在则 no-op），unbind-key 是 server 级键表
-	// 操作（幂等；影响该远端 tmux server 的全部会话），最后才 attach 进会话——
-	// 不带 -d 的 new 会阻塞命令链，排在后面的 unbind 永远执行不到
+	// 整条命令经 sh -c 执行，tmuxName 字符集已校验（[A-Za-z0-9_-]）可安全内嵌
+	//（wrapper 构造与步骤序说明见 buildTmuxWrapper）
 	if tmuxName != "" {
-		wrapper := fmt.Sprintf(
-			`command -v tmux >/dev/null 2>&1 && { tmux new -A -d -s %s 2>/dev/null; tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n MouseDown3StatusRight 2>/dev/null; exec tmux attach -t %s; }; exec "${SHELL:-/bin/sh}"`,
-			tmuxName, tmuxName)
+		wrapper := buildTmuxWrapper(tmuxName)
 		if err := sess.Start(wrapper); err != nil {
 			_ = sess.Close()
 			return nil, fmt.Errorf("start tmux shell: %w", err)
@@ -242,6 +292,17 @@ func CreateRemoteTerminal(c *gin.Context) {
 		shared.Error(c, http.StatusInternalServerError, "remote terminal manager not initialized", nil)
 		return
 	}
+	// tmux 版本地板探测（P-20261109-7 A2）：tmux 模式才探（原生 shell 无 tmux 链
+	// 可言）。与 PTY 拨号并行起跑（各自独立 SSH 连接），创建完成后限时收割——
+	// 探测先到零额外延迟，慢于 4s 不等（静默降级，横幅缺省），绝不阻塞/失败创建
+	var floorCh chan [2]string
+	if tmuxName != "" {
+		floorCh = make(chan [2]string, 1)
+		go func() {
+			v, f := probeHostTmuxFloor(hostID)
+			floorCh <- [2]string{v, f}
+		}()
+	}
 	s, err := m.CreateSession(hostID, rows, cols, tmuxName)
 	if err != nil {
 		// 上限满是客户端可感知的状态（提示关 tab），拨号/凭据失败是上游故障——分开状态码
@@ -273,16 +334,49 @@ func CreateRemoteTerminal(c *gin.Context) {
 	}
 	// 会话建立 = SSH 认证通过：主机状态点升级为绿（已连通）
 	MarkAuthOK(hostID)
+	// 收割并行探测（4s 上限）：先到零延迟、慢到不等——教育性提示不值得拖住
+	// 会话创建（「探测失败静默降级不阻塞」）。收割的值只进本响应（tab 持有，
+	// 宿主不落盘）；响应缺字段 = 前端无横幅（诚实降级）
+	tmuxVersion, tmuxFloor := "", ""
+	if floorCh != nil {
+		select {
+		case r := <-floorCh:
+			tmuxVersion, tmuxFloor = r[0], r[1]
+		case <-time.After(4 * time.Second):
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"sessionId": s.ID,
-			"hostId":    s.HostID,
-			"rows":      s.Rows,
-			"cols":      s.Cols,
-			"createdAt": s.CreatedAt,
-			"tmuxName":  tmuxName,
+			"sessionId":   s.ID,
+			"hostId":      s.HostID,
+			"rows":        s.Rows,
+			"cols":        s.Cols,
+			"createdAt":   s.CreatedAt,
+			"tmuxName":    tmuxName,
+			"tmuxVersion": tmuxVersion,
+			// tmuxClipboardFloor：ok / drag-copy(<3.2 拖选复制受限) / passthrough
+			// (≥3.2<3.3 应用内复制透传受限)；空串 = 探测失败或 tmux 缺席（无横幅）
+			"tmuxClipboardFloor": tmuxFloor,
 		},
 	})
+}
+
+// GetRemoteTmuxFloor GET /remotehosts/:id/terminals/tmux-floor —— 远端 tmux
+// 版本地板探测（P-20261109-7 A2）。Create 响应携带探测结果，但页面刷新后
+// 恢复的存量 tab 不经 Create（WS 直连重连），pane 挂载时经本端点补拉一次。
+// 同步探测（连接池借出，通常一 RTT），失败/超时静默返回空字段（前端不显示
+// 横幅），200 恒成功——探测是教育性提示数据源，不值得错误码
+func GetRemoteTmuxFloor(c *gin.Context) {
+	hostID := c.Param("id")
+	if !remoteResIDRe.MatchString(hostID) {
+		shared.Error(c, http.StatusNotFound, "remote host not found", nil)
+		return
+	}
+	version, floor := probeHostTmuxFloor(hostID)
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"tmuxVersion":        version,
+		"tmuxClipboardFloor": floor,
+	}})
 }
 
 // ListRemoteTerminals 列出某远程主机的终端会话

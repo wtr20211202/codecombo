@@ -378,19 +378,33 @@
   outline-offset: -1px;
 }
 
-/* ============== 应用接管鼠标提示条（P-20261106-6） ============== */
-/* 鼠标上报模式在位时的顶部提示 pill：左上角锚定（右上角已被重绘/锁/最大化
-   按钮与搜索条占据），半透明底不喧宾夺主；显隐随模式序列即时切换（无过渡
-   ——终端输出帧率高，transition 反而闪切）；主题变量取色，无新增语义色 */
-.term-mouse-hint {
+/* ============== pane 顶部教育/兜底浮条区（P-20261106-6 + P-20261109-7 B/C） ============== */
+/* 左上角锚定的纵向堆叠容器：鼠标教育条与 OSC 52 写失败兜底条并列共存（教育
+   条教 Shift 旁路、兜底条救写失败自救，语义独立互不抑制）。容器承载定位与
+   z-index，条目自身退为普通 flex 子项——新增浮条照同构追加即自动堆叠 */
+.term-pane-hints {
   position: absolute;
   top: 6px;
   left: 10px;
   z-index: 3;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
   max-width: min(78%, 460px);
+  pointer-events: none;
+}
+.term-pane-hints > div {
+  pointer-events: auto;
+}
+/* 鼠标上报模式在位时的顶部提示 pill：半透明底不喧宾夺主；显隐随模式序列
+   即时切换（无过渡——终端输出帧率高，transition 反而闪切）；主题变量取色，
+   无新增语义色 */
+.term-mouse-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
   padding: 3px 6px 3px 10px;
   border: 1px solid var(--border-default);
   border-radius: 4px;
@@ -398,6 +412,25 @@
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.4;
+}
+/* 教育条/兜底条的并列动作按钮（P-20261109-7）：「切换到复制优先」「复制」
+   ——quaternary 风格的文字钮，与 ✕ 同行不挤占文案 */
+.term-mouse-hint-action {
+  background: none;
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 1.3;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: color var(--motion-fast), border-color var(--motion-fast);
+}
+.term-mouse-hint-action:hover {
+  color: var(--text-body);
+  border-color: var(--text-dim);
 }
 .term-mouse-hint-text {
   overflow: hidden;
@@ -417,6 +450,47 @@
 }
 .term-mouse-hint-close:hover {
   color: var(--text-body);
+}
+
+/* OSC 52 写失败兜底浮条（P-20261109-7 B）：内容预览是最低防线（PTY 内任意
+   程序可控序列内容，禁无预览形态）——pre 保留换行原貌 + 字符截断省略号
+   （TerminalPane 内 200 字上限），max-height 三行封顶滚动省略；v-text 渲染
+   （内容来自不可信 PTY 字节流，等价转义，禁 v-html） */
+.term-osc52-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-orange, #d97706) 45%, var(--border-default));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.term-osc52-fallback-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-osc52-fallback-preview {
+  margin: 0;
+  max-height: 4.2em;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-body);
+  background: color-mix(in srgb, var(--bg-body, var(--bg-panel)) 60%, transparent);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+.term-osc52-fallback-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ============== 命令成败装饰行（P-20261003-150） ============== */

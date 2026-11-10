@@ -31,30 +31,32 @@ func portableSettingsFromConfig(s config.ServerConfig) *MigrationPortableSetting
 		TerminalHistoryEnabled:  s.TerminalHistoryEnabled,
 		TerminalPastePrecheck:   s.TerminalPastePrecheckEnabled,
 		TerminalRemoteTmux:      s.TerminalRemoteTmux,
-		TerminalIdleTimeoutMin:  s.TerminalIdleTimeoutMin,
-		TerminalDefaultShell:    s.TerminalDefaultShell,
-		AgentProvider:           s.AgentProvider,
-		AgentNamingNoteEnabled:  s.AgentNamingNoteEnabled,
-		AgentLaunchCommands:     s.AgentLaunchCommands,
-		CustomAgents:            s.CustomAgents,
-		AgentGuard:              s.AgentGuard,
-		AgentApprovalMode:       s.AgentApprovalMode,
-		AgentApprovalRules:      s.AgentApprovalRules,
-		AgentApprovalTimeoutMin: s.AgentApprovalTimeoutMin,
-		ApprovalRecording:       s.ApprovalRecording,
-		CustomSensitivePatterns: s.CustomSensitivePatterns,
-		UISnapshotEnabled:       s.UISnapshotEnabled,
-		SensitiveExternalWatch:  s.SensitiveExternalWatch,
-		AuditRetentionDays:      s.AuditRetentionDays,
-		LogRetentionDays:        s.LogRetentionDays,
-		GitNetworkTimeoutSec:    s.GitNetworkTimeoutSec,
-		HookURLAllowHosts:       s.HookURLAllowHosts,
-		DshWebBase:              s.DshWebBase,
-		DshProxyPort:            s.DshProxyPort,
-		DshExposeAll:            s.DshExposeAll,
-		DshAllowStandalone:      s.DshAllowStandalone,
-		DshLaunchCommand:        s.DshLaunchCommand,
-		DshNpmCommand:           s.DshNpmCommand,
+		// P-20261109-7：终端行为偏好随包迁移（指针三态，nil=未配置跨机保持）
+		TerminalTmuxMouseEnabled: s.TerminalTmuxMouseEnabled,
+		TerminalIdleTimeoutMin:   s.TerminalIdleTimeoutMin,
+		TerminalDefaultShell:     s.TerminalDefaultShell,
+		AgentProvider:            s.AgentProvider,
+		AgentNamingNoteEnabled:   s.AgentNamingNoteEnabled,
+		AgentLaunchCommands:      s.AgentLaunchCommands,
+		CustomAgents:             s.CustomAgents,
+		AgentGuard:               s.AgentGuard,
+		AgentApprovalMode:        s.AgentApprovalMode,
+		AgentApprovalRules:       s.AgentApprovalRules,
+		AgentApprovalTimeoutMin:  s.AgentApprovalTimeoutMin,
+		ApprovalRecording:        s.ApprovalRecording,
+		CustomSensitivePatterns:  s.CustomSensitivePatterns,
+		UISnapshotEnabled:        s.UISnapshotEnabled,
+		SensitiveExternalWatch:   s.SensitiveExternalWatch,
+		AuditRetentionDays:       s.AuditRetentionDays,
+		LogRetentionDays:         s.LogRetentionDays,
+		GitNetworkTimeoutSec:     s.GitNetworkTimeoutSec,
+		HookURLAllowHosts:        s.HookURLAllowHosts,
+		DshWebBase:               s.DshWebBase,
+		DshProxyPort:             s.DshProxyPort,
+		DshExposeAll:             s.DshExposeAll,
+		DshAllowStandalone:       s.DshAllowStandalone,
+		DshLaunchCommand:         s.DshLaunchCommand,
+		DshNpmCommand:            s.DshNpmCommand,
 	}
 }
 
@@ -77,6 +79,7 @@ func applyPortableToConfig(in *MigrationPortableSettings, s *config.ServerConfig
 	s.TerminalHistoryEnabled = in.TerminalHistoryEnabled
 	s.TerminalPastePrecheckEnabled = in.TerminalPastePrecheck
 	s.TerminalRemoteTmux = in.TerminalRemoteTmux
+	s.TerminalTmuxMouseEnabled = in.TerminalTmuxMouseEnabled
 	s.TerminalIdleTimeoutMin = in.TerminalIdleTimeoutMin
 	s.TerminalDefaultShell = in.TerminalDefaultShell
 	s.AgentProvider = in.AgentProvider

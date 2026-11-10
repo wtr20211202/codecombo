@@ -8,6 +8,12 @@ import { useTerminalSessionsStore } from '../../stores/terminal-sessions'
 import { useI18n } from '../../composables/useI18n'
 import { isCopyOnSelectEnabled, setCopyOnSelectEnabled } from '../../composables/useTerminalClipboard'
 import { resetMouseModeHintDismissed } from '../../composables/terminalMouseModeHint'
+import {
+  DEFAULT_TMUX_MOUSE_ENABLED,
+  isTmuxMouseTakeoverEnabled,
+  syncTmuxMouseTakeoverLocal,
+  setTmuxMouseTakeover,
+} from '../../composables/tmuxMouseTakeover'
 import { invalidatePastePrecheckCache } from '../../composables/useTerminalDangerGate'
 import { termInstances } from '../../composables/useTerminalInstances'
 import { terminalLru, TERMINAL_LRU_KEEP } from '../../composables/terminalLru'
@@ -198,6 +204,8 @@ async function load() {
       pendingRemoteTmux.value = data.terminalRemoteTmux
       initialRemoteTmux = data.terminalRemoteTmux
     }
+    // tmux 鼠标接管（P-20261109-7）：镜像同步（模块级，提示条一键按钮同源）
+    syncTmuxMouseTakeoverLocal(data.terminalTmuxMouseEnabled)
     pendingDshWebBase.value = data.dshWebBase || DEFAULT_DSH_BASE
     pendingDshWebToken.value = data.dshWebToken || ''
     pendingDshLaunchCommand.value = data.dshLaunchCommand || ''
@@ -347,6 +355,34 @@ function onCopyOnSelectChange(checked: boolean) {
 function restoreCopyOnSelect() {
   onCopyOnSelectChange(DEFAULT_COPY_ON_SELECT)
 }
+
+// ── tmux 鼠标接管开关（P-20261109-7 C）：直写行（写即热切换即时生效）──
+// 模块级反应式镜像同步（提示条「切换到复制优先」一键按钮与本开关同源）；
+// 写路径收口 setTmuxMouseTakeover（乐观更新+失败回滚），本行只补 toast。
+// 覆盖面声明：仅本地终端（专有 socket），远程终端不托管（hint 文案同口径）
+const tmuxMouseSwitching = ref(false)
+async function onTmuxMouseChange(checked: boolean) {
+  if (tmuxMouseSwitching.value) return
+  tmuxMouseSwitching.value = true
+  const ok = await setTmuxMouseTakeover(checked)
+  tmuxMouseSwitching.value = false
+  if (ok) message.success(checked
+    ? t('settings.terminalTmuxMouseOn')
+    : t('settings.terminalTmuxMouseOff'))
+  else message.error(t('settings.terminalTmuxMouseFailed'))
+}
+function restoreTmuxMouse() {
+  void onTmuxMouseChange(DEFAULT_TMUX_MOUSE_ENABLED)
+}
+
+// 本地面板两档地板提示（P-20261109-7 A2）：clipboardFloor 由 tmux-info 端点
+// 归类（ok/drag-copy/passthrough；空=不可解析不提示）
+const tmuxFloorHintKey = computed(() => {
+  const floor = tmuxInfo.value?.clipboardFloor
+  if (floor === 'drag-copy') return 'settings.tmuxFloorDragCopy'
+  if (floor === 'passthrough') return 'settings.tmuxFloorPassthrough'
+  return ''
+})
 
 // 光标形态/闪烁（P-20261005-212）：font store 直写行（即时落盘，运行中会话经
 // useTerminalInstances / TerminalPane 的 watch 直写 term.options 即时生效），
@@ -613,6 +649,16 @@ defineExpose({ load, save, isDirty })
         >
           {{ t('settings.tmuxRequiredHint', { version: tmuxInfo.required }) }}
         </div>
+        <!-- 剪贴板能力地板两档提示（P-20261109-7 A2）：本机 tmux 3.2 前无
+             set-clipboard / 3.3 前无 allow-passthrough——版本显示与一键安装
+             同面板诚实降级提示（探测失败/版本健康则无提示） -->
+        <div
+          v-if="tmuxFloorHintKey"
+          class="tmux-required-hint"
+          data-testid="settings-tmux-floor-hint"
+        >
+          {{ t(tmuxFloorHintKey) }}
+        </div>
       </div>
     </div>
 
@@ -797,6 +843,34 @@ defineExpose({ load, save, isDirty })
       <!-- 分轨标注（P-20261007-1）：复制选中随账号漫游（服务端 userPrefs 单键） -->
       <div class="backend-hint">
         {{ t('settings.syncTrackRoaming') }}
+      </div>
+    </div>
+
+    <!-- tmux 鼠标接管（P-20261109-7 C，默认开）：直写行（写即服务端热切换
+         tmux mouse，现存会话逐事件读取即刻生效）；关=复制优先模式 -->
+    <div
+      class="form-group"
+      data-testid="settings-terminal-tmux-mouse"
+    >
+      <div class="form-label">
+        {{ t('settings.terminalTmuxMouse') }}
+      </div>
+      <div class="slider-row">
+        <n-checkbox
+          :checked="isTmuxMouseTakeoverEnabled()"
+          :disabled="tmuxMouseSwitching"
+          size="small"
+          @update:checked="onTmuxMouseChange"
+        >
+          {{ t('settings.terminalTmuxMouseLabel') }}
+        </n-checkbox>
+        <SettingModifiedMark
+          :modified="isTmuxMouseTakeoverEnabled() !== DEFAULT_TMUX_MOUSE_ENABLED"
+          @restore="restoreTmuxMouse"
+        />
+      </div>
+      <div class="backend-hint">
+        {{ t('settings.terminalTmuxMouseHint') }}
       </div>
     </div>
 

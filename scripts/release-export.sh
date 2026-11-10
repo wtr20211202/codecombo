@@ -22,15 +22,28 @@
 # 导出后必须跑零放行敏感扫描门禁（scripts/release-scan.sh）才可对外拷贝；
 # Pages 发布步骤见 docs/pages-publishing.md。
 #
-# 用法：bash scripts/release-export.sh [DEST]
+# 用法：bash scripts/release-export.sh [--ref <commit|tag>] [DEST]
 #   DEST 缺省 release/public/（.gitignore 已忽略 release/）。
 #   DEST 含 .git 时拒绝导出（防止误清空用户的 GitHub 检出目录）。
+#   --ref <commit>  从任意提交导出（节点发布，配 release-publish.sh --ref 用）；
+#                   缺省=HEAD。导出源一律走 git archive（提交树字节，恒 LF、
+#                   不含工作树未提交物——脏工作树不可能泄漏进发布面）。
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
-DEST="${1:-release/public}"
+DEST="" REF=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ref) [ $# -ge 2 ] || { echo "FATAL: --ref 需要一个提交参数（commit/tag/分支名）" >&2; exit 2; }
+           REF="$2"; shift 2;;
+    --ref=*) REF="${1#--ref=}"; shift;;
+    *) if [ -n "$DEST" ]; then echo "FATAL: 多余的位置参数：$1（用法见文件头）" >&2; exit 2; fi
+       DEST="$1"; shift;;
+  esac
+done
+DEST="${DEST:-release/public}"
 DEST_ABS="$(mkdir -p "$DEST" && cd "$DEST" && pwd)"
 case "$DEST_ABS" in
   "$REPO_ROOT") echo "FATAL: DEST 不能是仓库根" >&2; exit 2;;
@@ -38,6 +51,11 @@ esac
 if [ -e "$DEST_ABS/.git" ]; then
   echo "FATAL: DEST 是 git 工作树（含 .git），拒绝清空——发布拷贝目标是纯净目录" >&2
   exit 2
+fi
+if [ -n "$REF" ]; then
+  REF=$(git rev-parse --verify --quiet "$REF^{commit}") \
+    || { echo "FATAL: --ref 无法解析为提交：$REF" >&2; exit 2; }
+  echo "==> Export ref: $REF"
 fi
 
 # ---------- 剔除决策清单（每条带缘由；命中即不导出） ----------
@@ -86,9 +104,16 @@ excluded() {
 }
 
 # ---------- 导出：清空重灌（真幂等——剔除清单收紧后旧残留不滞留） ----------
+# 导出源统一 git archive（提交树字节，恒 LF、不含工作树未提交物）：缺省 HEAD，
+# --ref 任意节点（节点发布）。剔除清单照旧走 excluded()，命中即从提取树移除。
 echo "==> Export destination: $DEST_ABS"
 rm -rf "$DEST_ABS"
 mkdir -p "$DEST_ABS"
+
+EXPORT_SRC="${REF:-HEAD}"
+# -c core.autocrlf=false：导出=提交 blob 原字节（文本恒 LF），与本机 autocrlf
+# 配置解耦——同一提交在任何机器导出逐字节一致；工作树换行形态不再影响发布面。
+git -c core.autocrlf=false archive --format=tar "$EXPORT_SRC" | tar -xf - -C "$DEST_ABS"
 
 total=0; kept=0; dropped=0
 DROPPED_LIST="$(dirname "$DEST_ABS")/export-dropped.txt"
@@ -98,12 +123,13 @@ while IFS= read -r f; do
   if excluded "$f"; then
     dropped=$((dropped + 1))
     printf '%s\n' "$f" >> "$DROPPED_LIST"
+    rm -f "$DEST_ABS/$f"
     continue
   fi
   kept=$((kept + 1))
-  mkdir -p "$DEST_ABS/$(dirname "$f")"
-  cp -p "$f" "$DEST_ABS/$f"
-done < <(git ls-files -z | tr '\0' '\n')
+done < <(git ls-tree -r --name-only -z "$EXPORT_SRC" | tr '\0' '\n')
+# 剔除后清掉变空的目录（.zcode/、scripts/perf/ 等）——archive 先落了树结构
+find "$DEST_ABS" -type d -empty -delete
 
 # ---------- 确定性后处理 ----------
 # 1) web/package.json：只删 npm scripts 键与 check/check:fast 链里的挂载点；
@@ -219,7 +245,7 @@ done
 [ "$fail" = 0 ] || { echo "==> Export FAILED (see FATAL lines above)" >&2; exit 1; }
 
 # ---------- 运行元信息（写 release/ 根，不进 public/ 拷贝树） ----------
-COMMIT=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+COMMIT=$(git rev-parse "$EXPORT_SRC" 2>/dev/null || echo unknown)
 {
   echo "source-commit: $COMMIT"
   echo "exported-at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"

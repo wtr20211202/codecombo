@@ -3,7 +3,12 @@ import type { Terminal } from '@xterm/xterm'
 import {
   attachOsc52Clipboard,
   hasOsc52ClipboardProof,
+  getOsc52ClipboardFailure,
+  markOsc52FailureShown,
+  clearOsc52ClipboardFailure,
   OSC52_PROOF_CAP,
+  OSC52_FAILURE_CAP,
+  OSC52_FAILURE_TTL_MS,
 } from './terminalOsc52Clipboard'
 
 // OSC 52 写入接管测试（P-20261107-6）：桩 parser 捕获注册的 OSC handler，直接以
@@ -180,5 +185,110 @@ describe('OSC 52 写入接管', () => {
     expect(hasOsc52ClipboardProof(first)).toBe(false)
     expect(hasOsc52ClipboardProof(keep)).toBe(true)
     expect(hasOsc52ClipboardProof(last)).toBe(true)
+  })
+})
+
+describe('OSC 52 写失败兜底簿记（P-20261109-7 B）', () => {
+  it('copyText 失败 → 同一 then(ok) 分叉登记失败条目（text 原文保留）；成功 → 不登记', async () => {
+    const failId = nextId()
+    copyTextMock.mockResolvedValue(false)
+    const t1 = makeTermStub()
+    attachOsc52Clipboard(failId, t1.term)
+    t1.handlers.get(52)!(`c;${b64('secret-payload <b>x</b>')}`)
+    await flush()
+    const f = getOsc52ClipboardFailure(failId)
+    expect(f).not.toBeNull()
+    expect(f!.text).toBe('secret-payload <b>x</b>') // 原文，截断在展示层
+    expect(f!.shownAt).toBeNull() // 未可见，30s 不起算
+    expect(f!.failedAt).toBeGreaterThan(0)
+
+    const okId = nextId()
+    copyTextMock.mockResolvedValue(true)
+    const t2 = makeTermStub()
+    attachOsc52Clipboard(okId, t2.term)
+    t2.handlers.get(52)!(`c;${b64('ok')}`)
+    await flush()
+    expect(getOsc52ClipboardFailure(okId)).toBeNull()
+    expect(hasOsc52ClipboardProof(okId)).toBe(true)
+  })
+
+  it('重挂/重连重放幂等：同会话重复失败只刷新（单条、内容以最新为准），不叠条', async () => {
+    const sid = nextId()
+    copyTextMock.mockResolvedValue(false)
+    const t1 = makeTermStub()
+    attachOsc52Clipboard(sid, t1.term)
+    t1.handlers.get(52)!(`c;${b64('first')}`)
+    await flush()
+    // 重挂：新 term 再 attach（重放历史 OSC 52 → handler 再跑）
+    const t2 = makeTermStub()
+    attachOsc52Clipboard(sid, t2.term)
+    t2.handlers.get(52)!(`c;${b64('second')}`)
+    await flush()
+    const f = getOsc52ClipboardFailure(sid)
+    expect(f).not.toBeNull()
+    expect(f!.text).toBe('second')
+    // 模块簿记无条数读数——以「首条内容被覆盖」断言刷新语义（若叠条会有两条，
+    // Map 键控结构性排除叠条）
+    expect(getOsc52ClipboardFailure(sid)).toBe(f)
+  })
+
+  it('30s TTL 起算 = pane 可见时刻：markOsc52FailureShown 首见落账且幂等；clear 清除', async () => {
+    vi.useFakeTimers()
+    try {
+      const base = Date.now()
+      vi.setSystemTime(base)
+      const sid = nextId()
+      copyTextMock.mockResolvedValue(false)
+      const t1 = makeTermStub()
+      attachOsc52Clipboard(sid, t1.term)
+      t1.handlers.get(52)!(`c;${b64('x')}`)
+      await vi.runAllTimersAsync() // flush then 回调（fake timers 下 flush 不适用）
+
+      // 后台失败 → 首见（切回可见）时才起算；重复调用不重置（不续期）
+      vi.setSystemTime(base + 20_000)
+      expect(markOsc52FailureShown(sid)).toBe(true)
+      expect(getOsc52ClipboardFailure(sid)!.shownAt).toBe(base + 20_000)
+      expect(markOsc52FailureShown(sid)).toBe(false)
+      vi.setSystemTime(base + 20_000 + OSC52_FAILURE_TTL_MS)
+      expect(markOsc52FailureShown(sid)).toBe(false) // 过期后不再落账
+      clearOsc52ClipboardFailure(sid)
+      expect(getOsc52ClipboardFailure(sid)).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('失败 FIFO 上限：失败条目按插入序淘汰最早者（与 proof 簿记互不影响）', async () => {
+    copyTextMock.mockResolvedValue(false)
+    const first = nextId()
+    const keep = nextId()
+    const fill: string[] = []
+    for (let i = 0; i < OSC52_FAILURE_CAP - 2; i++) fill.push(nextId())
+    for (const sid of [first, keep, ...fill]) {
+      const s = makeTermStub()
+      attachOsc52Clipboard(sid, s.term)
+      s.handlers.get(52)!(`c;${b64(sid)}`)
+    }
+    await flush()
+    expect(getOsc52ClipboardFailure(first)).not.toBeNull()
+    const last = nextId()
+    const s = makeTermStub()
+    attachOsc52Clipboard(last, s.term)
+    s.handlers.get(52)!(`c;${b64(last)}`)
+    await flush()
+    expect(getOsc52ClipboardFailure(first)).toBeNull() // 最早失败条目被淘汰
+    expect(getOsc52ClipboardFailure(keep)).not.toBeNull()
+    expect(getOsc52ClipboardFailure(last)).not.toBeNull()
+  })
+
+  it('失败条目不登记 proof；成功 proof 不产生失败条目——两簿记正交', async () => {
+    const sid = nextId()
+    copyTextMock.mockResolvedValue(false)
+    const t1 = makeTermStub()
+    attachOsc52Clipboard(sid, t1.term)
+    t1.handlers.get(52)!(`c;${b64('x')}`)
+    await flush()
+    expect(hasOsc52ClipboardProof(sid)).toBe(false)
+    expect(getOsc52ClipboardFailure(sid)).not.toBeNull()
   })
 })

@@ -47,6 +47,9 @@
              徽标层级须低于 modal，放行指示不得遮挡/挡点设置弹层等浮层；
              审批卡在场时徽标让位于更高层的卡片堆） -->
         <ApprovalModeBadge />
+        <!-- 全局更新进度徽标（P-20261109-10）：自更新进行中/刚出结局时全路由常驻
+             （左下独立 fixed 锚点，z 1500 低于 modal），离开版本面板仍可见实时进度 -->
+        <UpdateProgressBadge />
         <a
           href="#main-content"
           class="skip-link"
@@ -144,6 +147,7 @@ import { useAsksStore } from './stores/asks'
 import { useInstanceStore } from './stores/instance'
 import { useRemoteOpsStore } from './stores/remoteOps'
 import { useUpdateCheckStore } from './stores/updateCheck'
+import { useUpdateProgressStore } from './stores/updateProgress'
 import { useErrorLogStore } from './stores/errorLog'
 import { useI18n } from './composables/useI18n'
 import { useTerminalTheme } from './composables/useTerminalTheme'
@@ -166,6 +170,7 @@ import InstanceSwitchOverlay from './components/instance/InstanceSwitchOverlay.v
 import OpsChannelBridge from './components/ai/OpsChannelBridge.vue'
 import ApprovalCards from './components/agent/ApprovalCards.vue'
 import ApprovalModeBadge from './components/agent/ApprovalModeBadge.vue'
+import UpdateProgressBadge from './components/home/UpdateProgressBadge.vue'
 import AskCards from './components/agent/AskCards.vue'
 import StallTriageCard from './components/agent/StallTriageCard.vue'
 import CrashFallback from './components/crash/CrashFallback.vue'
@@ -254,6 +259,10 @@ watch(documentTitle, (title) => { document.title = title }, { immediate: true })
 watch(todoBadge, (n) => { void updateFaviconBadge(n) }, { immediate: true })
 const remoteOps = useRemoteOpsStore()
 const updateCheckStore = useUpdateCheckStore()
+const updateProgressStore = useUpdateProgressStore()
+// 实例切换（P-20261109-10）：更新进度按新实例实况重探——旧实例的跟踪作废，
+// 远程实例的在途更新同样接管可见
+watch(() => instanceStore.currentInstanceId, () => { updateProgressStore.resetForInstance() })
 const { t } = useI18n()
 
 // 终端主题 → document 副作用全局唯一应用点：body data-terminal-theme + CSS 变量
@@ -384,8 +393,13 @@ onMounted(() => {
   // 智能操作通道：订阅后端/外部 Agent 的前端联动指令
   initOpsChannel()
   // 更新可用性检查：启动延时静默首查 + 周期复查（GitHub 分发源 + 所属中心，
-  // 结果驱动状态栏角标/实例面板提示；发现更新仅提示，由用户决定是否安装）
+  // 结果驱动状态栏角标/实例面板提示；发现更新仅提示，由用户决定是否安装）。
+  // 这里只表达意图：起停表受「自动检查更新」开关门控（P-20261109-6，关 = 零
+  // 自动检查请求，热切换即时生效），门控与开关跟随收口在 store 内
   updateCheckStore.startAutoCheck()
+  // 自更新进度（P-20261109-10）：解锁后探测一次，服务端在途（F5/他页/CLI 发起）
+  // 即接管轮询，全局徽标与版本面板同源可见
+  updateProgressStore.init()
   // 联邦派发进度回流轮询（P-20261004-131）：中心对有派发记录的实例 15s 一轮
   // 拉对端任务进度映射 bySession（锁定态内部跳过；App 根生命周期即轮询生命周期）
   startFleetTaskBackflow()

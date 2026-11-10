@@ -53,9 +53,6 @@ var (
 	tmuxBinary     string
 	tmuxVersionStr string // tmux -V 原始输出（如 "tmux 3.4"），未安装时为空
 
-	// tmuxVersionRe 匹配 "tmux 3.4" / "tmux 3.3a" / "tmux 4.0" 等
-	tmuxVersionRe = regexp.MustCompile(`tmux\s+(\d+)\.(\d+)(?:[a-z])?`)
-
 	// tmuxSessionNameRe 反向解析 tmux session 名（重启恢复用）
 	// 形如: sc-<8 hex>-<6 alnum>
 	tmuxSessionNameRe = regexp.MustCompile(`^sc-([a-f0-9]{8})-([a-z0-9]{6})$`)
@@ -174,7 +171,7 @@ func isTmuxAvailable() bool {
 		return false
 	}
 
-	maj, min, ok := parseTmuxVersion(strings.TrimSpace(string(out)))
+	maj, min, ok := ParseTmuxVersion(strings.TrimSpace(string(out)))
 	if !ok {
 		slog.Warn("terminal: tmux version unparseable", "output", string(out))
 		return false
@@ -223,6 +220,7 @@ type TmuxInfo struct {
 	Installable    bool   `json:"installable"`    // 是否支持一键安装（找到包管理器）
 	PkgManager     string `json:"pkgManager"`     // 检测到的包管理器（如 "apt-get"）
 	InstallCommand string `json:"installCommand"` // 推荐的安装命令（显示给用户参考）
+	ClipboardFloor string `json:"clipboardFloor"` // 剪贴板能力地板（P-20261109-7）：ok/drag-copy/passthrough，未安装或不可解析为空
 }
 
 // GetTmuxInfo 返回 tmux 当前状态（已触发检测，调用安全）
@@ -237,23 +235,59 @@ func GetTmuxInfo() TmuxInfo {
 		Installable:    pkg != "",
 		PkgManager:     pkg,
 		InstallCommand: cmd,
+		// 剪贴板能力地板（P-20261109-7）：本机 tmux 二进制同时服务专属 socket
+		// 与外部接管（用户默认 socket），<3.2/<3.3 两档地板提示以此为准；
+		// 不可解析为空串（前端静默不显示）
+		ClipboardFloor: TmuxClipboardFloorKind(tmuxVersionStr),
 	}
 }
 
-// parseTmuxVersion 解析 tmux -V 输出
-// 输入示例: "tmux 3.4" / "tmux 3.3a" / "tmux next-3.5"
-// 返回主版本、次版本、是否解析成功
-func parseTmuxVersion(s string) (int, int, bool) {
-	m := tmuxVersionRe.FindStringSubmatch(s)
-	if m == nil {
-		return 0, 0, false
+// mouseSwitchValue mouse 开关的 tmux 字面量（conf 行与 set-option 共用同一拼写）
+func mouseSwitchValue(on bool) string {
+	if on {
+		return "on"
 	}
-	maj, err1 := strconv.Atoi(m[1])
-	min, err2 := strconv.Atoi(m[2])
-	if err1 != nil || err2 != nil {
-		return 0, 0, false
+	return "off"
+}
+
+// syncTmuxServerOptions 已运行 tmux server 的选项运行同步（backend_tmux.Create
+// 每次创建会话时调用；conf 只在 server 启动时读取，运行中的 server 靠这里拿到
+// 最新值）。三条与 conf 关键设置一一对应：
+//   - history-limit：server option，影响后续新 session 的 scrollback 上限
+//   - set-clipboard on（P-20261109-7）：拖选 copy-pipe 源头兜底——<3.2 默认
+//     off = 拖选源头即不发 OSC 52（拖选复制死源主因）；旧 tmux（<3.2 无此键）
+//     报 unknown option 落 Debug 日志即过，无害；-s server option 只落专有
+//     socket（-L codecombo），不影响用户自有 tmux
+//   - mouse（P-20261109-7）：全局 session option 逐事件读取——即刻影响现存全部
+//     会话，与设置页热切换（ApplyTmuxMouseOption）双路兜底
+//
+// 首次 Create 时 server 还没启动，set-option 会失败（正常，new-session 启动
+// server 时会读 conf 拿到同源值）——失败统一 Debug 日志即过
+func syncTmuxServerOptions(historyLimit int, mouseOn bool) {
+	if _, err := runTmux("set-option", "-s", "history-limit", strconv.Itoa(historyLimit)); err != nil {
+		slog.Debug("terminal: tmux set-option history-limit (server may not be running yet)",
+			"err", err)
 	}
-	return maj, min, true
+	if _, err := runTmux("set-option", "-s", "set-clipboard", "on"); err != nil {
+		slog.Debug("terminal: tmux set-option set-clipboard (server may not be running yet / tmux <3.2)",
+			"err", err)
+	}
+	if _, err := runTmux("set-option", "-g", "mouse", mouseSwitchValue(mouseOn)); err != nil {
+		slog.Debug("terminal: tmux set-option mouse (server may not be running yet)",
+			"err", err)
+	}
+}
+
+// ApplyTmuxMouseOption tmux 鼠标接管热切换（P-20261109-7）：设置页切换后立即
+// 对专有 socket（-L codecombo）执行 set-option -g mouse——mouse 是全局 session
+// option 且 tmux 逐事件读取，现存全部会话即刻生效（无需重挂）。server 尚未启动
+// 时失败落 Debug 日志即过：下次 Create 的运行同步会用新值兜底。Windows stub
+// 见 tmux_windows_stub.go（Windows 无 tmux 路径，恒 no-op）
+func ApplyTmuxMouseOption(on bool) {
+	if _, err := runTmux("set-option", "-g", "mouse", mouseSwitchValue(on)); err != nil {
+		slog.Debug("terminal: tmux set-option mouse (server may not be running yet)",
+			"on", on, "err", err)
+	}
 }
 
 // computeTmuxSessionName 生成 tmux session 名: sc-<projectId短哈希>-<6位随机>

@@ -126,7 +126,10 @@ const updatingFromCenter = ref(false)
 // pollCenterUpdateResult 轮询换包结果（/api/updates/status 的 result 字段
 // 来自换包子进程写的结果文件：success / failed / rolled_back）。
 // 重启窗口期（旧进程退出 → 换包 → 新进程拉起）请求会失败，属预期，继续轮询；
-// 2 分钟仍未出结果则放弃判定，提示用户去日志确认
+// 2 分钟仍未出结果则放弃判定，提示用户去日志确认。
+// 完成/失败/回滚的通知中心入账由服务端单一发射（P-20261109-10：换包后新进程
+// 启动观察窗读同一结果文件入账，主进程退出/本页关闭也必达）——此处只 toast，
+// 再入账即与服务端重复
 function pollCenterUpdateResult(inst: Instance) {
   let attempts = 0
   const maxAttempts = 60
@@ -147,12 +150,6 @@ function pollCenterUpdateResult(inst: Instance) {
       const result = payload.result as string | undefined
       if (result === 'success') {
         message.success(t('update.success'))
-        notificationStore.add({
-          type: 'success',
-          category: 'system',
-          title: t('notification.event.updateCompleted'),
-          body: inst.name,
-        })
         // 新进程已就绪：立即重评「中心有更新」状态，提示行/按钮高亮随之消隐，
         // 不等下一次周期检查（默认 6h）
         void recheckCenter()
@@ -160,12 +157,6 @@ function pollCenterUpdateResult(inst: Instance) {
       }
       if (result === 'failed' || result === 'rolled_back') {
         message.error(t('update.failed'))
-        notificationStore.add({
-          type: 'error',
-          category: 'system',
-          title: t('notification.event.updateFailed'),
-          body: payload.resultError || inst.name,
-        })
         // 回滚后版本未变，失败后版本未知——重评让提示与真实版本对齐
         void recheckCenter()
         return

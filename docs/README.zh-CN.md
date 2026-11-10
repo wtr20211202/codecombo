@@ -48,15 +48,17 @@ iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercon
 
 浏览器打开 **http://localhost:9999**，首启设置锁密码。版本全自动决策：
 有正式版装最新正式版；当前没有正式版时装最新 rc，没有 rc 才装最新 beta。
+端口、绑定地址、安装目录与数据目录均可指定——见下方[可选参数](#可选参数)。
 
 **权限与服务运行账户。** 注册服务需要提权——Windows 用管理员 PowerShell，
 Linux 用 sudo（脚本内部提权写系统文件，服务仍以**当前用户**身份运行而非
 root）；macOS launchd 用户代理无需提权。不提权也能装：脚本会装好二进制并
-打印前台启动命令。服务只写你自己的数据目录（`~/.codecombo`——Windows 下经服务命令行
+打印手动启动命令（不注册系统服务——`start` 即后台守护运行）。服务只写你自己的数据目录（`~/.codecombo`——Windows 下经服务命令行
 `--data-dir` 旗标钉死到安装者用户目录）。
 
-**安装后改绑定/端口**：带环境变量前缀重跑同一命令（`$env:CODECOMBO_HOST='0.0.0.0'`，
-幂等更新服务配置），或直接管理服务。服务管理命令**各平台不同**——Windows 的
+**安装后改绑定/端口**：按[可选参数](#可选参数)的写法带环境变量重跑同一命令（如
+`CODECOMBO_HOST=0.0.0.0`，Windows 为 `$env:CODECOMBO_HOST='0.0.0.0'`，幂等更新服务配置），
+或直接管理服务。服务管理命令**各平台不同**——Windows 的
 `sc.exe` 是系统自带的服务控制命令行（对应 Linux 的 `systemctl`、macOS 的
 `launchctl`）：
 
@@ -86,9 +88,50 @@ launchctl unload ~/Library/LaunchAgents/com.codecombo.plist
 launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 ```
 
-**安装方式决定更新方式。** 二进制安装（本脚本或手动下载）走**应用内更新**
-——从 GitHub 拉取新版本、失败自动回滚，是推荐的形态；npm 安装则归 npm 管
-（`npm i -g codecombo@latest`，应用内更新自动让位）。
+#### 可选参数
+
+两个安装脚本都读四个可选环境变量；不设置即取下表默认值——与此前行为完全一致：
+
+| 变量 | 默认值 | 含义 |
+|---|---|---|
+| `CODECOMBO_PORT` | `9999` | 服务端口 |
+| `CODECOMBO_HOST` | `127.0.0.1`（仅本机） | 绑定地址；`0.0.0.0` = 局域网可达 |
+| `CODECOMBO_PREFIX` | `~/.local/bin`（Windows：`%LOCALAPPDATA%\Programs\codecombo`） | 二进制安装目录 |
+| `CODECOMBO_DATA_DIR` | `~/.codecombo` | 数据目录（绝对路径）。只把路径交给服务——systemd unit / launchd plist 的 `CC_DATA_DIR`、Windows 服务命令行与打印的手动启动命令里的 `--data-dir`；安装器仍不创建、不写入它 |
+
+写在哪：放在管道 `sh` 一侧（写在 `curl` 前只对 curl 生效，脚本读不到、回落
+默认值）；PowerShell 里在 `iex` 之前用 `$env:` 赋值——它们在该 PowerShell
+会话内一直有效。
+
+```bash
+# 与已有实例并存的第二套：独立端口、数据目录与安装目录
+curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test CODECOMBO_PREFIX=$HOME/.local/codecombo-test sh
+
+# 局域网访问（绑定全部网卡）——仅限可信网络，锁密码是唯一闸门
+curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=0.0.0.0 sh
+
+# 自定义安装目录
+curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PREFIX=$HOME/bin sh
+```
+
+```powershell
+# Windows：与已有实例并存的第二套
+$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; $env:CODECOMBO_PREFIX="$env:LOCALAPPDATA\Programs\codecombo-test"; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))
+```
+
+加装第二套实例前须知：
+
+- **一台机器只有一个脚本托管的服务。** 服务名固定（`codecombo.service` /
+  `com.codecombo` / `Codecombo`）。已有实例本身就是该服务（一键脚本装或远程
+  部署装）时，带不同参数再跑会改写那个服务——接管原实例而非新增一个。此时
+  第二套不走服务注册，用二进制带参数直接起：
+  `<bin> start --port 11000 --data-dir <dir>`——即安装脚本跳过服务注册时
+  （非管理员 PowerShell、Linux 无 sudo 凭据）打印的那条命令。
+- **CLI 也要带数据目录**：`<bin> status --data-dir <dir>`、
+  `<bin> stop --data-dir <dir>`。
+- **升级重跑须带同样的变量**——漏了 `CODECOMBO_DATA_DIR`，改写后的服务下次
+  重启回落 `~/.codecombo`（数据仍在自定义目录，只是实例不再读它）。
+- **远程部署装的实例禁止重跑脚本**（见[升级](#升级)）。
 
 ### npm 安装
 
@@ -106,6 +149,54 @@ npm 包只是薄包装，npm 会按平台经 optionalDependencies 自动装上�
 或显式指定任意版本（如 `npm i -g codecombo@0.2.0-rc1`）。稳定的
 `npm i -g codecombo` 不会被动到。npm 形态的更新归 npm 管：应用内自更新对
 npm 安装不生效——更新就是重跑安装命令。
+
+### 升级
+
+**安装方式决定更新方式。** 先判别装法——`systemctl cat codecombo` 看
+`ExecStart` 指向的二进制路径（没有 unit 的形态——手动启动的实例（`start`
+后台守护或 `--serve` 前台）或远程部署选了「直接进程」方式——用
+`ps -ef | grep codecombo` 看运行中的二进制路径；`~` 即服务用户家目录，unit
+里显示为绝对路径）：
+
+| 判别依据 | 安装方式 | 升级路径 |
+|---|---|---|
+| `ExecStart` → `~/.local/bin/codecombo` | 上方一键脚本装 | ① 应用内自更新（首选）· ② 重跑脚本 |
+| `ExecStart` → `~/.codecombo/bin/codecombo` | 中心实例远程部署装 | ① 应用内自更新 · 中心实例重新远程部署 · ③ 手工替换——**禁止**重跑脚本 |
+| `ExecStart` → `/opt/codecombo/bin/codecombo` | 手工 `/opt` 布局（[Linux 部署指南](deploy-linux.md)） | ① 应用内自更新 · ③ 手工替换 |
+| `npm ls -g codecombo` 有结果 | npm | `npm i -g codecombo@latest`（应用内更新自动让位） |
+
+**① 应用内自更新（推荐形态）**：版本面板（设置 → 关于）「检查更新」从
+GitHub 拉取新版本、失败自动回滚。两个注意点：早于 v0.0.1-beta.3 的版本
+检查链有缺陷、应用内看不到新版本（v0.0.1-beta.3 已修复）——先按下方脚本/
+手工方式升一次；beta 期（尚无正式版）GitHub 正式通道恒为空，先在版本面板
+打开**「跟进预发布版本」**再检查。脚本装（systemd 托管）的实例：更新后
+服务若未自行拉起，`sudo systemctl restart codecombo` 收尾。
+
+**② 重跑安装脚本（仅限脚本装实例）**——原 `--host`/`--port` 读自
+`ExecStart`（装时指定过数据目录的，再从 unit 的 `Environment=` 行取
+`CC_DATA_DIR` 原值、以 `CODECOMBO_DATA_DIR` 带回），环境变量必须放在管道 `sh` 一侧（写在 `curl` 前只对 curl 生效，
+端口/绑定回落默认 9999/127.0.0.1）：
+
+```bash
+sudo -v && curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=<原值> CODECOMBO_PORT=<原值> sh
+```
+
+先 `sudo -v`——`curl | sh` 形态下脚本无法交互输密码，只认已缓存的提权
+凭据（没有时脚本仍会换好二进制、但跳过服务 unit 改写）。脚本经 rename
+换包（服务在跑也不冲突），旧进程要等重启才换成新版本：脚本提示「检测到
+正在运行的实例」时，`sudo systemctl restart codecombo` 收尾。macOS 重跑
+即生效（脚本自带 launchd 代理重载）。**远程部署装的实例禁止重跑脚本**——
+unit 被模板覆写会丢 `PATH`/`WorkingDirectory`/`NoNewPrivileges` 且绑定缩回
+`127.0.0.1`，服务一重启远程访问即断；该布局走应用内更新或中心实例重新远程
+部署（中心实例须 v0.0.1-beta.3 及以上——更早的部署器覆盖升级旧实例可能失败）。
+Windows 重跑 install.ps1 前先 `sc.exe stop Codecombo`——Windows 锁定运行中的
+`.exe`，服务在跑换包必败。
+
+**③ 手工替换二进制（仅 Linux）**：完整配方（stop → SHA256 校验 → 留
+`.bak` 备份 → 替换 → start，含回滚步）见 [Linux 部署指南](deploy-linux.md)
+§6；服务起不来的 `status=203/EXEC` 三态诊断见同篇 §7。注意文件体积：二进制
+约 50MB 量级（linux-amd64 约 51–54MB），只有几十字节说明点成了
+`.sha256`/`.sig` 伴随资产。
 
 ### 从源码构建
 
@@ -243,9 +334,9 @@ hunk 级暂存与丢弃、三路差异、拖拽式交互变基、合并预演、
 - **安全底座** —— 全局锁（首启设密、闲置自锁）、全部敏感字段经本机
   master-key AES-256 加密落盘、IP 限流、审计日志与 CSV 导出。
 - **自更新** —— 基于 GitHub Release 的更新检查与失败自动回滚；中心实例可
-  缓存转发二进制给子实例。零配置：官方仓库即内置默认更新源——不希望联网
-  零配置：官方仓库即内置默认更新源；自动检查每 24 小时一轮，新版本可用时
-  推送通知，版本面板可关闭。
+  缓存转发二进制给子实例。零配置：官方仓库即内置默认更新源；自动检查每 24
+  小时一轮，新版本可用时推送通知，版本面板可关闭。走哪条升级路径取决于安装
+  方式——见[升级](#升级)。
 - **双语与主题** —— 简体中文 / English 界面；Dark / Light / One Dark /
   Dracula 四主题。
 

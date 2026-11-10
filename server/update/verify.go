@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"codecombo/server/errmarkers"
 )
 
 // updatePubKey ed25519 验签公钥（base64），发布构建经 -ldflags 注入；
@@ -32,7 +34,13 @@ func allowUnverified() bool {
 //  1. 清单带 Signature 且构建内嵌公钥 → ed25519 验签（防更新源被攻破后校验值一同被换）
 //  2. 清单带 ChecksumSHA256 → sha256 比对（防下载损坏）
 //  3. 两者皆无 → 默认拒绝；CC_UPDATE_ALLOW_UNVERIFIED=1 显式逃生（旧名 SC_ 双读兼容）
+//
+// 伴随资产拉取失败（P-20261109-9）只改拒绝文案、不改放行/拒绝判定：先过
+// CompanionPreflight（注定拒绝的形态报真实拉取原因），其余原分支一字未动
 func verifyUpdate(binaryPath string, info *ReleaseInfo) error {
+	if err := CompanionPreflight(info); err != nil {
+		return err
+	}
 	switch {
 	case info.Signature != "" && updatePubKey != "":
 		return verifySignature(binaryPath, info.Signature)
@@ -50,6 +58,48 @@ func verifyUpdate(binaryPath string, info *ReleaseInfo) error {
 		}
 		return fmt.Errorf("release provides no checksum/signature; set %s=1 to override", AllowUnverifiedEnv)
 	}
+}
+
+// CompanionPreflight 伴随资产拉取失败是否已注定校验拒绝（与二进制内容无关）：
+// 是则返回带真实拉取原因的错误，否则 nil（可校验 / 逃生门放行 / 真缺失——
+// 后两者与校验结果仍由 verifyUpdate 原分支裁决）。三处同源消费：
+// verifyUpdate 拒绝文案、ApplyUpdate 下载前拒绝（注定被拒就不白拉主包）、
+// check 旗标（面板即时提示「更新将被拒」只在真会被拒时出现）。
+//
+// 判定与 verifyUpdate 原分支逐条对齐，保证放行/拒绝结果零变化：
+//   - 签名在手且有公钥 → 验签可行，checksum 状态无关；
+//   - 签名在手无公钥 → 退回 checksum：checksum 拉取失败即注定失败（旧口径
+//     落到 verifyChecksum("") 报 "empty checksum"，与拉取失败同样失真）；
+//   - checksum 在手 → sha256 可比对；
+//   - 两者皆空且至少一个拉取失败 → 注定失败（旧口径误报 release 没提供）。
+//
+// 逃生门（CC_UPDATE_ALLOW_UNVERIFIED=1）语义不变：原分支在「无可用校验数据」
+// 时一律放行，这里同步放行
+func CompanionPreflight(info *ReleaseInfo) error {
+	if !info.CompanionFetchFailed() || allowUnverified() {
+		return nil
+	}
+	switch {
+	case info.Signature != "" && updatePubKey != "":
+		return nil
+	case info.Signature != "":
+		if info.ChecksumSHA256 == "" && info.ChecksumFetchErr != "" {
+			return companionFetchFailedError(info.CompanionFetchError())
+		}
+		return nil
+	case info.ChecksumSHA256 != "":
+		return nil
+	default:
+		return companionFetchFailedError(info.CompanionFetchError())
+	}
+}
+
+// companionFetchFailedError 拉取失败形态的拒绝文案：区别于真缺失的「release
+// provides no checksum/signature」——资产在 release 里，只是没取到，指引重试。
+// 原文收口 errmarkers 注册表（前端 KNOWN_ERROR_I18N 按「; retry or set」截取
+// reason 进本地化文案的插值参数，reason 内勿含该分隔串）
+func companionFetchFailedError(reason string) error {
+	return fmt.Errorf(errmarkers.UpdateCompanionFetchFailedTemplate, reason, AllowUnverifiedEnv)
 }
 
 // verifyChecksum sha256 完整性比对

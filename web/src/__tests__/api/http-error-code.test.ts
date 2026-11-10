@@ -100,4 +100,24 @@ describe('错误码消费层 code 优先命中（P-20261005-153）', () => {
     expect(logs[1].code).toBe('project.locked')
     expect(logs[0].code).toBeUndefined()
   })
+
+  it('自更新伴随资产拉取失败：原因段经捕获组插值，内嵌网络原文不被通用条目截走（P-20261109-9）', async () => {
+    // 原因段内嵌 OS 网络原文（i/o timeout）——表序错位会先命中 netUnreachable
+    await recordError(500, {
+      error: 'update verification failed: companion asset fetch failed: checksum: dial tcp: i/o timeout (after 3 attempts); retry or set CC_UPDATE_ALLOW_UNVERIFIED=1 to override',
+    })
+    const entry = useErrorLogStore().logs[0]
+    expect(entry.userMessage).toContain('伴随校验资产')
+    expect(entry.userMessage).toContain('（checksum: dial tcp: i/o timeout (after 3 attempts)）')
+    expect(entry.userMessage).toContain('CC_UPDATE_ALLOW_UNVERIFIED=1')
+    // 原文保留供排障
+    expect(entry.rawMessage).toContain('companion asset fetch failed')
+  })
+
+  it('自更新伴随资产真缺失：保持原文语义，不冒充拉取失败（P-20261109-9）', async () => {
+    await recordError(500, {
+      error: 'update verification failed: release provides no checksum/signature; set CC_UPDATE_ALLOW_UNVERIFIED=1 to override',
+    })
+    expect(useErrorLogStore().logs[0].userMessage).not.toContain('伴随校验资产')
+  })
 })

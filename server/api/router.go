@@ -73,8 +73,12 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 	// 端点自身有回环 + 自定义头双约束（见 system.Shutdown）
 	r.POST("/api/shutdown", system.Shutdown)
 
-	// 本机优雅重启（P-20261106 页面重启链）：同 shutdown 豁免与双约束
-	//（锁定态下也要能重启；回环 + X-SC-Restart 头防任意网页 CSRF 重启）
+	// 本机优雅重启（P-20261106 页面重启链）：同 shutdown 豁免锁保护组
+	//（锁定态下也要能重启（A8））；授权双路（P-20261109-11）= 回环 OR 有效锁
+	// 凭据（mw.ValidateLockCredential，校验器与锁中间件同一套）——LAN/https
+	// 部署形态解锁后可重启；X-SC-Restart 头保持防任意网页 CSRF 重启
+	//（自定义头跨源需预检被 CORS 拒）。shutdown 保持 loopback-only 不动：
+	// 重启可恢复、停机是终局（刻意不对称，见 system.Restart/Shutdown 注）
 	r.POST("/api/restart", system.Restart)
 
 	// 快投递（P-20261006-51）：手机/脚本 → 工作台的最轻投递通道。公开路由
@@ -437,6 +441,8 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 			// 远程主机终端（REST）；WS 见 /ws/remote-terminal/:id（:id 为 sessionId）
 			remoteHost.GET("/:id/terminals", remote.ListRemoteTerminals)
 			remoteHost.POST("/:id/terminals", remote.CreateRemoteTerminal)
+			// 远端 tmux 版本地板探测（P-20261109-7 A2，只读；静态段先于 :sid 动态段）
+			remoteHost.GET("/:id/terminals/tmux-floor", remote.GetRemoteTmuxFloor)
 			remoteHost.DELETE("/:id/terminals/:sid", remote.DeleteRemoteTerminal)
 			remoteHost.PUT("/:id/terminals/:sid/resize", remote.ResizeRemoteTerminal)
 			// 权威重绘（远端 tmux refresh-client；原生 shell 会话 no-op）

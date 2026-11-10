@@ -109,15 +109,23 @@ export const remoteHostApi = {
   listAllTerminals: (config?: AxiosRequestConfig) =>
     api.get<{ data: RemoteTerminalSessionRef[] }>('/remotehosts/terminals', config),
   // tmuxName：重开场景回传既有 tmux 会话名（服务端 terminalRemoteTmux 开启时 attach-or-create）；
+  // tmuxVersion/tmuxClipboardFloor：远端 tmux 版本地板探测（P-20261109-7 A2）——
+  // 与 PTY 拨号并行探测，失败/超时缺省（空串=无横幅，静默降级）
   // silent：拦截器已弹 toast，调用方本地再弹会双提示
   createTerminal: (
     id: string, rows: number, cols: number,
     opts?: { config?: AxiosRequestConfig; tmuxName?: string },
   ) =>
-    api.post<{ data: { sessionId: string; hostId: string; rows: number; cols: number; createdAt: string; tmuxName?: string } }>(
+    api.post<{ data: { sessionId: string; hostId: string; rows: number; cols: number; createdAt: string; tmuxName?: string; tmuxVersion?: string; tmuxClipboardFloor?: string } }>(
       `/remotehosts/${id}/terminals`,
       { rows, cols, ...(opts?.tmuxName ? { tmuxName: opts.tmuxName } : {}) },
       opts?.config,
+    ),
+  // 远端 tmux 版本地板探测（P-20261109-7 A2）：页面刷新后恢复的存量 tab 不经
+  // create（WS 直连重连），pane 挂载时补拉一次；失败/超时返回空字段（无横幅）
+  tmuxFloor: (id: string, config?: AxiosRequestConfig) =>
+    api.get<{ data: { tmuxVersion?: string; tmuxClipboardFloor?: string } }>(
+      `/remotehosts/${id}/terminals/tmux-floor`, config,
     ),
   closeTerminal: (id: string, sessionId: string) =>
     api.delete(`/remotehosts/${id}/terminals/${sessionId}`),

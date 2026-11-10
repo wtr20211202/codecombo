@@ -17,8 +17,14 @@ func newTestStore(t *testing.T) {
 	t.Cleanup(func() { store.SetDefault(nil) })
 }
 
-// TestModuleConformance 契约一致性自检（M1.6）
+// TestModuleConformance 契约一致性自检（M1.6）。数据目录注入临时目录：Start 的
+// 启动清理与结果观察窗不得触碰真实数据目录（P-20261109-10）
 func TestModuleConformance(t *testing.T) {
 	newTestStore(t)
-	kerneltest.Conformance(t, func() kernel.Module { return NewModule("") })
+	dd := t.TempDir()
+	kerneltest.Conformance(t, func() kernel.Module {
+		m := NewModule("")
+		m.dataDirGen = func() string { return dd }
+		return m
+	})
 }

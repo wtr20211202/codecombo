@@ -5,12 +5,16 @@
 import { ref, computed, onMounted } from 'vue'
 import { useMessage, NTooltip, NIcon, NSwitch } from 'naive-ui'
 import { shouldShowToast } from '../../utils/toastDedupe'
-import { InformationCircleOutline, LogoGithub } from '@vicons/ionicons5'
+import { InformationCircleOutline, LogoGithub, CheckmarkCircleOutline } from '@vicons/ionicons5'
+import UpdateProgressBlock from './UpdateProgressBlock.vue'
+import UpdateCompanionWarning from './UpdateCompanionWarning.vue'
 import { settingsApi, updateApi } from '../../api/client'
 import { copyText } from '../../utils/clipboard'
 import { confirmDialog } from '../../composables/useDialog'
 import { useI18n } from '../../composables/useI18n'
 import { useNotificationStore } from '../../stores/notification'
+import { useUpdateProgressStore } from '../../stores/updateProgress'
+import { useUpdateCheckStore } from '../../stores/updateCheck'
 
 export interface VersionBuildInfo {
   version: string
@@ -27,6 +31,10 @@ const emit = defineEmits<{ (e: 'update-detected', latest: string): void }>()
 const message = useMessage()
 const { t } = useI18n()
 const notificationStore = useNotificationStore()
+// 自更新进度（P-20261109-10）：轮询上移全局 store，面板与 App 层徽标同源消费
+const progress = useUpdateProgressStore()
+// 前端自动检查电路（P-20261109-6）：「自动检查更新」开关保存成功即同帧起停表
+const updateCheckStore = useUpdateCheckStore()
 
 async function copyCommitId() {
   if (props.buildInfo?.commit) {
@@ -43,7 +51,7 @@ function metaValue(v: string): string {
   return v === 'unknown' ? '—' : v
 }
 
-// ---- 检查更新（自包含轮询） ----
+// ---- 检查更新 ----
 interface UpdateCheckResult {
   currentVersion: string
   latestVersion?: string
@@ -55,28 +63,25 @@ interface UpdateCheckResult {
   channelEmpty?: boolean
   sourceMissing?: boolean
   checkError?: string
-}
-interface UpdateStatusResult {
-  status: string
-  progress: number
-  total: number
-  version: string
-  error?: string
-  result?: string
-  resultError?: string
+  // 伴随校验资产拉取失败旗标（P-20261109-9）：有更新但此刻更新必被校验拒绝
+  //（后端与 ApplyUpdate 同源判定，只在真会被拒时置位）——面板即时提示，
+  // 「立即更新」保持可点（点击后端会 skipCache 重拉一次）
+  companionFetchFailed?: boolean
+  companionFetchError?: string
 }
 
 const updateInfo = ref<UpdateCheckResult | null>(null)
-const updateStatus = ref<UpdateStatusResult | null>(null)
-const updatePolling = ref(false)
+// 检查中态：请求期禁用按钮 + 文案切换（GitHub API 1~3s 内给即时反馈，顺带防连点并发）
+const checking = ref(false)
 
-// 后端 progress/total 是字节；进度条需要百分比（历史实现把字节直接当 % 宽度）
-const updateProgressPercent = computed(() => {
-  const p = updateStatus.value?.progress ?? 0
-  const total = updateStatus.value?.total ?? 0
-  if (p <= 0 || total <= 0) return 0
-  return Math.min(100, Math.round((p / total) * 100))
-})
+// 已是最新态的回显版本：统一取「当前版本」而非 latest——hasUpdate=false 含
+// 「当前高于最新」形态（dev 构建领先官方 tag），回显 latest 会写出
+// 「已是最新 v<更旧版本>」的自相矛盾文案
+const upToDateVersion = computed(() => updateInfo.value?.currentVersion || props.buildInfo?.version || '')
+
+// 「立即更新」可点：无在途更新且本会话未刚更新成功（成功后本页仍是旧版本的
+// 检查结果，再点必 400「已是最新」）
+const canStartUpdate = computed(() => !progress.inFlight && progress.outcome?.phase !== 'success')
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -86,12 +91,17 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
-async function checkUpdate() {
+async function checkUpdate(opts?: { manual?: boolean }) {
+  if (checking.value) return
+  checking.value = true
   try {
     const res = await updateApi.check()
     updateInfo.value = res.data || res
     const info = updateInfo.value
-    if (info?.hasUpdate || (info?.latestVersion && info.latestVersion !== info.currentVersion)) {
+    if (info?.hasUpdate) {
+      // 判断只认后端 hasUpdate（semver 对比）——旧「latest !== current」字符串
+      // 兜底会把「当前高于最新」形态误判成有新版，造成通知绿点说有新版、
+      // 面板说已是最新的矛盾面
       const latest = info.latestVersion || ''
       emit('update-detected', latest)
       notificationStore.add({
@@ -119,57 +129,62 @@ async function checkUpdate() {
       if (shouldShowToast('update.checkFailedHint')) {
         message.warning(t('update.checkFailedHint', { reason: info.checkError }))
       }
+    } else if (opts?.manual && shouldShowToast('update.alreadyLatest')) {
+      // 已是最新：手动路径显式挂 manual 标记才出 toast（shouldShowToast 5s 窗
+      // 防多入口叠加），不依赖「按钮恰是唯一调用方」的巧合；自动检查
+      // （前端 6h / 服务端 24h）已是最新 = 零 toast 零通知守住不打扰现状
+      message.success(t('update.alreadyLatest'))
     }
-    // else：latestVersion 非空且同版/更新 → updateInfo 留存，面板渲染「已是最新」
+    // else（非手动路径已是最新 / 手动但处 5s 去重窗内）：updateInfo 留存，
+    // 面板照常渲染「已是最新」成功块——面板态是主反馈，toast 只是一次性补充
   } catch {
     updateInfo.value = null
+  } finally {
+    checking.value = false
   }
 }
 
-function pollUpdateStatus() {
-  let interval = 2000
-  const maxInterval = 30000
-  const terminalStatuses = ['success', 'failed', 'rolled_back']
-
-  async function poll() {
-    if (!updatePolling.value) return
-    try {
-      const res = await updateApi.status({ silent: true })
-      updateStatus.value = res.data || res
-      const status: string = updateStatus.value?.status || updateStatus.value?.result || ''
-      if (terminalStatuses.includes(status)) {
-        updatePolling.value = false
-        if (status === 'success') {
-          message.success(t('update.success'))
-          notificationStore.add({ type: 'success', category: 'system', title: t('notification.event.updateCompleted') })
-        } else if (status === 'rolled_back') {
-          message.warning(t('update.rolledBack'))
-          notificationStore.add({ type: 'warning', category: 'system', title: t('notification.event.updateFailed'), body: t('update.rolledBack') })
-        } else {
-          message.error(t('update.failed'))
-          notificationStore.add({ type: 'error', category: 'system', title: t('notification.event.updateFailed') })
-        }
-        return
-      }
-      interval = Math.min(interval * 1.5, maxInterval)
-      setTimeout(poll, interval)
-    } catch {
-      if (updatePolling.value) setTimeout(poll, interval)
-    }
-  }
-  void poll()
-}
+// 发起更新：受理/跟踪/失败推断全在 updateProgress store（P-20261109-10）——
+// 服务端异步受理即 202，进度由 store 轮询，开始/失败/完成通知服务端单一发射；
+// 受理结论未知（超时/断网）或跨标签 409 由 store 探实况接管，不再「前端报
+// 失败、服务端在换包」全盲。明确拒绝（已是最新/npm 形态/伴随校验资产重拉后仍
+// 未取到等）由本面板自出反馈（见 catch）
+//
+// applying = 受理请求在途：伴随资产拉取失败时服务端先 skipCache 重拉再裁决受理
+//（P-20261109-9，受理前同步段，失败路径最长约 20s）——期间按钮禁用并切文案，
+// 给出即时反馈、防连点并发（同 checking 守卫）
+const applying = ref(false)
 
 async function startUpdate() {
+  if (applying.value) return
+  applying.value = true
   try {
-    await updateApi.apply()
-    updatePolling.value = true
-    updateStatus.value = null
-    // 接入通知中心：与"从中心更新"同语义——更新启动即留档，
-    // 用户关掉本面板后仍能从通知中心获知进展入口
-    notificationStore.add({ type: 'info', category: 'system', title: t('update.updateStarted') })
-    pollUpdateStatus()
-  } catch { /* 拦截器处理 */ }
+    // silent：被拒反馈由面板自出。拦截器的错误 toast 只在项目页外壳注入 message
+    // API 后才有（useErrorDisplayInit），首页/设置入口被拒时原本零反馈——伴随
+    // 资产重拉仍失败的真实原因就送不到用户眼前（P-20261109-9）。面板自出则三入口
+    // 一致且不与拦截器双弹；错误中心入账不受 silent 影响
+    await progress.start(updateInfo.value?.latestVersion || '', { silent: true })
+  } catch (e) {
+    // 文案取拦截器已算好的本地化 userMessage（KNOWN_ERROR_I18N：伴随资产拉取失败
+    // 带逐资产原因、npm 形态更新指引等），兜底通用失败；原因可能较长，悬停保活
+    const userMessage = (e as { userMessage?: string } | null)?.userMessage
+    message.error(userMessage || t('update.failed'), { duration: 8000, keepAliveOnHover: true })
+    // 被拒后静默同步告警块：服务端受理前已 skipCache 重拉并刷新缓存——伴随失败
+    // 原因随之更新（或首次在受理时才暴露），恢复则告警消失
+    void syncCompanionState()
+  } finally {
+    applying.value = false
+  }
+}
+
+// 面板告警块同步：只更新仍有更新的检查结果，不走 checkUpdate——那条会重复发
+// 「发现新版本」通知；失败静默保留上次状态（toast 已如实报过）
+async function syncCompanionState() {
+  try {
+    const res = await updateApi.check({ silent: true })
+    const info: UpdateCheckResult | undefined = res.data || res
+    if (info?.hasUpdate) updateInfo.value = info
+  } catch { /* 静默 */ }
 }
 
 // ---- 本机优雅重启（P-20261106 页面重启链）：真正需要重启的少数设置
@@ -219,14 +234,19 @@ const updateChecks = ref(true)
 const updateChecksSaving = ref(false)
 const updatePrerelease = ref(false)
 const updatePrereleaseSaving = ref(false)
+// 更新链出站代理（P-20261109-12）：公司代理/本地 clash 两类 CN 网络场景，
+// 显式配置优先于环境变量；保存即热化（服务端重装出站状态与更新源）
+const updateProxy = ref('')
+const updateProxySaving = ref(false)
 
 async function loadUpdateSource() {
   try {
     const res = await settingsApi.get({ silent: true })
-    const data = res.data as { updateURL?: string; updateChecks?: boolean; updateChannel?: string } | undefined
+    const data = res.data as { updateURL?: string; updateChecks?: boolean; updateChannel?: string; updateProxy?: string } | undefined
     updateSourceUrl.value = data?.updateURL || ''
     updateChecks.value = data?.updateChecks !== false
     updatePrerelease.value = data?.updateChannel === 'prerelease'
+    updateProxy.value = data?.updateProxy || ''
   } catch { /* silent */ }
 }
 
@@ -245,10 +265,17 @@ async function saveUpdateSource() {
   }
 }
 
+// 开关乐观翻转（P-20261109-6 顺带修复）：n-switch 以 :value 受控，不回写展示态
+// 则保存成功后开关仍停在旧位（再点一次又提交同一值，界面上关不掉也开不回）；
+// 失败经 loadUpdateSource 按服务端真值回滚
 async function saveUpdateChecks(v: boolean) {
+  updateChecks.value = v
   updateChecksSaving.value = true
   try {
     await settingsApi.update({ updateChecks: v })
+    // 前端 6h 自动检查电路同帧跟随：关即停表（零自动检查请求），开即按冷启动
+    // 节律重新起表——不等 settings.changed 广播往返（他端/他标签页走广播重读）
+    updateCheckStore.applyAutoCheckSetting(v)
     message.success(t('update.autoCheckSaved'))
   } catch {
     // 失败回滚开关展示态（拦截器已出错误提示）
@@ -259,6 +286,7 @@ async function saveUpdateChecks(v: boolean) {
 }
 
 async function saveUpdatePrerelease(v: boolean) {
+  updatePrerelease.value = v
   updatePrereleaseSaving.value = true
   try {
     await settingsApi.update({ updateChannel: v ? 'prerelease' : 'stable' })
@@ -270,7 +298,30 @@ async function saveUpdatePrerelease(v: boolean) {
   }
 }
 
-onMounted(() => { void loadUpdateSource() })
+async function saveUpdateProxy() {
+  const v = updateProxy.value.trim()
+  // 客户端早反馈只挡明显错拼；权威校验在服务端（http/https/socks5/socks5h + 补端口）
+  if (v && !/^(https?|socks5h?):\/\//.test(v)) {
+    message.error(t('update.proxyInvalid'))
+    return
+  }
+  updateProxySaving.value = true
+  try {
+    await settingsApi.update({ updateProxy: v })
+    message.success(t('update.proxySaved'))
+  } catch {
+    // 失败回滚输入框展示态（拦截器已出错误提示）
+    loadUpdateSource()
+  } finally {
+    updateProxySaving.value = false
+  }
+}
+
+// 挂载即同步一次更新实况：服务端在途（他页/CLI 发起、或 F5 后）即接管轮询
+onMounted(() => {
+  void loadUpdateSource()
+  void progress.sync()
+})
 </script>
 
 <template>
@@ -321,59 +372,73 @@ onMounted(() => { void loadUpdateSource() })
           <span class="version-label">{{ t('update.downloadSize') }}</span>
           <span class="version-value">{{ formatBytes(updateInfo.fileSize) }}</span>
         </div>
+        <!-- 更新说明限高滚动（P-20261109-10 R11）：双语长 changelog 整段渲染曾把
+             「立即更新」顶到数屏之外——限高内滚，操作区始终首屏可达 -->
         <div
           v-if="updateInfo.changelog"
           class="version-changelog"
         >
           <span class="version-label">{{ t('update.changelog') }}</span>
-          <span class="version-value prewrap">{{ updateInfo.changelog }}</span>
+          <div
+            class="version-changelog-body"
+            data-testid="version-changelog-body"
+            tabindex="0"
+          >
+            <span class="version-value prewrap">{{ updateInfo.changelog }}</span>
+          </div>
         </div>
+        <!-- 伴随校验资产未取到（P-20261109-9）：按钮保持可点（点后服务端受理前先
+             skipCache 重拉）；与「立即更新」同显隐——更新在途/本会话已更新成功时
+             隐藏（能被受理说明重拉已成功，留着即自相矛盾） -->
+        <UpdateCompanionWarning
+          v-if="updateInfo.companionFetchFailed && canStartUpdate"
+          :reason="updateInfo.companionFetchError"
+        />
         <button
-          v-if="!updatePolling"
+          v-if="canStartUpdate"
           class="panel-btn primary"
+          data-testid="version-update-now"
+          :disabled="applying"
           @click="startUpdate"
         >
-          {{ t('update.updateNow') }}
+          {{ applying ? t('update.updating') : t('update.updateNow') }}
         </button>
       </div>
+      <!-- 已是最新成功块：与 hasUpdate 块同构的显著终态（对勾 + 正文色 + 版本号）。
+           此前单行 .muted 灰字与下方静态说明文字同形，被读成「没有任何反馈」 -->
       <div
         v-else-if="updateInfo && !updateInfo.hasUpdate"
         class="version-update-info"
       >
-        <span class="muted">{{ t('update.alreadyLatest') }}</span>
-      </div>
-      <div
-        v-if="updatePolling || (updateStatus && ['success','failed','rolled_back'].includes(updateStatus.status || updateStatus.result || ''))"
-        class="version-update-progress"
-      >
-        <div class="version-row">
-          <span class="version-label">{{ t('update.status') }}</span>
-          <span class="version-value">{{ updateStatus?.status ? t('update.' + updateStatus.status) : t('update.updating') }}</span>
-        </div>
-        <div
-          v-if="updateProgressPercent > 0"
-          class="version-progress-bar"
-        >
-          <div
-            class="version-progress-fill"
-            :style="{ width: updateProgressPercent + '%' }"
-          />
-        </div>
-        <div
-          v-if="updateProgressPercent > 0"
-          class="version-row"
-        >
-          <span class="version-value muted">{{ updateProgressPercent }}%（{{ formatBytes(updateStatus?.progress ?? 0) }} / {{ formatBytes(updateStatus?.total ?? 0) }}）</span>
+        <div class="version-uptodate">
+          <n-icon
+            size="16"
+            class="version-uptodate-icon"
+          >
+            <CheckmarkCircleOutline />
+          </n-icon>
+          <span
+            v-if="upToDateVersion"
+            class="version-uptodate-text"
+          >{{ t('update.alreadyLatestWithVersion', { version: upToDateVersion }) }}</span>
+          <span
+            v-else
+            class="version-uptodate-text"
+          >{{ t('update.alreadyLatest') }}</span>
         </div>
       </div>
+      <!-- 更新进度/结局（P-20261109-10）：数据在全局 updateProgress store，面板
+           只是消费方之一（App 层徽标同源）——关面板/切路由/F5 后重开照常恢复 -->
+      <UpdateProgressBlock />
       <!-- 检查更新按钮：未检查过或无更新时始终可再查——检查后按钮消失会导致
-           刚配置分发源等场景下无法重新检查 -->
+           刚配置分发源等场景下无法重新检查；checking 期禁用（防连点并发） -->
       <button
-        v-if="!updatePolling && (!updateInfo || !updateInfo.hasUpdate)"
+        v-if="!progress.inFlight && (!updateInfo || !updateInfo.hasUpdate)"
         class="panel-btn"
-        @click="checkUpdate"
+        :disabled="checking"
+        @click="checkUpdate({ manual: true })"
       >
-        {{ updateInfo ? t('update.recheck') : t('update.checkUpdate') }}
+        {{ checking ? t('update.checking') : (updateInfo ? t('update.recheck') : t('update.checkUpdate')) }}
       </button>
       <!-- 本机优雅重启（P-20261106）：页面一键完成，无须进服务管理器 -->
       <button
@@ -386,12 +451,14 @@ onMounted(() => { void loadUpdateSource() })
     </div>
 
     <!-- 自动检查更新：24h 定时检查 + 新版本推通知（P-20261103-1）。
-         更新源自带官方默认，这里只露开关——不联网检查的用户在此关闭 -->
+         更新源自带官方默认，这里只露开关——不联网检查的用户在此关闭；
+         一个开关同时门控服务端 24h 定时器与前端 6h 自动检查电路（P-20261109-6） -->
     <div class="version-source-section">
       <div class="version-row">
         <span class="version-label">{{ t('update.autoCheckLabel') }}</span>
         <n-switch
           size="small"
+          data-testid="version-autocheck-switch"
           :value="updateChecks"
           :disabled="updateChecksSaving"
           @update:value="saveUpdateChecks"
@@ -412,6 +479,49 @@ onMounted(() => { void loadUpdateSource() })
       </div>
       <div class="version-row">
         <span class="version-value muted">{{ t('update.prereleaseHint') }}</span>
+      </div>
+      <!-- 更新链出站代理（P-20261109-12）：公司代理/本地 clash 场景，检查与
+           下载全走代理；留空 = 环境变量（HTTPS_PROXY）感知。placeholder 只放
+           短示例（长文案输入框显示不全），完整说明收进 ⓘ 悬浮提示 -->
+      <div class="version-row">
+        <span class="version-label">{{ t('update.proxyLabel') }}</span>
+        <!-- z-index 需高于宿主弹窗 overlay（9999），否则 tooltip 被遮住 -->
+        <n-tooltip
+          trigger="hover"
+          placement="top-start"
+          :z-index="10000"
+          :style="{ maxWidth: '320px' }"
+        >
+          <template #trigger>
+            <n-icon
+              size="13"
+              class="version-info-icon"
+            >
+              <InformationCircleOutline />
+            </n-icon>
+          </template>
+          <div class="version-tooltip-body">
+            {{ t('update.proxyHint') }}
+          </div>
+        </n-tooltip>
+      </div>
+      <div class="version-source-row">
+        <input
+          v-model="updateProxy"
+          class="version-source-input"
+          :placeholder="t('update.proxyPlaceholder')"
+          spellcheck="false"
+        >
+        <button
+          class="panel-btn inline"
+          :disabled="updateProxySaving"
+          @click="saveUpdateProxy"
+        >
+          {{ updateProxySaving ? t('common.saving') : t('common.save') }}
+        </button>
+      </div>
+      <div class="version-row">
+        <span class="version-value muted">{{ t('update.proxyHintShort') }}</span>
       </div>
     </div>
 
@@ -503,18 +613,32 @@ onMounted(() => { void loadUpdateSource() })
 .version-update-section { padding: 0 20px; }
 .section-divider { height: 1px; background: var(--border-default); margin: 14px 0 12px; }
 .version-update-info { display: flex; flex-direction: column; gap: 10px; }
+/* 已是最新成功块：图标走状态语义色（--status-success），文字走正文色——
+   均为语义名（色彩红线），对比度由六主题既有色对守（check-theme-contrast） */
+.version-uptodate { display: flex; align-items: center; gap: 8px; }
+.version-uptodate-icon { color: var(--status-success); flex-shrink: 0; }
+.version-uptodate-text { color: var(--text-primary); font-size: 13px; font-weight: 600; }
 .version-changelog { display: flex; flex-direction: column; gap: 4px; }
-.version-update-progress { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.version-progress-bar { width: 100%; height: 4px; background: var(--border-default); border-radius: 2px; overflow: hidden; }
-.version-progress-fill { height: 100%; background: var(--accent-blue); border-radius: 2px; transition: width 0.3s ease; }
+/* 更新说明限高内滚（R11）：~8 行可见，超出滚动；描边示意可滚区域 */
+.version-changelog-body {
+  max-height: 160px; overflow-y: auto;
+  padding: 6px 8px; border: 1px solid var(--border-default); border-radius: 6px;
+  background: var(--bg-primary);
+}
+.version-changelog-body:focus-visible { outline: 1px solid var(--accent-blue); }
 .panel-btn {
   width: 100%; padding: 8px 0; border: 1px solid var(--border-default); border-radius: 6px;
   background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer;
   transition: all var(--motion-base); margin-top: 10px;
 }
 .panel-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); background: color-mix(in srgb, var(--accent-blue) 8%, transparent); }
+/* 禁用态（检查中/重启中）：压低存在感并中和 hover 反馈，避免「看着能点」 */
+.panel-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.panel-btn:disabled:hover { border-color: var(--border-default); color: var(--text-secondary); background: transparent; }
 .panel-btn.primary { background: var(--accent-blue); border-color: var(--accent-blue); color: var(--bg-primary); font-weight: 600; }
 .panel-btn.primary:hover { opacity: 0.85; background: var(--accent-blue); color: var(--bg-primary); }
+/* 主按钮禁用（apply 在途）：压过上面同权重的 primary:hover，悬停不再被抬回 0.85 */
+.panel-btn.primary:disabled, .panel-btn.primary:disabled:hover { opacity: 0.6; cursor: not-allowed; background: var(--accent-blue); border-color: var(--accent-blue); color: var(--bg-primary); }
 .panel-btn.inline { width: auto; padding: 7px 16px; margin-top: 0; flex-shrink: 0; }
 .version-source-section { display: flex; flex-direction: column; gap: 6px; padding: 14px 20px 20px; }
 .version-star-section {

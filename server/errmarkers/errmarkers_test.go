@@ -65,7 +65,7 @@ func TestRegistryKindShape(t *testing.T) {
 		TooManyAuthFailures, PrecheckRuntimeMissingTemplate, PrecheckVersionCheckTemplate,
 		CloneDestExists, CloneURLInvalid, QueueFull, QueueInvalid,
 		FrozenTooLarge, FrozenQuota, ReplayTooLarge, RevealNoDisplay, RevealXdgMissing, RevealXdgExitTemplate,
-		UpdateSourceNotConfigured, UpdateNpmManaged, CenterBinaryMissingTemplate, RemoteUnreachable,
+		UpdateSourceNotConfigured, UpdateNpmManaged, CenterBinaryMissingTemplate, UpdateCompanionFetchFailedTemplate, RemoteUnreachable,
 		SessionBusy, MaxWsConnections, WrongPassphraseExport,
 		SearchRateLimited,
 		CredSyncUnverified, CredSyncEnvelopeRejected, CredSyncManualOnly,

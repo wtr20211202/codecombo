@@ -9,6 +9,78 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.5] - 2026-11-10
+
+### Added
+
+- **Update downloads through a proxy** — a new update-proxy setting with
+  three-state outbound routing (direct / proxy / auto) lets self-update
+  traffic go through your HTTP(S) proxy; proxy-routed requests are guarded
+  by an official-domain allowlist so the update chain cannot be pointed at
+  arbitrary hosts.
+- **Update progress stays visible** — self-updates are accepted
+  asynchronously and report their lifecycle from the server side: a global
+  progress badge with staged detail (download → verify → swap → restart)
+  keeps you informed after you leave the version panel, and failures
+  surface as notifications instead of dying quietly.
+- **Terminal selection-copy hardening** — the OSC 52 clipboard hand-off is
+  unified across all terminal surfaces with tmux `set-clipboard on`;
+  tmux version floors surface as a two-tier hint; a failed clipboard write
+  gets a fallback toast; and a new tmux mouse-capture toggle (default on,
+  hot-switchable, with a one-click "copy-first mode" shortcut) keeps
+  drag-copy and scrolling working across TUI applications and older tmux
+  builds.
+- **Installer parameters documented** — README and the website now show
+  one-line installer parameter examples, and `CODECOMBO_DATA_DIR` is
+  honored end-to-end through service installation.
+
+### Changed
+
+- **`codecombo update` no longer swaps the binary while the server is stopped** —
+  the standalone offline update path (download + replace without signature
+  verification) is retired for supply-chain safety. The command now prints
+  guidance instead: start the server and update via the verified in-app flow
+  (signature verification + auto-rollback), or use your package manager (npm
+  installs are pointed at `npm i -g codecombo@latest`). When the server is
+  running, `codecombo update` keeps triggering the same verified,
+  auto-rollback update as before.
+- **"Already up to date" is now visible** — a successful update check
+  renders an explicit success state and a checking state; the up-to-date
+  decision is unified so the notification panel and the version panel can
+  no longer disagree.
+- **Upgrade guidance for existing installs** — the README gains an
+  install-type decision table, route ranking, and diagnostics for the
+  common `203/EXEC` systemd failure.
+
+### Fixed
+
+- **Windows background start survives console close** — `codecombo start`
+  now detaches the daemon from the controlling console (closing the
+  launcher window used to kill it); the installer diagnostics line runs a
+  genuinely foreground `--serve`, and foreground/background wording is
+  unified.
+- **Script-installed instances can self-update and restart** — the install
+  script provisions the same polkit rules the remote deployer uses, so the
+  post-update `systemctl restart codecombo` is authorized instead of
+  silently leaving the service down.
+- **Windows installer upgrade ordering** — the service is stopped before
+  the binary is moved into place, pre-checks fail fast before anything is
+  overwritten, and a failed overwrite rolls back.
+- **The 6-hour auto update check honors its switch** — turning off
+  "auto check updates" now actually stops the frontend timer (with hot
+  switching), instead of only muting the server-side check.
+- **Update companion-asset failures surface** — signature/hash sidecar
+  download failures are distinguished by state, retried a bounded number
+  of times with cache bypass, and flagged at check time instead of
+  surfacing only at install time.
+- **Restart-from-page works over LAN** — restarting the app from the web
+  UI now accepts a valid lock token over LAN connections (loopback-only
+  before), authorized on both paths.
+- **Install script downloads resume** — the main-package download in
+  install.sh / install.ps1 passes curl `-C -` alongside the existing
+  retries, so a dropped connection resumes the ~50 MB download instead of
+  starting over.
+
 ## [0.0.1-beta.4] - 2026-11-09
 
 ### Added
@@ -200,7 +272,8 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.4...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.5...HEAD
+[0.0.1-beta.5]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.5
 [0.0.1-beta.4]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.4
 [0.0.1-beta.3]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.3
 [0.0.1-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.2

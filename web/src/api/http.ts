@@ -317,6 +317,13 @@ api.interceptors.response.use(
     // 条目：[稳定标记正则, i18n 键, 可选参数提取]——第三元素把正则捕获组转成
     // t() 插值参数（如 runtime 预检错误里的运行时名），无参数条目省略
     const KNOWN_ERROR_I18N: Array<[RegExp, string, ((m: RegExpMatchArray) => Record<string, unknown>)?]> = [
+      // 自更新伴随校验资产拉取失败（P-20261109-9）：资产在 release 但没取到的
+      // 拒绝——稳定原文即 errmarkers UpdateCompanionFetchFailedTemplate（改文案
+      // 须两侧同步），逐资产原因经捕获组进插值。必须排在表首：原因段内嵌 OS
+      // 网络原文（i/o timeout / connection refused 等），靠后会先被下方通用
+      // 网络条目截走、丢掉「伴随资产 + 逃生门」语境。真缺失（release provides
+      // no checksum/signature）不在此列，保持原文
+      [/companion asset fetch failed: (.+?); retry or set/i, 'errors.known.updateCompanionFetchFailed', m => ({ reason: m[1] })],
       // SSH 主机密钥 TOFU 变更拒绝（P-20261003-34，服务端稳定标记 hostKeyChangedMarker）
       [/host key has changed/i, 'errors.known.hostKeyChanged'],
       [/auth rejected by remote server|unable to authenticate|authentication failed/i, 'errors.known.authFailed'],

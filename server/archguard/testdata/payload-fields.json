@@ -83,6 +83,7 @@
     "terminalRemoteTmux",
     "terminalScrollbackLines",
     "terminalTheme",
+    "terminalTmuxMouseEnabled",
     "tlsCertFile",
     "tlsEnabled",
     "tlsKeyFile",
@@ -92,6 +93,7 @@
     "uidensity",
     "updateChannel",
     "updateChecks",
+    "updateProxy",
     "updateURL",
     "userPrefs"
   ],

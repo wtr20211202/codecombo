@@ -16,6 +16,10 @@ export interface ConsoleTab {
   title: string
   /** 远端 tmux 会话名（服务端 terminalRemoteTmux 开启时创建；重开时回传以重连既有会话） */
   tmuxName?: string
+  /** 远端 tmux 版本与剪贴板能力地板（P-20261109-7 A2）：create 时并行探测回带；
+   *  探测失败/页面刷新恢复的旧 tab 无值——pane 挂载时经 tmux-floor 端点补拉 */
+  tmuxVersion?: string
+  tmuxClipboardFloor?: string
   /** open = WS 会话进行中；ended = 服务端会话已 GC（终态，可重开） */
   state: 'open' | 'ended'
 }
@@ -103,10 +107,18 @@ export function useRemoteConsoleTabs(deps: UseRemoteConsoleTabsDeps) {
     creating.value[hostId] = true
     try {
       // 响应拦截器已解包：res 即 { data: { sessionId, ... } }；silent 避免拦截器+本地双 toast
-      const res = await remoteHostApi.createTerminal(hostId, 24, 80, { config: { silent: true } }) as unknown as { data?: { sessionId: string; tmuxName?: string } }
+      const res = await remoteHostApi.createTerminal(hostId, 24, 80, { config: { silent: true } }) as unknown as { data?: { sessionId: string; tmuxName?: string; tmuxVersion?: string; tmuxClipboardFloor?: string } }
       const d = res.data
       if (!d?.sessionId) return
-      const tab: ConsoleTab = { hostId, sessionId: d.sessionId, title: nextTitle(hostId), tmuxName: d.tmuxName, state: 'open' }
+      const tab: ConsoleTab = {
+        hostId,
+        sessionId: d.sessionId,
+        title: nextTitle(hostId),
+        tmuxName: d.tmuxName,
+        tmuxVersion: d.tmuxVersion,
+        tmuxClipboardFloor: d.tmuxClipboardFloor,
+        state: 'open',
+      }
       tabs.value.push(tab)
       activeTabId.value = tab.sessionId
       // 纯 SFTP 服务器可能未开放 shell（连接成功但终端持续无输出）：不开连即提示——
@@ -137,10 +149,18 @@ export function useRemoteConsoleTabs(deps: UseRemoteConsoleTabsDeps) {
     if (idx === -1) return
     creating.value[tab.hostId] = true
     try {
-      const res = await remoteHostApi.createTerminal(tab.hostId, 24, 80, { config: { silent: true }, tmuxName: tab.tmuxName }) as unknown as { data?: { sessionId: string; tmuxName?: string } }
+      const res = await remoteHostApi.createTerminal(tab.hostId, 24, 80, { config: { silent: true }, tmuxName: tab.tmuxName }) as unknown as { data?: { sessionId: string; tmuxName?: string; tmuxVersion?: string; tmuxClipboardFloor?: string } }
       const d = res.data
       if (!d?.sessionId) return
-      tabs.value[idx] = { ...tab, sessionId: d.sessionId, tmuxName: d.tmuxName || tab.tmuxName, state: 'open' }
+      tabs.value[idx] = {
+        ...tab,
+        sessionId: d.sessionId,
+        tmuxName: d.tmuxName || tab.tmuxName,
+        // 重开再探一次：远端 tmux 升级/降级后横幅随之刷新（空 = 探测失败保持无横幅）
+        tmuxVersion: d.tmuxVersion,
+        tmuxClipboardFloor: d.tmuxClipboardFloor,
+        state: 'open',
+      }
       activeTabId.value = d.sessionId
     } catch (e: unknown) {
       message.error(terminalOpenErrorText(e), { duration: 8000 })

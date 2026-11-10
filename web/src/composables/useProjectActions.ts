@@ -1,5 +1,4 @@
 import { ref, computed, watch, h } from 'vue'
-import { shouldShowToast } from '../utils/toastDedupe'
 import { createDiscreteApi } from 'naive-ui'
 import { useProjectStore } from '../stores/project'
 import { registerBeforeSwitchHook } from '../stores/instance'
@@ -8,7 +7,7 @@ import { copyText } from '../utils/clipboard'
 import { pullResultSummary } from '../utils/pullResult'
 import { useNotificationStore } from '../stores/notification'
 import { useThemeStore } from '../stores/theme'
-import { remoteApi, browseApi, settingsApi, updateApi } from '../api/client'
+import { remoteApi, browseApi, settingsApi } from '../api/client'
 import { fetchAheadBehindMap } from '../utils/aheadBehind'
 import { confirmDialog } from './useDialog'
 import { useI18n } from './useI18n'
@@ -22,7 +21,7 @@ import {
   OpenOutline,
 } from '@vicons/ionicons5'
 
-/** 项目操作——Git 同步、克隆、PR、删除、更新检查——从 Layout.vue 提取 */
+/** 项目操作——Git 同步、克隆、PR、删除——从 Layout.vue 提取 */
 export function useProjectActions(openFilesRef?: () => OpenFile[]) {
   const projectStore = useProjectStore()
   const notificationStore = useNotificationStore()
@@ -458,11 +457,6 @@ export function useProjectActions(openFilesRef?: () => OpenFile[]) {
   const buildInfo = ref<{ version: string; commit: string; buildTime: string; goVersion: string; platform: string } | null>(null)
   const showVersionModal = ref(false)
 
-  // 更新分发源：本机作为中心时，跨平台子实例从该 GitHub Release 地址缓存转发
-  // 二进制（同平台子实例直接用本机自身二进制，无需配置）
-  const updateSourceUrl = ref('')
-  const updateSourceSaving = ref(false)
-
   async function fetchBuildInfo() {
     try {
       // 后台启动请求：失败仅写 Console，不打扰用户
@@ -474,23 +468,7 @@ export function useProjectActions(openFilesRef?: () => OpenFile[]) {
         goVersion: res.data?.goVersion || '',
         platform: res.data?.platform || '',
       }
-      updateSourceUrl.value = (res.data as { updateURL?: string } | undefined)?.updateURL || ''
     } catch { /* silent */ }
-  }
-
-  async function saveUpdateSource() {
-    const v = updateSourceUrl.value.trim()
-    if (v && !/^https?:\/\//.test(v)) {
-      message.error(t('update.sourceUrlInvalid'))
-      return
-    }
-    updateSourceSaving.value = true
-    try {
-      await settingsApi.update({ updateURL: v })
-      message.success(t('update.sourceUrlSaved'))
-    } catch { /* 拦截器处理 */ } finally {
-      updateSourceSaving.value = false
-    }
   }
 
   async function copyCommitId() {
@@ -503,132 +481,11 @@ export function useProjectActions(openFilesRef?: () => OpenFile[]) {
     }
   }
 
-  interface UpdateCheckResult {
-    currentVersion: string
-    latestVersion?: string
-    hasUpdate: boolean
-    changelog?: string
-    downloadUrl?: string
-    fileSize?: number
-    // 检查失败分类（P-20261106 beta.2 误报实锚）：后端不再吞错，前端据标志诚实呈现
-    channelEmpty?: boolean
-    sourceMissing?: boolean
-    checkError?: string
-  }
+  // 注：更新检查/更新执行/UI 全部收敛在共享面板 components/home/VersionPanel.vue
+  //（本项目页版本弹窗、首页版本弹窗、设置关于页三处复用）——本 composable 曾有
+  // 一套并行实现，useLayoutShell 零解构构成死代码，已删（P-20261109-2）；
+  // 再要动更新面板请直接改 VersionPanel，勿在此重建第二实现
 
-  interface UpdateStatusResult {
-    status: string
-    progress: number
-    total: number
-    version: string
-    error?: string
-    result?: string
-    resultError?: string
-  }
-
-  const updateInfo = ref<UpdateCheckResult | null>(null)
-  const updateStatus = ref<UpdateStatusResult | null>(null)
-  const showUpdateModal = ref(false)
-  const updatePolling = ref(false)
-
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-  }
-
-  async function checkUpdate() {
-    try {
-      const res = await updateApi.check()
-      updateInfo.value = res.data || res
-      const info = updateInfo.value
-      if (info?.hasUpdate || (info?.latestVersion && info.latestVersion !== info.currentVersion)) {
-        notificationStore.add({
-          type: 'info',
-          category: 'system',
-          title: t('notification.event.updateAvailable'),
-          body: info.latestVersion ? `v${info.latestVersion}` : undefined,
-        })
-      } else if (info?.channelEmpty) {
-        // stable 通道无正式版（正式通道恒排预发布），提示避免误读为"已是最新"
-        if (shouldShowToast('update.channelEmptyHint')) {
-          message.info(t('update.channelEmptyHint'))
-        }
-      } else if (info?.sourceMissing) {
-        // 自更新源已内置官方仓库；真缺源仅剩「配置的非法分发源被拒」一途
-        if (shouldShowToast('update.sourceMissingHint')) {
-          message.warning(t('update.sourceMissingHint'))
-        }
-      } else if (info?.checkError) {
-        // 其余检查失败如实呈现，不再吞成「未配置源」
-        if (shouldShowToast('update.checkFailedHint')) {
-          message.warning(t('update.checkFailedHint', { reason: info.checkError }))
-        }
-      }
-    } catch {
-      updateInfo.value = null
-    }
-  }
-
-  function pollUpdateStatus() {
-    let interval = 2000
-    const maxInterval = 30000
-    const terminalStatuses = ['success', 'failed', 'rolled_back']
-
-    async function poll() {
-      if (!updatePolling.value) return
-      try {
-        // 轮询请求：失败仅写 Console，不打扰用户
-        const res = await updateApi.status({ silent: true })
-        updateStatus.value = res.data || res
-        const status: string = updateStatus.value?.status || updateStatus.value?.result || ''
-        if (terminalStatuses.includes(status)) {
-          updatePolling.value = false
-          if (status === 'success') {
-            message.success(t('update.success'))
-            notificationStore.add({
-              type: 'success',
-              category: 'system',
-              title: t('notification.event.updateCompleted'),
-            })
-          } else if (status === 'rolled_back') {
-            message.warning(t('update.rolledBack'))
-            notificationStore.add({
-              type: 'warning',
-              category: 'system',
-              title: t('notification.event.updateFailed'),
-              body: t('update.rolledBack'),
-            })
-          } else {
-            message.error(t('update.failed'))
-            notificationStore.add({
-              type: 'error',
-              category: 'system',
-              title: t('notification.event.updateFailed'),
-            })
-          }
-          return
-        }
-        interval = 2000
-      } catch {
-        interval = Math.min(interval * 2, maxInterval)
-      }
-      setTimeout(poll, interval)
-    }
-
-    poll()
-  }
-
-  async function startUpdate() {
-    try {
-      await updateApi.apply()
-      message.success(t('update.updateStarted'))
-      updatePolling.value = true
-      pollUpdateStatus()
-    } catch { /* 拦截器处理 */ }
-  }
 
   return {
     // 添加项目
@@ -693,15 +550,5 @@ export function useProjectActions(openFilesRef?: () => OpenFile[]) {
     showVersionModal,
     fetchBuildInfo,
     copyCommitId,
-    updateInfo,
-    updateStatus,
-    showUpdateModal,
-    updatePolling,
-    formatBytes,
-    checkUpdate,
-    startUpdate,
-    updateSourceUrl,
-    updateSourceSaving,
-    saveUpdateSource,
   }
 }

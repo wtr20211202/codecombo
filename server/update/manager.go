@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,12 +27,25 @@ const (
 	StatusIdle        Status = "idle"
 	StatusChecking    Status = "checking"
 	StatusDownloading Status = "downloading"
-	StatusReplacing   Status = "replacing"
-	StatusRestarting  Status = "restarting"
-	StatusSuccess     Status = "success"
-	StatusFailed      Status = "failed"
-	StatusRolledBack  Status = "rolled_back"
+	// StatusVerifying 下载完成后的完整性/真实性校验阶段（P-20261109-10）：此前
+	// verifyUpdate 在 downloading 态内跑，进度停在 100% 却无阶段透出
+	StatusVerifying  Status = "verifying"
+	StatusReplacing  Status = "replacing"
+	StatusRestarting Status = "restarting"
+	StatusSuccess    Status = "success"
+	StatusFailed     Status = "failed"
+	StatusRolledBack Status = "rolled_back"
 )
+
+// InFlight 在途四态（下载/校验/替换/重启）：受理闸门拒绝重入、检查不得覆写、
+// 清状态（DELETE /updates/status）不得打断——前端据此常驻进度指示
+func (s Status) InFlight() bool {
+	switch s {
+	case StatusDownloading, StatusVerifying, StatusReplacing, StatusRestarting:
+		return true
+	}
+	return false
+}
 
 // UpdateResult 更新结果文件
 type UpdateResult struct {
@@ -40,6 +54,10 @@ type UpdateResult struct {
 	PreviousVersion string `json:"previousVersion"`
 	Error           string `json:"error,omitempty"`
 	Timestamp       string `json:"timestamp"`
+	// NotifiedAt 结果通知已入账时刻（P-20261109-10）：新进程启动观察窗推送
+	// 完成/回滚/失败通知后回写，5 分钟新鲜窗内重启不重推。旧文件无此字段 =
+	// 未推送；旧版本读新文件忽略未知字段——双向兼容
+	NotifiedAt string `json:"notifiedAt,omitempty"`
 }
 
 // UpdateStatusResult GetStatus 返回的状态快照
@@ -70,6 +88,9 @@ type Manager struct {
 	cachedInfo    *ReleaseInfo
 	cachedAt      time.Time
 	cacheDuration time.Duration
+	// sourceGen 换源代际（SetSource 递增）：拉取期间被换源时旧源结果不落缓存。
+	// 用代际而非比较 source 接口值——不可比较的动态类型做 == 会运行时 panic
+	sourceGen uint64
 }
 
 var (
@@ -92,11 +113,18 @@ func GetManager() *Manager {
 }
 
 // SetSource 设置更新源。运行时重接线走 ApplySource（启动与保存共用同一
-// 装配语义，P-20261106 热化），不直接调用本方法
+// 装配语义，P-20261106 热化），不直接调用本方法。
+// 换源即清版本缓存：缓存的 ReleaseInfo 属于旧源/旧通道——切预发布通道或改
+// 分发源后若仍沿用最长 1h 的旧结果，「保存即生效」就只是表面生效（旧缓存同样
+// 会把旧源的伴随拉取失败原因带过来，P-20261109-9）。sourceGen 递增让拉取途中
+// 被换源的旧源结果不再回写缓存（见 CheckUpdateWithCache）
 func (m *Manager) SetSource(source UpdateSource) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.source = source
+	m.sourceGen++
+	m.cachedInfo = nil
+	m.cachedAt = time.Time{}
 }
 
 // Source 返回当前更新源（nil=未装配）——诊断与测试消费
@@ -124,10 +152,23 @@ func (m *Manager) CheckUpdate(ctx context.Context, currentVersion string) (*Rele
 	return m.CheckUpdateWithCache(ctx, currentVersion, false)
 }
 
-// CheckUpdateWithCache 检查更新，可选跳过缓存
+// CheckUpdateWithCache 检查更新，可选跳过缓存。skipCache=true 是「要实时结果」：
+// 既不读缓存，拉取失败也不回落过期缓存而是如实返回错误（P-20261109-9 伴随
+// 重拉的调用方据此区分「重拉成功」与「重拉本身失败」——回落旧缓存会把旧的
+// 失败原因冒充成新结果透出）
 func (m *Manager) CheckUpdateWithCache(ctx context.Context, currentVersion string, skipCache bool) (*ReleaseInfo, error) {
 	m.mu.Lock()
-	m.status = StatusChecking
+	// 在途更新不被检查覆写（P-20261109-10）：否则下方 Checking→Idle 收尾会把
+	// 下载中/校验中抹成 Idle——进度指示失真，受理闸门也会放行并发的第二次更新。
+	// 异步受理后下载期跨分钟级，期间的定时/手动检查必然撞上；受理前的伴随重拉
+	// （P-20261109-9）同样经此守卫，撞上并发受理的在途更新不会把它抹掉
+	if !m.status.InFlight() {
+		m.status = StatusChecking
+	}
+	// 源与缓存锁内取快照（P-20261109-9）：拉取不持锁（网络慢），期间 SetSource
+	// 可能换源清缓存——用快照判定，回写前再按代际核对
+	source, gen := m.source, m.sourceGen
+	cached, cachedAt, ttl := m.cachedInfo, m.cachedAt, m.cacheDuration
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()
@@ -137,30 +178,34 @@ func (m *Manager) CheckUpdateWithCache(ctx context.Context, currentVersion strin
 		m.mu.Unlock()
 	}()
 
-	if m.source == nil {
+	if source == nil {
 		// 稳定原文收口 errmarkers 注册表（P-20261004-29）：api/system/update.go
 		// 的 404 响应同串双发射点
 		return nil, errors.New(errmarkers.UpdateSourceNotConfigured)
 	}
 
 	// 缓存命中（未过期且不强制跳过）
-	if !skipCache && m.cachedInfo != nil && time.Since(m.cachedAt) < m.cacheDuration {
-		return m.cachedInfo, nil
+	if !skipCache && cached != nil && time.Since(cachedAt) < ttl {
+		return cached, nil
 	}
 
 	platform, arch := DetectPlatform()
-	info, err := m.source.FetchLatest(ctx, platform, arch)
+	info, err := source.FetchLatest(ctx, platform, arch)
 	if err != nil {
-		// 请求失败时返回过期缓存
-		if m.cachedInfo != nil {
-			return m.cachedInfo, nil
+		// 请求失败时返回过期缓存（skipCache 调用方要实时结果，不回落）
+		if !skipCache && cached != nil {
+			return cached, nil
 		}
 		return nil, err
 	}
 
 	m.mu.Lock()
-	m.cachedInfo = info
-	m.cachedAt = time.Now()
+	// 拉取期间被换源（设置保存热接线）：旧源结果不落缓存，免得刚清掉的旧通道
+	// 结果又被写回、再盖住新源 1h
+	if m.sourceGen == gen {
+		m.cachedInfo = info
+		m.cachedAt = time.Now()
+	}
 	m.mu.Unlock()
 	return info, nil
 }
@@ -169,9 +214,73 @@ func (m *Manager) CheckUpdateWithCache(ctx context.Context, currentVersion strin
 // update api 以 409 发射——包装器/前端按此文案给出 npm 更新指引）
 var ErrNpmManaged = errors.New(errmarkers.UpdateNpmManaged)
 
-// ApplyUpdate 执行更新（下载+启动子进程）
-// Failed/RolledBack 视为可重试终态：上次失败不阻断本次（Reset 语义内联）
+// ErrUpdateInProgress 受理闸门拒绝：已有在途更新（API 层映射 409）。返回时
+// 包装为「update already in progress: <status>」，文案与历史一致，判型走 errors.Is
+var ErrUpdateInProgress = errors.New("update already in progress")
+
+// verifyUpdateFn 校验步骤取值口（默认 verifyUpdate）：单测替换以断言流水线
+// 在校验时刻处于 verifying 阶段（P-20261109-10），生产路径恒为 verifyUpdate
+var verifyUpdateFn = verifyUpdate
+
+// companionRefetchTimeout 受理前伴随重拉的总时限（P-20261109-9）：release 端点 +
+// 伴随资产预算（companionFetchBudget）之和的上界。重拉发生在受理之前、请求方
+// 同步等待受理结论（StartUpdate），故须低于前端 apply 请求的 axios 30s 超时——
+// 失败路径要把真实原因带回去，而不是让用户只看到一个客户端超时。包级变量便于
+// 测试压缩
+var companionRefetchTimeout = 20 * time.Second
+
+// ApplyUpdate 同步执行更新（下载+校验+启动子进程），返回即本进程内终态。
+// Failed/RolledBack 视为可重试终态：上次失败不阻断本次（Reset 语义内联）。
+// HTTP 入口走异步的 StartUpdate；本形态供单测与无请求语境的调用方
 func (m *Manager) ApplyUpdate(ctx context.Context, info *ReleaseInfo, currentVersion string, port int, progressCB ProgressCallback) error {
+	return m.applyUpdate(ctx, info, currentVersion, port, progressCB, nil)
+}
+
+// StartUpdate 异步受理更新（P-20261109-10，HTTP 入口）：npm 形态、伴随预检
+// 拒绝（P-20261109-9）与在途闸门同步裁决后即返回（nil = 已受理），下载/校验/
+// 拉起换包子进程在后台 goroutine 以脱离请求的 context 跑完。历史同步形态把数
+// 分钟的下载塞进请求——主引擎 WriteTimeout 60s 与前端 axios 30s 双重截断，前端
+// 报失败而服务端仍在换包（用户「不知道什么情况」实锚）。生命周期通知服务端单一
+// 发射：受理点入账「开始」（先于后台任何失败，时序恒定）；受理后失败入账
+// 「失败」（原因 = 状态机 errMsg）；受理前拒绝（含伴随重拉后仍失败——此刻
+// 发「开始更新」就是假话）零通知，真实原因随错误交还请求方；成功路径本进程
+// 随即退出，完成/回滚由新进程启动观察窗推送
+func (m *Manager) StartUpdate(info *ReleaseInfo, currentVersion string, port int) error {
+	admission := make(chan error, 1)
+	go func() {
+		accepted := false
+		version := info.Version
+		err := m.applyUpdate(context.Background(), info, currentVersion, port, nil, func(admittedVersion string) {
+			accepted = true
+			// 受理版本以流水线实际采用的为准：伴随重拉（P-20261109-9）可能换成
+			// 比请求方缓存检查结果更新的 release，通知不能报旧版本号
+			version = admittedVersion
+			notifyUpdateStarted(version)
+			admission <- nil
+		})
+		if !accepted {
+			// 受理前即返回（npm 形态/伴随预检拒绝/在途闸门）：错误交还请求方。
+			// 零通知、结果文件不动——「开始更新」只发生在真受理之后
+			admission <- err
+			return
+		}
+		if err != nil {
+			reason := m.GetStatus().ErrMsg
+			if reason == "" {
+				reason = err.Error()
+			}
+			slog.Warn("update: background apply failed", "version", version, "err", err)
+			notifyUpdateFailed(version, reason)
+		}
+	}()
+	return <-admission
+}
+
+// applyUpdate 更新流水线本体。admitted 在受理点（闸门通过、状态机进入
+// downloading、上一轮结果文件已清）同步回调一次、带实际受理的版本——StartUpdate
+// 据此把「受理/拒绝」交还请求方；受理之前的一切失败（npm 形态/伴随预检拒绝/
+// 在途闸门）同样经返回值交还；受理之后的失败经状态机（failed+errMsg）承载
+func (m *Manager) applyUpdate(ctx context.Context, info *ReleaseInfo, currentVersion string, port int, progressCB ProgressCallback, admitted func(version string)) error {
 	// npm 分发形态（P-20261102-2）：node_modules 里的文件归 npm 管——自更新
 	// 原位替换会让 npm 版本记账漂移（下次 npm update 把旧版盖回来）。在动
 	// 状态机之前就拒绝，错误面给出 npm 更新指引
@@ -179,10 +288,58 @@ func (m *Manager) ApplyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 		return ErrNpmManaged
 	}
 
+	// 伴随资产重拉前置（P-20261109-9 缓存粘性处置）：check 结果走 1h 缓存，一次
+	// 瞬时的伴随资产拉取失败会被钉住整个缓存窗、点几次更新都同样被拒——带失败
+	// 标记先 skipCache 重拉一次（成功即刷新缓存，面板再查随之恢复）。属受理之前
+	// 的同步前置段（StartUpdate 的请求方同步等待受理结论），放在状态闸门之前：
+	// CheckUpdateWithCache 自身要过 Checking 态，与 API 层闸门前的 CheckUpdate
+	// 同一位置语义（在途态有 InFlight 守卫不被它抹掉）。重拉结果须仍是可用更新
+	// 才采用（发布被撤回等边角形态沿用原 info，由下方预检/校验照常裁决）。重拉
+	// 限时 companionRefetchTimeout：失败路径要在前端请求超时之前把真实原因带回
+	var refetchErr error
+	if info.CompanionFetchFailed() {
+		rctx, cancel := context.WithTimeout(ctx, companionRefetchTimeout)
+		fresh, err := m.CheckUpdateWithCache(rctx, currentVersion, true)
+		cancel()
+		switch {
+		case err != nil:
+			refetchErr = err
+		case fresh != nil && HasUpdate(currentVersion, fresh.Version):
+			info = fresh
+		}
+	}
+
 	m.mu.Lock()
 	if m.status != StatusIdle && m.status != StatusChecking && m.status != StatusFailed && m.status != StatusRolledBack {
+		st := m.status
 		m.mu.Unlock()
-		return fmt.Errorf("update already in progress: %s", m.status)
+		return fmt.Errorf("%w: %s", ErrUpdateInProgress, st)
+	}
+	// 重拉后仍注定过不了校验（伴随资产没取到、无逃生门、无其他可用校验数据；
+	// 判定与 verifyUpdate 同源 CompanionPreflight，放行/拒绝结果零变化）→ 受理前
+	// 同步拒绝（P-20261109-9）：不进异步下载（注定被拒的主包不白拉几十 MB）、
+	// 不入账「开始/失败」通知、不清上一轮结果文件——三态真实原因随错误交还请求
+	// 方（API 层 500 带原文，前端 KNOWN_ERROR_I18N 本地化）。落账在闸门之后、与
+	// 闸门同一临界区（闸门前落账会踩掉在途更新的状态；同区则不经 downloading
+	// 中间态）。诊断落点 = manager errMsg（GET /updates/status 可见，面板「上次
+	// 更新」块回显）+ 主进程 stderr（拉取失败由 GitHubSource 逐资产 slog.Warn；
+	// 本拒绝经 API 层 shared.Error 的 slog 落主进程日志并镜像 stderr）——伴随拉取
+	// 发生在主进程，update.log 由 _do_update 子进程 initLogger 落盘，记录不到
+	if CompanionPreflight(info) != nil {
+		reason := info.CompanionFetchError()
+		if refetchErr != nil {
+			// 重拉本身失败（release 端点不可达等）：缓存里的旧原因之外，此刻的
+			// 新失败一并进原因段（前端插值参数整段透出，不丢在指引之后）
+			reason += "; re-fetch failed: " + refetchErr.Error()
+		}
+		err := fmt.Errorf("update verification failed: %w", companionFetchFailedError(reason))
+		m.status = StatusFailed
+		m.progress = 0
+		m.total = 0
+		m.version = info.Version
+		m.errMsg = err.Error()
+		m.mu.Unlock()
+		return err
 	}
 	m.status = StatusDownloading
 	m.progress = 0
@@ -190,6 +347,14 @@ func (m *Manager) ApplyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 	m.version = info.Version
 	m.errMsg = ""
 	m.mu.Unlock()
+
+	// 受理即清上一轮结果文件：轮询方（前端/中心链）与新进程启动观察窗都按
+	// 结果文件判定终态——残留的旧结论会在换包重启窗（新进程已起、子进程尚未
+	// 落盘本轮结果）被误读成本轮结局
+	_ = ClearUpdateResult(m.dataDir)
+	if admitted != nil {
+		admitted(info.Version)
+	}
 
 	tmpDir := filepath.Join(m.dataDir, "tmp", "update-"+info.Version)
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
@@ -208,7 +373,7 @@ func (m *Manager) ApplyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 	}
 
 	newBinary := filepath.Join(tmpDir, filepath.Base(m.binaryPath))
-	if err := m.download(ctx, info.DownloadURL, newBinary, progressCB); err != nil {
+	if err := m.download(ctx, info.DownloadURL, newBinary, progressCB, true); err != nil {
 		// 下载失败清理：半截文件与本次临时目录都不留给下次（重试从干净状态开始）
 		os.RemoveAll(tmpDir)
 		m.fail("download failed: " + err.Error())
@@ -218,8 +383,12 @@ func (m *Manager) ApplyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 	_ = os.Chmod(newBinary, 0755)
 
 	// 完整性/真实性校验（安全 backlog A5）：签名验签优先，其次 sha256 比对，
-	// 两者皆无默认拒绝。校验失败即删除下载产物，不进入替换流程
-	if err := verifyUpdate(newBinary, info); err != nil {
+	// 两者皆无默认拒绝。校验失败即删除下载产物，不进入替换流程。
+	// 独立 verifying 阶段（P-20261109-10）：大包哈希可感知耗时，前端阶段透出
+	m.mu.Lock()
+	m.status = StatusVerifying
+	m.mu.Unlock()
+	if err := verifyUpdateFn(newBinary, info); err != nil {
 		os.RemoveAll(tmpDir)
 		m.fail("update verification failed: " + err.Error())
 		return fmt.Errorf("update verification failed: %w", err)
@@ -250,11 +419,15 @@ func (m *Manager) ApplyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 const downloadStallTimeout = 60 * time.Second
 
 // download 下载文件（带可选进度回调）。响应 ctx 取消与停滞检测
-// downloadClient 下载专用：出站守卫 Transport（https + 拒绝内网/保留地址），
-// 不设整体超时——大文件下载的停滞检测由下方 read 循环负责
-var downloadClient = &http.Client{Transport: newSafeTransport()}
+// downloadClient 下载专用：safeRoundTripper 出站选路（显式代理/env 代理命中时
+// 过官方域白名单，直连档 https + 拒绝内网/保留地址，P-20261109-12），不设整体
+// 超时——大文件下载的停滞检测由下方 read 循环负责
+var downloadClient = &http.Client{Transport: safeRoundTripper{}}
 
-func (m *Manager) download(ctx context.Context, url, dest string, progressCB ProgressCallback) error {
+// track 是否回写状态机进度：仅自更新下载为 true。中心分发的跨平台缓存下载
+// （DownloadToFile → ServeBinary）共用本函数，若也回写会与并发的自更新下载
+// 互踩 progress/total（P-20261109-10 进度事实源收口）
+func (m *Manager) download(ctx context.Context, url, dest string, progressCB ProgressCallback, track bool) error {
 	// 下载地址来自更新源 API 响应（非本地配置）：同样强制 https 公网，
 	// 防响应被篡改后把二进制拉取指向内网/本机
 	if err := ValidatePublicHTTPSURL(url); err != nil {
@@ -278,6 +451,16 @@ func (m *Manager) download(ctx context.Context, url, dest string, progressCB Pro
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download returned %d", resp.StatusCode)
+	}
+
+	// 发布元数据未带体积（FileSize=0）时以响应 Content-Length 补齐分母，
+	// 前端百分比才有意义；元数据已有则以元数据为准不覆盖
+	if track && resp.ContentLength > 0 {
+		m.mu.Lock()
+		if m.total <= 0 {
+			m.total = resp.ContentLength
+		}
+		m.mu.Unlock()
 	}
 
 	watchdog := time.AfterFunc(downloadStallTimeout, cancel)
@@ -314,9 +497,11 @@ func (m *Manager) download(ctx context.Context, url, dest string, progressCB Pro
 			lastProgress = time.Now()
 			// 采样更新进度，避免频繁加锁
 			if now := time.Now(); now.Sub(lastUpdate) > 200*time.Millisecond {
-				m.mu.Lock()
-				m.progress = written
-				m.mu.Unlock()
+				if track {
+					m.mu.Lock()
+					m.progress = written
+					m.mu.Unlock()
+				}
 				lastUpdate = now
 				if progressCB != nil {
 					progressCB(written, resp.ContentLength)
@@ -338,9 +523,11 @@ func (m *Manager) download(ctx context.Context, url, dest string, progressCB Pro
 	}
 
 	// 最终进度更新
-	m.mu.Lock()
-	m.progress = written
-	m.mu.Unlock()
+	if track {
+		m.mu.Lock()
+		m.progress = written
+		m.mu.Unlock()
+	}
 	if progressCB != nil {
 		progressCB(written, resp.ContentLength)
 	}
@@ -361,9 +548,9 @@ func (b *stallResetBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// DownloadToFile 下载文件到指定路径（无进度回调）
+// DownloadToFile 下载文件到指定路径（无进度回调、不回写状态机进度）
 func (m *Manager) DownloadToFile(ctx context.Context, url, dest string) error {
-	return m.download(ctx, url, dest, nil)
+	return m.download(ctx, url, dest, nil, false)
 }
 
 func (m *Manager) fail(msg string) {
@@ -404,6 +591,22 @@ func LoadUpdateResult(dataDir string) (*UpdateResult, error) {
 // SaveUpdateResult 保存更新结果到文件
 func SaveUpdateResult(dataDir string, result *UpdateResult) error {
 	result.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	return writeUpdateResult(dataDir, result)
+}
+
+// MarkUpdateResultNotified 回写结果通知已入账时刻（P-20261109-10 启动观察窗
+// 跨重启防重）：保留子进程落盘的 Timestamp 原值——它是新鲜度判定的锚，
+// 走 SaveUpdateResult 会被改写成此刻。结果文件不存在时空操作
+func MarkUpdateResultNotified(dataDir string, at time.Time) error {
+	r, err := LoadUpdateResult(dataDir)
+	if err != nil || r == nil {
+		return err
+	}
+	r.NotifiedAt = at.UTC().Format(time.RFC3339)
+	return writeUpdateResult(dataDir, r)
+}
+
+func writeUpdateResult(dataDir string, result *UpdateResult) error {
 	path := filepath.Join(dataDir, "update-result.json")
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
@@ -440,7 +643,8 @@ func CleanupBackup(binaryPath string) {
 	os.Remove(backup)
 }
 
-// CopyFile 复制文件（导出，供 main.go 等复用）
+// CopyFile 复制文件（导出复用点：_do_update 回滚复制等；P-20261109-5 起
+// main.go CLI 离线换包路径已退役，不再有 main 侧调用方）
 func CopyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {

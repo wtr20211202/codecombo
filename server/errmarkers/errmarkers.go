@@ -115,6 +115,12 @@ const (
 	MaxWsConnections            = "max websocket connections reached"
 	WrongPassphraseExport       = "wrong passphrase or corrupted export file"
 
+	// 自更新伴随校验资产（.sha256/.sig）在 release 但没取到的拒绝文案
+	//（P-20261109-9：区别于真缺失的 "release provides no checksum/signature"；
+	// 首个 %s=逐资产拉取原因——前端正则按「; retry or set」截取进插值参数，
+	// 次个 %s=逃生门 env 名）
+	UpdateCompanionFetchFailedTemplate = "companion asset fetch failed: %s; retry or set %s=1 to override"
+
 	// 手动携密同步（P-20261024-3）：三道服务端硬面的稳定原文（前端
 	// KNOWN_ERROR_I18N 映射 + e2e 断言锚点）。EnvelopeRejected 统一篡改/
 	// 重放/配对钥不配三类失败文案（防 oracle：不给中间人区分失败原因的回声）
@@ -184,6 +190,7 @@ var Registry = []Marker{
 	{Symbol: "UpdateSourceNotConfigured", Text: UpdateSourceNotConfigured, LocaleKey: "errors.known.centerNoUpdateSource", Kind: KindEmitted, Note: "从中心更新：中心未配置更新源 404（update/api 双发射点）"},
 	{Symbol: "UpdateNpmManaged", Text: UpdateNpmManaged, LocaleKey: "errors.known.updateNpmManaged", Kind: KindEmitted, Note: "npm 分发形态拒绝自更新 409（P-20261102-2：node_modules 归 npm 管，防版本记账漂移），update api 单发射点"},
 	{Symbol: "CenterBinaryMissingTemplate", Text: CenterBinaryMissingTemplate, LocaleKey: "errors.known.centerBinaryMissing", Kind: KindEmitted, Note: "从中心更新：更新源无该平台包 404"},
+	{Symbol: "UpdateCompanionFetchFailedTemplate", Text: UpdateCompanionFetchFailedTemplate, LocaleKey: "errors.known.updateCompanionFetchFailed", Kind: KindEmitted, Note: "P-20261109-9 自更新伴随校验资产在 release 但拉取失败（首 %s=逐资产原因、次 %s=逃生门 env），update 包 verify/ApplyUpdate 发射；与真缺失文案分流"},
 	{Symbol: "RemoteUnreachable", Text: RemoteUnreachable, LocaleKey: "errors.known.netUnreachable", Kind: KindEmitted, Note: "对端实例/代理不可达稳定前缀（dispatch/proxy 双发射点）"},
 	{Symbol: "SessionBusy", Text: SessionBusy, LocaleKey: "errors.known.sessionBusy", Kind: KindEmitted, Note: "远程主机终端会话回复中 409"},
 	{Symbol: "MaxWsConnections", Text: MaxWsConnections, LocaleKey: "errors.known.wsLimit", Kind: KindEmitted, Note: "ws 连接数上限 503"},

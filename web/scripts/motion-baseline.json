@@ -8,7 +8,6 @@
     "src/assets/main.css|0.01ms": "prefers-reduced-motion 全局 kill switch（功能性：无障碍偏好直显，非装饰节奏）",
     "src/assets/main.css|99999s": "autofill 背景过渡抑制 hack（功能性：对抗浏览器 UA 样式过渡，非装饰时长）",
     "src/components/home/CloneStatusBar.vue|0.3s": "克隆进度条 width 跟手（功能性：与进度数据节奏同步，非装饰节奏）",
-    "src/components/home/VersionPanel.vue|0.3s": "版本任务进度条 width 跟手（功能性：与进度数据节奏同步，非装饰节奏）",
     "src/components/settings/SystemMonitorPanel.vue|.3s": "磁盘占用条 width 跟手（功能性：与采样数据节奏同步，非装饰节奏）"
   }
 }

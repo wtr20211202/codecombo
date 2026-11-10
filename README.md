@@ -58,19 +58,23 @@ iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercon
 
 Then open **http://localhost:9999** and set your lock password on first start.
 Version selection is automatic: the latest stable release when one exists;
-until then the newest rc, falling back to the newest beta.
+until then the newest rc, falling back to the newest beta. Port, bind
+address, install directory and data directory are adjustable — see
+[Optional parameters](#optional-parameters).
 
 **Permissions & the service account.** To register the service you need
 elevation — administrator PowerShell on Windows, sudo on Linux (the script
 prompts for it and keeps the service running as *your* user, not root);
 macOS launchd agents need no elevation. Without elevation the script still
-installs the binary and prints the foreground command. The service writes
-only to your own data directory (`~/.codecombo` — pinned via the
+installs the binary and prints a manual start command (no service
+registration — `start` runs the app as a background daemon). The service
+writes only to your own data directory (`~/.codecombo` — pinned via the
 `--data-dir` service argument on Windows, since the service account's
 default home points elsewhere).
 
-**Change bind host / port after install**: re-run the same command with
-`CODECOMBO_HOST=0.0.0.0` (env prefix), or manage the service directly.
+**Change bind host / port after install**: re-run the same command with the
+variables from [Optional parameters](#optional-parameters) (e.g.
+`CODECOMBO_HOST=0.0.0.0` — mind where they go), or manage the service directly.
 Service control differs per platform — `sc.exe` is Windows' built-in
 Service Control command line (the counterpart of `systemctl` on Linux and
 `launchctl` on macOS):
@@ -100,10 +104,58 @@ launchctl unload ~/Library/LaunchAgents/com.codecombo.plist
 launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 ```
 
-**Install method decides update method.** Binary installs (this script or a
-manual download) update **in-app** from GitHub releases with automatic
-rollback — the recommended shape. npm installs update through npm instead
-(`npm i -g codecombo@latest`; the in-app updater steps aside automatically).
+#### Optional parameters
+
+Both installers read four optional environment variables; leave them unset
+and you get the defaults below — the same behavior as before:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CODECOMBO_PORT` | `9999` | Service port |
+| `CODECOMBO_HOST` | `127.0.0.1` (this machine only) | Bind address; `0.0.0.0` = reachable from your LAN |
+| `CODECOMBO_PREFIX` | `~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\codecombo`) | Directory the binary is installed to |
+| `CODECOMBO_DATA_DIR` | `~/.codecombo` | Data directory (absolute path). Only handed to the service — `CC_DATA_DIR` in the systemd unit / launchd plist, `--data-dir` in the Windows service command line and in the printed manual start command; the installer still never creates or writes it |
+
+Where they go: on the `sh` side of the pipe (placed before `curl` they only
+reach curl, and the script falls back to the defaults); in PowerShell as
+`$env:` assignments before `iex` — they stay set for the rest of that
+PowerShell session.
+
+```bash
+# Second instance next to an existing one: own port, data dir and install dir
+curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test CODECOMBO_PREFIX=$HOME/.local/codecombo-test sh
+
+# LAN access (all interfaces) — trusted networks only, the lock password is the only gate
+curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=0.0.0.0 sh
+
+# Custom install directory
+curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PREFIX=$HOME/bin sh
+```
+
+```powershell
+# Windows: second instance next to an existing one
+$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; $env:CODECOMBO_PREFIX="$env:LOCALAPPDATA\Programs\codecombo-test"; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))
+```
+
+Before adding a second instance:
+
+- **One installer-managed service per machine.** Service names are fixed
+  (`codecombo.service` / `com.codecombo` / `Codecombo`). If the existing
+  instance already runs as that service (installed by this script or by
+  remote deploy), a run with other settings re-points that service — it
+  takes the existing instance over instead of adding one. Keep the second
+  instance out of service registration then and start a binary with its own
+  flags: `<bin> start --port 11000 --data-dir <dir>` — the command the
+  installers print when they skip registration (non-elevated PowerShell,
+  Linux without sudo credentials).
+- **The CLI needs the data dir too**: `<bin> status --data-dir <dir>`,
+  `<bin> stop --data-dir <dir>`.
+- **Upgrades re-run with the same variables** — without
+  `CODECOMBO_DATA_DIR` the rewritten service falls back to `~/.codecombo` at
+  its next restart (your data stays in the custom dir; the instance just no
+  longer reads it).
+- **Never re-run the script on a remote-deployed instance** (see
+  [Upgrading](#upgrading)).
 
 ### Install with npm
 
@@ -123,6 +175,68 @@ channel: `npm i -g codecombo@next` — or pin any version explicitly, e.g.
 `npm i -g codecombo@0.2.0-rc1`. Stable `npm i -g codecombo` never moves.
 Updates for npm installs are owned by npm: the in-app updater stays off for
 this install shape — just re-run the install command to move to the latest.
+
+### Upgrading
+
+**Install method decides update method.** Identify your install first — run
+`systemctl cat codecombo` and read the binary path in `ExecStart` (no unit,
+e.g. a manually started instance — `start` daemon or `--serve` foreground —
+or a remote deploy in "direct process" mode: `ps -ef | grep codecombo`
+shows the running binary path; `~` is the service user's home, shown as an
+absolute path in the unit):
+
+| Check | Installed by | How to upgrade |
+|---|---|---|
+| `ExecStart` → `~/.local/bin/codecombo` | the install script above | 1 in-app update (preferred) · 2 re-run the script |
+| `ExecStart` → `~/.codecombo/bin/codecombo` | remote deploy from a central instance | 1 in-app update · re-deploy remotely · 3 manual replacement — **never** re-run the script |
+| `ExecStart` → `/opt/codecombo/bin/codecombo` | manual `/opt` layout ([deploy-linux](docs/deploy-linux.md)) | 1 in-app update · 3 manual replacement |
+| `npm ls -g codecombo` lists it | npm | `npm i -g codecombo@latest` (the in-app updater steps aside) |
+
+**1. In-app update (recommended shape)** — "Check Update" in the version
+panel (Settings → About) pulls the new binary from GitHub and swaps it with
+automatic rollback on failure. Two notes: versions older than v0.0.1-beta.3
+cannot see new releases in-app (a check-chain defect, fixed in
+v0.0.1-beta.3) — upgrade once via the script/manual paths below first;
+during the beta phase the GitHub stable channel stays empty, so turn on
+**Follow pre-releases** in the version panel before checking.
+Script-installed (systemd-managed) instances: if the service has not come
+back on its own after updating, `sudo systemctl restart codecombo` finishes
+the rollout.
+
+**2. Re-run the install script (script installs only)** — read your original
+`--host`/`--port` from `ExecStart` (installed with a custom data dir? also
+pass its `CC_DATA_DIR` from the unit's `Environment=` line back as
+`CODECOMBO_DATA_DIR`); the env vars must sit on the `sh` side
+of the pipe (placed before `curl` they only apply to curl, and the port/bind
+fall back to the 9999/127.0.0.1 defaults):
+
+```bash
+sudo -v && curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=<original> CODECOMBO_PORT=<original> sh
+```
+
+`sudo -v` first — under `curl | sh` the script cannot prompt for a password,
+so it proceeds only with cached credentials (without them it still swaps the
+binary but skips the service unit). The script swaps the binary via rename
+(a running service is fine) but keeps serving the old version until restart:
+when it reports a running instance, close with
+`sudo systemctl restart codecombo`. On macOS re-running takes effect
+immediately (the script reloads the launchd agent itself). **Instances
+installed by remote deploy must not re-run the script** — the templated unit
+overwrite drops `PATH`/`WorkingDirectory`/`NoNewPrivileges` and reverts the
+bind address to `127.0.0.1`, cutting remote access as soon as the service
+restarts; that layout upgrades in-app or via a fresh remote deploy from the
+central instance (use a central instance on v0.0.1-beta.3 or later — earlier
+deployers could fail to upgrade older installs in place). On Windows, run
+`sc.exe stop Codecombo` before re-running install.ps1 — Windows locks a
+running `.exe`, so the swap fails with the service up.
+
+**3. Manual binary replacement (Linux only)** — the full recipe (stop →
+verify SHA256 → keep a `.bak` → replace → start, plus the rollback step)
+lives in [docs/deploy-linux.md](docs/deploy-linux.md) §6; the three-state
+`status=203/EXEC` triage for a service that won't start is in §7 of the same
+doc. Mind the file size: binaries are ~50 MB (linux-amd64 ≈ 51–54 MB) — a
+file of tens of bytes means you clicked a `.sha256`/`.sig` sidecar instead
+of the binary.
 
 ### Build and run
 
@@ -281,10 +395,10 @@ and a commit graph you can cherry-pick / squash / extract from.
   key, per-IP rate limiting, audit log with CSV export.
 - **Self-update** — GitHub-release-based update checks with automatic
   rollback; central instances can cache and forward binaries to child
-  instances. Zero-config: the official repo is the built-in default source —
-  Zero-config: the official repo is the built-in default source. Automatic
-  checks run every 24h and notify on new versions — toggle in the version
-  panel to opt out.
+  instances. Zero-config: the official repo is the built-in default source.
+  Automatic checks run every 24h and notify on new versions — toggle in the
+  version panel to opt out. Which upgrade path applies depends on how you
+  installed — see [Upgrading](#upgrading).
 - **i18n & themes** — English / 简体中文 UI; four built-in themes
   (Dark / Light / One Dark / Dracula).
 

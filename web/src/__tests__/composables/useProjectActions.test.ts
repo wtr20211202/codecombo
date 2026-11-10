@@ -74,12 +74,6 @@ describe('useProjectActions', () => {
     })
   })
 
-  describe('formatBytes', () => {
-    it('格式化字节数', () => {
-      const { formatBytes } = useProjectActions(() => [])
-      expect(formatBytes(0)).toBe('0 B')
-      expect(formatBytes(1024)).toBe('1 KB')
-      expect(formatBytes(1048576)).toBe('1 MB')
-    })
-  })
+  // 注：formatBytes 用例随 P-20261109-2 死代码清除移除——更新检查/UI 已收敛在
+  // VersionPanel.vue，composable 侧不再导出 formatBytes
 })

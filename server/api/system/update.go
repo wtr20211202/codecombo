@@ -56,14 +56,24 @@ func CheckUpdate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": model.CheckUpdateResponse{
+	resp := model.CheckUpdateResponse{
 		CurrentVersion: buildVersion,
 		LatestVersion:  info.Version,
 		HasUpdate:      update.HasUpdate(buildVersion, info.Version),
 		Changelog:      info.Changelog,
 		DownloadURL:    info.DownloadURL,
 		FileSize:       info.FileSize,
-	}})
+	}
+	// 伴随校验资产拉取失败旗标（P-20261109-9，channelEmpty 同款 omitempty 先例）：
+	// 只在有更新且已注定被校验拒绝时置位——「更新将被拒」提示必须是真话
+	//（逃生门开着 / 另一校验资产可用时不报）；判定与 ApplyUpdate 下载前拒绝同源
+	if resp.HasUpdate {
+		if update.CompanionPreflight(info) != nil {
+			resp.CompanionFetchFailed = true
+			resp.CompanionFetchError = info.CompanionFetchError()
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": resp})
 }
 
 // updateRetryable 终态失败可重试：Failed/RolledBack 不算"进行中"，
@@ -73,7 +83,13 @@ func updateRetryable(st update.UpdateStatusResult) bool {
 		st.Status == update.StatusFailed || st.Status == update.StatusRolledBack
 }
 
-// ApplyUpdate 执行更新
+// ApplyUpdate 受理更新（P-20261109-10 异步化）：快校验（在途闸门/版本检查/
+// npm 形态）同步裁决，受理即 202——下载/校验/拉起换包子进程在后台跑完，进度
+// 经 GET /updates/status 轮询，开始/失败/完成经通知中心入账（服务端单一发射）。
+// 同步形态的历史缺陷（WriteTimeout 60s × axios 30s 全盲窗）见 Manager.StartUpdate。
+// 伴随校验资产重拉后仍未取到（P-20261109-9）同属受理前拒绝：走下方通用 500，
+// 响应原文即 errmarkers.UpdateCompanionFetchFailedTemplate 形态（三态原因 +
+// 逃生门指引，前端 KNOWN_ERROR_I18N 本地化）
 func ApplyUpdate(c *gin.Context) {
 	mgr := update.GetManager()
 	st := mgr.GetStatus()
@@ -102,11 +118,12 @@ func ApplyUpdate(c *gin.Context) {
 		port = 9999
 	}
 
-	if err := mgr.ApplyUpdate(c.Request.Context(), info, buildVersion, port, nil); err != nil {
+	if err := mgr.StartUpdate(info, buildVersion, port); err != nil {
 		// npm 分发形态（P-20261102-2）：node_modules 归 npm 管，自更新拒绝
 		// 409 + 注册表稳定文案（前端 KNOWN_ERROR_I18N 映射双语指引）。检查更新
-		// 不拦——npm 用户仍能在 UI 看到新版本，只是应用动作换指引
-		if errors.Is(err, update.ErrNpmManaged) {
+		// 不拦——npm 用户仍能在 UI 看到新版本，只是应用动作换指引。
+		// 在途闸门竞态（上方 GetStatus 与受理之间被并发请求抢先受理）同 409
+		if errors.Is(err, update.ErrNpmManaged) || errors.Is(err, update.ErrUpdateInProgress) {
 			shared.Error(c, http.StatusConflict, err.Error(), nil)
 			return
 		}
@@ -114,7 +131,14 @@ func ApplyUpdate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "update started"})
+	// 202 Accepted：已受理、在后台进行（CLI `codecombo update` 同认 200/202）。
+	// 版本取状态机受理值：受理前的伴随重拉（P-20261109-9）可能换成比上方缓存
+	// 检查更新的 release；状态机未带版本（受理后被并发清状态的极窄窗）回落 info
+	accepted := info.Version
+	if v := mgr.GetStatus().Version; v != "" {
+		accepted = v
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": "update started", "version": accepted})
 }
 
 // GetUpdateStatus 查询更新状态
@@ -136,6 +160,7 @@ func GetUpdateStatus(c *gin.Context) {
 		if result, _ := update.LoadUpdateResult(config.DataDir()); result != nil {
 			resp.Result = result.Status
 			resp.ResultError = result.Error
+			resp.ResultAt = result.Timestamp
 			resp.Version = result.Version
 		}
 	}
@@ -143,10 +168,18 @@ func GetUpdateStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": resp})
 }
 
-// DeleteUpdateStatus 前端确认已读取更新结果
+// DeleteUpdateStatus 前端确认已读取更新结果。在途更新（下载/校验/替换/重启）
+// 拒绝 409 不清（P-20261109-10）：Reset 会把下载中的状态机抹回 idle，受理闸门
+// 随即放行并发的第二次更新——中心链「先 clearStatus 再拉取」与自更新跨标签
+// 并发即此形态
 func DeleteUpdateStatus(c *gin.Context) {
+	mgr := update.GetManager()
+	if st := mgr.GetStatus(); st.Status.InFlight() {
+		shared.Error(c, http.StatusConflict, fmt.Sprintf("update already in progress: %s", st.Status), nil)
+		return
+	}
 	_ = update.ClearUpdateResult(config.DataDir())
-	update.GetManager().Reset()
+	mgr.Reset()
 	c.JSON(http.StatusOK, gin.H{"message": "update status cleared"})
 }
 

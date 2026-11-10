@@ -25,6 +25,14 @@ type Module struct {
 	//（与 system.NewModule 的 rt.Version 同源；update 包不反向依赖 api 包），
 	// 可整体替换（测试注入）
 	currentVerGen func() string
+
+	// dataDirGen 数据目录取值口（默认 config.DataDir）：启动清理与结果观察窗
+	// 共用，测试注入临时目录——模块契约测试不得读写真实数据目录
+	dataDirGen func() string
+
+	// stopWatch 结果观察窗的取消口（Start 装配，Stop 调用）：停机后不得再有
+	// 通知入账（内核契约「Stop 后无副作用」）
+	stopWatch context.CancelFunc
 }
 
 // NewModule 创建更新模块（version 由组合根声明式传入，与 system.NewModule
@@ -33,6 +41,7 @@ func NewModule(version string) *Module {
 	v := strings.TrimSpace(version)
 	return &Module{
 		currentVerGen: func() string { return v },
+		dataDirGen:    config.DataDir,
 	}
 }
 
@@ -54,11 +63,22 @@ func (m *Module) Init(_ context.Context, k kernel.Kernel) error {
 // 热化：开关保存即生效，无须重启）共用同一入口：URL 空=官方仓内置
 // （P-20261103-1 零配置自更新，「不更新」语义由 UpdateChecks 开关承接）；
 // 源非法（非 https / 指向内网）时留痕并停用——更新通道是供应链入口，
-// 宁可不更新也不放宽；通道（stable/prerelease）随设置即时生效
+// 宁可不更新也不放宽；通道（stable/prerelease）随设置即时生效。
+// 出站代理（P-20261109-12）同点装配：显式设置项 > 环境变量 > 直连；代理串
+// 非法时留痕回直连（env 感知仍在）——宁降级不阻断，保存期校验挡住常规入口
 func ApplySource(cfg *config.Config) {
 	updateURL := strings.TrimSpace(cfg.Server.UpdateURL)
 	if updateURL == "" {
 		updateURL = config.UpdateURLOfficial
+	}
+	sourceHost := hostOfSourceURL(updateURL)
+	if proxy := strings.TrimSpace(cfg.Server.UpdateProxy); proxy != "" {
+		if err := SetOutbound(proxy, sourceHost); err != nil {
+			slog.Warn("update: outbound proxy rejected — falling back to direct/env", "err", err)
+			_ = SetOutbound("", sourceHost)
+		}
+	} else {
+		_ = SetOutbound("", sourceHost)
 	}
 	source, err := NewGitHubSource(updateURL)
 	if err != nil {
@@ -75,16 +95,21 @@ func ApplySource(cfg *config.Config) {
 	GetManager().SetSource(source)
 }
 
-// Start 启动期清理：旧备份、过期更新结果、serve 临时缓存；并挂定时检查
+// Start 启动期清理：旧备份、过期更新结果、serve 临时缓存；挂结果观察窗
+// （P-20261109-10：换包/回滚后的完成通知由本进程推送）与定时检查
 // （定时器无条件注册，UpdateChecks 开关由 autoCheck 每次 tick 实读——
 // P-20261106 热化：开关保存即生效，不必重启）
 func (m *Module) Start(ctx context.Context, k kernel.Kernel) error {
 	exePath, _ := os.Executable()
 	CleanupBackup(exePath)
-	dd := config.DataDir()
+	dd := m.dataDirGen()
 	ClearOldUpdateResult(dd)
 	CleanupServeCache(dd)
 	slog.Debug("update: startup cleanup done")
+
+	wctx, cancel := context.WithCancel(ctx)
+	m.stopWatch = cancel
+	go m.watchUpdateResult(wctx, dd)
 
 	if !k.Scheduler().AddTicker("update-check", autoCheckInterval, m.autoCheck) {
 		return errors.New("update: update-check ticker already registered")
@@ -139,5 +164,30 @@ func (m *Module) autoCheck(ctx context.Context) {
 	slog.Info("update: new version available", "current", cur, "latest", info.Version)
 }
 
-// Stop 停机（调度器任务由内核统一停）
-func (m *Module) Stop(_ context.Context, _ kernel.Kernel) error { return nil }
+// watchUpdateResult 结果观察窗（时序与窗口取值见 notify.go publishUpdateResult
+// 段注）：每 resultWatchInterval 读一次结果文件，可判定即收工，窗口到期或
+// 停机即退出
+func (m *Module) watchUpdateResult(ctx context.Context, dd string) {
+	deadline := time.Now().Add(resultWatchWindow)
+	for {
+		if publishUpdateResult(dd, strings.TrimSpace(m.currentVerGen()), time.Now()) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(resultWatchInterval):
+		}
+	}
+}
+
+// Stop 停机（调度器任务由内核统一停；结果观察窗经 stopWatch 收口，幂等）
+func (m *Module) Stop(_ context.Context, _ kernel.Kernel) error {
+	if m.stopWatch != nil {
+		m.stopWatch()
+	}
+	return nil
+}

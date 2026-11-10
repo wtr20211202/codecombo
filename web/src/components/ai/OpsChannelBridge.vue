@@ -22,6 +22,7 @@ import { playAlert, bindAudioUnlock } from '../../utils/alertSound'
 import { useDndStore } from '../../stores/dnd'
 import { useLockStore } from '../../stores/lock'
 import { useUserPrefsStore } from '../../stores/userPrefs'
+import { useUpdateCheckStore } from '../../stores/updateCheck'
 import { useI18n } from '../../composables/useI18n'
 import { invalidatePastePrecheckCache } from '../../composables/useTerminalDangerGate'
 import { invalidatePreviewCompat } from '../../composables/usePreviewSandbox'
@@ -36,7 +37,8 @@ import { refreshCustomSensitivePatterns } from '../../composables/useCustomSensi
  * 智能操作通道的界面桥（须挂在 NMessageProvider 内部才能使用 useMessage）：
  * - notify 事件 → toast（外部 Agent 经 /api/ops-notify 驱动界面反馈）
  * - settings.changed 事件 → 重新加载终端主题（设置变更前端实时跟随）+ 用户
- *   偏好漫游对账（P-20261007-1：userPrefs 单键他端/agent 改动整表应用）
+ *   偏好漫游对账（P-20261007-1：userPrefs 单键他端/agent 改动整表应用）+ 自动
+ *   检查更新开关重读（P-20261109-6：前端 6h 自动检查电路即时起停）
  * - task.progress 事件 → AI 助手任务进度 store（收起后的迷你进度窗实时渲染）+ 终态通知链（done/failed → 通知中心 + 桌面通知）
  * - approval.pending / approval.resolved → 审批 store（全局确认卡片堆 + 角标）+ 等待音效（P-20261003-33，pending 到达时）；
  *   挂载时 seedPending 冷启动补账（P-20261003-130）——刷新/重启后既有 pending 卡不丢；
@@ -113,6 +115,10 @@ function onSettingsChanged() {
   // 单键 userPrefs，他端或 agent 改动经本广播到达，整表应用（服务端 wins）；
   // 本端推送在途时内部守卫跳过，等自身 PUT 的广播回流对账
   void useUserPrefsStore().pull()
+  // 自动检查更新开关跟随（P-20261109-6）：updateChecks 落服务端 settings，他标签
+  // 页/他端/agent settings API 改开关经本广播到达，前端 6h 自动检查电路即时起停
+  //（本页版本面板保存已同帧应用，此处重读幂等）
+  void useUpdateCheckStore().syncAutoCheckSetting()
 }
 
 function onTaskProgress(e: Event) {

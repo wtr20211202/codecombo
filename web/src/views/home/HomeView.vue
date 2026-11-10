@@ -14,7 +14,6 @@ import { useNotificationStore } from '../../stores/notification'
 import { useThemeStore } from '../../stores/theme'
 import { useLockStore } from '../../stores/lock'
 import { themeRegistry } from '../../themes'
-import { updateApi } from '../../api/client'
 import { fetchAheadBehindMap } from '../../utils/aheadBehind'
 import { useI18n } from '../../composables/useI18n'
 import { useProjectActions } from '../../composables/useProjectActions'
@@ -22,7 +21,6 @@ import { useFetchAll } from '../../composables/useFetchAll'
 import { useHomeProjects } from '../../composables/useHomeProjects'
 import { useHomeBuildInfo } from '../../composables/useHomeBuildInfo'
 import { useHomeGlobalListeners } from '../../composables/useHomeGlobalListeners'
-import { safeStorage } from '../../utils/storage'
 import { formatBadgeCount } from '../../utils/badge'
 import { useAgentTerminal } from '../../composables/useAgentTerminal'
 import { restoreDshConsoleOnce } from '../../composables/usePanelLayout'
@@ -236,27 +234,11 @@ onMounted(() => {
     .then(() => fetchAllAheadBehind())
     .finally(() => { loading.value = false })
   fetchBuildInfo() // 不依赖项目数据，并行获取
-  void autoCheckUpdate()
+  // 更新检查不在此处做（P-20261109-6）：首页挂载即查的旁路曾绕过「自动检查更新」
+  // 开关（关了照查），且与 App 层 updateCheck store 的启动首查重复请求、每浏览器
+  // 会话重复入账「发现新版本」通知——自动检查统一收口 store（开关门控 + 按版本去重）
   void restoreDshConsoleOnce() // 刷新后恢复上次的 dsh 控制台浮层开关
 })
-
-// 启动后静默检查一次更新（有新版本仅入通知中心，不打扰；会话内去重）
-async function autoCheckUpdate() {
-  if (safeStorage.sessionGet('sc.update.checked') === '1') return
-  safeStorage.sessionSet('sc.update.checked', '1')
-  try {
-    const res = await updateApi.check({ silent: true }) as unknown as { data?: { hasUpdate?: boolean; latestVersion?: string } }
-    const d = res.data || (res as { hasUpdate?: boolean; latestVersion?: string })
-    if (d?.hasUpdate) {
-      notificationStore.add({
-        type: 'info',
-        category: 'system',
-        title: t('notification.event.updateAvailable'),
-        body: d.latestVersion ? `v${d.latestVersion}` : undefined,
-      })
-    }
-  } catch { /* 无源/网络不可达完全静默 */ }
-}
 
 // 监听解锁：isLocked 从 true → false 时，刷新项目列表 + ahead/behind
 // HomeView 始终挂载（LockScreenOverlay 只是覆盖层），解锁不会重新触发 onMounted

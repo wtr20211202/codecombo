@@ -27,7 +27,7 @@ type Notification struct {
 	Read          bool      `json:"read"`
 	ProjectID     string    `json:"projectId,omitempty"`     // 关联项目（跨项目跳转用）
 	ProjectName   string    `json:"projectName,omitempty"`   // 冗余显示用（避免前端反查）
-	Action        string    `json:"action,omitempty"`        // terminal / panel / url / preview / watch-fallback / agent-fix / cron-retry（定时任务发起失败一键重试，payload=JSON {cronId,slot}）/ stash-recover（P-20261006-48 切回原分支的 autoStash 一键恢复，前端落档，payload=JSON {projectId,branch,message}）
+	Action        string    `json:"action,omitempty"`        // terminal / panel / url / preview / watch-fallback / agent-fix / cron-retry（定时任务发起失败一键重试，payload=JSON {cronId,slot}）/ stash-recover（P-20261006-48 切回原分支的 autoStash 一键恢复，前端落档，payload=JSON {projectId,branch,message}）/ update-panel（P-20261109-10 自更新通知回版本面板，无 payload）
 	ActionPayload string    `json:"actionPayload,omitempty"` // terminal:<sessionId> / panel:<name> / url:<...> / preview:<port> / agent-fix:<deployTaskId>
 	// SecondAction/SecondActionPayload 可选第二动作（P-20261005-150）：主动作
 	// 旁的第二小钮（通知中心行内副钮，视觉层级弱于主动作）。主动作是单槽且

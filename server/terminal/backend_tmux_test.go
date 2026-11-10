@@ -3,6 +3,7 @@
 package terminal
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -25,12 +26,61 @@ func TestParseTmuxVersion(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
-			maj, min, ok := parseTmuxVersion(tc.input)
+			maj, min, ok := ParseTmuxVersion(tc.input)
 			if ok != tc.ok || maj != tc.maj || min != tc.min {
-				t.Errorf("parseTmuxVersion(%q) = (%d, %d, %v), want (%d, %d, %v)",
+				t.Errorf("ParseTmuxVersion(%q) = (%d, %d, %v), want (%d, %d, %v)",
 					tc.input, maj, min, ok, tc.maj, tc.min, tc.ok)
 			}
 		})
+	}
+}
+
+// TestTmuxClipboardFloorKind 剪贴板能力地板两档分类（P-20261109-7）：
+// <3.2 拖选复制受限（set-clipboard 键不存在）/ 3.2≤v<3.3 应用内复制透传受限
+// （allow-passthrough 缺）/ ≥3.3 全通；空串与不可解析 = 静默（空串）不提示
+func TestTmuxClipboardFloorKind(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"tmux 3.4", tmuxFloorOK},
+		{"tmux 3.3a", tmuxFloorOK},
+		{"tmux 3.3", tmuxFloorOK},
+		{"tmux 4.0", tmuxFloorOK},
+		{"tmux 3.2", tmuxFloorPassthrough},
+		{"tmux 3.2a", tmuxFloorPassthrough},
+		{"tmux 3.1b", tmuxFloorDragCopy},
+		{"tmux 2.9", tmuxFloorDragCopy},
+		// next-3.5 形态沿 ParseTmuxVersion 既有解析契约判不可解析（isTmuxAvailable
+		// 同一正则同一行为，本提案不改后端选型语义）→ 静默（空串）无提示
+		{"tmux next-3.5", ""},
+		{"", ""},
+		{"garbage", ""},
+	}
+	for _, tc := range cases {
+		if got := TmuxClipboardFloorKind(tc.input); got != tc.want {
+			t.Errorf("TmuxClipboardFloorKind(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+// TestTmuxConfContentClipboardAndMouse 托管 conf 全文断言（P-20261109-7 A①）：
+// set-clipboard on 恒在位（拖选 copy-pipe 源头兜底）；mouse 行随开关翻转——
+// conf 是「DO NOT EDIT」托管文件，内容即本系统对 tmux 行为的声明面
+func TestTmuxConfContentClipboardAndMouse(t *testing.T) {
+	conf := tmuxConfContent(20000, true)
+	if !strings.Contains(conf, "\nset -s set-clipboard on\n") {
+		t.Errorf("tmuxConfContent missing `set -s set-clipboard on`:\n%s", conf)
+	}
+	if !strings.Contains(conf, "\nset -g mouse on\n") {
+		t.Errorf("tmuxConfContent(mouseOn=true) missing `set -g mouse on`:\n%s", conf)
+	}
+	off := tmuxConfContent(20000, false)
+	if !strings.Contains(off, "\nset -g mouse off\n") {
+		t.Errorf("tmuxConfContent(mouseOn=false) missing `set -g mouse off`:\n%s", off)
+	}
+	if strings.Contains(off, "\nset -g mouse on\n") {
+		t.Errorf("tmuxConfContent(mouseOn=false) still has `set -g mouse on`:\n%s", off)
 	}
 }
 

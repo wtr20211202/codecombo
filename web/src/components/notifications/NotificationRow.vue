@@ -153,6 +153,9 @@ function actionInlineLabel(n: NotificationItem): string {
   // 按钮经 pendingAction 链在编辑器打开该文件（缓冲已随 file.changed 自动
   // 重载，打开即外部改动后的现内容）
   if (n.action === 'file') return t('notify.extwrite.action')
+  // 自更新开始/失败/回滚「查看详情」（P-20261109-10）：点击行/按钮同义，
+  // store.handleClick 就地打开版本面板（设置 → 关于）
+  if (n.action === 'update-panel') return t('update.notify.action')
   return ''
 }
 

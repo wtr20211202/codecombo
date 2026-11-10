@@ -15,7 +15,19 @@ import {
   isMouseModeHintDismissed,
   dismissMouseModeHintForever,
 } from '../../composables/terminalMouseModeHint'
-import { hasOsc52ClipboardProof } from '../../composables/terminalOsc52Clipboard'
+import {
+  hasOsc52ClipboardProof,
+  getOsc52ClipboardFailure,
+  markOsc52FailureShown,
+  clearOsc52ClipboardFailure,
+  OSC52_FAILURE_TTL_MS,
+  type Osc52ClipboardFailure,
+} from '../../composables/terminalOsc52Clipboard'
+import { copyText } from '../../utils/clipboard'
+import {
+  isTmuxMouseTakeoverEnabled,
+  setTmuxMouseTakeover,
+} from '../../composables/tmuxMouseTakeover'
 import { useTerminalSearch } from '../../composables/useTerminalSearch'
 import { useTerminalDnd } from '../../composables/useTerminalDnd'
 import { useTerminalSession, terminalHasReceivedOutput, type OscEvent } from '../../composables/useTerminalSession'
@@ -341,6 +353,12 @@ onBeforeUnmount(() => {
   visibilityHealer?.disconnect()
   visibilityHealer = null
   if (containerRef.value) containerRef.value.removeEventListener('mouseup', onPaneMouseUp)
+  // 兜底浮条 pane 本地消隐定时器随实例清理（簿记在模块级，重挂自会按 shownAt
+  // 过期判定，不丢诚实语义）
+  if (osc52FailTimer !== null) {
+    clearTimeout(osc52FailTimer)
+    osc52FailTimer = null
+  }
 })
 
 // ============== 选中即复制（copy-on-select，全终端宿主统一） ==============
@@ -389,6 +407,87 @@ const mouseModeHintVisible = computed(
 function dismissMouseModeHint(): void {
   dismissMouseModeHintForever()
 }
+
+// ============== OSC 52 写失败兜底浮条（P-20261109-7 B） ==============
+// 应用自发 OSC 52 但终端侧 copyText 降级链写入失败（非安全上下文无 clipboard
+// API / 权限拒绝 / execCommand 无手势被拒）= 用户「以为复制了、实际剪贴板没
+// 内容」的静默失败。浮条诚实展示待写入内容预览 + 「复制」按钮（点击=用户
+// 手势，execCommand 降级在手势内有效），教育与自救一体。
+// 30s TTL 起算 = pane 可见时刻（paneVisible，IntersectionObserver 驱动）：
+// 后台 tab 期间到达的失败在切回时才起算——按 failedAt 起算会让兜底条在用户
+// 看到之前就过期。边界如实：OSC 52 死源（旧 tmux 吞透传）时本条无信号可挂，
+// 由服务端 set-clipboard 统一+版本地板提示治理（A/A2）
+const osc52Failure = computed(() => getOsc52ClipboardFailure(props.sessionId))
+// 预览截断：PTY 内任意程序可控 OSC 52 内容，预览是提示诈骗面的最低防线
+// （禁纯「点击复制」无预览形态）；200 字符上限 + 省略号，渲染走 v-text
+// （插值等价转义，禁 v-html——内容来自不可信 PTY 字节流）
+const OSC52_PREVIEW_MAX_CHARS = 200
+const osc52Preview = computed(() => {
+  const f: Osc52ClipboardFailure | null = osc52Failure.value
+  if (!f) return ''
+  if (f.text.length > OSC52_PREVIEW_MAX_CHARS) {
+    return f.text.slice(0, OSC52_PREVIEW_MAX_CHARS) + '…'
+  }
+  return f.text
+})
+let osc52FailTimer: ReturnType<typeof setTimeout> | null = null
+watch([osc52Failure, paneVisible], ([f, visible]) => {
+  if (!f) {
+    if (osc52FailTimer !== null) {
+      clearTimeout(osc52FailTimer)
+      osc52FailTimer = null
+    }
+    return
+  }
+  if (!visible) return
+  // 首见落账（shownAt 幂等不重置）+ pane 本地 30s 精确消隐（模块级扫描器
+  // 只是 GC 兜底，条消失以本定时器为准）
+  const first = markOsc52FailureShown(props.sessionId)
+  if (first && osc52FailTimer === null) {
+    osc52FailTimer = setTimeout(() => {
+      osc52FailTimer = null
+      clearOsc52ClipboardFailure(props.sessionId)
+    }, OSC52_FAILURE_TTL_MS)
+  }
+}, { immediate: true })
+// 浮条可见性：条目存在 + pane 可见 + 未过 TTL（重挂后 shownAt 已在账，模块
+// 扫描器/本 watch 的过期清理让计算属性失效回收）
+const osc52FailureVisible = computed(() => {
+  const f = osc52Failure.value
+  if (!f || f.shownAt === null) return false
+  return Date.now() - f.shownAt <= OSC52_FAILURE_TTL_MS
+})
+/** 兜底浮条「复制」：用户手势内重试 copyText 降级链。刻意不 markOsc52Proof
+ *  ——手势补写不改变「应用自发 OSC 52 失败」事实，鼠标教育条并列共存不抑制
+ *  （评审定稿：proof 不登记） */
+async function copyOsc52Fallback(): Promise<void> {
+  const f = osc52Failure.value
+  if (!f) return
+  const ok = await copyText(f.text)
+  if (ok) {
+    clearOsc52ClipboardFailure(props.sessionId)
+    message.success(t('terminal.copyDone'))
+  } else {
+    message.error(t('terminal.copyFailed'))
+  }
+}
+/** 兜底浮条 ✕：只清本会话本条（非 sticky 教育——下次失败照常出现，诚实语义） */
+function dismissOsc52Fallback(): void {
+  clearOsc52ClipboardFailure(props.sessionId)
+}
+
+// ============== 「切换到复制优先」一键直达（P-20261109-7 C） ==============
+// Shift 教育条并列动作：服务端热切换 tmux mouse off（现存会话逐事件读取即刻
+// 生效）。仅覆盖本地终端（专有 socket）；远程终端不托管。失败 toast 可恢复
+// （乐观更新已回滚）
+async function switchToCopyFirst(): Promise<void> {
+  const ok = await setTmuxMouseTakeover(false)
+  if (ok) message.success(t('terminal.mouseModeHint.copyFirstDone'))
+  else message.error(t('terminal.mouseModeHint.copyFirstFailed'))
+}
+// 设置项开关值（设置页与一键按钮同源镜像）；教育条按钮仅开关为开时展示
+// （已处复制优先则无从再切）
+const tmuxMouseTakeoverOn = computed(() => isTmuxMouseTakeoverEnabled())
 
 // ============== Ctrl/Cmd+滚轮 字号手势（对标编辑器 Monaco 的缩放手感） ==============
 // 经 fontStore.stepTerminalSize 改全局终端字号（与设置页滑条/字号快捷键同源联动），
@@ -688,25 +787,73 @@ const {
         <RefreshOutline />
       </n-icon>
     </button>
-    <!-- 应用接管鼠标提示条（P-20261106-6）：鼠标上报模式在位时显示——普通拖选
-         被应用消费，按住 Shift 拖选才走本地选择进剪贴板。模式关闭即自动隐藏；
-         本会话应用经 OSC 52 写剪贴板成功过即粘性不显示（P-20261107-6）；
-         ✕ = 永久不再提示（safeStorage，设置页可重置） -->
-    <div
-      v-if="mouseModeHintVisible"
-      class="term-mouse-hint"
-      data-testid="term-mouse-mode-hint"
-    >
-      <span class="term-mouse-hint-text">{{ t('terminal.mouseModeHint.text') }}</span>
-      <button
-        class="term-mouse-hint-close"
-        :title="t('terminal.mouseModeHint.dismiss')"
-        :aria-label="t('terminal.mouseModeHint.dismiss')"
-        data-testid="term-mouse-mode-hint-dismiss"
-        @click.stop.prevent="dismissMouseModeHint"
+    <!-- pane 顶部教育/兜底浮条区（flex 纵向堆叠：鼠标教育条与 OSC 52 兜底条
+         并列共存——教育条教 Shift 旁路、兜底条救写失败自救，语义独立互不抑制） -->
+    <div class="term-pane-hints">
+      <!-- 应用接管鼠标提示条（P-20261106-6）：鼠标上报模式在位时显示——普通拖选
+           被应用消费，按住 Shift 拖选才走本地选择进剪贴板。模式关闭即自动隐藏；
+           本会话应用经 OSC 52 写剪贴板成功过即粘性不显示（P-20261107-6）；
+           ✕ = 永久不再提示（safeStorage，设置页可重置）。
+           「切换到复制优先」一键直达（P-20261109-7 C）：服务端热切换 tmux mouse
+           off（现存会话逐事件读取即刻生效），仅本地终端（专有 socket） -->
+      <div
+        v-if="mouseModeHintVisible"
+        class="term-mouse-hint"
+        data-testid="term-mouse-mode-hint"
       >
-        &times;
-      </button>
+        <span class="term-mouse-hint-text">{{ t('terminal.mouseModeHint.text') }}</span>
+        <button
+          v-if="tmuxMouseTakeoverOn"
+          class="term-mouse-hint-action"
+          data-testid="term-mouse-mode-hint-copy-first"
+          @click.stop.prevent="switchToCopyFirst"
+        >
+          {{ t('terminal.mouseModeHint.copyFirst') }}
+        </button>
+        <button
+          class="term-mouse-hint-close"
+          :title="t('terminal.mouseModeHint.dismiss')"
+          :aria-label="t('terminal.mouseModeHint.dismiss')"
+          data-testid="term-mouse-mode-hint-dismiss"
+          @click.stop.prevent="dismissMouseModeHint"
+        >
+          &times;
+        </button>
+      </div>
+      <!-- OSC 52 写失败兜底浮条（P-20261109-7 B）：应用请求复制但终端侧写入
+           失败（非安全上下文/权限拒绝）——诚实展示内容预览 + 手势内重试。
+           预览 v-text 渲染（内容来自不可信 PTY 字节流，禁 v-html）；30s 消隐；
+           ✕ 只清本条（非 sticky，下次失败照常出现）。重挂/重连重放幂等：
+           同会话只刷新不叠条 -->
+      <div
+        v-if="osc52FailureVisible"
+        class="term-osc52-fallback"
+        data-testid="term-osc52-fallback"
+      >
+        <span class="term-osc52-fallback-text">{{ t('terminal.osc52Fallback.text') }}</span>
+        <pre
+          class="term-osc52-fallback-preview"
+          v-text="osc52Preview"
+        />
+        <div class="term-osc52-fallback-actions">
+          <button
+            class="term-mouse-hint-action"
+            data-testid="term-osc52-fallback-copy"
+            @click.stop.prevent="copyOsc52Fallback"
+          >
+            {{ t('terminal.osc52Fallback.copy') }}
+          </button>
+          <button
+            class="term-mouse-hint-close"
+            :title="t('terminal.osc52Fallback.dismiss')"
+            :aria-label="t('terminal.osc52Fallback.dismiss')"
+            data-testid="term-osc52-fallback-dismiss"
+            @click.stop.prevent="dismissOsc52Fallback"
+          >
+            &times;
+          </button>
+        </div>
+      </div>
     </div>
     <div
       v-if="session.connecting.value"

@@ -5,7 +5,9 @@
 #
 # Behavior: detect architecture -> pick version (latest stable; newest rc;
 # newest beta when no rc/stable) -> download from GitHub Releases -> verify
-# SHA256 -> install to a user-level directory -> register a Windows service
+# SHA256 -> stop the registered Windows service when it runs the binary being
+# replaced (a running exe is file-locked and cannot be overwritten) ->
+# install to a user-level directory -> register a Windows service
 # when elevated. The installer NEVER touches the data directory
 # (~/.codecombo) - data is owned by the app itself (created on first start,
 # untouched by upgrades, reused as-is).
@@ -16,7 +18,21 @@
 #
 # Env vars: CODECOMBO_PREFIX (default $env:LOCALAPPDATA\Programs\codecombo),
 #           CODECOMBO_PORT (default 9999),
-#           CODECOMBO_HOST (default 127.0.0.1; 0.0.0.0 = LAN reachable)
+#           CODECOMBO_HOST (default 127.0.0.1; 0.0.0.0 = LAN reachable),
+#           CODECOMBO_DATA_DIR (default ~/.codecombo; only handed on - as
+#           --data-dir in the service command line / printed manual-start
+#           command - the installer still never creates or writes it)
+# Set them before the one-liner ($env: values stay set for the rest of that
+# PowerShell session), e.g.
+#   $env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))
+#
+# Side-by-side instances: the service name is fixed (Codecombo) - one
+# installer-managed service per machine. With that service already present,
+# an elevated run with other settings re-points it (takes the existing
+# instance over) instead of adding one; run the second instance from a
+# non-elevated session instead (binary only + a manual start command that
+# carries these settings; `start` runs the app as a background daemon),
+# with its own CODECOMBO_PREFIX.
 #
 # NOTE: keep this file ASCII-only, no BOM. It is consumed via `irm | iex`,
 # where Windows PowerShell 5.1 decodes the payload with console encoding and
@@ -29,6 +45,16 @@ $Port = if ($env:CODECOMBO_PORT) { $env:CODECOMBO_PORT } else { '9999' }
 $BindHost = if ($env:CODECOMBO_HOST) { $env:CODECOMBO_HOST } else { '127.0.0.1' }
 $Prefix = if ($env:CODECOMBO_PREFIX) { $env:CODECOMBO_PREFIX } else { "$env:LOCALAPPDATA\Programs\codecombo" }
 $DataDir = "$env:USERPROFILE\.codecombo"
+# CODECOMBO_DATA_DIR override (unset = the default above, unchanged). Resolved
+# to an absolute path against the current PowerShell location: the service
+# runs as LocalSystem with System32 as its working directory, so a relative
+# path would land there. Trailing separators are trimmed - a trailing
+# backslash would escape the closing quote of --data-dir "..." in the service
+# command line. Only the path is handed on; the installer never creates it.
+if ($env:CODECOMBO_DATA_DIR) {
+  $DataDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:CODECOMBO_DATA_DIR).TrimEnd('\', '/')
+  if ($DataDir -match '^[A-Za-z]:$') { throw "CODECOMBO_DATA_DIR cannot be a drive root: $env:CODECOMBO_DATA_DIR" }
+}
 
 # ---------- root/builtin-admin guard (same semantics as the remote deployer's
 # non-root useradd): running the workbench as root/SYSTEM is a security
@@ -41,6 +67,56 @@ if ($env:USERNAME -in @('root', 'SYSTEM', 'Administrator') -and $env:USERPROFILE
   Write-Error @"
 Do not run this installer under a system/built-in account (found USERPROFILE=$env:USERPROFILE).
 Create a normal user account and run the installer from that user's session.
+"@
+}
+
+# ---------- preflight: admin + existing service state (before any download) ----------
+# Admin detection hardened: ::Current can return null in restricted contexts
+# and this script may be executed line-by-line (irm | iex array semantics on
+# PS 5.1) - any null/exception degrades to the non-admin branch (manual-start
+# instructions) instead of crashing after a successful install. Probed up
+# front so a locked running service fails fast with an actionable message
+# instead of after a ~50 MB download.
+$isAdmin = $false
+try {
+  $wid = [Security.Principal.WindowsIdentity]::Current
+  if ($null -ne $wid) {
+    $isAdmin = ([Security.Principal.WindowsPrincipal]$wid).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  }
+} catch { $isAdmin = $false }
+if (-not $isAdmin) {
+  # fallback probe: `net session` succeeds only for elevated tokens
+  try {
+    $null = net session 2>$null
+    if ($LASTEXITCODE -eq 0) { $isAdmin = $true }
+  } catch { }
+}
+$Bin = Join-Path $Prefix 'codecombo.exe'
+$svcExists = (sc.exe query Codecombo 2>$null | Select-String 'STATE') -ne $null
+$svcRunning = $false
+if ($svcExists) {
+  $svcRunning = (sc.exe query Codecombo 2>$null | Select-String 'RUNNING') -ne $null
+}
+# Does the registered service actually run the binary this installer is about
+# to replace? Conservative default ($true) when the query cannot be parsed:
+# stopping a service that points elsewhere is harmless (the service section
+# starts it again), while missing the stop would fail the file replace below
+# (Windows locks the exe image of a running process).
+$svcRunsOurBin = $true
+try {
+  $qcLine = (sc.exe qc Codecombo 2>$null | Select-String 'BINARY_PATH_NAME')
+  if ($qcLine) {
+    $svcBinPath = (($qcLine.Line -split ':', 2)[1]).Trim()
+    if ($svcBinPath -and ($svcBinPath -notlike "*$Bin*")) { $svcRunsOurBin = $false }
+  }
+} catch { }
+# Set by the stop-before-replace step; read by the replace-failure rollback.
+$svcStoppedHere = $false
+if ($svcExists -and $svcRunning -and $svcRunsOurBin -and -not $isAdmin) {
+  throw @"
+Windows service Codecombo is running the binary this installer replaces ($Bin).
+The running exe is file-locked and stopping the service needs elevation.
+Re-run from an elevated PowerShell, or stop the service first: sc.exe stop Codecombo
 "@
 }
 
@@ -67,6 +143,9 @@ switch ($env:PROCESSOR_ARCHITECTURE) {
 }
 $Asset = "codecombo-windows-$Arch.exe"
 Write-Host "==> Platform: windows/$Arch -> $Asset"
+if ($env:CODECOMBO_DATA_DIR) {
+  Write-Host "==> Data directory: $DataDir (CODECOMBO_DATA_DIR; created by the app on first start, never written by the installer)"
+}
 
 # ---------- download + SHA256 verify ----------
 # curl.exe first (bundled with Windows 10 1803+): verified-reliable binary
@@ -75,6 +154,19 @@ Write-Host "==> Platform: windows/$Arch -> $Asset"
 # binary while curl fetched the same URL clean) - kept only as fallback.
 # -# = progress bar (the binary is ~50MB; silent mode looks like a hang),
 # --connect-timeout/--max-time guard against a truly dead connection.
+# -C - = resume (GitHub Releases serves Range requests): when a resume is
+# possible curl asks for the bytes it already has instead of restarting the
+# ~50MB download from zero. Verified behavior split by curl version: current
+# curls resume a --retry reconnect via Range (upstream fixed retry
+# auto-resume 2025-10; the bundled curl.exe 8.21.0 verified resuming here),
+# older builds (e.g. 8.5.0) still restart a retried transfer from zero -
+# harmless, the output is rewritten and the SHA256 check below gates the
+# result. Hard mid-transfer drops (curl error 18) are not retried by any
+# tested version: the script exits with the re-run hint below. The temp dir
+# is a fresh GUID per run, so a stale file from an older version can never
+# be resumed-into. SHA256SUMS.txt (a few hundred bytes) stays without -C -
+# (retrying it whole is free). The Invoke-WebRequest fallback below cannot
+# resume and stays a full download; SHA256 remains its integrity gate.
 # $ProgressPreference silent: PS 5.1 Invoke-WebRequest's progress bar slows
 # downloads ~10x in the fallback path.
 $ProgressPreference = 'SilentlyContinue'
@@ -84,7 +176,7 @@ $useCurl = Test-Path $curlExe
 Write-Host "==> Downloading ~50 MB from GitHub Releases (progress below; slow networks may take a few minutes)"
 try {
   if ($useCurl) {
-    & $curlExe -# -fSL --retry 3 --connect-timeout 30 --max-time 1800 -o "$tmp/codecombo.exe" "$Base/$Asset"
+    & $curlExe -# -fSL -C - --retry 3 --connect-timeout 30 --max-time 1800 -o "$tmp/codecombo.exe" "$Base/$Asset"
     if ($LASTEXITCODE -ne 0) { throw "download failed (curl exit $LASTEXITCODE): $Asset - check network and re-run" }
     & $curlExe -fsSL --retry 3 --connect-timeout 30 -o "$tmp/SHA256SUMS.txt" "$Base/SHA256SUMS.txt"
     if ($LASTEXITCODE -ne 0) { throw "download failed (curl exit $LASTEXITCODE): SHA256SUMS.txt - check network and re-run" }
@@ -98,40 +190,75 @@ try {
   if ($actual -ne $expect) { throw "SHA256 mismatch! expected $expect got $actual" }
   Write-Host '==> SHA256 verified'
 
+  # ---------- stop service before binary replace ----------
+  # A running process's exe image is file-locked on Windows: Move-Item -Force
+  # over the service's running binary always fails with a sharing violation
+  # (P-20261109-4: the old order replaced the binary first and stopped the
+  # service only afterwards, so re-running the installer with the service up
+  # could never succeed). The stop lands here - after download+SHA256, so
+  # service downtime never overlaps a failed download - and only when the
+  # registered binPath points at the binary being replaced. The stop is
+  # issued even when the probe said stopped (it may have started since; a
+  # stop on a stopped service is a harmless no-op). sc.exe stop returns at
+  # once (STOP_PENDING); the exe file handle is released only when the
+  # process actually exits (the app's SCM stop path allows a 10s grace,
+  # hence the 20s poll ceiling).
+  if ($isAdmin -and $svcExists -and $svcRunsOurBin) {
+    $wasRunning = (sc.exe query Codecombo 2>$null | Select-String 'RUNNING') -ne $null
+    if ($wasRunning) { Write-Host '==> Stopping running service Codecombo before binary replace' }
+    sc.exe stop Codecombo | Out-Null
+    $stopped = $false
+    for ($i = 0; $i -lt 40; $i++) {
+      Start-Sleep -Milliseconds 500
+      if ((sc.exe query Codecombo | Select-String 'STOPPED') -ne $null) { $stopped = $true; break }
+    }
+    if (-not $stopped) {
+      throw "Service Codecombo did not reach STOPPED within 20s - stop it manually (sc.exe stop Codecombo) and re-run this installer"
+    }
+    # Flag only a stop this run actually performed (was running): the
+    # replace-failure rollback then restarts exactly what it stopped instead
+    # of starting a service the user had deliberately stopped.
+    $svcStoppedHere = $wasRunning
+  }
+
   # ---------- install ----------
   New-Item -ItemType Directory -Force -Path $Prefix | Out-Null
-  $Bin = Join-Path $Prefix 'codecombo.exe'
-  Move-Item -Force "$tmp/codecombo.exe" $Bin
+  try {
+    Move-Item -Force "$tmp/codecombo.exe" $Bin
+  } catch {
+    # Replace-failure rollback (mirrors the in-app updater semantics in
+    # server/update/do_update.go: restore prior state before failing).
+    # Move-Item -Force failing leaves the old binary intact, but this run may
+    # have stopped the service for the replace - bring it back up on the old
+    # binary first (a manually started exe - daemon or foreground --serve -
+    # can hold the lock even though the service is down), then surface a
+    # clear error.
+    if ($svcStoppedHere) {
+      Write-Host '==> Binary replace failed - restarting service Codecombo on the old binary'
+      sc.exe start Codecombo | Out-Null
+    }
+    throw "could not replace $Bin (locked by a running process?): $($_.Exception.Message)"
+  }
   Write-Host "==> Installed: $Bin"
 } finally {
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
 # ---------- service (elevated only) ----------
-# Admin detection hardened: ::Current can return null in restricted contexts
-# and this script may be executed line-by-line (irm | iex array semantics on
-# PS 5.1) - any null/exception degrades to the non-admin branch (foreground
-# instructions) instead of crashing after a successful install.
-$isAdmin = $false
-try {
-  $wid = [Security.Principal.WindowsIdentity]::Current
-  if ($null -ne $wid) {
-    $isAdmin = ([Security.Principal.WindowsPrincipal]$wid).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-  }
-} catch { $isAdmin = $false }
-if (-not $isAdmin) {
-  # fallback probe: `net session` succeeds only for elevated tokens
-  try {
-    $null = net session 2>$null
-    if ($LASTEXITCODE -eq 0) { $isAdmin = $true }
-  } catch { }
-}
-$svcExists = (sc.exe query Codecombo 2>$null | Select-String 'STATE') -ne $null
+# Admin detection and the existing-service probe ran in the preflight above
+# (before any download): a running service is stopped before the binary
+# replace, and a non-elevated re-run against a running service fails fast.
 if ($isAdmin) {
-  # 数据目录直接写进服务命令行（--data-dir 旗标，main.go 原生支持）——
-  # 服务以 LocalSystem 跑（其 HOME 指向系统 profile），不显式指定会让数据
-  # 落 systemprofile\.codecombo 与交互运行分裂（实锚）。binPath 一眼可见、
-  # 不依赖 SCM 的注册表 Environment 注入（该机制有兼容性怪癖曾未生效）
+  # Data dir goes straight into the service command line (--data-dir flag,
+  # native in main.go): the service runs as LocalSystem (its HOME is the
+  # system profile), so without it the data would land in
+  # systemprofile\.codecombo, split from interactive runs (real incident).
+  # binPath is visible at a glance and does not depend on SCM registry
+  # Environment injection (which had compatibility quirks and once did not
+  # take effect). Comments here MUST stay ASCII: with non-ASCII text, a
+  # BOM-less file decoded as ANSI (PS 5.1 reading it from disk, e.g. on a
+  # zh-CN system) swallowed the next line - this very assignment - into the
+  # comment with zero parse errors.
   $svcBin = "`"$Bin`" --serve --data-dir `"$DataDir`" --port=$Port --host $BindHost"
   if ($svcExists) {
     Write-Host '==> Service exists - updating binPath (incl. --data-dir pin), then restarting'
@@ -149,7 +276,7 @@ if ($isAdmin) {
     sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
   }
   sc.exe start Codecombo 2>&1 | Select-String -Pattern '.' | ForEach-Object { Write-Host "    $_" }
-  # 轮询确认 RUNNING（start 报成功≠真的起来了）
+  # Poll until RUNNING (a successful "start" reply does not mean it came up)
   $running = $false
   for ($i = 0; $i -lt 15; $i++) {
     Start-Sleep -Milliseconds 400
@@ -162,12 +289,24 @@ if ($isAdmin) {
   } else {
     Write-Host '==> Service NOT running - diagnose:'
     Write-Host '    sc query Codecombo                # state'
-    Write-Host "    & '$Bin' start                    # foreground run shows the real error"
+    # --serve = true foreground (full output in this console; Ctrl+C stops it).
+    # `start` would daemonize and DISCARD output (the daemon's stdout/stderr
+    # go to the log files), so it shows no real error. Same flags as the
+    # service binPath above to reproduce the service's environment.
+    Write-Host "    & '$Bin' --serve --data-dir `"$DataDir`" --port=$Port --host $BindHost"
+    Write-Host '    (foreground run shows the real error; Ctrl+C stops it)'
     Write-Host '    Get-EventLog -LogName Application -Newest 10 -Source Codecombo'
   }
 } else {
-  Write-Host '==> Not elevated: skipped service registration. Run in foreground:'
-  Write-Host "     $Bin start"
+  # Carry only explicitly set options (none set = the exact command as
+  # before): a side-by-side instance started from here must not fall back to
+  # the default port / data dir of the existing one
+  $fgArgs = ''
+  if ($env:CODECOMBO_PORT) { $fgArgs += " --port $Port" }
+  if ($env:CODECOMBO_HOST) { $fgArgs += " --host $BindHost" }
+  if ($env:CODECOMBO_DATA_DIR) { $fgArgs += " --data-dir `"$DataDir`"" }
+  Write-Host '==> Not elevated: skipped service registration. Start it manually (background daemon, survives terminal close):'
+  Write-Host "     $Bin start$fgArgs"
   Write-Host '  (re-run in an elevated PowerShell to register the Windows service)'
 }
 Write-Host "==> Open http://localhost:$Port (set your lock password on first start)"

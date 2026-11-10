@@ -6,6 +6,52 @@
 
 ## [Unreleased]
 
+## [0.0.1-beta.5] - 2026-11-10
+
+### 新增
+
+- **更新可走代理** —— 新增更新代理设置，三态出站选路（直连/代理/自动），自更新
+  流量可经 HTTP(S) 代理；代理路径带官方域白名单守卫，更新链不会被指向任意主机。
+- **更新进度离开可见** —— 自更新改异步受理、服务端上报生命周期：全局进度徽标
+  阶段化透出（下载→校验→换包→重启），离开版本面板也能盯着更新；失败以通知
+  呈现，不再静默死掉。
+- **终端选中复制链路硬化** —— OSC 52 剪贴板交接在各终端面统一并配合 tmux
+  `set-clipboard on`；tmux 版本地板两档提示；剪贴板写失败兜底浮条；新增 tmux
+  鼠标接管开关（默认开、热切换、复制优先一键直达）——拖选复制与滚轮在各种
+  TUI 应用与较旧 tmux 上都不再打架。
+- **一键安装参数上文档** —— README 与官网补一行式安装参数样例；
+  `CODECOMBO_DATA_DIR` 服务化安装全程贯通。
+
+### 变更
+
+- **`codecombo update` 服务停止时不再换包** —— 无验签直换包的离线更新路径
+  因供应链安全退役；命令改为打印指引：先起服务走应用内验签自更新（带自动
+  回滚），或用包管理器（npm 安装指向 `npm i -g codecombo@latest`）。服务
+  运行中时 `codecombo update` 行为不变（同一条验签+自动回滚链）。
+- **「已是最新」看得见了** —— 检查成功态显著化+检查中态；「是否最新」判断
+  统一，通知面板与版本面板不再各说各话。
+- **升级已装实例指引补强** —— README 新增装法判别表、路径分级与常见
+  `203/EXEC` systemd 失败的诊断。
+
+### 修复
+
+- **Windows 后台启动关窗不死** —— `codecombo start` 守护进程脱离控制台
+  （此前关掉启动窗口守护即被终止）；安装器诊断行跑真前台 `--serve`；
+  「前台/后台」措辞统一。
+- **脚本装实例自更新重启可用** —— install.sh 补装远程部署器同款 polkit
+  放行规则，更新后的 `systemctl restart codecombo` 获得授权，不再静默
+  把服务留在停机态。
+- **Windows 安装器覆盖序修复** —— 停服先行于二进制覆盖；预检前置 fail-fast
+  （不覆盖任何文件才报错）；覆盖失败回滚。
+- **6h 自动检查真正听开关** —— 关闭「自动检查更新」现在真的停掉前端定时器
+  （热切换三路），而非只静默服务端检查。
+- **更新伴随资产拉取失败透出** —— 签名/哈希伴随资产下载失败三态区分、
+  有限重试+绕缓存重拉、检查时旗标化，不再拖到安装时才暴露。
+- **页面重启支持 LAN** —— Web 界面重启应用现在接受 LAN 连接携带的有效锁
+  token（此前仅回环），双路授权。
+- **安装脚本下载断点续传** —— install.sh / install.ps1 主包下载加 curl
+  `-C -` 配合既有重试，断连从断点续传 ~50MB 主包而非从头再来。
+
 ## [0.0.1-beta.4] - 2026-11-09
 
 ### 新增
@@ -142,7 +188,8 @@
 - 文档全面刷新：快速开始前置、完整工具清单（What's inside）、典型场景
   走查、开放贡献指南（欢迎 DCO 签名的 PR）。
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.4...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.5...HEAD
+[0.0.1-beta.5]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.5
 [0.0.1-beta.4]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.4
 [0.0.1-beta.3]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.3
 [0.0.1-beta.2]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.2

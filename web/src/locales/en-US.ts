@@ -728,6 +728,10 @@ export default {
     tmuxInstall: 'Install',
     tmuxInstallManualHint: 'No package manager detected, please install manually',
     tmuxRequiredHint: 'Requires tmux {version} or later (Unix only)',
+    // tmux clipboard capability floors (P-20261109-7 A2): the local tmux binary
+    // serves both the dedicated-socket sessions and external takeovers
+    tmuxFloorDragCopy: 'This version (<3.2) lacks set-clipboard: drag-select copy is limited. Upgrade recommended (one-click install fills a missing tmux, it does not upgrade)',
+    tmuxFloorPassthrough: 'This version (3.2.x) lacks allow-passthrough: in-app copies from claude code etc. are swallowed by tmux; upgrade to 3.3+ to restore passthrough',
     tmuxInstallNeedsSudo: 'Root permission required. Run in your system terminal: {cmd}',
     tmuxInstallSuccess: 'tmux installed successfully',
     tmuxInstallFailed: 'Install failed: {output}',
@@ -800,6 +804,15 @@ export default {
     terminalCopyOnSelect: 'Copy on Select',
     terminalCopyOnSelectLabel: 'Automatically copy selection to clipboard',
     terminalCopyOnSelectHint: 'In any terminal (project / session manager / remote host), releasing the mouse after selecting text copies it, matching claude code behavior; when off, use the context menu or Ctrl+Shift+C / Ctrl+C to copy',
+    // tmux mouse takeover switch (P-20261109-7 C, default on): off = copy-first mode.
+    // Effective immediately (tmux reads mouse per event, hot switch); covers local
+    // terminals only (dedicated socket); remote hosts' own tmux is not managed
+    terminalTmuxMouse: 'tmux mouse takeover',
+    terminalTmuxMouseLabel: 'On: drags go to tmux selection and auto-copy (claude wheel paging / split dragging kept). Off: "copy-first mode"',
+    terminalTmuxMouseHint: 'Real costs when off: wheel scrollback is dead inside full-screen apps (alt screen), split drag / click-to-switch-pane stops working. Applies only to this app dedicated tmux sessions; remote terminals are not covered',
+    terminalTmuxMouseOn: 'tmux mouse takeover enabled (existing local terminal sessions updated immediately)',
+    terminalTmuxMouseOff: 'Switched to copy-first mode (existing local terminal sessions updated immediately)',
+    terminalTmuxMouseFailed: 'Switch failed (server did not respond) — the toggle was reverted, please retry',
     resetCloseConfirm: 'Reset Close Confirmation',
     resetCloseConfirmDesc: 'Click to re-enable the confirmation prompt if you\'ve checked "Don\'t ask again"',
     // Mouse-takeover hint reset (P-20261106-6)
@@ -3018,6 +3031,10 @@ export default {
     reopen: 'Reopen',
     ended: 'Remote session ended (server reconnect window expired)',
     endedTip: 'Server session was recycled; reopening creates a new session',
+    // Remote tmux version-floor banner (P-20261109-7 A2): the remote tmux is the
+    // user's own server — honest hint inside the pane when the version is too low
+    tmuxFloorDragCopy: 'Remote tmux {version} (<3.2) lacks set-clipboard: drag-select copy is limited — upgrade tmux on the remote host (local terminals unaffected)',
+    tmuxFloorPassthrough: 'Remote tmux {version} (3.2.x) lacks allow-passthrough: in-app copies from claude code etc. are swallowed by tmux — upgrading the remote host to 3.3+ restores it',
     removedHostToast: 'Some terminal tabs belonged to deleted hosts and were removed',
     staleSessionsToast: '{n} remote terminal session(s) are gone (server restart or expiry) — use "Reopen" on the tab to reconnect',
     openFailed: 'Failed to open remote terminal',
@@ -3444,6 +3461,18 @@ export default {
     mouseModeHint: {
       text: 'App has taken over the mouse — hold Shift and drag to select and copy text',
       dismiss: 'Don\'t show again',
+      // 'Switch to copy-first' one-click (P-20261109-7 C): hot-switches tmux mouse off
+      copyFirst: 'Switch to copy-first',
+      copyFirstDone: 'Switched to copy-first mode (drags fall back to local selection, effective immediately)',
+      copyFirstFailed: 'Switch failed (server did not respond) - retry from Settings',
+    },
+    // OSC 52 write-failure fallback bar (P-20261109-7 B): the app requested a copy
+    // but the browser denied it - honest copy with a content preview (PTY content
+    // is untrusted; the preview is the minimal anti-spoofing surface)
+    osc52Fallback: {
+      text: 'The app requested a clipboard copy, but the browser denied it. Content to copy:',
+      copy: 'Copy',
+      dismiss: 'Close (will show again on next failure)',
     },
     exportText: 'Export as text',
     copyDone: 'Copied to clipboard',
@@ -3879,6 +3908,7 @@ export default {
       alreadyUpToDate: 'Already up to date',
       centerNoUpdateSource: "The center has no preset binary for this platform and no update source configured: place the binary under serve-binaries/<platform>/ in the center's data directory, or configure the update source (updateURL) in the center's settings",
       updateNpmManaged: 'This instance was installed via npm — update through the package manager: npm i -g codecombo@latest (previews: codecombo@next). In-app self-update does not apply to npm installs',
+      updateCompanionFetchFailed: 'Update refused: the companion verification assets (.sha256/.sig) are in the release but could not be fetched ({reason}) — check your network and retry; to skip verification deliberately, set CC_UPDATE_ALLOW_UNVERIFIED=1',
       centerBinaryMissing: "The center's update source has no package for this platform: check the update source (updateURL) configured on the center, or preset the binary under serve-binaries/<platform>/ in the center's data directory",
       wrongPassphrase: 'Wrong passphrase or corrupted export file',
       credSyncUnverified: 'This instance has not completed pairing and fingerprint verification — finish pairing in the sync center before credential sync',
@@ -5760,11 +5790,20 @@ export default {
     prereleaseLabel: 'Follow pre-releases',
     prereleaseHint: 'When on, beta/rc pre-releases are also detected; default is stable releases only',
     prereleaseSaved: 'Update channel saved',
+    // Update-chain outbound proxy (P-20261109-12): corporate proxy / local clash
+    proxyLabel: 'Update Proxy (optional)',
+    proxyPlaceholder: 'http://proxy:8080 or socks5://127.0.0.1:1080',
+    proxyHint: 'Route update checks and binary downloads through this proxy (http://, https:// and socks5:// supported; socks5 covers local clash client ports). For corporate proxies or networks where GitHub is unstable. Leave empty to use standard environment variables (HTTPS_PROXY/HTTP_PROXY/NO_PROXY). Under a proxy the SSRF guard degrades to an official-domain allowlist: only GitHub official domains and the center distribution source configured below are allowed.',
+    proxyHintShort: 'Corporate proxy or local clash goes here; empty uses HTTPS_PROXY env',
+    proxySaved: 'Update proxy saved',
+    proxyInvalid: 'Proxy address must start with http://, https:// or socks5://',
     sourceUrlSaved: 'Distribution source saved',
     sourceUrlInvalid: 'URL must start with http:// or https://',
     sourceMissingHint: 'Update source disabled — self-update uses the built-in official repo; this only appears when the center distribution source URL is invalid and was rejected',
     channelEmptyHint: 'No stable release on the stable channel yet (the GitHub stable channel excludes pre-releases) — enable "Follow pre-releases" below to track beta/rc',
     checkFailedHint: 'Update check failed: {reason}',
+    companionFetchFailedHint: 'Companion verification assets (.sha256/.sig) were not fetched — updating now would be refused. "Update Now" re-fetches them first; if it still fails, check your network and retry',
+    companionFetchFailedReason: 'Reason: {reason}',
     restartApp: 'Restart app',
     restartConfirm: 'Restart the local Codecombo instance? The service goes offline briefly (a few seconds); the page will wait for it to come back.',
     restartStarted: 'Restart requested — waiting for the service to come back…',
@@ -5781,8 +5820,9 @@ export default {
     restarting: 'Restarting...',
     success: 'Update Successful',
     failed: 'Update Failed',
-    rolledBack: 'Rolled Back',
     alreadyLatest: 'Already up to date',
+    alreadyLatestWithVersion: 'Already up to date (v{version})',
+    checking: 'Checking...',
     status: 'Status',
     progress: '{percent}%',
     role: 'Role',
@@ -5798,6 +5838,67 @@ export default {
     noParent: 'None (standalone)',
     updateSourceNotConfigured: 'Update source not configured',
     updateStarted: 'Update started',
+    // Update progress visibility (P-20261109-10): phase labels cover the whole
+    // state machine (9 server states + 2 frontend-inferred: reconnecting/unknown),
+    // looked up via stores/updateProgress phaseLabelKey — the former dynamic
+    // t('update.' + status) leaked raw keys for downloading/verifying etc.
+    phase: {
+      idle: 'Idle',
+      checking: 'Checking for updates…',
+      downloading: 'Downloading',
+      verifying: 'Verifying',
+      replacing: 'Installing',
+      restarting: 'Restarting',
+      reconnecting: 'Installing and restarting — waiting for the new version…',
+      success: 'Update succeeded',
+      failed: 'Update failed',
+      rolled_back: 'Rolled back',
+      unknown: 'Result unknown',
+    },
+    // Version panel progress / outcome block
+    progressInfo: {
+      bytes: '{percent}% ({done} / {total})',
+      background: 'You can close this panel and keep working — progress shows in the update badge, results land in the notification center',
+      reason: 'Reason: {reason}',
+      at: 'At: {time}',
+      lastOutcome: 'Last update',
+      unknownHint: 'The service has not come back for a while, so the result is unknown — check the service status or refresh later',
+      refreshHint: 'The new version is live; this page still runs the previous UI — refresh to load the new one',
+      refreshNow: 'Refresh page',
+      dismiss: 'Got it',
+    },
+    // Global update badge (App level, visible on every route)
+    badge: {
+      running: 'Updating · {phase}',
+      runningPercent: 'Updating · {phase} {percent}%',
+      success: 'Updated to v{version} · click to refresh',
+      successBare: 'Update complete · click to refresh',
+      failed: 'Update failed · see why',
+      rolledBack: 'Update rolled back · see why',
+      unknown: 'Update result unknown · details',
+      tip: 'Self-update progress — click to open the version panel',
+      tipSuccess: 'The new version is live — refresh to load the new UI',
+      dismiss: 'Dismiss update notice',
+    },
+    // Server lifecycle notification templates (server/update/notify.go
+    // titleKey/bodyKey, single server-side emitter: started/failed by the
+    // accepting process, completed/rolled back by the post-swap process's
+    // startup watch window)
+    notify: {
+      startedTitle: 'Updating to v{version}',
+      startedBody: 'Download, verification and install run in the background — keep working; follow progress in the update badge or the version panel',
+      failedTitle: 'Update to v{version} failed',
+      failedTitleBare: 'Update failed',
+      failedBody: 'The current version is unaffected — open the version panel for details and retry',
+      successTitle: 'Updated to v{version}',
+      successTitleBare: 'Update completed',
+      successBody: 'Refresh the page to use the new version',
+      rolledBackTitle: 'Update did not complete — rolled back',
+      rolledBackBody: 'Restored v{version} — open the version panel for details and retry',
+      rolledBackBodyBare: 'Restored the previous version — open the version panel for details and retry',
+      // Inline action button for action='update-panel'
+      action: 'Details',
+    },
   },
   // Toolbar & status bar extras
   toolbar2: {
@@ -6363,8 +6464,6 @@ export default {
       longTaskFailed: 'Long task failed',
       taskDuration: 'took {n}s',
       updateAvailable: 'Update available',
-      updateCompleted: 'Update completed',
-      updateFailed: 'Update failed',
       backendDisconnected: 'Backend disconnected',
       backendReconnected: 'Backend reconnected',
       // WS long-backoff close codes (P-20261005-185): 1009 server read limit / 1011

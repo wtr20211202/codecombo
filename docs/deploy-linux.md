@@ -76,6 +76,28 @@ sudo chown -R cld:cld /var/lib/codecombo /opt/codecombo
 sudo systemctl daemon-reload && sudo systemctl enable --now codecombo
 ```
 
+手工布局还要同装 polkit 放行规则（`install.sh` 脚本装与远程部署器会自动
+写入，本节手工装需手动放行）——应用内自更新收尾与「重启应用」按钮以服务
+用户身份 `systemctl restart`，系统服务默认 polkit 策略要求鉴权，无规则必被
+拒且优雅退出码 0 不触发 `Restart=on-failure` 兜底，服务停在 inactive：
+
+```bash
+sudo tee /etc/polkit-1/rules.d/10-codecombo-restart.rules >/dev/null <<'RULE'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "cld" &&
+        action.lookup("unit") == "codecombo.service") {
+        return polkit.Result.YES;
+    }
+});
+RULE
+```
+
+旧版 polkit（≤ 0.105，Debian 11 / Ubuntu 22.04 等）无 rules.d JS 机制，改
+写 `/etc/polkit-1/localauthority/50-local.d/10-codecombo-restart.pkla`
+（`Identity=unix-user:cld` / `Action=org.freedesktop.systemd1.manage-units`
+/ `ResultAny=yes`）——两代规则同装互不冲突。
+
 ## 4. 首次设密
 
 - 绑定 `127.0.0.1`：只能从服务器本机设密（安全默认）；
@@ -132,6 +154,25 @@ sudo update-ca-certificates
   实例间证书校验见 §4.2（默认 TOFU 指纹校验，自签直达免信任库导入）。
 - **更新通道**：更新源强制 https 且拒绝指向本机/内网/保留地址（SSRF 防护），
   保存设置时即校验；
+- **局域网 HTTP 访问的剪贴板影响（终端选中复制等）**：浏览器剪贴板写 API
+  （navigator.clipboard）只在 secure context（HTTPS 或本机回环）暴露——为省事
+  用 `--no-tls` 明文 HTTP + 局域网 IP 访问时，终端内的拖选复制/应用内复制
+  （claude code 等经 OSC 52 请求写剪贴板）会在浏览器侧被拒：应用以为复制了、
+  系统剪贴板并无内容。产品侧的兜底是终端 pane 顶部的「写失败兜底浮条」
+  （展示待复制内容预览 + 手势内一键复制），但根治只有两条路：
+  ①保持默认 TLS（推荐，本节其余内容即是为此）；②从本机回环
+  （`https://127.0.0.1:9999`）打开。**SSH 隧道 / 自签证书提示**：把远程实例的
+  端口经 `ssh -L 9999:127.0.0.1:9999 user@host` 转发到本机回环后走
+  `https://127.0.0.1:9999`，即满足 secure context 且不依赖证书信任；直接用
+  `https://<局域网 IP>:9999` 时自签证书需先信任（`certs/cert.pem` 装入客户端
+  信任库，见本节上方命令；实例互联的 TOFU 指纹校验见 §4.2，与本客户端场景
+  互不替代）；
+- **tmux 版本与终端复制链**：终端拖选/应用内复制的 tmux 链路有两档版本地板——
+  `<3.2` 无 `set-clipboard`（拖选复制受限）、`3.2.x` 无 `allow-passthrough`
+  （应用内复制会被 tmux 吞掉）；服务端在会话创建时探测 tmux -V 并在会话横幅/
+  设置页面板提示，装好 tmux 后可在 **设置 → 终端** 用「一键安装」（仅补缺，
+  不做版本升级——升级远端 tmux 属主机运维，步骤与 systemd 注意事项见 §3）。
+  远端主机的 tmux 版本同样受此影响（远程管理里开终端时横幅提示）；
 - systemd 部署：把 TLS 相关环境/参数写入 unit 的 ExecStart
   （`ExecStart=/opt/codecombo/bin/codecombo --serve --tls ...`）。
 
@@ -275,12 +316,144 @@ codecombo 没有让事情变坏，但也没有变好。
 
 ## 6. 升级
 
+升级路径由安装布局决定。先判别装法——`systemctl cat codecombo` 看
+`ExecStart` 指向的二进制路径（README「升级」节有同一张判别表；`~` 即服务
+用户家目录，unit 里显示为绝对路径；没有 unit 的形态——手动启动（`start`
+后台守护或 `--serve` 前台）、远程部署选了「直接进程」运行方式——用
+`ps -ef | grep codecombo` 看运行中的二进制路径，同表判别）：
+
+| `ExecStart` 路径 | 安装布局 | 升级路径 |
+| --- | --- | --- |
+| `~/.local/bin/codecombo` | install.sh 脚本装 | 应用内自更新（首选，§6a）；或重跑 install.sh（§6b） |
+| `~/.codecombo/bin/codecombo` | 远程部署器装（中心实例下发） | 应用内自更新（§6a）；或中心实例重新远程部署；或手工配方（§6c）——**禁止重跑 install.sh**（§6b） |
+| `/opt/codecombo/bin/codecombo` | 本篇手工布局 | 应用内自更新（§6a）；或手工配方（§6c） |
+
+`npm ls -g codecombo` 有结果的是 npm 装——更新归 npm 管
+（`npm i -g codecombo@latest`，应用内更新自动让位）。
+
+### 6a. 应用内自更新（所有布局首选）
+
+设置 → 关于 → 版本面板「检查更新」：从 GitHub Release 拉取新版本，换包
+动作是 rename 留 `.bak` 备份 → 写入新二进制 → chmod 0755 → 拉起 → 健康
+检查，任一步失败换回旧二进制。点「立即更新」后下载/校验/换包在后台进行：
+可关闭面板继续操作，页面左下角的更新徽标实时显示阶段与下载百分比，开始/
+失败/完成/回滚结果进通知中心（服务重启期间结果由新进程启动后补推）；更新
+完成后刷新页面加载新界面。两点注意：
+
+- **v0.0.1-beta.3 之前的版本检查链有缺陷**，应用内看不到新版本——先按
+  §6b（脚本装）或 §6c 升一次，之后的版本应用内检查才可用；
+- **beta 期（尚无正式版）GitHub 正式通道恒为空**：先在版本面板打开
+  「跟进预发布版本」（保存即时生效）再检查，否则只会得到「stable 通道暂无
+  正式版」的提示。
+
+脚本装（systemd 托管）的实例更新后若服务未自行拉起（`systemctl status
+codecombo` 非 active），`sudo systemctl restart codecombo` 收尾——现行
+install.sh 已自动同装 polkit 放行规则（服务用户自重启授权），此形态通常即
+早期版本脚本装且从未重跑过的实例（缺规则被 polkit 拒），重跑一次 install.sh
+即补装。
+
+### 6b. 重跑 install.sh（仅限脚本装布局）
+
+```bash
+sudo -v && curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=<原值> CODECOMBO_PORT=<原值> sh
+```
+
+- 原 `--host`/`--port` 读自 unit 的 `ExecStart` 行，环境变量必须放在管道
+  `sh` 一侧——写在 `curl` 前只对 curl 进程生效，`sh` 读不到，端口/绑定
+  回落默认 9999/127.0.0.1；
+- 装时用 `CODECOMBO_DATA_DIR` 指定过数据目录的（unit 里有
+  `Environment="CC_DATA_DIR=…"` 行），重跑须以同值带回
+  `CODECOMBO_DATA_DIR=<原值>`——漏带则改写后的 unit 不再下发该变量，服务
+  下次重启回落默认 `~/.codecombo`（数据仍在原目录，只是实例不再读它）；
+  参数全表与并存第二套实例的注意事项见 README「可选参数」节；
+- 先 `sudo -v` 缓存提权凭据：`curl | sh` 下脚本无法交互输入密码，只认
+  免密 sudo（脚本内部写 `/etc/systemd/system` 需要它）；无可用凭据时脚本
+  跳过 unit 改写、只换盘上二进制；
+- 脚本以 `mv` 换包（rename 不碰运行中的旧 inode，服务在跑也不会 Text file
+  busy），但旧进程仍是旧版本：提示「检测到正在运行的 Codecombo 实例——
+  服务已注册但【未启动】」时，在跑的就是本服务则直接
+  `sudo systemctl restart codecombo` 收尾；若是手动 `codecombo start`
+  （后台守护形态）起的实例，先 `codecombo stop` 再
+  `sudo systemctl start codecombo`；
+- systemd 分支同装 polkit 放行规则（幂等重写，与远程部署器同款）：应用内
+  自更新收尾与「重启应用」按钮以服务用户身份 `systemctl restart`，缺规则会
+  被 polkit 拒且 `Restart=on-failure` 不兜底——早期版本脚本装的实例重跑本
+  脚本即补装；
+- macOS 重跑即生效（脚本自带 launchd 代理 unload/load）；Windows 重跑
+  install.ps1 前先 `sc.exe stop Codecombo`——脚本先换二进制后动服务，而
+  Windows 锁定运行中的 `.exe`，服务在跑时换包失败。
+
+**远程部署器布局（`~/.codecombo/bin/codecombo`）禁止重跑 install.sh**：
+脚本会以自己的模板覆写部署器写的 unit——丢掉部署器多下发的
+`Environment=PATH`（少了它，服务里用户级安装的智能体 CLI 一律 not found）、
+`WorkingDirectory`、默认开启的 `NoNewPrivileges`，绑定地址缩回默认
+`127.0.0.1`（部署器默认 `0.0.0.0`）——下一次重启服务（含按脚本提示
+restart）起远程访问即断；二进制还会另装一份到 `~/.local/bin`，新旧两份
+并存。该布局的升级走应用内自更新、或中心实例重新远程部署（中心实例须
+v0.0.1-beta.3 及以上——更早版本的部署器覆盖升级存量旧实例会失败），或用
+§6c 手工配方（unit 原样不动）。
+
+### 6c. 手工替换二进制（Linux，脚本装/远程部署装/本篇手工布局通用）
+
+各 systemd 布局同构——只是 `<bin>` 路径不同（脚本装
+`~/.local/bin/codecombo`、远程部署装 `~/.codecombo/bin/codecombo`、本篇
+手工布局 `/opt/codecombo/bin/codecombo`，以 `systemctl cat codecombo` 的
+ExecStart 为准）。与 §6a 应用内更新的换包动作同语义：rename 备份 →
+覆写 → 权限 → 拉起，任一步失败可用 `.bak` 回滚。文件操作（第 1–3 步）以
+服务用户（unit 的 `User=`）身份执行，新二进制属主不变——bin 目录须对服务
+用户可写，之后应用内自更新才换得了包（§2）；以管理员身份操作时第 2/3 步
+加 `sudo`，第 3 步并带 `-o <user> -g <user>` 保持属主：
+
+```bash
+# 0) 停服务（运行中覆盖二进制会 Text file busy，必须先停；数据目录不动）
+sudo systemctl stop codecombo
+
+# 1) 下载二进制与校验和清单到同一目录（TAG 换成 Release 页的目标版本，
+#    arch 按 uname -m：x86_64→amd64、aarch64→arm64），然后校验——清单含
+#    全部平台资产，--ignore-missing 只核下载到的那个，须见 "<资产名>: OK"；
+#    自行构建（§1）的直接用 dist/ 下产物，跳过本步
+curl -fLO https://github.com/wtr20211202/codecombo/releases/download/<TAG>/codecombo-linux-<arch>
+curl -fLO https://github.com/wtr20211202/codecombo/releases/download/<TAG>/SHA256SUMS.txt
+sha256sum -c --ignore-missing SHA256SUMS.txt
+
+# 2) 原二进制留 .bak 回滚副本（rename 不破坏旧 inode，与自更新链同构）
+mv <bin> <bin>.bak
+
+# 3) 装新二进制；0755 与自更新链一致——缺 exec 位是 203/EXEC 的常见根因（§7）
+install -m 0755 codecombo-linux-<arch> <bin>
+
+# 4) 仅 SELinux 系统（RHEL/CentOS/Fedora 等）：按策略重置安全标签（见下注）
+sudo restorecon -v <bin>
+
+# 5) 起服务并确认 active (running)
+sudo systemctl start codecombo && systemctl status codecombo --no-pager
+```
+
+失败回滚（服务起不来时，先看 §7 的 203/EXEC 三态再决定是否回滚）：
+
 ```bash
 sudo systemctl stop codecombo
-sudo cp dist/codecombo-linux-amd64 /opt/codecombo/bin/codecombo
+mv <bin>.bak <bin>      # 原样恢复（原属主与标签都随 .bak 回来）
 sudo systemctl start codecombo
-# 数据目录不动；运行中替换二进制会 Text file busy，必须先停
 ```
+
+- **第 4 步注**：SELinux 系统上新建文件的标签按所在目录继承，未必等于策略
+  为该路径规定的值（家目录下的二进制尤甚，§2），服务域无权执行同样表现为
+  203/EXEC——`restorecon` 按策略重置；非 SELinux 系统（Debian/Ubuntu 系默认）
+  无此命令，整步跳过。回滚的 `mv <bin>.bak <bin>` 恢复原文件、原标签随之
+  回来，无需再补；
+- **ETXTBSY（Text file busy）**：说明服务还在跑、目标文件正被执行——先
+  `systemctl stop`，不要写运行中的文件；`mv`（rename 换目录项）不触发，
+  `cp`/`dd` 原地覆写会触发；
+- **体积自查**：二进制约 50MB 量级（linux-amd64 约 51–54MB）——只有几十
+  字节的文件是点成了旁置的 `.sha256`/`.sig` 伴随资产（浏览器在 Releases 页
+  点错小文件是手工升级最高发的「资产拿错」形态，SHA256 校验步可拦）；
+- **非 systemd 形态**（手动启动的后台守护实例、远程部署「直接进程」方式）：
+  第 0 步换成 `<bin> stop`，第 5 步按原参数
+  `<bin> start --port=<原值> --host=<原值>` 拉起（原参数见 `ps -ef` 输出），
+  其余步骤不变；
+- **macOS 不走本节**（见 §6.1 macOS 部署；从网页下载的二进制覆盖前需
+  `xattr -d com.apple.quarantine <bin>` 去隔离属性）。
 
 ## 6.1 macOS 部署（launchd）
 
@@ -328,7 +501,8 @@ launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 | 设密 500 且提示 permission denied | 同上，setup 落盘失败 | 同上 |
 | 设密 403 "only allowed from localhost" | 服务绑定 127.0.0.1，局域网来源被拒 | 改 `-H 0.0.0.0` 启动（有意开放局域网时） |
 | 设密 429 | 同 IP 限流中 | 60s 后重试 |
-| `Text file busy` | 运行中覆盖二进制 | 先 `systemctl stop` 再替换 |
+| `Text file busy` | 运行中覆盖二进制 | 先 `systemctl stop` 再替换（§6c） |
+| `systemctl status` 显示 `status=203/EXEC`，服务反复重启失败 | systemd 无法执行 ExecStart 指向的二进制 | `journalctl -u codecombo -n 30 --no-pager` 看 "Failed to execute" 后的具体错误：`Permission denied`=缺 exec 位（`chmod 0755 <bin>`）/ SELinux 标签（`restorecon -v <bin>`，§5）/ 二进制所在挂载点 noexec；`Exec format error`=架构不符或文件不完整（拿错资产/下载中断——对体积与 SHA256，§6c）；`No such file or directory`=ExecStart 路径不对（对照 `systemctl cat codecombo` 与 `ls -l`；动态链接库缺失时同样报此错，本产品发布二进制为静态链接，出现该错优先查路径） |
 | `systemctl status` 的 Memory 远大于 `free` 的 used | cgroup 记账含 page cache：tmux/claude 等子进程读写的工作区文件缓存都记在此 cgroup（§3 KillMode=process 下子进程留在组内），并非真实占用 | 正常现象；验证构成：`grep -E '^(anon\|file) ' /sys/fs/cgroup/system.slice/simple-coding.service/memory.stat`，anon=进程真实内存，file=可回收缓存 |
 
 ## 8. TLS 慢（深度检测网络）：明文伴随端口

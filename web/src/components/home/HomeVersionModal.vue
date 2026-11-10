@@ -67,8 +67,12 @@ const emit = defineEmits<{
   border-radius: 10px;
   width: 480px;
   max-width: calc(100vw - 32px);
+  /* 视口钳高内滚（P-20261109-10 R11）：卡片随内容增高（更新说明/进度/结局块）
+     超出视口时，居中布局会把上下两端裁出视口且无从滚动 */
+  max-height: calc(100vh - 32px);
   box-shadow: var(--shadow-pop-lg);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .version-card-header {
   display: flex;

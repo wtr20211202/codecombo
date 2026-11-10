@@ -37,8 +37,107 @@ import { copyText } from '../utils/clipboard'
 // 全栈激活，超出本提案范围）。当前边界：重挂/重连会把会话历史里最近一次
 // OSC 52 复制的内容重写回剪贴板——与被替换的 ClipboardAddon 行为完全一致
 // （其无任何重放设防），非本次引入的回归；用户重新复制一次即自愈。
+//
+// 写失败兜底浮条（P-20261109-7 B）：copyText 失败分支簿记（下方 Osc52ClipboardFailure
+// 节），TerminalPane 据此渲染带内容预览的兜底浮条。边界如实：OSC 52 死源
+// （旧 tmux 吞透传/不发）时本模块无信号可挂——浮条兜的是浏览器侧残余变量
+// （非安全上下文/权限拒绝），死源由服务端 set-clipboard 三处统一+版本地板
+// 提示治理（A/A2）。
 
 const OSC52_IDENT = 52
+
+// ============== 写失败兜底簿记（P-20261109-7 B） ==============
+// copyText 降级链失败（非安全上下文无 clipboard API + execCommand 无用户手势等）
+// = 应用以为复制了而系统剪贴板并无内容——用户面对的是「拖了/按了复制却粘不出
+// 来」的静默失败。兜底浮条（TerminalPane）据此出现：展示待复制内容预览 +
+// 「复制」按钮（用户手势内 copyText 重试，execCommand 降级在手势内是有效的）。
+//
+// 分叉纪律：handler 的 then(ok) 同一分支收口——true→markOsc52Proof（能力已证，
+// 教育条粘性抑制）/ false→recordOsc52Failure（兜底簿记）。**禁止在此 handler 内
+// 第二写通道**（如失败即再试 execCommand/另挂降级实现）：写尝试只有 copyText
+// 一条链，失败簿记只是信号面，不承担重试——防漂移（两条写链各自演化出不同
+// 降级行为的历史教训，健壮性红线「统一降级入口」同源）。
+//
+// 超时起算 = pane 可见时刻：失败常发生在后台 tab（OSC 52 到达时 pane 未挂载/
+// 不可见），簿记若按 failedAt 起算 30s，用户切回 tab 时条已过期消隐——白白
+// 丢掉兜底。effectiveStart = shownAt ?? failedAt，由 TerminalPane 在首次可见
+// 渲染时落 shownAt。module 级 5s 扫描兜底清理（lazy 启停，map 空即停——常驻
+// 定时器是热路径外的不必要功耗）。
+export interface Osc52ClipboardFailure {
+  /** 待复制内容（原文，未截断；预览截断在展示层做） */
+  text: string
+  /** 失败时刻（ms） */
+  failedAt: number
+  /** 首次被可见 pane 渲染的时刻；null = 尚未可见过（30s 未起算） */
+  shownAt: number | null
+}
+
+/** 失败条目 FIFO 上限：远超单页会话量级（256 同 proof 口径），淘汰代价仅是
+ *  该会话兜底条不再出现一次 */
+export const OSC52_FAILURE_CAP = 256
+/** 兜底浮条 TTL（30s），自 effectiveStart（可见时刻优先）起算 */
+export const OSC52_FAILURE_TTL_MS = 30_000
+/** 从未可见条目的硬性过期（防「永远切不回的会话」占位不清理；远大于一次
+ *  人工切回的合理时延） */
+const OSC52_FAILURE_HARD_TTL_MS = 10 * 60_000
+
+const osc52FailureMap = reactive(new Map<string, Osc52ClipboardFailure>())
+let failureSweeperTimer: ReturnType<typeof setInterval> | null = null
+
+function ensureFailureSweeper(): void {
+  if (failureSweeperTimer !== null) return
+  failureSweeperTimer = setInterval(() => {
+    pruneOsc52Failures()
+    if (osc52FailureMap.size === 0 && failureSweeperTimer !== null) {
+      clearInterval(failureSweeperTimer)
+      failureSweeperTimer = null
+    }
+  }, 5_000)
+}
+
+function pruneOsc52Failures(): void {
+  const now = Date.now()
+  for (const [sid, f] of osc52FailureMap) {
+    const start = f.shownAt ?? f.failedAt
+    const hardExpired = now - f.failedAt > OSC52_FAILURE_HARD_TTL_MS
+    if (hardExpired || (f.shownAt !== null && now - start > OSC52_FAILURE_TTL_MS)) {
+      osc52FailureMap.delete(sid)
+    }
+  }
+}
+
+function recordOsc52Failure(sessionId: string, text: string): void {
+  // 同会话重放/重复失败：只刷新不叠条（重挂/重连重放幂等——Map 键控天然去重，
+  // 刷新 text+failedAt 即「以最新失败内容为准」）
+  osc52FailureMap.set(sessionId, { text, failedAt: Date.now(), shownAt: null })
+  if (osc52FailureMap.size > OSC52_FAILURE_CAP) {
+    const oldest = osc52FailureMap.keys().next().value
+    if (oldest !== undefined && oldest !== sessionId) osc52FailureMap.delete(oldest)
+  }
+  ensureFailureSweeper()
+}
+
+/** 本会话待兜底的 OSC 52 写失败（反应式，TerminalPane 浮条显隐计算属性内
+ *  读取可追踪；已过期条目由扫描器惰性删除，读取侧不重复判时） */
+export function getOsc52ClipboardFailure(sessionId: string): Osc52ClipboardFailure | null {
+  return osc52FailureMap.get(sessionId) ?? null
+}
+
+/** 兜底浮条首次渲染（pane 可见）时落 shownAt：30s TTL 起算点。返回 true=本次
+ *  调用完成了首见落账（调用方据此启动精确消隐定时器；幂等——重复调用不重置
+ *  shownAt，重挂/重渲染不续期，条按首见时刻诚实消隐） */
+export function markOsc52FailureShown(sessionId: string): boolean {
+  const f = osc52FailureMap.get(sessionId)
+  if (!f || f.shownAt !== null) return false
+  f.shownAt = Date.now()
+  ensureFailureSweeper()
+  return true
+}
+
+/** 兜底浮条「复制」成功后的清除（点击复制成功 / 条目生命周期终点） */
+export function clearOsc52ClipboardFailure(sessionId: string): void {
+  osc52FailureMap.delete(sessionId)
+}
 
 // base64 → UTF-8 文本：atob 出 binary string 后按字节展开经 TextDecoder 还原
 // （中文/emoji 等多字节内容不乱码）。atob 只认标准 base64，非法输入抛错按
@@ -96,11 +195,13 @@ export function attachOsc52Clipboard(sessionId: string, term: Terminal): void {
     if (sel !== 'c' || pd === '?') return true
     const text = decodeOsc52Payload(pd)
     if (!text) return true
-    // 写入异步落定，handler 同步返回不阻塞解析（无回应序列需要保序）；
-    // copyText 降级链失败（非安全上下文且无用户手势等）不登记——复制确实
-    // 没生效，提示条照常教育 Shift 旁路
+    // 写入异步落定，handler 同步返回不阻塞解析（无回应序列需要保序）。
+    // 同一 then(ok) 收口两分支（P-20261109-7 B）：true→能力已证（教育条粘性
+    // 抑制）；false→失败兜底簿记（浮条展示内容预览，用户手势内重试）。handler
+    // 内禁第二写通道——写链只有 copyText 一条，防漂移（见文件头注）
     void copyText(text).then((ok) => {
       if (ok) markOsc52Proof(sessionId)
+      else recordOsc52Failure(sessionId, text)
     })
     return true
   })

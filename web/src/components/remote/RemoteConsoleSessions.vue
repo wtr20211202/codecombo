@@ -173,6 +173,8 @@ function onTabDrop(target: ConsoleTab) {
             :ref="(el) => setPaneRef(tab.sessionId, el)"
             :host-id="tab.hostId"
             :session-id="tab.sessionId"
+            :tmux-version="tab.tmuxVersion"
+            :tmux-floor="tab.tmuxClipboardFloor"
             :active="tab.sessionId === activeTabId"
             :ended="tab.state === 'ended'"
             @exit="$emit('exit', $event)"

@@ -270,6 +270,14 @@ type CheckUpdateResponse struct {
 	ChannelEmpty bool `json:"channelEmpty,omitempty"`
 	// CheckError 其余检查失败原文（网络/DNS/限流等），前端如实呈现不再吞
 	CheckError string `json:"checkError,omitempty"`
+	// CompanionFetchFailed 有可用更新，但伴随校验资产（.sha256/.sig）在 release
+	// 里却没取到，且已注定过不了校验——此刻点更新会被拒（P-20261109-9，旧口径
+	// 吞错后误报「release 没提供」）。只在「真会被拒」时置位（与 ApplyUpdate
+	// 下载前拒绝同源判定 update.CompanionPreflight）；面板据此即时提示、更新
+	// 按钮保持可点（点击会 skipCache 重拉一次）。CompanionFetchError 为逐资产
+	// 拉取失败原因
+	CompanionFetchFailed bool   `json:"companionFetchFailed,omitempty"`
+	CompanionFetchError  string `json:"companionFetchError,omitempty"`
 }
 
 // UpdateStatusResponse 更新状态响应
@@ -281,6 +289,9 @@ type UpdateStatusResponse struct {
 	Error       string `json:"error"`
 	Result      string `json:"result,omitempty"` // success/failed/rolled_back
 	ResultError string `json:"resultError,omitempty"`
+	// ResultAt 结果文件落盘时刻（RFC3339 UTC，P-20261109-10）：版本面板「上次
+	// 更新」块回显时间，零值省略
+	ResultAt string `json:"resultAt,omitempty"`
 }
 
 // LockConfig 锁定机制配置，持久化到 docstore 集合 "lock" 的 "config" 文档

@@ -328,6 +328,9 @@ export interface TmuxInfo {
   installable: boolean
   pkgManager: string
   installCommand: string
+  // 剪贴板能力地板（P-20261109-7 A2）：ok / drag-copy(<3.2 拖选复制受限) /
+  // passthrough(3.2.x 应用内复制透传受限)；未安装或不可解析为空串（不提示）
+  clipboardFloor: string
 }
 
 // ShellCandidate GET /terminals/shell-candidates 返回的单条候选（P-20261004-57）：

@@ -170,6 +170,14 @@ type ServerConfig struct {
 	// 恒排 prerelease，预发布通道走列表端点取首个含本平台产物的 release）。
 	// 合法值仅此二，保存期校验；npm 侧对应 dist-tag latest/next 同构
 	UpdateChannel string `json:"updateChannel,omitempty"`
+	// UpdateProxy 更新链出站代理（P-20261109-12）：显式配置优先于环境变量，
+	// 支持 http(s):// CONNECT 隧道与 socks5://（socks5h 同义，net/http 原生
+	// 支持）——覆盖公司代理与本地 clash（127.0.0.1 端口）两类 CN 网络场景；
+	// 回环/内网代理地址合法且是目标场景本身，不套 IP 守卫。空串 = 不用显式代理
+	// （HTTPS_PROXY/HTTP_PROXY/NO_PROXY 环境变量仍生效——第一层业界事实标准）。
+	// 走代理后目标由代理解析，拨号期 IP 守卫降级为官方域白名单（∪ 本更新源
+	// host），见 server/update/urlsafety.go；保存期校验见 system.UpdateSettings
+	UpdateProxy string `json:"updateProxy,omitempty"`
 	// ExternalAccessURL 外部访问地址（P-20261019-10）：Tailscale/Cloudflare
 	// Tunnel/公网反代接入时的手机可达 origin（scheme+host+可选 port，无路径/
 	// query/fragment/凭据）。二维码接力在桌面端以回环地址打开时优先用它，
@@ -224,6 +232,16 @@ type ServerConfig struct {
 	// 开启后远程控制台新建终端在远端 tmux 会话中启动（attach-or-create），
 	// SSH 通道断开后远端进程与滚动缓冲仍在，重开 tab 重连续工作
 	TerminalRemoteTmux *bool `json:"terminalRemoteTmux,omitempty"`
+	// tmux 鼠标接管开关（P-20261109-7）：指针区分"未配置"（默认开）与"显式
+	// 关闭"。开=tmux mouse on（拖选进 tmux copy-mode 选择，MouseDragEnd
+	// copy-pipe 经 set-clipboard 进系统剪贴板；claude 滚轮翻页/分屏拖拽保留，
+	// 对齐业界主流）；关=「复制优先模式」（拖选落回 xterm 原生选择+copyOnSelect，
+	// 代价：tmux 处 alt screen 时滚轮翻史失效、分屏拖拽失效）。服务端全局
+	// 语义：tmux 全局 session option 逐事件读取，切换即时生效（ApplyTmuxMouseOption
+	// 热切换 + 每次 Create 运行同步双路）；只落专有 socket（-L codecombo），
+	// 不影响用户自有 tmux；远程终端不在此开关覆盖面（远端 tmux 是用户自有
+	// 默认 socket server，行为不托管）
+	TerminalTmuxMouseEnabled *bool `json:"terminalTmuxMouseEnabled,omitempty"`
 	// AI 助手底层智能体选型：auto（按注册顺序取第一个可用）/ claude / dsh /
 	// 自定义注册名（白名单校验见 admin.UpdateSettings；默认 auto）
 	AgentProvider string `json:"agentProvider"`
@@ -505,6 +523,15 @@ func (sc *ServerConfig) TerminalRemoteTmuxOrDefault() bool {
 		return false
 	}
 	return *sc.TerminalRemoteTmux
+}
+
+// TerminalTmuxMouseEnabledOrDefault tmux 鼠标接管开关（P-20261109-7，未配置默认
+// 开——鼠标接管对齐业界主流，claude 滚轮翻页/tmux 分屏能力保留；关闭即复制优先）
+func (sc *ServerConfig) TerminalTmuxMouseEnabledOrDefault() bool {
+	if sc.TerminalTmuxMouseEnabled == nil {
+		return true
+	}
+	return *sc.TerminalTmuxMouseEnabled
 }
 
 // PreviewCompatModeOrDefault 预览面板同源兼容模式（P-20261019-1，未配置默认关

@@ -166,16 +166,27 @@ func ExtractLockToken(r *http.Request) string {
 	return ""
 }
 
-// ValidateLockTokenForWS WS 握手期校验，返回 token 与是否有效
-func ValidateLockTokenForWS(r *http.Request) (string, bool) {
+// ValidateLockCredential 通用锁凭据校验：HTTP 请求是否携带可用解锁凭据，
+// 返回 (token, ok)。校验器与载体与 lockAuth / WS 握手完全同一套，不新增
+// 信任边界：
+//   - 锁关闭且已有配置 → ("", true)（全应用开放，与 LockMiddleware 放行同语义）
+//   - 无配置（首次安装 / reset-lock 后）→ false（强制先设密）
+//   - 持有效 access token（Bearer sc_）→ ("", true)（机器间调用）
+//   - 头/子协议/cookie 载体（ExtractLockToken）的解锁 token 或智能体令牌
+//     任一有效 → (token, true)（解锁 token 随校验滑动续期）
+//
+// 消费方：WS 握手（ValidateLockTokenForWS）与 /api/restart 非回环请求授权
+// （P-20261109-11，Restart 不入锁保护组——锁定态也要能重启（A8），回环之外
+// 凭本函数放行）——新增授权面须复用本函数，不另写校验器
+func ValidateLockCredential(r *http.Request) (string, bool) {
 	lock := store.Get().Lock
 	cfg := lock.GetConfig()
 	if !cfg.Enabled {
-		// 与 LockMiddleware 同语义：从未初始化配置时握手不放行（强制先设密）
+		// 与 LockMiddleware 同语义：从未初始化配置时不放行（强制先设密）
 		if !lock.HasConfig() {
 			return "", false
 		}
-		// 锁定功能关闭，握手放行（无 token）
+		// 锁定功能关闭，放行（无 token）
 		return "", true
 	}
 	// 与 HTTP LockMiddleware 同语义：持有效 access token（Bearer sc_）的机器间调用放行。
@@ -194,6 +205,12 @@ func ValidateLockTokenForWS(r *http.Request) (string, bool) {
 		return "", false
 	}
 	return token, true
+}
+
+// ValidateLockTokenForWS WS 握手期校验，返回 token 与是否有效
+// （ValidateLockCredential 的 WS 消费别名——语义由后者单点承载）
+func ValidateLockTokenForWS(r *http.Request) (string, bool) {
+	return ValidateLockCredential(r)
 }
 
 // ── unlock 接口 IP 限流 ──

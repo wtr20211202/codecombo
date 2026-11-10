@@ -153,8 +153,8 @@
           <li>
             <span class="qs-label" data-lang-en>Install</span><span class="qs-label" data-lang-zh>安装</span>
             <p class="perm-note">
-              <span data-lang-en>Registering the service needs elevation (admin PowerShell / sudo); without it you still get the binary + a foreground command.</span>
-              <span data-lang-zh>注册服务需要提权（管理员 PowerShell / sudo）；不提权则安装二进制并给出前台启动命令。</span>
+              <span data-lang-en>Registering the service needs elevation (admin PowerShell / sudo); without it you still get the binary + a manual start command (runs as a background daemon).</span>
+              <span data-lang-zh>注册服务需要提权（管理员 PowerShell / sudo）；不提权则安装二进制并给出手动启动命令（后台守护运行）。</span>
             </p>
             <div class="cmd-lines">
               <div class="cmd-row">
@@ -168,6 +168,16 @@
               <div class="cmd-row">
                 <code class="cmd-text">npm i -g codecombo</code><span class="qs-cmt"># or via npm (Node.js 18+)</span>
                 <button class="copy-btn" type="button" data-copy="npm i -g codecombo" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+              <!-- 参数化样例（P-20261109-16，源=README §Optional parameters，改先改 README）：
+                   环境变量须在管道 sh 一侧 / PowerShell 在 iex 前 $env: 赋值；全表与并存注意事项见 README -->
+              <div class="cmd-row">
+                <code class="cmd-text">curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test sh</code><span class="qs-cmt" data-lang-en># options: port + data dir</span><span class="qs-cmt" data-lang-zh># 可选：端口 + 数据目录</span>
+                <button class="copy-btn" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test sh" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+              <div class="cmd-row">
+                <code class="cmd-text">$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))</code><span class="qs-cmt" data-lang-en># same on Windows</span><span class="qs-cmt" data-lang-zh># Windows 同款</span>
+                <button class="copy-btn" type="button" data-copy="$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR=&quot;$HOME\.codecombo-test&quot;; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
               </div>
             </div>
           </li>

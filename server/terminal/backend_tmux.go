@@ -68,24 +68,21 @@ func (b *tmuxBackend) Create(spec SessionSpec) (ptyConn, error) {
 		return nil, fmt.Errorf("tmux backend requires SessionSpec.TmuxName")
 	}
 
-	// 从 settings 读 history-limit
+	// 从 settings 读 history-limit 与 tmux 鼠标接管开关（P-20261109-7）
 	historyLimit := DefaultScrollbackLines
+	mouseOn := true
 	if cfg := store.Get().Settings.Get(); cfg != nil {
 		historyLimit = GetScrollbackLines(cfg.Server.TerminalScrollbackLines)
+		mouseOn = cfg.Server.TerminalTmuxMouseEnabledOrDefault()
 	}
 
-	confPath, err := ensureTmuxConf(historyLimit)
+	confPath, err := ensureTmuxConf(historyLimit, mouseOn)
 	if err != nil {
 		return nil, fmt.Errorf("ensure tmux conf: %v", err)
 	}
 
-	// 同步 tmux server option：已运行的 server 不会重新读 conf，显式 set 让后续新 session 用最新值
-	// 首次 Create 时 server 还没启动，set-option 会失败（正常，new-session 启动 server 时会读 conf）
-	if _, err := runTmux("set-option", "-s", "history-limit", strconv.Itoa(historyLimit)); err != nil {
-		slog.Debug("terminal: tmux set-option history-limit (server may not be running yet)",
-			"err", err)
-	}
-
+	// 运行同步（已运行 server 不重读 conf，见 syncTmuxServerOptions）+ 右键菜单解绑
+	syncTmuxServerOptions(historyLimit, mouseOn)
 	// 同步右键菜单解绑：conf 里的 unbind 只在 server 启动时生效，已运行的 server
 	// （升级前创建）需显式补 unbind，否则 tmux 自带右键菜单与本系统菜单双层同现。
 	// -n = 键不存在也不报错；专有 socket（-L simple-coding）不影响用户自己的 tmux

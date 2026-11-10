@@ -342,12 +342,16 @@ func Run(opts Options) {
 	}
 
 	// 长操作路由（push/pull/fetch/clone；远程文件上传/下载/互传）清零读写超时：
-	// 大文件传输轻松超过全局 WriteTimeout 60s，上传侧 ReadTimeout 30s 同样不够
+	// 大文件传输轻松超过全局 WriteTimeout 60s，上传侧 ReadTimeout 30s 同样不够。
+	// 中心分发拉取（apply-from-center）在请求内同步下载整包（客户端窗口 5 分钟），
+	// 慢链路超 60s 即被写超时截断——前端报失败而服务端照常换包（P-20261109-10；
+	// 自更新 /updates/apply 已异步化受理即返回，无须豁免）
 	r.Use(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		longWrite := c.Request.Method == "POST" &&
 			(strings.Contains(path, "/push") || strings.Contains(path, "/pull") ||
-				strings.Contains(path, "/fetch") || strings.Contains(path, "/clone"))
+				strings.Contains(path, "/fetch") || strings.Contains(path, "/clone") ||
+				strings.HasSuffix(path, "/updates/apply-from-center"))
 		longTransfer := strings.Contains(path, "/files/upload") ||
 			strings.Contains(path, "/files/download") ||
 			strings.Contains(path, "/files/transfer")

@@ -166,6 +166,7 @@ export interface SettingsData {
   terminalHistoryEnabled: boolean  // 终端命令历史记录开关（后端未配置时默认开）
   terminalPastePrecheckEnabled?: boolean // 高危命令粘贴预检开关（P-20261005-191；后端未配置时默认开）
   terminalRemoteTmux?: boolean     // 远程终端 tmux 持久化开关（后端未配置时默认关）
+  terminalTmuxMouseEnabled?: boolean // tmux 鼠标接管开关（P-20261109-7，后端未配置时默认开）
   terminalTheme: string       // 终端主题名（手工选择基准；跟随应用明暗开启时被档位映射临时盖住，解绑后生效——开关是浏览器本地态不在此处）
   terminalFont: TerminalFont  // 终端字体
   uidensity?: string          // 界面密度档（P-20261003-322）：comfortable（默认）/ compact
@@ -192,6 +193,8 @@ export interface SettingsData {
   dshNpmCommand?: string      // npm 命令（默认 npm）
   dshRollbackVersion?: string // 最近一次升级前的 dsh 版本（空 = 无回退点）
   updateURL: string           // 更新分发源（本机作为中心时跨平台缓存的 Release 地址）
+  /** 更新链出站代理（P-20261109-12）：http(s)/socks5 地址；空 = 走环境变量（HTTPS_PROXY） */
+  updateProxy?: string
   externalAccessUrl?: string  // 外部访问地址（P-20261019-10）：Tailscale/反代接入时的手机可达 origin；空=未配置
   /** 多实例同步本端落位根（P-20261023-1）：空 = 默认（用户主目录下 codecombo-sync/） */
   syncDestRoot?: string
@@ -322,6 +325,7 @@ export const settingsApi = {
     terminalHistoryEnabled?: boolean
     terminalPastePrecheckEnabled?: boolean // 高危命令粘贴预检开关（默认开；关=粘贴/直达插入不再写入前预检）
     terminalRemoteTmux?: boolean
+    terminalTmuxMouseEnabled?: boolean // tmux 鼠标接管开关（P-20261109-7，默认开；false=复制优先模式，热切换即时生效）
     terminalTheme?: string
     terminalFont?: TerminalFont
     uidensity?: string // 界面密度档（P-20261003-322）：comfortable（默认）/ compact，settings.changed 广播多端跟随
@@ -354,6 +358,8 @@ export const settingsApi = {
     updateURL?: string
     updateChecks?: boolean // 自动检查更新开关（P-20261103-1）：省略=不动
     updateChannel?: string // 更新通道（P-20261103-3）：stable/prerelease，省略=不动
+    /** 更新链出站代理（P-20261109-12）：省略=不动；空串=清除回环境变量感知 */
+    updateProxy?: string
     externalAccessUrl?: string // 外部访问地址（仅 http/https origin，服务端校验+尾斜杠归一；空串=清除）
     syncDestRoot?: string // 多实例同步本端落位根（P-20261023-1）：绝对目录路径；空串=恢复默认
     shareDefaultTTL?: string // 新建文件分享默认有效期（P-20261020-5）：permanent/1d/7d/30d；省略=不动
@@ -837,11 +843,33 @@ export const hookTokenApi = {
 }
 
 // 更新管理
+// 更新状态快照（GET /updates/status，与 server/model UpdateStatusResponse 对齐）：
+// status = 服务端状态机（idle/checking/downloading/verifying/replacing/restarting/
+// success/failed/rolled_back）；result* = 换包子进程落盘的结果文件（空闲/终态时附带）
+export interface UpdateStatusPayload {
+  status: string
+  progress: number
+  total: number
+  version: string
+  error?: string
+  result?: string
+  resultError?: string
+  resultAt?: string
+}
+
 export const updateApi = {
   check: (config?: AxiosRequestConfig) => api.get('/updates/check', config),
-  apply: () => api.post('/updates/apply'),
-  status: (config?: AxiosRequestConfig) => api.get('/updates/status', config),
-  clearStatus: () => api.delete('/updates/status'),
+  // 异步受理（P-20261109-10）：202 = 已受理、后台下载/校验/换包，进度走 status
+  // 轮询（stores/updateProgress）；受理前拒绝（在途 409 / npm 409 / 已是最新 400 /
+  // 伴随校验资产重拉后仍未取到 500，P-20261109-9）同步返回。响应 { message, version }。
+  // config 可选：版本面板以 silent 发起、被拒反馈由面板自出——拦截器错误 toast
+  // 依赖项目页外壳注入的 message API，首页/设置入口拿不到
+  apply: (config?: AxiosRequestConfig) =>
+    api.post('/updates/apply', undefined, config) as unknown as Promise<{ message?: string; version?: string }>,
+  status: (config?: AxiosRequestConfig) =>
+    api.get<{ data: UpdateStatusPayload }>('/updates/status', config) as unknown as Promise<{ data?: UpdateStatusPayload }>,
+  // 确认已读更新结果（清结果文件 + 状态机复位）；在途更新服务端 409 拒绝不清
+  clearStatus: (config?: AxiosRequestConfig) => api.delete('/updates/status', config),
   // 本机优雅重启（P-20261106 页面重启链）：服务形态=SCM recovery 拉起，
   // systemd=systemctl restart，前台=原参数自 spawn。自定义头与 /api/shutdown
   // 同型 CSRF 防线（服务端校验存在性）
@@ -866,7 +894,7 @@ export interface NotificationItem {
   read: boolean
   projectId?: string
   projectName?: string
-  action?: string                        // terminal / panel / url / preview（payload=端口号）/ watch-fallback / agent-fix（P-20261003-289，payload=部署任务 id）/ switch-instance（P-20261004-101，payload=实例 id）/ cron-retry（P-20261006-14，payload=JSON {cronId,slot}）/ stash-recover（P-20261006-48，前端落档，payload=JSON {projectId,branch,message}）/ file（P-20261005-15，payload=项目相对路径）
+  action?: string                        // terminal / panel / url / preview（payload=端口号）/ watch-fallback / agent-fix（P-20261003-289，payload=部署任务 id）/ switch-instance（P-20261004-101，payload=实例 id）/ cron-retry（P-20261006-14，payload=JSON {cronId,slot}）/ stash-recover（P-20261006-48，前端落档，payload=JSON {projectId,branch,message}）/ file（P-20261005-15，payload=项目相对路径）/ update-panel（P-20261109-10，自更新通知回版本面板，无 payload）
   actionPayload?: string
   // 可选第二动作（P-20261005-150）：主动作旁的第二小钮。主动作单槽契约不回退
   //（部署失败 agent-fix / 哨兵命中 terminal 直达），第二入口走本槽——哨兵命中

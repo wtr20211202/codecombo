@@ -708,6 +708,10 @@ export default {
     tmuxInstall: '一键安装',
     tmuxInstallManualHint: '未检测到包管理器，请手动安装',
     tmuxRequiredHint: '需要 tmux {version} 及以上（仅 Unix）',
+    // tmux 剪贴板能力地板两档提示（P-20261109-7 A2）：本机 tmux 二进制同时服务
+    // 专属 socket 会话与外部接管（用户默认 socket），版本不足时面板诚实降级提示
+    tmuxFloorDragCopy: '此版本（<3.2）不支持 set-clipboard：终端拖选复制受限，建议升级（一键安装仅补缺，不覆盖降级）',
+    tmuxFloorPassthrough: '此版本（3.2.x）缺 allow-passthrough：claude code 等应用内复制会被 tmux 吞掉，升级 3.3+ 后透传恢复',
     tmuxInstallNeedsSudo: '需要管理员权限。请在系统终端执行：{cmd}',
     tmuxInstallSuccess: 'tmux 安装成功',
     tmuxInstallFailed: '安装失败：{output}',
@@ -780,6 +784,15 @@ export default {
     terminalCopyOnSelect: '选中即复制',
     terminalCopyOnSelectLabel: '选中文本后自动复制到剪贴板',
     terminalCopyOnSelectHint: '在任意终端（项目/终端管理/远程主机）中选中文本、松开鼠标即复制，与 claude code 行为一致；关闭后仍可用右键菜单或 Ctrl+Shift+C / Ctrl+C 复制',
+    // tmux 鼠标接管开关（P-20261109-7 C，默认开）：关=复制优先模式。即时生效
+    // （tmux mouse 逐事件读取，现存会话热切换）；仅覆盖本地终端（专有 socket），
+    // 远程终端的远端 tmux 属用户自有 server 不托管
+    terminalTmuxMouse: 'tmux 鼠标接管',
+    terminalTmuxMouseLabel: '开启时拖选进 tmux 选择并自动复制（claude 滚轮翻页/分屏拖拽保留）；关闭为「复制优先模式」',
+    terminalTmuxMouseHint: '关闭后的真实代价：tmux 全屏应用（alt screen）下滚轮翻史失效、分屏拖拽/点击切 pane 失效；仅作用于本系统专有 tmux 会话，远程终端不在此开关覆盖面',
+    terminalTmuxMouseOn: '已开启 tmux 鼠标接管（现存本地终端会话即时生效）',
+    terminalTmuxMouseOff: '已切换为复制优先模式（现存本地终端会话即时生效）',
+    terminalTmuxMouseFailed: '切换失败（服务端未响应），开关已还原，请重试',
     resetCloseConfirm: '重置关闭确认提示',
     resetCloseConfirmDesc: '已勾选「不再提示」时点此恢复二次确认弹窗',
     // 鼠标接管提示重置（P-20261106-6）
@@ -2950,6 +2963,10 @@ export default {
     reopen: '重开',
     ended: '远程会话已结束（服务端超过重连窗口）',
     endedTip: '服务端会话已回收，重开将创建新会话',
+    // 远端 tmux 版本地板横幅（P-20261109-7 A2）：远端 tmux 用户自有 server，
+    // 版本不足时在会话 pane 内诚实提示（探测失败/缺 tmux 无横幅）
+    tmuxFloorDragCopy: '远端 tmux {version}（<3.2）不支持 set-clipboard：拖选复制受限——请升级远端 tmux（本地终端不受影响）',
+    tmuxFloorPassthrough: '远端 tmux {version}（3.2.x）缺 allow-passthrough：claude code 等应用内复制会被 tmux 吞掉——升级远端 tmux 3.3+ 后恢复',
     removedHostToast: '部分终端标签对应的主机已被删除，已自动移除',
     staleSessionsToast: '{n} 个远程终端会话已失效（服务端重启或会话过期），点标签上的「重开」可重新连接',
     openFailed: '打开远程终端失败',
@@ -3364,6 +3381,17 @@ export default {
     mouseModeHint: {
       text: '应用已接管鼠标——按住 Shift 拖选可复制文本',
       dismiss: '不再提示',
+      // 「切换到复制优先」一键直达（P-20261109-7 C）：服务端热切换 tmux mouse off
+      copyFirst: '切换到复制优先',
+      copyFirstDone: '已切换为复制优先模式（拖选落回本地选择，即时生效）',
+      copyFirstFailed: '切换失败（服务端未响应），请到设置页重试',
+    },
+    // OSC 52 写失败兜底浮条（P-20261109-7 B）：应用请求复制但浏览器未放行——
+    // 诚实文案带内容预览（PTY 内内容不可信，预览是提示诈骗面最低防线）
+    osc52Fallback: {
+      text: '应用请求复制到剪贴板，但浏览器未放行。以下为待复制内容：',
+      copy: '复制',
+      dismiss: '关闭（下次失败仍会提示）',
     },
     exportText: '导出为文本',
     copyDone: '已复制到剪贴板',
@@ -3792,6 +3820,7 @@ export default {
       alreadyUpToDate: '已经是最新的，无需操作',
       centerNoUpdateSource: '中心实例未预置本平台的更新包且未配置更新源：请在中心的数据目录 serve-binaries/<平台>/ 下放置对应二进制，或在中心的设置中配置更新源（updateURL）',
       updateNpmManaged: '本实例经 npm 安装，更新请走包管理器：npm i -g codecombo@latest（尝鲜版 codecombo@next）——界面内自更新不适用于 npm 形态',
+      updateCompanionFetchFailed: '更新已拒绝：伴随校验资产（.sha256/.sig）在发布中但未能取到（{reason}）——请检查网络后重试；确需跳过校验可设置环境变量 CC_UPDATE_ALLOW_UNVERIFIED=1',
       centerBinaryMissing: '中心的更新源中没有本平台的安装包：请检查中心设置的更新源（updateURL），或改为在中心数据目录 serve-binaries/<平台>/ 下预置二进制',
       wrongPassphrase: '口令错误或导出文件已损坏',
       credSyncUnverified: '该实例尚未完成配对与指纹短码核对——请在同步中心「实例配对」完成配对并核对证书指纹后再携密同步',
@@ -5639,11 +5668,20 @@ export default {
     prereleaseLabel: '跟进预发布版本',
     prereleaseHint: '开启后 beta/rc 等预发布版本也会被检测到；默认只认正式版',
     prereleaseSaved: '更新通道已保存',
+    // 更新链出站代理（P-20261109-12）：公司代理/本地 clash 两类网络形态
+    proxyLabel: '更新代理（可选）',
+    proxyPlaceholder: 'http://proxy:8080 或 socks5://127.0.0.1:1080',
+    proxyHint: '更新检查与二进制下载经该代理出网（支持 http://、https:// 与 socks5://，后者覆盖本地 clash 等客户端端口形态）。适合公司内网代理或直连 GitHub 不稳定的网络。留空 = 使用标准环境变量（HTTPS_PROXY/HTTP_PROXY/NO_PROXY）。走代理后安全守卫降级为官方域名白名单：仅允许 GitHub 官方域与下方配置的中心分发源。',
+    proxyHintShort: '公司代理或本地 clash 填这里；留空走环境变量 HTTPS_PROXY',
+    proxySaved: '更新代理已保存',
+    proxyInvalid: '代理地址须以 http://、https:// 或 socks5:// 开头',
     sourceUrlSaved: '更新分发源已保存',
     sourceUrlInvalid: '地址须以 http:// 或 https:// 开头',
     sourceMissingHint: '更新源未启用——自更新源已内置官方仓库，此状态仅代表设置里的中心分发源地址非法被拒，请检查该字段',
     channelEmptyHint: '当前 stable 通道暂无正式版（GitHub 正式通道恒排预发布）——最新 beta/rc 可在下方开启「跟进预发布版本」跟进',
     checkFailedHint: '检查更新失败：{reason}',
+    companionFetchFailedHint: '伴随校验资产（.sha256/.sig）未取到，此刻更新将被拒——点击「立即更新」会先重新拉取，仍失败请检查网络后重试',
+    companionFetchFailedReason: '原因：{reason}',
     restartApp: '重启应用',
     restartConfirm: '确认重启本机 Codecombo 实例？服务会短暂离线（数秒），页面将自动等待恢复。',
     restartStarted: '重启指令已发出，等待服务恢复…',
@@ -5660,8 +5698,9 @@ export default {
     restarting: '重启中…',
     success: '更新成功',
     failed: '更新失败',
-    rolledBack: '已回滚',
     alreadyLatest: '已是最新版本',
+    alreadyLatestWithVersion: '已是最新版本（v{version}）',
+    checking: '检查中…',
     status: '状态',
     progress: '{percent}%',
     role: '角色',
@@ -5677,6 +5716,65 @@ export default {
     noParent: '无（独立实例）',
     updateSourceNotConfigured: '未配置更新源',
     updateStarted: '更新已开始',
+    // 更新进度可见性（P-20261109-10）：阶段文案按状态机全态登记（服务端 9 态
+    // + 前端推断两态 reconnecting/unknown），消费方经 stores/updateProgress
+    // 的 phaseLabelKey 映射取键——此前 t('update.' + status) 动态拼键在
+    // downloading/verifying 等态直出键名原文
+    phase: {
+      idle: '空闲',
+      checking: '检查更新中…',
+      downloading: '下载中',
+      verifying: '校验中',
+      replacing: '安装中',
+      restarting: '重启中',
+      reconnecting: '安装并重启中，等待新版本就绪…',
+      success: '更新成功',
+      failed: '更新失败',
+      rolled_back: '未成功，已回滚',
+      unknown: '结果未知',
+    },
+    // 版本面板进度/结局块
+    progressInfo: {
+      bytes: '{percent}%（{done} / {total}）',
+      background: '可关闭面板继续其他操作——进度见页面角落的更新徽标，结果会进通知中心',
+      reason: '原因：{reason}',
+      at: '时间：{time}',
+      lastOutcome: '上次更新',
+      unknownHint: '服务长时间未恢复，更新结果未知——请检查服务状态，或稍后刷新页面',
+      refreshHint: '新版本已生效；本页面仍在运行旧版界面，刷新后加载新界面',
+      refreshNow: '刷新页面',
+      dismiss: '知道了',
+    },
+    // 全局更新徽标（App 层常驻，全路由可见）
+    badge: {
+      running: '更新中 · {phase}',
+      runningPercent: '更新中 · {phase} {percent}%',
+      success: '已更新到 v{version} · 点击刷新',
+      successBare: '更新完成 · 点击刷新',
+      failed: '更新失败 · 查看原因',
+      rolledBack: '更新未成功已回滚 · 查看原因',
+      unknown: '更新结果未知 · 查看详情',
+      tip: '自更新进度——点击打开版本面板',
+      tipSuccess: '新版本已生效，刷新页面以加载新界面',
+      dismiss: '关闭更新提示',
+    },
+    // 服务端生命周期通知模板（server/update/notify.go titleKey/bodyKey，服务端
+    // 单一发射：开始/失败由受理进程入账，完成/回滚由换包后新进程启动观察窗入账）
+    notify: {
+      startedTitle: '开始更新到 v{version}',
+      startedBody: '下载、校验与安装在后台进行，可继续其他操作；进度见页面角落的更新徽标或版本面板',
+      failedTitle: '更新到 v{version} 失败',
+      failedTitleBare: '更新失败',
+      failedBody: '当前版本未受影响，可在版本面板查看原因并重试',
+      successTitle: '已更新到 v{version}',
+      successTitleBare: '更新已完成',
+      successBody: '刷新页面以使用新版本界面',
+      rolledBackTitle: '更新未成功，已自动回滚',
+      rolledBackBody: '已恢复为 v{version}，可在版本面板查看原因并重试',
+      rolledBackBodyBare: '已恢复为更新前的版本，可在版本面板查看原因并重试',
+      // 通知行内动作钮（action='update-panel'）
+      action: '查看详情',
+    },
   },
   // 工具栏与状态栏新增
   toolbar2: {
@@ -6227,8 +6325,6 @@ export default {
       longTaskFailed: '长任务失败',
       taskDuration: '耗时 {n} 秒',
       updateAvailable: '发现新版本',
-      updateCompleted: '系统更新完成',
-      updateFailed: '系统更新失败',
       backendDisconnected: '后端连接断开',
       backendReconnected: '后端已重连',
       // WS 长退避关闭码（P-20261005-185）：1009 服务端读上限超限 / 1011 服务端异常——

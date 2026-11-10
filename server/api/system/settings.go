@@ -88,11 +88,14 @@ func GetSettings(c *gin.Context) {
 			"terminalHistoryEnabled":       cfg.Server.TerminalHistoryEnabledOrDefault(),
 			"terminalPastePrecheckEnabled": cfg.Server.TerminalPastePrecheckEnabledOrDefault(),
 			"terminalRemoteTmux":           cfg.Server.TerminalRemoteTmuxOrDefault(),
-			"terminalTheme":                terminalTheme,
-			"terminalFont":                 font,
-			"uidensity":                    cfg.Server.UIDensityOrDefault(),
-			"sessionContext":               cfg.Server.SessionContextOrDefault(),
-			"agentProvider":                agentProvider,
+			// tmux 鼠标接管开关（P-20261109-7）：默认开（鼠标接管）；false=复制
+			// 优先模式（tmux mouse off，拖选落回 xterm 原生选择）
+			"terminalTmuxMouseEnabled": cfg.Server.TerminalTmuxMouseEnabledOrDefault(),
+			"terminalTheme":            terminalTheme,
+			"terminalFont":             font,
+			"uidensity":                cfg.Server.UIDensityOrDefault(),
+			"sessionContext":           cfg.Server.SessionContextOrDefault(),
+			"agentProvider":            agentProvider,
 			// 会话命名系统注记注入开关（P-20261023-3）：未配置默认开
 			"agentNamingNoteEnabled": cfg.Server.AgentNamingNoteEnabledOrDefault(),
 			"agentProviders":         agentops.ProviderNames(),
@@ -132,7 +135,9 @@ func GetSettings(c *gin.Context) {
 			"updateURL":          cfg.Server.UpdateURL,
 			"updateChecks":       cfg.Server.UpdateChecks,
 			"updateChannel":      cfg.Server.UpdateChannel,
-			"externalAccessUrl":  cfg.Server.ExternalAccessURL,
+			// 更新链出站代理（P-20261109-12）：空 = 回环境变量感知（HTTPS_PROXY）
+			"updateProxy":       cfg.Server.UpdateProxy,
+			"externalAccessUrl": cfg.Server.ExternalAccessURL,
 			// 多实例同步本端落位根（P-20261023-1）：空串 = 默认（主目录下
 			// simple-coding-sync/），前端展示默认值说明
 			"syncDestRoot": cfg.Server.SyncDestRoot,
@@ -278,11 +283,15 @@ func UpdateSettings(c *gin.Context) {
 		TerminalHistoryEnabled       *bool   `json:"terminalHistoryEnabled"`
 		TerminalPastePrecheckEnabled *bool   `json:"terminalPastePrecheckEnabled"`
 		TerminalRemoteTmux           *bool   `json:"terminalRemoteTmux"`
-		TerminalTheme                *string `json:"terminalTheme"`
-		TerminalFont                 *string `json:"terminalFont"`
-		UIDensity                    *string `json:"uidensity"`
-		SessionContext               *string `json:"sessionContext"`
-		AgentProvider                *string `json:"agentProvider"`
+		// tmux 鼠标接管开关（P-20261109-7）：指针直接透传（nil=不动，保持原值/
+		// 默认开）。落盘成功后 ApplyTmuxMouseOption 热切换——mouse 全局 session
+		// option 逐事件读取，现存全部专有 socket 会话即刻生效，无需重启/重挂
+		TerminalTmuxMouseEnabled *bool   `json:"terminalTmuxMouseEnabled"`
+		TerminalTheme            *string `json:"terminalTheme"`
+		TerminalFont             *string `json:"terminalFont"`
+		UIDensity                *string `json:"uidensity"`
+		SessionContext           *string `json:"sessionContext"`
+		AgentProvider            *string `json:"agentProvider"`
 		// AgentNamingNoteEnabled 会话命名系统注记注入开关（P-20261023-3）：
 		// 省略 = 不动；指针三态与既有开关字段同口径
 		AgentNamingNoteEnabled  *bool                       `json:"agentNamingNoteEnabled"`
@@ -317,6 +326,7 @@ func UpdateSettings(c *gin.Context) {
 		DshNpmCommand      *string `json:"dshNpmCommand"`
 		DshRollbackVersion *string `json:"dshRollbackVersion"`
 		UpdateURL          *string `json:"updateURL"`
+		UpdateProxy        *string `json:"updateProxy"` // 更新链出站代理（P-20261109-12），省略=不动
 		// UpdateChecks 自动检查更新开关（P-20261103-1）：省略 = 不动；
 		// 指针三态与既有开关字段同口径
 		UpdateChecks *bool `json:"updateChecks"`
@@ -425,6 +435,11 @@ func UpdateSettings(c *gin.Context) {
 	// 远程终端 tmux 持久化开关：指针直接透传（nil=未配置不动，保持原值/默认关）
 	if req.TerminalRemoteTmux != nil {
 		cfg.Server.TerminalRemoteTmux = req.TerminalRemoteTmux
+	}
+	// tmux 鼠标接管开关（P-20261109-7）：指针直接透传（nil=未配置不动，保持
+	// 原值/默认开）。热切换在落盘成功后统一执行（见 Save 之后）
+	if req.TerminalTmuxMouseEnabled != nil {
+		cfg.Server.TerminalTmuxMouseEnabled = req.TerminalTmuxMouseEnabled
 	}
 	if req.TerminalTheme != nil {
 		// 终端主题白名单（与前端 terminalThemeRegistry 保持一致）
@@ -741,6 +756,19 @@ func UpdateSettings(c *gin.Context) {
 		// 内置回填），不必重启
 		update.ApplySource(cfg)
 	}
+	// 更新链出站代理（P-20261109-12）：空串=清除（回环境变量感知）；非空仅接受
+	// http/https/socks5/socks5h，缺端口补默认归一。回环/内网代理地址合法（本地
+	// clash 端口、公司内网代理正是目标场景）。保存即热化（update.ApplySource 重装
+	// 出站状态与更新源），代理路径守卫=官方域白名单（urlsafety.go）
+	if req.UpdateProxy != nil {
+		v, err := update.NormalizeProxyURL(*req.UpdateProxy)
+		if err != nil {
+			shared.Error(c, http.StatusBadRequest, "Settings operation failed", err)
+			return
+		}
+		cfg.Server.UpdateProxy = v
+		update.ApplySource(cfg)
+	}
 	// 自动检查更新开关（P-20261103-1）：省略 = 不动；false = 定时检查完全
 	// 静默（手动检查不受影响——更新源内置化后始终可检）
 	if req.UpdateChecks != nil {
@@ -903,6 +931,13 @@ func UpdateSettings(c *gin.Context) {
 	if err := store.Get().Settings.Save(); err != nil {
 		shared.Error(c, http.StatusInternalServerError, "Settings operation failed", err)
 		return
+	}
+
+	// tmux 鼠标接管热切换（P-20261109-7）：落盘成功才执行（失败即未生效无切换），
+	// mouse 逐事件读取——现存全部专有 socket 会话即刻生效，新值下次 Create 运行
+	// 同步兜底。仅本字段被显式携带时执行（每次保存都戳 tmux 是无谓 exec）
+	if req.TerminalTmuxMouseEnabled != nil {
+		terminal.ApplyTmuxMouseOption(*req.TerminalTmuxMouseEnabled)
 	}
 
 	// 自定义敏感模式注册表即时同步（P-20261006-11）：落盘成功才注入（失败即

@@ -70,7 +70,7 @@ var manualWhitelist = map[string]string{
 	"/api/health":   "健康探针（无中间件保护）——进程探活面非能力面",
 	"/api/metrics":  "Prometheus 指标出口——监控系统消费",
 	"/api/shutdown": "本机优雅停机通道（回环+自定义头双约束）——进程管理面",
-	"/api/restart":  "本机优雅重启通道（回环+X-SC-Restart 头双约束，P-20261106 页面重启链）——进程管理面，同 shutdown 族",
+	"/api/restart":  "本机优雅重启通道（回环 OR 有效锁凭据 + X-SC-Restart 头双约束，P-20261106 页面重启链 / P-20261109-11 LAN 放开）——进程管理面，同 shutdown 族",
 	"/preview/":     "端口预览回环反代——传输通道非能力端点（浏览器 iframe 消费）",
 	"/proxy/":       "实例代理传输通道——机器间转发管道（发现面 routeWhitelist 同款豁免）",
 	"/ws/proxy/":    "实例代理 WS 传输通道——同 /proxy 的 WebSocket 形态",

@@ -25,6 +25,7 @@ type TmuxInfo struct {
 	Installable    bool   `json:"installable"`
 	PkgManager     string `json:"pkgManager"`
 	InstallCommand string `json:"installCommand"`
+	ClipboardFloor string `json:"clipboardFloor"`
 }
 
 // GetTmuxInfo Windows 平台：tmux 永远不可用，无包管理器
@@ -34,6 +35,9 @@ func GetTmuxInfo() TmuxInfo {
 		Required:  "3.3+ (Unix only)",
 	}
 }
+
+// ApplyTmuxMouseOption Windows stub：无 tmux 路径，恒 no-op
+func ApplyTmuxMouseOption(bool) {}
 
 // InstallTmuxResult 跨平台结构（与 Unix 版字段一致）
 type InstallTmuxResult struct {
@@ -64,11 +68,6 @@ func computeTmuxSessionName(projectID string) string {
 // 提供 stub 满足编译
 func parseTmuxSessionName(name string) (projHash, randID string, ok bool) { //nolint:unused // 平台对等 stub：实现与引用均在 unix 侧（tmux_cmd.go/recover.go）
 	return "", "", false
-}
-
-// parseTmuxVersion Windows 平台不会调用，提供 stub 满足测试编译
-func parseTmuxVersion(s string) (int, int, bool) { //nolint:unused // 平台对等 stub：实现与引用均在 unix 侧（tmux_cmd.go/recover.go）
-	return 0, 0, false
 }
 
 // ListExternalTmuxSessions Windows stub：tmux 不可用，外部会话面恒为空

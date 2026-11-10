@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -111,4 +112,32 @@ func TestApplyDataDirFlag_OverridesEnv(t *testing.T) {
 	if got := os.Getenv("CC_DATA_DIR"); got != "/tmp/from-flag" {
 		t.Fatalf("flag should override env, CC_DATA_DIR = %q", got)
 	}
+}
+
+// TestOfflineUpdateHint P-20261109-5：CLI 离线换包路径退役后的指引文案。
+// npm 形态直接给 npm 更新指令（不走服务端链——manager 对 npm 形态本就让位）；
+// 其余形态给「先起服务再 update（服务端 manager 全链：验签+回滚）/包管理器」
+// 两条出路。IsNpmManaged 双判据：CODECOMBO_INSTALLER 环境变量 + node_modules
+// 路径段——测试二进制路径不含 node_modules，注入 env 即可分别命中两分支
+func TestOfflineUpdateHint(t *testing.T) {
+	t.Run("npm 形态指向 npm 更新", func(t *testing.T) {
+		t.Setenv("CODECOMBO_INSTALLER", "npm")
+		hint := offlineUpdateHint()
+		if !strings.Contains(hint, "npm i -g codecombo@latest") {
+			t.Fatalf("npm hint should point to npm update, got: %s", hint)
+		}
+		if strings.Contains(hint, "codecombo start") {
+			t.Fatalf("npm hint should not suggest the server-side flow, got: %s", hint)
+		}
+	})
+
+	t.Run("非 npm 形态指向运行中服务端或包管理器", func(t *testing.T) {
+		t.Setenv("CODECOMBO_INSTALLER", "")
+		hint := offlineUpdateHint()
+		for _, want := range []string{"codecombo start", "codecombo update", "npm i -g codecombo@latest"} {
+			if !strings.Contains(hint, want) {
+				t.Fatalf("hint should contain %q, got: %s", want, hint)
+			}
+		}
+	})
 }

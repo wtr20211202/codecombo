@@ -269,3 +269,23 @@ describe('notification store handleSecondAction', () => {
     expect(store.showPanel).toBe(false)
   })
 })
+
+// 自更新通知「查看详情」（P-20261109-10）：update-panel 动作就地打开版本面板
+// （设置 → 关于），不进 pendingAction 路由桥——首页用户不被拽进项目页
+describe('notification store update-panel action', () => {
+  it('标已读 + 关面板 + 派发 about 分区定位，pendingAction 不落', async () => {
+    mockedApi.readOne.mockResolvedValue(apiRes({ ok: true }) as any)
+    const opened = vi.fn()
+    window.addEventListener('sc-open-settings', opened)
+    const store = useNotificationStore()
+    store.showPanel = true
+    store.items = [{ ...notif('u-1', '更新失败'), action: 'update-panel' }] as any
+    await store.handleClick(store.items[0]!)
+    await vi.waitFor(() => expect(opened).toHaveBeenCalledTimes(1))
+    window.removeEventListener('sc-open-settings', opened)
+    expect((opened.mock.calls[0]![0] as CustomEvent).detail).toBe('about')
+    expect(mockedApi.readOne).toHaveBeenCalledWith('u-1', { silent: true })
+    expect(store.showPanel).toBe(false)
+    expect(store.pendingAction).toBeNull()
+  })
+})

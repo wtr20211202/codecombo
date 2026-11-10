@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -42,7 +44,9 @@ func NewGitHubSource(repoURL string) (*GitHubSource, error) {
 	}
 	return &GitHubSource{
 		RepoURL: normalizeGitHubAPI(strings.TrimRight(repoURL, "/")),
-		client:  &http.Client{Timeout: 30 * time.Second, Transport: newSafeTransport()},
+		// safeRoundTripper：出站路径每请求现选（显式代理/env 代理/直连三态，
+		// P-20261109-12）——设置保存即生效，无须重建源
+		client: &http.Client{Timeout: 30 * time.Second, Transport: safeRoundTripper{}},
 	}, nil
 }
 
@@ -127,23 +131,155 @@ func (s *GitHubSource) FetchLatest(ctx context.Context, platform, arch string) (
 			FileSize:    fileSize,
 		}
 		// 伴随校验资产（安全 backlog A5）：<二进制名>.sha256 / <二进制名>.sig。
-		// 存在则拉取内容填充校验字段；缺失则留空，由 ApplyUpdate 按无校验策略处理
-		for _, companion := range release.Assets {
-			switch companion.Name {
-			case target + ".sha256":
-				if data, err := s.fetchSmall(ctx, companion.BrowserDownloadURL); err == nil {
-					info.ChecksumSHA256 = data
-				}
-			case target + ".sig":
-				if data, err := s.fetchSmall(ctx, companion.BrowserDownloadURL); err == nil {
-					info.Signature = data
-				}
-			}
-		}
+		// 三态（P-20261109-9）：不在列表=缺失（留空，ApplyUpdate 按无校验策略
+		// 处理）；在列表且拉到=填内容；在列表但拉取失败=填 *FetchErr 原因（旧
+		// 实现吞错，拉取失败被误报成「release 没提供」）。check 期急切拉取不
+		// 懒加载——面板据此即时提示「更新将被拒」，不等用户点了更新才暴露
+		s.fetchCompanions(ctx, release, target, info)
 		return info, nil
 	}
 
 	return nil, fmt.Errorf("no asset found for %s/%s (looking for %s)", platform, arch, assetName(platform, arch))
+}
+
+// 伴随资产拉取预算（P-20261109-9）：单资产一份总预算（context.WithTimeout）
+// 覆盖全部尝试与退避，两资产并发——坏链路下 check 最坏耗时由旧口径「client
+// 30s × 两文件串行 = 60s」收到一份预算；首试 + 2 次退避重试吸收连接重置 /
+// DNS 抖动 / CDN 5xx 等瞬时故障。主包下载的重试牵动状态机（进度/半截文件），
+// 另立不并入。包级变量便于测试压缩时长
+var (
+	companionFetchBudget   = 10 * time.Second
+	companionFetchAttempts = 3
+	// companionRetryBackoff 第 n 次重试前的退避（n 从 1 起：500ms、1s）
+	companionRetryBackoff = func(retry int) time.Duration {
+		return time.Duration(250<<retry) * time.Millisecond
+	}
+)
+
+// errEmptyCompanion 伴随资产拉到空内容：在列表即「release 提供了」，空内容按
+// 拉取失败计，不退化成「缺失」被误报为没提供；确定性结果不重试
+var errEmptyCompanion = errors.New("empty content")
+
+// companionStatusError 伴随资产非 200 响应（重试判定按状态码分流）
+type companionStatusError struct {
+	url    string
+	status int
+}
+
+func (e *companionStatusError) Error() string {
+	return fmt.Sprintf("fetch %s: status %d", e.url, e.status)
+}
+
+// fetchCompanions 并发拉取本产物的伴随校验资产，按三态填充 info
+func (s *GitHubSource) fetchCompanions(ctx context.Context, release *githubRelease, target string, info *ReleaseInfo) {
+	var checksumURL, sigURL string
+	var hasChecksum, hasSig bool
+	for _, asset := range release.Assets {
+		switch {
+		case asset.Name == target+".sha256" && !hasChecksum:
+			checksumURL, hasChecksum = asset.BrowserDownloadURL, true
+		case asset.Name == target+".sig" && !hasSig:
+			sigURL, hasSig = asset.BrowserDownloadURL, true
+		}
+	}
+	var wg sync.WaitGroup
+	// 两 goroutine 各写本资产的一对字段（内存位置不重叠），wg.Wait 建立先行关系。
+	// 拉取失败逐资产 slog.Warn：主进程日志镜像 stderr，是该失败的落点之一
+	//（update.log 属 _do_update 子进程，伴随拉取在主进程，那里记录不到）
+	fetch := func(name, url string, content, fetchErr *string) {
+		defer wg.Done()
+		data, err := s.fetchCompanion(ctx, url)
+		if err != nil {
+			slog.Warn("update: companion asset fetch failed", "asset", name, "err", err)
+			*fetchErr = err.Error()
+			return
+		}
+		*content = data
+	}
+	if hasChecksum {
+		wg.Add(1)
+		go fetch(target+".sha256", checksumURL, &info.ChecksumSHA256, &info.ChecksumFetchErr)
+	}
+	if hasSig {
+		wg.Add(1)
+		go fetch(target+".sig", sigURL, &info.Signature, &info.SigFetchErr)
+	}
+	wg.Wait()
+}
+
+// fetchCompanion 单资产有限重试：总预算 companionFetchBudget、至多
+// companionFetchAttempts 次；仅瞬时故障（传输错误/5xx/429）重试，404 等确定性
+// 失败、预算耗尽与外层取消立即收手。失败原因附尝试次数与预算耗尽注记，
+// 便于区分「一次就确定失败」「反复抖动」「链路慢到超预算」
+func (s *GitHubSource) fetchCompanion(ctx context.Context, url string) (string, error) {
+	bctx, cancel := context.WithTimeout(ctx, companionFetchBudget)
+	defer cancel()
+	attempt := 0
+	var lastErr error
+	for {
+		attempt++
+		data, err := s.fetchSmall(bctx, url)
+		if err == nil && data == "" {
+			err = errEmptyCompanion
+		}
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		if attempt >= companionFetchAttempts || !retryableCompanionErr(err) ||
+			!sleepCtx(bctx, companionRetryBackoff(attempt)) {
+			break
+		}
+	}
+	note := "after 1 attempt"
+	if attempt > 1 {
+		note = fmt.Sprintf("after %d attempts", attempt)
+	}
+	if errors.Is(bctx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		note += fmt.Sprintf(", %s budget exhausted", companionFetchBudget)
+	}
+	return "", fmt.Errorf("%w (%s)", lastErr, note)
+}
+
+// retryableCompanionErr 瞬时故障判定：HTTP 5xx/429 与传输层错误（连接重置/
+// DNS/握手超时）可重试；其余状态码（404/403 等）与空内容是确定性结果
+func retryableCompanionErr(err error) bool {
+	if errors.Is(err, errEmptyCompanion) {
+		return false
+	}
+	var se *companionStatusError
+	if errors.As(err, &se) {
+		return se.status >= 500 || se.status == http.StatusTooManyRequests
+	}
+	return true
+}
+
+// sleepCtx 可取消的等待：等满返回 true，ctx 先结束返回 false
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// redactURLError 剥掉 *url.Error 里请求地址的查询串：GitHub 资产经 302 跳到
+// 预签名 CDN 地址，签名参数数百字符，原样进面板/错误条不可读——host+path
+// 足以定位是哪一跳失败
+func redactURLError(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	u, perr := url.Parse(ue.URL)
+	if perr != nil || u.RawQuery == "" {
+		return err
+	}
+	u.RawQuery = ""
+	return &url.Error{Op: ue.Op, URL: u.String(), Err: ue.Err}
 }
 
 // fetchLatestIncludingPrerelease 列表端点取首个含本平台产物的 release
@@ -228,7 +364,8 @@ func (s *GitHubSource) fetchJSON(ctx context.Context, url string) ([]byte, error
 	return io.ReadAll(io.LimitReader(resp.Body, 512<<10))
 }
 
-// fetchSmall 拉取小文本资产（checksum / 签名文件），上限 64KB
+// fetchSmall 拉取小文本资产（checksum / 签名文件），上限 64KB。单次尝试——
+// 重试与预算由调用方 fetchCompanion 负责
 func (s *GitHubSource) fetchSmall(ctx context.Context, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -236,11 +373,11 @@ func (s *GitHubSource) fetchSmall(ctx context.Context, url string) (string, erro
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "", err
+		return "", redactURLError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("fetch %s: status %d", url, resp.StatusCode)
+		return "", &companionStatusError{url: url, status: resp.StatusCode}
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {

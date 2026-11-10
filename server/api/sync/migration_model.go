@@ -109,48 +109,50 @@ type MigrationTokens struct {
 }
 
 // MigrationPortableSettings 跨机可迁的系统设置白名单（ServerConfig 的策展
-// 子集）。**刻意排除**：Port/Host/TLS 证书路径/UpdateURL/ExternalAccessURL/
+// 子集）。**刻意排除**：Port/Host/TLS 证书路径/UpdateURL/UpdateProxy（更新链
+// 出站代理与机器网络形态绑定，P-20261109-12）/ExternalAccessURL/
 // TrustedProxies/SyncDestRoot/DshTargets 等机器与网络拓扑绑定字段——跨 OS 换机后这些
 // 值是垃圾甚至有害（端口冲突/证书路径不存在），迁移由用户在新机重配；
 // DshTargets 另含访问令牌且设置 GET 面本就不外发该字段，进 diff 预览等于
 // 新开一处令牌展示面（宁缺勿滥）
 type MigrationPortableSettings struct {
-	AutoFetch               bool                       `json:"autoFetch"`
-	FetchInterval           int                        `json:"fetchInterval"`
-	TerminalBackend         string                     `json:"terminalBackend"`
-	TerminalScrollbackLines int                        `json:"terminalScrollbackLines"`
-	TerminalMaxSessions     int                        `json:"terminalMaxSessions"`
-	TerminalTheme           string                     `json:"terminalTheme"`
-	TerminalFont            string                     `json:"terminalFont"`
-	UIDensity               string                     `json:"uidensity"`
-	SessionContext          string                     `json:"sessionContext"`
-	TerminalHistoryEnabled  *bool                      `json:"terminalHistoryEnabled,omitempty"`
-	TerminalPastePrecheck   *bool                      `json:"terminalPastePrecheckEnabled,omitempty"`
-	TerminalRemoteTmux      *bool                      `json:"terminalRemoteTmux,omitempty"`
-	TerminalIdleTimeoutMin  int                        `json:"terminalIdleTimeoutMin"`
-	TerminalDefaultShell    string                     `json:"terminalDefaultShell,omitempty"`
-	AgentProvider           string                     `json:"agentProvider"`
-	AgentNamingNoteEnabled  *bool                      `json:"agentNamingNoteEnabled,omitempty"`
-	AgentLaunchCommands     map[string]string          `json:"agentLaunchCommands,omitempty"`
-	CustomAgents            []config.CustomAgent       `json:"customAgents,omitempty"`
-	AgentGuard              *bool                      `json:"agentGuard,omitempty"`
-	AgentApprovalMode       string                     `json:"agentApprovalMode,omitempty"`
-	AgentApprovalRules      []config.AgentApprovalRule `json:"agentApprovalRules,omitempty"`
-	AgentApprovalTimeoutMin int                        `json:"agentApprovalTimeoutMin"`
-	ApprovalRecording       *bool                      `json:"approvalRecording,omitempty"`
-	CustomSensitivePatterns []string                   `json:"customSensitivePatterns,omitempty"`
-	UISnapshotEnabled       *bool                      `json:"uiSnapshotEnabled,omitempty"`
-	SensitiveExternalWatch  *bool                      `json:"sensitiveExternalWatch,omitempty"`
-	AuditRetentionDays      int                        `json:"auditRetentionDays"`
-	LogRetentionDays        int                        `json:"logRetentionDays"`
-	GitNetworkTimeoutSec    int                        `json:"gitNetworkTimeoutSec"`
-	HookURLAllowHosts       []string                   `json:"hookUrlAllowHosts,omitempty"`
-	DshWebBase              string                     `json:"dshWebBase,omitempty"`
-	DshProxyPort            int                        `json:"dshProxyPort"`
-	DshExposeAll            bool                       `json:"dshExposeAll"`
-	DshAllowStandalone      *bool                      `json:"dshAllowStandalone,omitempty"`
-	DshLaunchCommand        string                     `json:"dshLaunchCommand,omitempty"`
-	DshNpmCommand           string                     `json:"dshNpmCommand,omitempty"`
+	AutoFetch                bool                       `json:"autoFetch"`
+	FetchInterval            int                        `json:"fetchInterval"`
+	TerminalBackend          string                     `json:"terminalBackend"`
+	TerminalScrollbackLines  int                        `json:"terminalScrollbackLines"`
+	TerminalMaxSessions      int                        `json:"terminalMaxSessions"`
+	TerminalTheme            string                     `json:"terminalTheme"`
+	TerminalFont             string                     `json:"terminalFont"`
+	UIDensity                string                     `json:"uidensity"`
+	SessionContext           string                     `json:"sessionContext"`
+	TerminalHistoryEnabled   *bool                      `json:"terminalHistoryEnabled,omitempty"`
+	TerminalPastePrecheck    *bool                      `json:"terminalPastePrecheckEnabled,omitempty"`
+	TerminalRemoteTmux       *bool                      `json:"terminalRemoteTmux,omitempty"`
+	TerminalTmuxMouseEnabled *bool                      `json:"terminalTmuxMouseEnabled,omitempty"`
+	TerminalIdleTimeoutMin   int                        `json:"terminalIdleTimeoutMin"`
+	TerminalDefaultShell     string                     `json:"terminalDefaultShell,omitempty"`
+	AgentProvider            string                     `json:"agentProvider"`
+	AgentNamingNoteEnabled   *bool                      `json:"agentNamingNoteEnabled,omitempty"`
+	AgentLaunchCommands      map[string]string          `json:"agentLaunchCommands,omitempty"`
+	CustomAgents             []config.CustomAgent       `json:"customAgents,omitempty"`
+	AgentGuard               *bool                      `json:"agentGuard,omitempty"`
+	AgentApprovalMode        string                     `json:"agentApprovalMode,omitempty"`
+	AgentApprovalRules       []config.AgentApprovalRule `json:"agentApprovalRules,omitempty"`
+	AgentApprovalTimeoutMin  int                        `json:"agentApprovalTimeoutMin"`
+	ApprovalRecording        *bool                      `json:"approvalRecording,omitempty"`
+	CustomSensitivePatterns  []string                   `json:"customSensitivePatterns,omitempty"`
+	UISnapshotEnabled        *bool                      `json:"uiSnapshotEnabled,omitempty"`
+	SensitiveExternalWatch   *bool                      `json:"sensitiveExternalWatch,omitempty"`
+	AuditRetentionDays       int                        `json:"auditRetentionDays"`
+	LogRetentionDays         int                        `json:"logRetentionDays"`
+	GitNetworkTimeoutSec     int                        `json:"gitNetworkTimeoutSec"`
+	HookURLAllowHosts        []string                   `json:"hookUrlAllowHosts,omitempty"`
+	DshWebBase               string                     `json:"dshWebBase,omitempty"`
+	DshProxyPort             int                        `json:"dshProxyPort"`
+	DshExposeAll             bool                       `json:"dshExposeAll"`
+	DshAllowStandalone       *bool                      `json:"dshAllowStandalone,omitempty"`
+	DshLaunchCommand         string                     `json:"dshLaunchCommand,omitempty"`
+	DshNpmCommand            string                     `json:"dshNpmCommand,omitempty"`
 }
 
 // MigrationLockConfig 锁配置可迁字段（**明确不含** PasswordHash——Bitwarden

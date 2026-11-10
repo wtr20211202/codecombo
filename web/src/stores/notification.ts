@@ -9,6 +9,7 @@ import {
   type NotificationPrefs,
 } from '../api/client'
 import { OPS_SYNC_PROGRESS, OPS_WATCH_FALLBACK } from '../utils/opsEvents'
+import { openVersionPanel } from '../utils/openSettings'
 import { useWebSocketBase, registerWsLongBackoffNotifier, WS_CLOSE_MESSAGE_TOO_BIG } from '../composables/useWebSocketBase'
 import { registerReconnectRefetch, runReconnectRefetches } from '../composables/reconnectRefetch'
 import { useLockStore, getUnlockToken } from './lock'
@@ -314,6 +315,16 @@ export const useNotificationStore = defineStore('notification', () => {
       if (!n.read) void markRead(n.id)
       showPanel.value = false
       window.open(String(n.actionPayload), '_blank', 'noopener')
+      return
+    }
+    // 版本面板（P-20261109-10 自更新开始/失败/回滚通知「查看详情」）：设置弹窗
+    // 宿主首页/项目页皆有，就地经 OPEN_SETTINGS_EVENT 定位「关于」分区——不进
+    // pendingAction 路由桥（桥会把首页用户硬拽进项目页）；大屏路由由
+    // openVersionPanel 先回首页
+    if (n.action === 'update-panel') {
+      if (!n.read) void markRead(n.id)
+      showPanel.value = false
+      void openVersionPanel()
       return
     }
     if (!n.read) await markRead(n.id)
