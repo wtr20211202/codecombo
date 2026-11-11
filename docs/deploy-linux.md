@@ -50,6 +50,10 @@ User=cld
 Group=cld
 ExecStart=/opt/codecombo/bin/codecombo --serve --port=9999 --host 0.0.0.0
 Environment=CC_DATA_DIR=/var/lib/codecombo
+# 更新链代理（可选）：服务器场景惯用环境变量档——取消注释并换成自己的代理
+# 地址即启用；NO_PROXY 照常豁免部分目标（说明见模板下方）
+#Environment=HTTPS_PROXY=http://proxy.example.com:8080
+#Environment=NO_PROXY=localhost,127.0.0.1,.internal.example.com
 Restart=on-failure
 RestartSec=3
 # 沙箱加固（数据目录在 /var/lib 时与 SELinux/ProtectSystem 无冲突）
@@ -75,6 +79,16 @@ sudo cp dist/codecombo-linux-amd64 /opt/codecombo/bin/codecombo
 sudo chown -R cld:cld /var/lib/codecombo /opt/codecombo
 sudo systemctl daemon-reload && sudo systemctl enable --now codecombo
 ```
+
+更新链代理（可选）：服务器直连 GitHub 不稳时，取消注释模板里的
+`Environment=HTTPS_PROXY=…`（需要对部分目标直连再配
+`Environment=NO_PROXY=…`）并换成自己的代理地址——改 unit 后必须
+`sudo systemctl daemon-reload && sudo systemctl restart codecombo` 才生效
+（环境变量随进程启动注入，运行中的进程不会重读）。更新链出站档序：显式设置 > 环境变量 >
+系统代理自动探测（开关开时）> 直连——设置页填了「更新代理」则以它为准；
+当前生效档位可在版本面板「当前生效」处查看，或
+`GET /api/updates/proxy-status` 核对（四档完整说明见
+[README 更新链代理节](README.zh-CN.md#更新链代理)）。
 
 手工布局还要同装 polkit 放行规则（`install.sh` 脚本装与远程部署器会自动
 写入，本节手工装需手动放行）——应用内自更新收尾与「重启应用」按钮以服务

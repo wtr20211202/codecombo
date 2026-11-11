@@ -211,14 +211,19 @@ func handleSOCKS5(conn net.Conn, log *targetLog, tunnels *tunnelSet) {
 
 // ── 夹具 ────────────────────────────────────────────────────────────────
 
-// resetOutboundForTest 测试期出站态治理：进出站配置与 env 探询口快照回滚
+// resetOutboundForTest 测试期出站态治理：进出站配置与 env 探询口 / 系统代理探测口 /
+// NO_PROXY 判定口（S6）快照回滚
 func resetOutboundForTest(t *testing.T) {
 	t.Helper()
 	prevState := outbound.Load()
 	prevHook := envProxyFor
+	prevDetect := detectSystemProxyFn
+	prevNoProxy := noProxyMatchFor
 	t.Cleanup(func() {
 		outbound.Store(prevState)
 		envProxyFor = prevHook
+		detectSystemProxyFn = prevDetect
+		noProxyMatchFor = prevNoProxy
 	})
 }
 
@@ -366,7 +371,7 @@ func TestRoundTripperSelection(t *testing.T) {
 
 	// 显式设置代理：对更新链全量生效；官方域与显式配置的更新源 host 均放行，
 	// 其余域拒
-	if err := SetOutbound("http://explicit.example:8080", "gitea.example.com"); err != nil {
+	if err := SetOutbound("http://explicit.example:8080", "gitea.example.com", false); err != nil {
 		t.Fatal(err)
 	}
 	rt, err = roundTripperFor(official)
@@ -389,7 +394,7 @@ func TestRoundTripperSelection(t *testing.T) {
 	}
 
 	// 内网 IP 目标：即使代理代解析使拨号期复查不可用，字面层白名单仍收口
-	if err := SetOutbound("socks5://127.0.0.1:1080", ""); err != nil {
+	if err := SetOutbound("socks5://127.0.0.1:1080", "", false); err != nil {
 		t.Fatal(err)
 	}
 	_, err = roundTripperFor(mustParseRaw(t, "https://10.0.0.5/steal"))
@@ -400,7 +405,7 @@ func TestRoundTripperSelection(t *testing.T) {
 
 func TestCheckProxyTargetHost(t *testing.T) {
 	resetOutboundForTest(t)
-	_ = SetOutbound("", "gitea.example.com")
+	_ = SetOutbound("", "gitea.example.com", false)
 
 	cases := []struct {
 		raw  string
@@ -429,10 +434,10 @@ func TestCheckProxyTargetHost(t *testing.T) {
 
 func TestSetOutboundInvalidProxyKeepsState(t *testing.T) {
 	resetOutboundForTest(t)
-	if err := SetOutbound("http://good.example:3128", ""); err != nil {
+	if err := SetOutbound("http://good.example:3128", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetOutbound("ftp://bad.example", ""); err == nil {
+	if err := SetOutbound("ftp://bad.example", "", false); err == nil {
 		t.Fatal("invalid scheme must be rejected")
 	}
 	st := outbound.Load()
@@ -459,11 +464,17 @@ func TestNormalizeProxyURL(t *testing.T) {
 		{"socks5h://clash.example", "socks5h://clash.example:1080"},
 		{"http://user:pass@proxy.example:3128", "http://user:pass@proxy.example:3128"},
 		{"  http://proxy.example:8080  ", "http://proxy.example:8080"},
+		// 「host:」空端口按缺端口补默认（曾拼成 url.Parse 不认的 host::80 坏串）；
+		// IPv6 字面量补默认端口保持方括号
+		{"http://proxy.example:", "http://proxy.example:80"},
+		{"socks5://[::1]", "socks5://[::1]:1080"},
 		{"ftp://proxy.example", ""},
 		{"proxy.example:8080", ""}, // 无 scheme
 		{"http://", ""},            // 无 host
 		{"http://proxy.example:8080/path", ""},
 		{"http://proxy.example:8080?x=1", ""},
+		{"http://proxy.example:0", ""},     // 端口须 1–65535
+		{"http://proxy.example:65536", ""}, // 同上
 	}
 	for _, c := range cases {
 		got, err := NormalizeProxyURL(c.in)

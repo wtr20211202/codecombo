@@ -2,6 +2,7 @@ package update
 
 import (
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"codecombo/server/notification"
@@ -138,11 +139,25 @@ func resultNotification(r *UpdateResult, running string) (notification.Notificat
 // 路径在重拉旧进程之后落盘）——两者都晚于本进程模块 Start，启动时只读一次
 // 必然扑空（原方案「Start 读结果文件」的时序缺口）。窗口覆盖健康检查 15s +
 // 回滚重拉余量；无结果文件的常规启动只付出窗口内的 stat 级轮询。包级变量供
-// 测试压缩
+// 测试压缩——取值口为原子形态（P-20261110-1 S6 入 race 门禁时暴露的存量测试
+// 竞争：前一用例经 Module.Start 起的观察窗 goroutine 收尾期仍在逐轮读间隔，
+// 后一用例压缩窗口即并发写；生产从不改写，取值与读取点零变化）
 var (
-	resultWatchWindow   = 2 * time.Minute
-	resultWatchInterval = 2 * time.Second
+	resultWatchWindow   = newAtomicDuration(2 * time.Minute)
+	resultWatchInterval = newAtomicDuration(2 * time.Second)
 )
+
+// atomicDuration 可并发读写的时长取值口（仅测试改写，观察窗 goroutine 并发读）
+type atomicDuration struct{ ns atomic.Int64 }
+
+func newAtomicDuration(d time.Duration) *atomicDuration {
+	a := &atomicDuration{}
+	a.ns.Store(int64(d))
+	return a
+}
+
+func (a *atomicDuration) Load() time.Duration   { return time.Duration(a.ns.Load()) }
+func (a *atomicDuration) Store(d time.Duration) { a.ns.Store(int64(d)) }
 
 // resultFreshWindow 结果新鲜窗：与启动期 ClearOldUpdateResult 的 5 分钟同口径
 // ——超窗的结果不补推（迟到的「更新完成」是噪声，通知中心也已有当时的记录）

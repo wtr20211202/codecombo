@@ -136,8 +136,11 @@ func GetSettings(c *gin.Context) {
 			"updateChecks":       cfg.Server.UpdateChecks,
 			"updateChannel":      cfg.Server.UpdateChannel,
 			// 更新链出站代理（P-20261109-12）：空 = 回环境变量感知（HTTPS_PROXY）
-			"updateProxy":       cfg.Server.UpdateProxy,
-			"externalAccessUrl": cfg.Server.ExternalAccessURL,
+			"updateProxy": cfg.Server.UpdateProxy,
+			// 系统代理自动探测开关（P-20261110-1 S6）：默认 false（存量零变化）；
+			// 当前生效档位见 GET /api/updates/proxy-status
+			"updateProxyAutoDetect": cfg.Server.UpdateProxyAutoDetect,
+			"externalAccessUrl":     cfg.Server.ExternalAccessURL,
 			// 多实例同步本端落位根（P-20261023-1）：空串 = 默认（主目录下
 			// simple-coding-sync/），前端展示默认值说明
 			"syncDestRoot": cfg.Server.SyncDestRoot,
@@ -327,6 +330,9 @@ func UpdateSettings(c *gin.Context) {
 		DshRollbackVersion *string `json:"dshRollbackVersion"`
 		UpdateURL          *string `json:"updateURL"`
 		UpdateProxy        *string `json:"updateProxy"` // 更新链出站代理（P-20261109-12），省略=不动
+		// UpdateProxyAutoDetect 系统代理自动探测开关（P-20261110-1 S6）：省略 =
+		// 不动；指针三态与既有开关字段同口径
+		UpdateProxyAutoDetect *bool `json:"updateProxyAutoDetect"`
 		// UpdateChecks 自动检查更新开关（P-20261103-1）：省略 = 不动；
 		// 指针三态与既有开关字段同口径
 		UpdateChecks *bool `json:"updateChecks"`
@@ -740,6 +746,11 @@ func UpdateSettings(c *gin.Context) {
 	if req.DshRollbackVersion != nil {
 		cfg.Server.DshRollbackVersion = strings.TrimSpace(*req.DshRollbackVersion)
 	}
+	// 更新链四字段（分发源/出站代理/探测开关/通道）任一被携带即标记，组内校验
+	// 全部通过后统一经 update.ApplySource 单点重装配一次（P-20261110-1 S6 收口：
+	// 探测开关开时装配点会同步探测系统代理，原先每字段各调一次在多字段保存时
+	// 会重复探测）
+	reapplyUpdate := false
 	if req.UpdateURL != nil {
 		// 更新分发源（serve-binary 跨平台缓存的 GitHub Release 地址）：
 		// 空串 = 清除（同平台子实例直接用中心自身二进制，无需更新源）；
@@ -754,7 +765,7 @@ func UpdateSettings(c *gin.Context) {
 		cfg.Server.UpdateURL = u
 		// 运行时热接线（P-20261106）：自更新源按新设置即时重装配（空=官方仓
 		// 内置回填），不必重启
-		update.ApplySource(cfg)
+		reapplyUpdate = true
 	}
 	// 更新链出站代理（P-20261109-12）：空串=清除（回环境变量感知）；非空仅接受
 	// http/https/socks5/socks5h，缺端口补默认归一。回环/内网代理地址合法（本地
@@ -767,7 +778,14 @@ func UpdateSettings(c *gin.Context) {
 			return
 		}
 		cfg.Server.UpdateProxy = v
-		update.ApplySource(cfg)
+		reapplyUpdate = true
+	}
+	// 系统代理自动探测开关（P-20261110-1 S6）：省略 = 不动；保存即热化——经
+	// update.ApplySource 既有单点重装配出站态（开时装配点同步探测一次），选路档序
+	// 显式 > env > 系统探测 > 直连
+	if req.UpdateProxyAutoDetect != nil {
+		cfg.Server.UpdateProxyAutoDetect = *req.UpdateProxyAutoDetect
+		reapplyUpdate = true
 	}
 	// 自动检查更新开关（P-20261103-1）：省略 = 不动；false = 定时检查完全
 	// 静默（手动检查不受影响——更新源内置化后始终可检）
@@ -787,6 +805,9 @@ func UpdateSettings(c *gin.Context) {
 		// 运行时热切换（P-20261106）：通道标志原本只在 update Init 接线一次，
 		// 保存后要重启才生效（用户实锚：开了「跟进预发布版本」仍查不到 beta）
 		// ——这里按新设置即时重装配源，开关保存即生效
+		reapplyUpdate = true
+	}
+	if reapplyUpdate {
 		update.ApplySource(cfg)
 	}
 	// 外部访问地址（P-20261019-10）：只接受 http/https origin（无凭据/路径/

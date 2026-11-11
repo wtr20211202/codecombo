@@ -67,6 +67,11 @@ type UpdateStatusResult struct {
 	Total    int64  `json:"total"`
 	Version  string `json:"version"`
 	ErrMsg   string `json:"errMsg"`
+	// ResumedBytes 本次下载尝试实际从 .part 续传的起点字节数（P-20261110-1-S4，
+	// 取值唯一来源 = downloadResumable 的追加基偏移；全量回退归 0）。增量字段
+	// omitempty——0 时省略，旧前端忽略未知字段零影响。重试场景（S2 重试分层后
+	// 每次重试亦经 downloadResumable）语义 = 当前这次尝试的续传起点
+	ResumedBytes int64 `json:"resumedBytes,omitempty"`
 }
 
 // ProgressCallback 下载进度回调
@@ -74,15 +79,16 @@ type ProgressCallback func(downloaded, total int64)
 
 // Manager 更新管理器
 type Manager struct {
-	mu         sync.Mutex
-	status     Status
-	progress   int64
-	total      int64
-	version    string
-	errMsg     string
-	source     UpdateSource
-	dataDir    string
-	binaryPath string
+	mu           sync.Mutex
+	status       Status
+	progress     int64
+	total        int64
+	resumedBytes int64 // 本次下载尝试的续传起点（downloadResumable 写入，见 UpdateStatusResult）
+	version      string
+	errMsg       string
+	source       UpdateSource
+	dataDir      string
+	binaryPath   string
 
 	// 版本缓存
 	cachedInfo    *ReleaseInfo
@@ -139,11 +145,12 @@ func (m *Manager) GetStatus() UpdateStatusResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return UpdateStatusResult{
-		Status:   m.status,
-		Progress: m.progress,
-		Total:    m.total,
-		Version:  m.version,
-		ErrMsg:   m.errMsg,
+		Status:       m.status,
+		Progress:     m.progress,
+		Total:        m.total,
+		ResumedBytes: m.resumedBytes,
+		Version:      m.version,
+		ErrMsg:       m.errMsg,
 	}
 }
 
@@ -190,6 +197,10 @@ func (m *Manager) CheckUpdateWithCache(ctx context.Context, currentVersion strin
 	}
 
 	platform, arch := DetectPlatform()
+	// 更新尝试边界探测挂点（P-20261110-1 S6）：真要出网取数时探测一次系统代理
+	// （开关关零探测；上方缓存命中不出网即不探测），本次检查的全部请求（release
+	// 端点 + 伴随资产及其 302 跳）共用这份快照——选路热路径不再探测
+	refreshSystemProxyDetection(ctx)
 	info, err := source.FetchLatest(ctx, platform, arch)
 	if err != nil {
 		// 请求失败时返回过期缓存（skipCache 调用方要实时结果，不回落）
@@ -221,6 +232,11 @@ var ErrUpdateInProgress = errors.New("update already in progress")
 // verifyUpdateFn 校验步骤取值口（默认 verifyUpdate）：单测替换以断言流水线
 // 在校验时刻处于 verifying 阶段（P-20261109-10），生产路径恒为 verifyUpdate
 var verifyUpdateFn = verifyUpdate
+
+// launchUpdateSubprocessFn 换包子进程拉起取值口（默认 LaunchUpdateSubprocess）：
+// 单测替换以断言流水线走完校验后的替换阶段并核对下发参数——测试绝不真实 spawn
+// 换包进程（该进程会等待测试进程退出后真实换包，护栏），生产路径恒为本体
+var launchUpdateSubprocessFn = LaunchUpdateSubprocess
 
 // companionRefetchTimeout 受理前伴随重拉的总时限（P-20261109-9）：release 端点 +
 // 伴随资产预算（companionFetchBudget）之和的上界。重拉发生在受理之前、请求方
@@ -336,14 +352,18 @@ func (m *Manager) applyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 		m.status = StatusFailed
 		m.progress = 0
 		m.total = 0
+		m.resumedBytes = 0
 		m.version = info.Version
 		m.errMsg = err.Error()
 		m.mu.Unlock()
 		return err
 	}
+	// 新受理从零起算：resumedBytes 由 downloadResumable 按本尝试的实际续传偏移
+	// 覆写（上一次失败尝试的旧值不得泄漏进新受理的状态面）
 	m.status = StatusDownloading
 	m.progress = 0
 	m.total = info.FileSize
+	m.resumedBytes = 0
 	m.version = info.Version
 	m.errMsg = ""
 	m.mu.Unlock()
@@ -373,9 +393,16 @@ func (m *Manager) applyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 	}
 
 	newBinary := filepath.Join(tmpDir, filepath.Base(m.binaryPath))
-	if err := m.download(ctx, info.DownloadURL, newBinary, progressCB, true); err != nil {
-		// 下载失败清理：半截文件与本次临时目录都不留给下次（重试从干净状态开始）
-		os.RemoveAll(tmpDir)
+	// 更新尝试边界探测挂点（P-20261110-1 S6）：受理后、出网下载前探测一次系统代理
+	// （开关关零探测），整条下载（含资产 302 跳）共用该快照
+	refreshSystemProxyDetection(ctx)
+	// 断点续传下载（P-20261110-1-S1）+ 续传重试（P-20261110-1-S2）：目标改写
+	// <binary>.part，失败/终止/进程死亡保留半截文件与旁元数据——同一受理内的瞬时
+	// 故障由重试层自动退避重拨、从已有字节续传；重试耗尽落 failed，下一次受理（或
+	// 重启后再受理）接着续。历史行为「失败即 os.RemoveAll(tmpDir) 从零重来」随续传
+	// 语义退役——大包慢网下一次停滞即前功尽弃；孤儿目录由启动期 CleanupOldUpdateTmp
+	// 7 天回收
+	if err := m.downloadResumableWithRetry(ctx, info.DownloadURL, newBinary, progressCB); err != nil {
 		m.fail("download failed: " + err.Error())
 		return err
 	}
@@ -399,7 +426,7 @@ func (m *Manager) applyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 	m.mu.Unlock()
 
 	pid := os.Getpid()
-	if err := LaunchUpdateSubprocess(m.binaryPath, newBinary, port, pid, m.dataDir, info.Version, currentVersion); err != nil {
+	if err := launchUpdateSubprocessFn(m.binaryPath, newBinary, port, pid, m.dataDir, info.Version, currentVersion); err != nil {
 		m.fail("start update process failed: " + err.Error())
 		return err
 	}
@@ -418,24 +445,125 @@ func (m *Manager) applyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 // 中止并报错（http.Client 对大文件不能设整体超时，停滞检测是唯一可靠保护）
 const downloadStallTimeout = 60 * time.Second
 
-// download 下载文件（带可选进度回调）。响应 ctx 取消与停滞检测
-// downloadClient 下载专用：safeRoundTripper 出站选路（显式代理/env 代理命中时
-// 过官方域白名单，直连档 https + 拒绝内网/保留地址，P-20261109-12），不设整体
-// 超时——大文件下载的停滞检测由下方 read 循环负责
+// stallTimeout 停滞判定取值口（默认 downloadStallTimeout，生产路径恒取 60s）：
+// 包级原子变量仅为测试压缩——「看门狗判死 → 当次尝试失败 → 重试层另拨号续传」
+// 是 P-20261110-1-S2 的提案点名形态，60s 常量塞不进单测。原子形态同 notify.go
+// 的 resultWatchWindow：每个下载会话起点读一次（pumpResponseBody），后台流水线
+// goroutine 的读与测试收尾期的改写可能并发，普通变量在 -race 门禁（wsl-verify
+// race 清单含本包）下即数据竞争
+var stallTimeout = newAtomicDuration(downloadStallTimeout)
+
+// downloadClient 下载专用：safeRoundTripper 出站选路（显式代理/env 代理/系统探测
+// 代理命中时过官方域白名单，直连档 https + 拒绝内网/保留地址，P-20261109-12 +
+// P-20261110-1 S6），不设整体超时——大文件下载的停滞检测由 pumpResponseBody 的
+// read 循环负责
 var downloadClient = &http.Client{Transport: safeRoundTripper{}}
 
-// track 是否回写状态机进度：仅自更新下载为 true。中心分发的跨平台缓存下载
-// （DownloadToFile → ServeBinary）共用本函数，若也回写会与并发的自更新下载
-// 互踩 progress/total（P-20261109-10 进度事实源收口）
+// validateDownloadURL 下载地址校验口（默认 ValidatePublicHTTPSURL，P-20261110-1）：
+// 包级变量仅为测试注入——续传协议的 Range/206/416 各态要用 httptest 本地源演练，
+// 而生产直连档的拨号期 IP 守卫本就拒绝回环，两道闸共用一个注入口
+var validateDownloadURL = ValidatePublicHTTPSURL
+
+// 主包下载自动退避重试预算（P-20261110-1-S2，companionFetchAttempts 同风格）：
+// 首试 + 2 次退避重试，吸收连接重置/DNS 抖动/CDN 5xx 等瞬时故障——停滞看门狗
+// 判死的死链同属瞬时态，下一拨号自愈常见。仅瞬时故障重试（retryableDownloadErr），
+// 确定性失败（403/404 等）与外层取消立即收手。重试即续传重试：重试层套在 S1 续传
+// 会话外层（downloadResumableWithRetry），中心分发缓存路径不经本层。包级变量便于
+// 测试压缩时长
+var (
+	downloadRetryAttempts = 3
+	// downloadRetryBackoff 第 n 次重试前的退避（n 从 1 起：500ms、1s），与伴随
+	// 资产拉取 companionRetryBackoff 同曲线同源（一处定义两处消费）
+	downloadRetryBackoff = companionRetryBackoff
+)
+
+// downloadStatusError 续传会话（downloadResumable）的非预期状态码响应：重试判定按
+// 状态码分流（companionStatusError 同款分类）。文案沿历史「download returned N」
+// 不夹 URL——GitHub 资产 302 后是带数百字符签名参数的预签名 CDN 地址，进失败态
+// errMsg 不可读
+type downloadStatusError struct{ status int }
+
+func (e *downloadStatusError) Error() string { return fmt.Sprintf("download returned %d", e.status) }
+
+// retryableDownloadErr 瞬时故障判定：HTTP 5xx/429 与传输层错误（连接重置/DNS/
+// 拨号与握手超时/停滞看门狗判死）可重试；其余状态码（403/404 等确定性结果）
+// 不重试。其余未知错误按可重试计（与伴随拉取 retryableCompanionErr 同口径，
+// 磁盘满等多拨号代价可忽略、空间预检在受理前已做）——续传会话完整性闸未过
+// （源端截短 206 区间，.part 已保留增长后的字节）同属此类，下一尝试从截断处续上。
+// 外层取消不在此分流——由重试层先行 ctx.Err() 判定收手：Go 的拨号超时
+// （"i/o timeout"）与响应头超时都满足 errors.Is(err, context.DeadlineExceeded)，
+// 按 context 错误排除会把 CDN 连接超时这类最常见的瞬时故障误判成确定性失败
+// （单测实锚）
+func retryableDownloadErr(err error) bool {
+	var se *downloadStatusError
+	if errors.As(err, &se) {
+		return se.status >= 500 || se.status == http.StatusTooManyRequests
+	}
+	return true
+}
+
+// downloadResumableWithRetry 自更新主包下载 = 续传重试（P-20261110-1-S2 收编进 S1
+// 续传路径，applyUpdate 单一调用方）：每次尝试即一次 downloadResumable 会话——失败
+// 尝试留下的 .part 与旁元数据跨尝试原样保留，下一尝试带 Range 从已有偏移续传（身份
+// 核对 / 200·416 全量回退 / 完整性闸逐次照 S1 语义生效，资产漂移即丢弃重下）。进度
+// 从续传偏移起步不回零：会话拿到响应即把进度落到续传起点，退避窗内停在上一尝试的
+// 末次采样——重试层刻意不碰进度（全量重试形态的「重试前进度归零」已随收编删除）。
+// 停滞看门狗 60s 判死即当次尝试失败、重试层另拨号；超限/确定性失败透真实原因（附
+// 尝试注记，失败态 errMsg 原文可读），.part 留给下一次受理续传（续传触发点=下次
+// apply 的下载启动，非 check 轮询）。中心分发缓存（download/DownloadToFile）维持
+// S1 定案的单拨号全量模式不经本层（作用域收窄：缓存可再生，下一次分发请求即重拉）
+func (m *Manager) downloadResumableWithRetry(ctx context.Context, url, dest string, progressCB ProgressCallback) error {
+	// 地址校验是确定性结果，不参与重试（续传会话内照常复核；纯字面量校验不拨号，
+	// 重复代价可忽略）
+	if err := validateDownloadURL(url); err != nil {
+		return err
+	}
+	attempt := 0
+	var lastErr error
+	for {
+		attempt++
+		err := m.downloadResumable(ctx, url, dest, progressCB)
+		if err == nil {
+			return nil
+		}
+		// 传输错误剥预签名 CDN 查询串（redactURLError，companion 同款）——host+path
+		// 足以定位是哪一跳失败。续传会话的传输错误即 Do 原样返回的 *url.Error，
+		// 其余错误不含 *url.Error、原样透过
+		err = redactURLError(err)
+		lastErr = err
+		// 外层取消（停机/请求方放弃）：立即收手不重试
+		if ctx.Err() != nil {
+			return err
+		}
+		if attempt >= downloadRetryAttempts || !retryableDownloadErr(err) {
+			break
+		}
+		if !sleepCtx(ctx, downloadRetryBackoff(attempt)) {
+			break // 退避期间外层取消
+		}
+		slog.Warn("update: download attempt failed, retrying (resume from kept .part)", "attempt", attempt, "err", err)
+	}
+	// 超限/确定性失败透真实原因：附尝试次数注记（companion fetchCompanion 同款），
+	// 「一次就确定失败」与「反复抖动后超限」在失败态 errMsg 里可区分
+	note := "after 1 attempt"
+	if attempt > 1 {
+		note = fmt.Sprintf("after %d attempts", attempt)
+	}
+	return fmt.Errorf("%w (%s)", lastErr, note)
+}
+
+// download 全量下载（带可选进度回调），响应 ctx 取消与停滞检测。P-20261110-1-S1
+// 起自更新改走断点续传 downloadResumable，本函数只剩中心分发缓存（DownloadToFile
+// → ServeBinary，track=false）一个调用方，直写 dest、不产 .part 旁产物；亦不经
+// 续传重试层（P-20261110-1-S2 作用域收窄：失败即弃，缓存由下一次分发请求重拉）。
+// track 是否回写状态机进度：中心分发下载若也回写会与并发的自更新下载互踩
+// progress/total（P-20261109-10 进度事实源收口），故恒为 false
 func (m *Manager) download(ctx context.Context, url, dest string, progressCB ProgressCallback, track bool) error {
 	// 下载地址来自更新源 API 响应（非本地配置）：同样强制 https 公网，
 	// 防响应被篡改后把二进制拉取指向内网/本机
-	if err := ValidatePublicHTTPSURL(url); err != nil {
+	if err := validateDownloadURL(url); err != nil {
 		return err
 	}
-	// 停滞看门狗：Body.Read 阻塞期间循环顶部的 lastProgress 检查永不执行（历史
-	// 缺陷——检测点在阻塞读之前等于失效），由 watchdog 在 stall 超时后 cancel
-	// 请求强制解开 Read，循环顶/读错误分支再区分「外层取消」与「停滞」
 	dctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req, err := http.NewRequestWithContext(dctx, http.MethodGet, url, nil)
@@ -463,63 +591,24 @@ func (m *Manager) download(ctx context.Context, url, dest string, progressCB Pro
 		m.mu.Unlock()
 	}
 
-	watchdog := time.AfterFunc(downloadStallTimeout, cancel)
-	defer watchdog.Stop()
-	body := &stallResetBody{ReadCloser: resp.Body, reset: func() { watchdog.Reset(downloadStallTimeout) }}
-
 	f, err := os.Create(dest)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	buf := make([]byte, 32*1024)
-	var written int64
-	var lastUpdate time.Time
-	lastProgress := time.Now()
-	for {
-		// 响应取消 + 停滞检测兜底（看门狗触发时由下方分支给出准确报错）
-		if err := dctx.Err(); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return fmt.Errorf("download stalled: no data for %s", downloadStallTimeout)
+	written, err := pumpResponseBody(ctx, dctx, cancel, resp.Body, f, func(n int64) {
+		if track {
+			m.mu.Lock()
+			m.progress = n
+			m.mu.Unlock()
 		}
-		if time.Since(lastProgress) > downloadStallTimeout {
-			return fmt.Errorf("download stalled: no data for %s", downloadStallTimeout)
+		if progressCB != nil {
+			progressCB(n, resp.ContentLength)
 		}
-		n, readErr := body.Read(buf)
-		if n > 0 {
-			if _, wErr := f.Write(buf[:n]); wErr != nil {
-				return wErr
-			}
-			written += int64(n)
-			lastProgress = time.Now()
-			// 采样更新进度，避免频繁加锁
-			if now := time.Now(); now.Sub(lastUpdate) > 200*time.Millisecond {
-				if track {
-					m.mu.Lock()
-					m.progress = written
-					m.mu.Unlock()
-				}
-				lastUpdate = now
-				if progressCB != nil {
-					progressCB(written, resp.ContentLength)
-				}
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if dctx.Err() != nil {
-				return fmt.Errorf("download stalled: no data for %s", downloadStallTimeout)
-			}
-			return readErr
-		}
+	})
+	if err != nil {
+		return err
 	}
 
 	// 最终进度更新
@@ -532,6 +621,66 @@ func (m *Manager) download(ctx context.Context, url, dest string, progressCB Pro
 		progressCB(written, resp.ContentLength)
 	}
 	return nil
+}
+
+// pumpResponseBody 读空 body 写入 w（download 与 downloadResumable 共享的读循环）：
+// 返回累计写入字节数。停滞看门狗在此装配——Body.Read 阻塞期间循环顶部的
+// lastProgress 检查永不执行（历史缺陷——检测点在阻塞读之前等于失效），由
+// watchdog 在 stall 超时后 cancel 请求强制解开 Read，循环顶/读错误分支再区分
+// 「外层取消」与「停滞」。onProgress 每采样窗（200ms）收到一次累计字节数，
+// 免得频繁加锁；续传路径的基偏移由调用方闭包内并加
+func pumpResponseBody(ctx, dctx context.Context, cancel context.CancelFunc, body io.ReadCloser, w io.Writer, onProgress func(written int64)) (int64, error) {
+	// 判定时长在会话起点读一次固化（生产恒为 60s 常量，与原先逐处读常量等价）：
+	// 看门狗装配、逐读重置与报错文案同取这一个值，测试压缩改写取值口不波及
+	// 已在跑的会话
+	stall := stallTimeout.Load()
+	watchdog := time.AfterFunc(stall, cancel)
+	defer watchdog.Stop()
+	rb := &stallResetBody{ReadCloser: body, reset: func() { watchdog.Reset(stall) }}
+
+	buf := make([]byte, 32*1024)
+	var written int64
+	var lastUpdate time.Time
+	lastProgress := time.Now()
+	for {
+		// 响应取消 + 停滞检测兜底（看门狗触发时由下方分支给出准确报错）
+		if err := dctx.Err(); err != nil {
+			if ctx.Err() != nil {
+				return written, ctx.Err()
+			}
+			return written, fmt.Errorf("download stalled: no data for %s", stall)
+		}
+		if time.Since(lastProgress) > stall {
+			return written, fmt.Errorf("download stalled: no data for %s", stall)
+		}
+		n, readErr := rb.Read(buf)
+		if n > 0 {
+			if _, wErr := w.Write(buf[:n]); wErr != nil {
+				return written, wErr
+			}
+			written += int64(n)
+			lastProgress = time.Now()
+			// 采样更新进度，避免频繁加锁
+			if now := time.Now(); now.Sub(lastUpdate) > 200*time.Millisecond {
+				if onProgress != nil {
+					onProgress(written)
+				}
+				lastUpdate = now
+			}
+		}
+		if readErr == io.EOF {
+			return written, nil
+		}
+		if readErr != nil {
+			if ctx.Err() != nil {
+				return written, ctx.Err()
+			}
+			if dctx.Err() != nil {
+				return written, fmt.Errorf("download stalled: no data for %s", stall)
+			}
+			return written, readErr
+		}
+	}
 }
 
 // stallResetBody 每读到数据就重置停滞看门狗计时器的 Body 包装
@@ -548,8 +697,10 @@ func (b *stallResetBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// DownloadToFile 下载文件到指定路径（无进度回调、不回写状态机进度）
+// DownloadToFile 下载文件到指定路径（无进度回调、不回写状态机进度）。中心分发
+// 缓存下载同走 safeRoundTripper 四档选路，入口即更新尝试边界探测挂点（S6）
 func (m *Manager) DownloadToFile(ctx context.Context, url, dest string) error {
+	refreshSystemProxyDetection(ctx)
 	return m.download(ctx, url, dest, nil, false)
 }
 
@@ -567,6 +718,7 @@ func (m *Manager) Reset() {
 	m.status = StatusIdle
 	m.progress = 0
 	m.total = 0
+	m.resumedBytes = 0
 	m.version = ""
 	m.errMsg = ""
 }

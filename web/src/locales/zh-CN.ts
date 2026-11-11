@@ -5675,6 +5675,15 @@ export default {
     proxyHintShort: '公司代理或本地 clash 填这里；留空走环境变量 HTTPS_PROXY',
     proxySaved: '更新代理已保存',
     proxyInvalid: '代理地址须以 http://、https:// 或 socks5:// 开头',
+    // 系统代理自动探测 + 生效档位透出（P-20261110-1 S6）
+    proxyAutoDetectLabel: '自动探测系统代理',
+    proxyAutoDetectHint: '显式代理与环境变量都未给出时，自动探测系统代理（Windows 设置/ macOS 系统设置/ GNOME）供更新链使用；默认关',
+    proxyAutoDetectSaved: '自动探测设置已保存',
+    proxyTierLabel: '当前生效',
+    proxyTierExplicit: '显式代理',
+    proxyTierEnv: '环境变量',
+    proxyTierSysdetect: '系统代理',
+    proxyTierDirect: '直连',
     sourceUrlSaved: '更新分发源已保存',
     sourceUrlInvalid: '地址须以 http:// 或 https:// 开头',
     sourceMissingHint: '更新源未启用——自更新源已内置官方仓库，此状态仅代表设置里的中心分发源地址非法被拒，请检查该字段',
@@ -5736,6 +5745,8 @@ export default {
     // 版本面板进度/结局块
     progressInfo: {
       bytes: '{percent}%（{done} / {total}）',
+      // 断点续传透出（P-20261110-1-S4）：续传会话的下载中态追加在字节明细后
+      resumed: '已续传 {bytes}',
       background: '可关闭面板继续其他操作——进度见页面角落的更新徽标，结果会进通知中心',
       reason: '原因：{reason}',
       at: '时间：{time}',
@@ -5743,6 +5754,9 @@ export default {
       unknownHint: '服务长时间未恢复，更新结果未知——请检查服务状态，或稍后刷新页面',
       refreshHint: '新版本已生效；本页面仍在运行旧版界面，刷新后加载新界面',
       refreshNow: '刷新页面',
+      // 失败态一键重试（P-20261110-1-S2）：复用 apply 受理端点，拒因落回原因行
+      retry: '重试更新',
+      retrying: '正在重试…',
       dismiss: '知道了',
     },
     // 全局更新徽标（App 层常驻，全路由可见）

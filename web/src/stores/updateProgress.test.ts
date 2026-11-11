@@ -25,7 +25,7 @@ import {
 import zhCN from '../locales/zh-CN'
 import enUS from '../locales/en-US'
 
-function status(s: Partial<{ status: string; progress: number; total: number; version: string; error: string; result: string; resultError: string; resultAt: string }>) {
+function status(s: Partial<{ status: string; progress: number; total: number; version: string; error: string; result: string; resultError: string; resultAt: string; resumedBytes: number }>) {
   return { data: { status: 'idle', progress: 0, total: 0, version: '', ...s } }
 }
 
@@ -222,6 +222,21 @@ describe('updateProgress store', () => {
     expect(store.percent).toBe(50)
   })
 
+  it('resumedBytes 纯透传（P-20261110-1-S4）：快照带值即透出，服务端省略（全量回退）回落 0', async () => {
+    api.apply.mockResolvedValue({ version: '9.9.9' })
+    const store = useUpdateProgressStore()
+    await store.start()
+    // 续传会话：服务端 downloadResumable 的实际续传偏移原样透出，百分比不随之失真
+    api.status.mockResolvedValueOnce(status({ status: 'downloading', progress: 80, total: 100, version: '9.9.9', resumedBytes: 40 * 1024 * 1024 }))
+    await poll()
+    expect(store.resumedBytes).toBe(40 * 1024 * 1024)
+    expect(store.percent).toBe(80)
+    // 全量回退（omitempty 省略字段）：0 =「已续传」标记不显
+    api.status.mockResolvedValueOnce(status({ status: 'downloading', progress: 10, total: 100 }))
+    await poll()
+    expect(store.resumedBytes).toBe(0)
+  })
+
   it('init：解锁后探测一次，服务端在途即接管（F5/他页/CLI 发起）；幂等', async () => {
     lockState.value!.isLocked = true
     api.status.mockResolvedValue(status({ status: 'downloading', progress: 30, total: 100, version: '9.9.9' }))
@@ -267,6 +282,52 @@ describe('updateProgress store', () => {
     await poll()
     expect(api.status).toHaveBeenCalledTimes(1)
     expect(store.tracking).toBe(false)
+  })
+
+  // 失败态一键重试（P-20261110-1-S2）：复用 apply 受理端点——受理成功即接棒
+  // 跟踪；被拒（npm 形态 409 等状态机不承载失败的拒绝）拒因兜底终局不丢反馈
+  it('retry：失败终局清位后走同一 apply 受理链，成功即接棒跟踪', async () => {
+    api.apply.mockResolvedValue({ version: '9.9.9' })
+    const store = useUpdateProgressStore()
+    await store.start()
+    api.status.mockResolvedValueOnce(status({ status: 'failed', version: '9.9.9', error: 'download failed: download returned 503 (after 3 attempts)' }))
+    await poll()
+    expect(store.outcome).toMatchObject({ phase: 'failed' })
+
+    api.apply.mockResolvedValueOnce({ message: 'update started', version: '9.9.9' })
+    api.status.mockResolvedValue(status({ status: 'downloading', progress: 1, total: 100, version: '9.9.9' }))
+    expect(await store.retry({ silent: true })).toBe('started')
+    expect(api.apply).toHaveBeenLastCalledWith({ silent: true })
+    expect(store.outcome).toBeNull()
+    expect(store.tracking).toBe(true)
+    expect(store.phase).toBe('downloading')
+  })
+
+  it('retry 被拒（状态机仍空闲）：拒因兜底终局，旧因不挡道；错误如实上抛', async () => {
+    api.status.mockResolvedValueOnce(status({ status: 'failed', version: '9.9.9', error: 'old reason' }))
+    const store = useUpdateProgressStore()
+    await store.sync()
+    expect(store.lastOutcome).toMatchObject({ phase: 'failed', error: 'old reason' })
+
+    const refusal = Object.assign(new Error('npm managed'), { status: 409, userMessage: 'npm 形态请用 npm 更新' })
+    api.apply.mockRejectedValueOnce(refusal)
+    api.status.mockResolvedValueOnce(status({ status: 'idle' }))
+    await expect(store.retry({ silent: true })).rejects.toBe(refusal)
+    expect(store.tracking).toBe(false)
+    expect(store.outcome).toMatchObject({ phase: 'failed', version: '9.9.9', error: 'npm 形态请用 npm 更新' })
+  })
+
+  it('retry 被拒且无本地化文案：错误 message 兜底拒因', async () => {
+    api.status.mockResolvedValueOnce(status({ status: 'failed', version: '9.9.9', error: 'old' }))
+    const store = useUpdateProgressStore()
+    await store.sync()
+
+    api.apply.mockRejectedValueOnce(new Error('raw refusal'))
+    api.status.mockResolvedValueOnce(status({ status: 'idle' }))
+    await expect(store.retry()).rejects.toBeTruthy()
+    expect(store.outcome).toMatchObject({ phase: 'failed', error: 'raw refusal' })
+    // 缺省不带 config（silent 透传契约与 start 一致）
+    expect(api.apply).toHaveBeenLastCalledWith(undefined)
   })
 
   it('openPanel 经 openVersionPanel 回版本面板', async () => {

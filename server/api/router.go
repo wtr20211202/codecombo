@@ -1176,6 +1176,8 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 	api.GET("/updates/check", system.CheckUpdate)
 	api.POST("/updates/apply", RequireTokenAuth(), system.ApplyUpdate)
 	api.GET("/updates/status", system.GetUpdateStatus)
+	// 出站档位只读透出（P-20261110-1 S6）：与 /updates/status、/settings 同鉴权姿态
+	api.GET("/updates/proxy-status", system.GetUpdateProxyStatus)
 	api.DELETE("/updates/status", system.DeleteUpdateStatus)
 	api.GET("/updates/serve-binary", RequireTokenAuth(), system.ServeBinary)
 	api.POST("/updates/apply-from-center", RequireTokenAuth(), system.ApplyUpdateFromCenter)

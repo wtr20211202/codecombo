@@ -5,12 +5,14 @@
  * F5 后重开进度照常恢复；全局徽标（UpdateProgressBadge）同源。
  *   - 进行中：阶段文案（update.phase.* 全态登记，取键走 phaseLabelKey——不再
  *     动态拼 update.<status> 直出键名原文）+ 进度条（下载按字节百分比，其余在途
- *     阶段流动条）+ 字节明细 + 「可关闭面板继续操作」提示（非模态）；
+ *     阶段流动条）+ 字节明细（续传会话追加「已续传 xxMB」，P-20261110-1-S4）+
+ *     「可关闭面板继续操作」提示（非模态）；
  *   - 结局：本会话终局，或服务端快照里的上次失败/回滚（失败通知「查看详情」
  *     回跳的落点——原因原文在此）。成功提示刷新（本页仍跑旧 bundle）；
+ *     失败态一键重试（P-20261110-1-S2：复用 apply 受理端点，拒因落回原因行）；
  *     「知道了」确认已读（DELETE 清结果文件与失败态）
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import { formatBytes } from '../../utils/bytes'
 import { useUpdateProgressStore, phaseLabelKey } from '../../stores/updateProgress'
@@ -26,6 +28,10 @@ const bytesText = computed(() => t('update.progressInfo.bytes', {
   done: formatBytes(progress.snapshot?.progress ?? 0),
   total: formatBytes(progress.snapshot?.total ?? 0),
 }))
+/** 断点续传透出（P-20261110-1-S4）：续传会话（服务端 resumedBytes>0）在字节明细
+ *  旁追加「已续传 xxMB」；全量会话/回退归 0 不显，语义 = 这次尝试从哪继续 */
+const resumedVisible = computed(() => progress.phase === 'downloading' && progress.resumedBytes > 0)
+const resumedText = computed(() => t('update.progressInfo.resumed', { bytes: formatBytes(progress.resumedBytes) }))
 
 const outcome = computed(() => progress.lastOutcome)
 const outcomeTone = computed(() => {
@@ -43,6 +49,22 @@ function formatAt(iso: string): string {
 
 function reloadPage(): void {
   window.location.reload()
+}
+
+// 失败态一键重试（P-20261110-1-S2）：复用 apply 受理端点重新受理（服务端对
+// failed 终态自 Reset 重走受理链）——此前失败后重试须绕回「立即更新」，通知
+// 「查看详情」回跳的落点（本结局块）直接可重试（升级链中断恢复形态）。拒因经
+// store 落回结局块的原因行（本组件无 message 注入点，以原因行为准不弹层）
+const retrying = ref(false)
+
+async function retryUpdate(): Promise<void> {
+  if (retrying.value) return
+  retrying.value = true
+  try {
+    await progress.retry({ silent: true })
+  } catch { /* 拒因已由 store settle 回结局块，无 message 注入点不重复出提示 */ } finally {
+    retrying.value = false
+  }
 }
 </script>
 
@@ -76,6 +98,11 @@ function reloadPage(): void {
         class="upd-value muted"
         data-testid="version-update-bytes"
       >{{ bytesText }}</span>
+      <span
+        v-if="resumedVisible"
+        class="upd-resumed"
+        data-testid="version-update-resumed"
+      >{{ resumedText }}</span>
     </div>
     <div class="upd-row">
       <span class="upd-value muted">{{ t('update.progressInfo.background') }}</span>
@@ -128,6 +155,18 @@ function reloadPage(): void {
         {{ t('update.progressInfo.refreshNow') }}
       </button>
     </template>
+    <!-- 失败态一键重试（P-20261110-1-S2）：主按钮位（与成功态刷新同级显眼），
+         知道了退居其后——失败的首要出口是重试而非关闭 -->
+    <button
+      v-if="outcome.phase === 'failed'"
+      type="button"
+      class="upd-btn primary"
+      data-testid="version-update-retry"
+      :disabled="retrying"
+      @click="retryUpdate"
+    >
+      {{ retrying ? t('update.progressInfo.retrying') : t('update.progressInfo.retry') }}
+    </button>
     <button
       type="button"
       class="upd-btn"
@@ -146,6 +185,8 @@ function reloadPage(): void {
 .upd-value { color: var(--text-primary); word-break: break-all; }
 .upd-value.muted { font-size: 12px; color: var(--text-dim); }
 .upd-value.prewrap { white-space: pre-wrap; }
+/* 续传标记（P-20261110-1-S4）：正向状态语义色，尺寸与字节明细同级保持克制 */
+.upd-resumed { font-size: 12px; color: var(--status-success); white-space: nowrap; flex-shrink: 0; }
 .upd-bar {
   position: relative; width: 100%; height: 4px; border-radius: 2px; overflow: hidden;
   background: var(--border-default);

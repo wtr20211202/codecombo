@@ -122,6 +122,7 @@ repo 层三步 upsert 样板收口用的 `Upsert`）+
 | `*.pid`、dsh 标志文件 | 运维基础设施 |
 | `logs/` 日轮转日志（15 天） | 基础设施，已有保留策略 |
 | 更新下载产物 / `update-result.json` | 单写者 + 5 分钟 TTL 快照（边缘案例，接受）；P-20261109-10 起新进程启动观察窗推送结果通知后回写 `notifiedAt` 跨重启防重（读改写保留 Timestamp 锚，仍是同一文件快照语义，不升格车道 1） |
+| `.part` 续传半截文件 + `.part.meta` 旁元数据（server/update/partresume.go，tmp/update-<版本>/ 下） | 自更新断点续传的跨重启半截现场（P-20261110-1-S1，可再生临时产物）：元数据记录资产身份（URL/ETag/总长）防「半截 A+半截 B」拼接，成功即原子 rename 消费、失败保留待续传；保留期 7 天（`CleanupOldUpdateTmp` 启动期回收，不升格车道 1） |
 
 ---
 

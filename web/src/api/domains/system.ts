@@ -195,6 +195,8 @@ export interface SettingsData {
   updateURL: string           // 更新分发源（本机作为中心时跨平台缓存的 Release 地址）
   /** 更新链出站代理（P-20261109-12）：http(s)/socks5 地址；空 = 走环境变量（HTTPS_PROXY） */
   updateProxy?: string
+  /** 系统代理自动探测开关（P-20261110-1 S6）：默认 false（存量零变化） */
+  updateProxyAutoDetect?: boolean
   externalAccessUrl?: string  // 外部访问地址（P-20261019-10）：Tailscale/反代接入时的手机可达 origin；空=未配置
   /** 多实例同步本端落位根（P-20261023-1）：空 = 默认（用户主目录下 codecombo-sync/） */
   syncDestRoot?: string
@@ -360,6 +362,8 @@ export const settingsApi = {
     updateChannel?: string // 更新通道（P-20261103-3）：stable/prerelease，省略=不动
     /** 更新链出站代理（P-20261109-12）：省略=不动；空串=清除回环境变量感知 */
     updateProxy?: string
+    /** 系统代理自动探测开关（P-20261110-1 S6）：省略=不动；保存即生效 */
+    updateProxyAutoDetect?: boolean
     externalAccessUrl?: string // 外部访问地址（仅 http/https origin，服务端校验+尾斜杠归一；空串=清除）
     syncDestRoot?: string // 多实例同步本端落位根（P-20261023-1）：绝对目录路径；空串=恢复默认
     shareDefaultTTL?: string // 新建文件分享默认有效期（P-20261020-5）：permanent/1d/7d/30d；省略=不动
@@ -855,10 +859,32 @@ export interface UpdateStatusPayload {
   result?: string
   resultError?: string
   resultAt?: string
+  // 断点续传起点（P-20261110-1-S4）：本次下载尝试实际从 .part 续传的字节数，
+  // 全量下载为 0 且服务端 omitempty 省略——可选字段，旧前端忽略未知字段
+  resumedBytes?: number
+}
+
+// 更新链出站档位快照（GET /updates/proxy-status，P-20261110-1 S6，与服务端
+// update.ProxyStatus 对齐）：对更新目标 github.com 当前生效的档位 + 生效代理地址 +
+// 探测开关态 + 最近一次探测结果。代理地址回显已脱敏 userinfo（user:pass@ → ***@）
+export interface UpdateProxyStatusPayload {
+  tier: 'explicit' | 'env' | 'sysdetect' | 'direct'
+  target: string
+  proxy?: string
+  autoDetect: boolean
+  detectedProxy?: string
+  detectedSource?: string
+  detectedAt?: string
+  detectError?: string
+  noProxyMatch: boolean
 }
 
 export const updateApi = {
   check: (config?: AxiosRequestConfig) => api.get('/updates/check', config),
+  // 出站档位只读透出（P-20261110-1 S6）：版本面板「当前生效」展示数据源；
+  // ?refresh=1 触发一次即时探测（写服务端快照，非热路径）
+  proxyStatus: (config?: AxiosRequestConfig) =>
+    api.get<{ data: UpdateProxyStatusPayload }>('/updates/proxy-status', config) as unknown as Promise<{ data?: UpdateProxyStatusPayload }>,
   // 异步受理（P-20261109-10）：202 = 已受理、后台下载/校验/换包，进度走 status
   // 轮询（stores/updateProgress）；受理前拒绝（在途 409 / npm 409 / 已是最新 400 /
   // 伴随校验资产重拉后仍未取到 500，P-20261109-9）同步返回。响应 { message, version }。

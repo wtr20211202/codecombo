@@ -94,6 +94,7 @@
     "updateChannel",
     "updateChecks",
     "updateProxy",
+    "updateProxyAutoDetect",
     "updateURL",
     "userPrefs"
   ],

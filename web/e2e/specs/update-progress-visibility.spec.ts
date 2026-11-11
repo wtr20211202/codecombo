@@ -14,7 +14,19 @@ import { API_BASE } from '../../tests/api-base'
  *   4. 失败通知「查看详情」回面板——服务端通知（titleKey 模板 + update-panel
  *      动作）点击后设置弹窗定位「关于」，原因原文在面板结局块可见；「知道了」
  *      确认已读（DELETE /updates/status）；
- *   5. 长 changelog 限高内滚，「立即更新」首屏可达。
+ *   5. 长 changelog 限高内滚，「立即更新」首屏可达；
+ *   6. 断点续传透出（P-20261110-1-S4）——续传态「已续传 xxMB」标记在面板内可见，
+ *      全量回退（服务端归 0 省略）后消隐，百分比分母不随之失真。
+ *   7. 失败态一键重试（P-20261110-1-S2）：结局块重试按钮复用 apply 受理端点，
+ *      失败→重试→受理进下载恢复（升级链中断恢复形态）。
+ *   8. 升级链中断恢复全链呈现（P-20261110-1-S7）：下载阶段内存失败态（重试耗尽
+ *      的 status=failed+error 原文，区别于 7 的结果文件形态）→ 重试受理 → 进度块
+ *      从续传偏移起步（「已续传」标记 + 百分比/分母不失真）→ 校验 → 重启 → 成功
+ *      结局带刷新引导。状态序列回放的是服务端真实链的输出——真链（受理→断连→
+ *      续传→真校验→换包边界）由 Go 集成测试背书（server/update/
+ *      manager_retry_test.go 的 S7 三用例：续传成功/中断恢复/停滞看门狗），本 spec
+ *      钉 UI 消费面。真 e2e 不可行的缘由：更新源与下载地址强制公网 https、拨号期
+ *      拒回环，且走通即真实换包。
  * /api/updates/apply 也拦下（本套件不真触发受理），通知 POST 拦截本地应答；
  * 结尾 API 清通知域，不残留测试数据。
  */
@@ -68,8 +80,9 @@ test.afterAll(async () => {
 })
 
 test('下载中：面板内进度块与全局徽标同源可见；关闭面板后徽标仍在且实时', async ({ page }) => {
+  // 续传态注入（P-20261110-1-S4）：resumedBytes = 服务端 .part 实际续传偏移
   const status = await routeStatus(page, {
-    status: 'downloading', progress: 40 * 1024 * 1024, total: 100 * 1024 * 1024, version: '9.9.9',
+    status: 'downloading', progress: 40 * 1024 * 1024, total: 100 * 1024 * 1024, resumedBytes: 40 * 1024 * 1024, version: '9.9.9',
   })
   const posted: string[] = []
   await page.route('**/api/notifications', async (route) => {
@@ -87,10 +100,17 @@ test('下载中：面板内进度块与全局徽标同源可见；关闭面板�
   await expect(badge).toContainText('下载中')
   await expect(badge).toContainText('40%')
 
-  // 打开面板：进度块同源（阶段文案不是键名原文）
+  // 打开面板：进度块同源（阶段文案不是键名原文）；续传会话带「已续传」标记
   const modal = await openVersionPanelViaSettings(page)
   await expect(page.locator('[data-testid="version-update-phase"]')).toHaveText('下载中')
   await expect(page.locator('[data-testid="version-update-bytes"]')).toContainText('40.0 MB')
+  await expect(page.locator('[data-testid="version-update-resumed"]')).toContainText('已续传 40.0 MB')
+
+  // 全量回退（服务端续传起点归 0、omitempty 省略）：标记消隐，分母不随之失真
+  status.payload = { status: 'downloading', progress: 50 * 1024 * 1024, total: 100 * 1024 * 1024, version: '9.9.9' }
+  await expect(page.locator('[data-testid="version-update-resumed"]')).toHaveCount(0, { timeout: 10000 })
+  await expect(page.locator('[data-testid="version-update-bytes"]')).toContainText('50%')
+
   await expect(page.locator('[data-testid="version-update-now"]')).toHaveCount(0)
   await page.locator('.n-modal.settings-modal .settings-close').click()
   await expect(modal).not.toBeVisible({ timeout: 5000 })
@@ -190,6 +210,110 @@ test('失败通知「查看详情」：回面板结局块带原因；「知道�
   await modal.locator('[data-testid="version-update-ack"]').click()
   await expect(modal.locator('[data-testid="version-update-outcome"]')).toHaveCount(0, { timeout: 5000 })
   expect(status.deletes).toBe(1)
+})
+
+test('失败态一键重试（P-20261110-1-S2）：结局块重试按钮复用 apply 受理，失败→重试→下载恢复', async ({ page }) => {
+  const status = await routeStatus(page, {
+    status: 'idle', progress: 0, total: 0, version: '9.9.9',
+    result: 'failed', resultError: 'download failed: download returned 503 (after 3 attempts)', resultAt: '2026-11-09T02:03:04Z',
+  })
+  const applies: string[] = []
+  await page.route('**/api/updates/apply', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    applies.push(route.request().postData() ?? '')
+    // 按服务端受理语义推进状态源：受理即清上一轮结果文件、状态机进下载——不切的话
+    // 受理后首拉（1.5s 轮询）读回旧 failed 结果会被判作本轮终局，用例随跑速竞态
+    status.payload = { status: 'downloading', progress: 0, total: 100 * 1024 * 1024, version: '9.9.9' }
+    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ message: 'update started', version: '9.9.9' }) })
+  })
+  await fixedLocale(page)
+  await gotoAndUnlock(page, `${API_BASE}/`)
+  await projectCardByName(page, 'simple-coding').first().click()
+  await page.waitForURL('**/project')
+
+  // 打开面板：上次失败结局块带原因原文（重试注记形态）与重试主按钮
+  const modal = await openVersionPanelViaSettings(page)
+  const block = modal.locator('[data-testid="version-update-outcome"]')
+  await expect(block).toBeVisible({ timeout: 5000 })
+  await expect(block.locator('[data-testid="version-update-outcome-reason"]')).toContainText('after 3 attempts')
+  await block.locator('[data-testid="version-update-retry"]').click()
+
+  // 受理成功：进度块接棒（下载中），结局块消隐；apply 走的是同一受理端点
+  await expect(modal.locator('[data-testid="version-update-phase"]')).toHaveText('下载中', { timeout: 5000 })
+  await expect(modal.locator('[data-testid="version-update-outcome"]')).toHaveCount(0)
+  expect(applies).toHaveLength(1)
+
+  // 重试后的下载进度实时恢复（面板与全局徽标同源）
+  status.payload = { status: 'downloading', progress: 20 * 1024 * 1024, total: 100 * 1024 * 1024, version: '9.9.9' }
+  await expect(modal.locator('[data-testid="version-update-bytes"]')).toContainText('20%', { timeout: 10000 })
+  await expect(page.locator('[data-testid="update-progress-badge-text"]')).toContainText('下载中', { timeout: 10000 })
+})
+
+test('升级链中断恢复全链（P-20261110-1-S7）：下载失败→重试受理→从续传偏移起步（已续传）→校验→重启→成功结局', async ({ page }) => {
+  const MB = 1024 * 1024
+  // 起点 = 服务端内存失败态（下载阶段重试耗尽：status=failed + error 原文，半截
+  // .part 保留）。此后回放的状态序列即 Go 集成测试
+  // TestApplyUpdateInterruptedThenReadmittedResumesToRestarting 实证的服务端输出：
+  // 再受理 → 首个下载快照即带续传偏移与 resumedBytes → 校验 → 重启
+  const status = await routeStatus(page, {
+    status: 'failed', progress: 40 * MB, total: 100 * MB, version: '9.9.9',
+    error: 'download failed: unexpected EOF (after 3 attempts)',
+  })
+  const applies: string[] = []
+  await page.route('**/api/updates/apply', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    applies.push(route.request().postData() ?? '')
+    // 再受理：服务端从保留的 .part 续传，状态机进度即刻落到续传起点（不回零）
+    status.payload = { status: 'downloading', progress: 40 * MB, total: 100 * MB, resumedBytes: 40 * MB, version: '9.9.9' }
+    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ message: 'update started', version: '9.9.9' }) })
+  })
+  await fixedLocale(page)
+  await gotoAndUnlock(page, `${API_BASE}/`)
+  await projectCardByName(page, 'simple-coding').first().click()
+  await page.waitForURL('**/project')
+
+  // 失败结局块：内存失败态的原因原文（尝试注记）+ 重试主按钮
+  const modal = await openVersionPanelViaSettings(page)
+  const failed = modal.locator('[data-testid="version-update-outcome"]')
+  await expect(failed).toBeVisible({ timeout: 5000 })
+  await expect(failed.locator('[data-testid="version-update-outcome-phase"]')).toHaveText('更新失败')
+  await expect(failed.locator('[data-testid="version-update-outcome-reason"]')).toContainText('unexpected EOF (after 3 attempts)')
+  await failed.locator('[data-testid="version-update-retry"]').click()
+
+  // 再受理 → 进度块接棒：首个字节明细即续传现场（40% 起步而非从 0 重来），分母
+  // 是全量总长（不是剩余尾段），「已续传」标记 = 续传起点
+  const phase = modal.locator('[data-testid="version-update-phase"]')
+  const bytes = modal.locator('[data-testid="version-update-bytes"]')
+  const resumed = modal.locator('[data-testid="version-update-resumed"]')
+  await expect(phase).toHaveText('下载中', { timeout: 5000 })
+  await expect(bytes).toHaveText('40%（40.0 MB / 100.0 MB）', { timeout: 10000 })
+  await expect(resumed).toHaveText('已续传 40.0 MB')
+  await expect(modal.locator('[data-testid="version-update-outcome"]')).toHaveCount(0)
+
+  // 推进：百分比跟随累计字节；续传起点标记恒定（本尝试从哪继续，不随进度漂移）
+  status.payload = { status: 'downloading', progress: 70 * MB, total: 100 * MB, resumedBytes: 40 * MB, version: '9.9.9' }
+  await expect(bytes).toHaveText('70%（70.0 MB / 100.0 MB）', { timeout: 10000 })
+  await expect(resumed).toHaveText('已续传 40.0 MB')
+  const badge = page.locator('[data-testid="update-progress-badge-text"]')
+  await expect(badge).toContainText('下载中 70%')
+
+  // 校验 → 重启：续传标记只对下载会话成立（离开下载阶段即消隐），阶段文案逐态推进
+  status.payload = { status: 'verifying', progress: 100 * MB, total: 100 * MB, resumedBytes: 40 * MB, version: '9.9.9' }
+  await expect(phase).toHaveText('校验中', { timeout: 10000 })
+  await expect(resumed).toHaveCount(0)
+  status.payload = { status: 'restarting', progress: 100 * MB, total: 100 * MB, resumedBytes: 40 * MB, version: '9.9.9' }
+  await expect(phase).toHaveText('重启中', { timeout: 10000 })
+
+  // 换包完成（结果文件落盘）：成功结局块带刷新引导、重试按钮不再出现，徽标与
+  // toast 同步；全链只受理一次（重试 = 同一 apply 受理端点）
+  status.payload = { status: 'idle', progress: 0, total: 0, version: '9.9.9', result: 'success', resultAt: '2026-11-11T03:04:05Z' }
+  const outcome = modal.locator('[data-testid="version-update-outcome"]')
+  await expect(outcome.locator('[data-testid="version-update-outcome-phase"]')).toHaveText('更新成功', { timeout: 10000 })
+  await expect(outcome.locator('[data-testid="version-update-refresh"]')).toBeVisible()
+  await expect(outcome.locator('[data-testid="version-update-retry"]')).toHaveCount(0)
+  await expect(badge).toContainText('已更新到 v9.9.9')
+  await expect(page.locator('.n-message').filter({ hasText: '已更新到 v9.9.9' }).first()).toBeVisible({ timeout: 5000 })
+  expect(applies).toHaveLength(1)
 })
 
 test('长 changelog：限高内滚，「立即更新」首屏可达', async ({ page }) => {

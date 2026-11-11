@@ -15,6 +15,7 @@ vi.mock('naive-ui', async (importOriginal) =>
 const checkMock = vi.hoisted(() => vi.fn())
 const applyMock = vi.hoisted(() => vi.fn())
 const statusMock = vi.hoisted(() => vi.fn())
+const proxyStatusMock = vi.hoisted(() => vi.fn())
 const settingsGetMock = vi.hoisted(() => vi.fn().mockResolvedValue({ data: {} }))
 const settingsUpdateMock = vi.hoisted(() => vi.fn().mockResolvedValue({ data: {} }))
 vi.mock('@/api/client', () => ({
@@ -22,6 +23,7 @@ vi.mock('@/api/client', () => ({
     check: checkMock,
     apply: applyMock,
     status: statusMock,
+    proxyStatus: proxyStatusMock,
     clearStatus: vi.fn(),
     restart: vi.fn(),
     healthPing: vi.fn(),
@@ -246,11 +248,11 @@ describe('VersionPanel 自动检查更新开关（P-20261109-6）', () => {
     applyAutoCheckSetting.mockClear()
   })
 
-  // 面板内两枚开关按模板序：自动检查更新 → 跟进预发布版本
+  // 面板内三枚开关按模板序：自动检查更新 → 跟进预发布版本 → 自动探测系统代理（S6）
   function switches(wrapper: VueWrapper) {
     const all = wrapper.findAll('[role="switch"]')
-    expect(all).toHaveLength(2)
-    return { autoCheck: all[0]!, prerelease: all[1]! }
+    expect(all).toHaveLength(3)
+    return { autoCheck: all[0]!, prerelease: all[1]!, autoDetect: all[2]! }
   }
 
   it('保存成功：展示态翻转 + 同帧应用到自动检查电路，关掉后可再开回', async () => {
@@ -310,7 +312,171 @@ describe('VersionPanel 自动检查更新开关（P-20261109-6）', () => {
 
 })
 
+// 失败态一键重试（P-20261110-1-S2）：结局块失败态带主按钮，复用 apply 受理
+// 端点重新受理（服务端 failed 终态自 Reset）——此前重试须绕回「立即更新」，
+// 通知「查看详情」回跳的落点直接可重试（升级链中断恢复形态）；拒因经 store
+// 落回原因行（本组件无 message 注入点），「知道了」保持可关闭
+describe('VersionPanel 失败态一键重试（P-20261110-1-S2）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    resetNaiveRuntimeMocks()
+    checkMock.mockReset()
+    applyMock.mockReset()
+    statusMock.mockReset()
+    notificationAdd.mockClear()
+  })
+
+  it('失败结局块带重试主按钮：点击走 apply 受理，进度块接棒', async () => {
+    // 首拉（挂载同步）= 失败快照；受理后的轮询挂起不返回（无跨例泄漏）
+    statusMock.mockResolvedValueOnce({ data: { status: 'failed', progress: 0, total: 0, version: '9.9.9', error: 'download failed: download returned 503 (after 3 attempts)' } })
+    statusMock.mockReturnValue(new Promise(() => {}))
+    applyMock.mockResolvedValue({ message: 'update started', version: '9.9.9' })
+    const wrapper = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="version-update-outcome-phase"]').text()).toBe('更新失败')
+    expect(wrapper.find('[data-testid="version-update-outcome-reason"]').text()).toContain('after 3 attempts')
+    const retry = wrapper.find('[data-testid="version-update-retry"]')
+    expect(retry.exists()).toBe(true)
+    expect(retry.element.disabled).toBe(false)
+    // 知道了仍在：重试是首要出口，关闭是次要出口
+    expect(wrapper.find('[data-testid="version-update-ack"]').exists()).toBe(true)
+
+    await retry.trigger('click')
+    await flushPromises()
+    expect(applyMock).toHaveBeenCalledTimes(1)
+    expect(applyMock).toHaveBeenCalledWith({ silent: true })
+    expect(wrapper.find('[data-testid="version-update-progress"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="version-update-retry"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('重试被拒（npm 形态 409，状态机不承载失败）：拒因落回结局块原因行，不再只剩旧因', async () => {
+    statusMock.mockResolvedValueOnce({ data: { status: 'failed', progress: 0, total: 0, version: '9.9.9', error: 'old reason' } })
+    const refusal = '更新已拒绝：npm 形态请用 npm 更新'
+    applyMock.mockRejectedValueOnce(Object.assign(new Error('npm managed'), { userMessage: refusal }))
+    statusMock.mockResolvedValueOnce({ data: { status: 'idle', progress: 0, total: 0, version: '' } })
+    const wrapper = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+
+    await wrapper.find('[data-testid="version-update-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="version-update-outcome"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="version-update-outcome-phase"]').text()).toBe('更新失败')
+    expect(wrapper.find('[data-testid="version-update-outcome-reason"]').text()).toBe(`原因：${refusal}`)
+    // 关闭出口不因被拒消失
+    expect(wrapper.find('[data-testid="version-update-ack"]').exists()).toBe(true)
+  })
+})
+
 // ─── 以下 P-20261109-9 段（rebase 语义收编：两侧 describe 并存）───
+
+// 系统代理自动探测开关 + 当前生效档位展示（P-20261110-1 S6）：开关默认关、保存走
+// 既有设置链且展示态乐观翻转（失败按服务端真值回滚）；档位读 proxy-status（挂载与
+// 保存后刷新），端点失败静默降级不阻断面板
+describe('VersionPanel 自动探测系统代理（P-20261110-1 S6）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    resetNaiveRuntimeMocks()
+    statusMock.mockReset()
+    statusMock.mockResolvedValue({ data: { status: 'idle', progress: 0, total: 0, version: '' } })
+    settingsGetMock.mockClear()
+    settingsGetMock.mockResolvedValue({ data: {} })
+    settingsUpdateMock.mockClear()
+    proxyStatusMock.mockReset()
+    applyAutoCheckSetting.mockClear()
+  })
+
+  // 面板内三枚开关按模板序：自动检查更新 → 跟进预发布版本 → 自动探测系统代理
+  function switches(wrapper: VueWrapper) {
+    const all = wrapper.findAll('[role="switch"]')
+    expect(all).toHaveLength(3)
+    return { autoCheck: all[0]!, prerelease: all[1]!, autoDetect: all[2]! }
+  }
+
+  it('开关默认关：settings 未带字段时不探测档不误开，保存成功翻转并刷新档位', async () => {
+    proxyStatusMock.mockResolvedValue({ data: { tier: 'direct', target: 'github.com', autoDetect: false, noProxyMatch: false } })
+    const wrapper = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+    const { autoDetect } = switches(wrapper)
+    expect(autoDetect.attributes('aria-checked')).toBe('false')
+
+    await autoDetect.trigger('click')
+    await flushPromises()
+    expect(settingsUpdateMock).toHaveBeenLastCalledWith({ updateProxyAutoDetect: true })
+    expect(autoDetect.attributes('aria-checked')).toBe('true')
+    expect(messageMock.success).toHaveBeenCalledWith('自动探测设置已保存')
+    // 保存后档位刷新（proxy-status 再拉一次）
+    expect(proxyStatusMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('档位展示：读 proxy-status 渲染档位名 + 脱敏地址（env 档）', async () => {
+    proxyStatusMock.mockResolvedValue({
+      data: { tier: 'env', target: 'github.com', proxy: 'http://***@1.2.3.4:8080', autoDetect: true, noProxyMatch: false },
+    })
+    const wrapper = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+
+    const tier = wrapper.find('[data-testid="version-proxy-tier"]')
+    expect(tier.exists()).toBe(true)
+    expect(tier.text()).toBe('当前生效环境变量 · http://***@1.2.3.4:8080')
+  })
+
+  it('直连档：只显档位名无地址；sysdetect/显式档各映射对应文案', async () => {
+    proxyStatusMock.mockResolvedValue({ data: { tier: 'direct', target: 'github.com', autoDetect: false, noProxyMatch: false } })
+    const wrapper = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="version-proxy-tier"]').text()).toBe('当前生效直连')
+
+    proxyStatusMock.mockResolvedValue({ data: { tier: 'sysdetect', target: 'github.com', proxy: 'http://***@127.0.0.1:7890', autoDetect: true, noProxyMatch: false } })
+    const wrapper2 = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+    expect(wrapper2.find('[data-testid="version-proxy-tier"]').text()).toBe('当前生效系统代理 · http://***@127.0.0.1:7890')
+
+    proxyStatusMock.mockResolvedValue({ data: { tier: 'explicit', target: 'github.com', proxy: 'socks5://***@p.example:1080', autoDetect: true, noProxyMatch: false } })
+    const wrapper3 = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+    expect(wrapper3.find('[data-testid="version-proxy-tier"]').text()).toBe('当前生效显式代理 · socks5://***@p.example:1080')
+  })
+
+  it('端点失败：档位行静默不展示，面板其余功能不受影响', async () => {
+    proxyStatusMock.mockRejectedValue(new Error('network down'))
+    const wrapper = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="version-proxy-tier"]').exists()).toBe(false)
+    // 面板照常：三开关在位
+    expect(wrapper.findAll('[role="switch"]')).toHaveLength(3)
+  })
+
+  it('保存代理地址成功后：档位跟随刷新', async () => {
+    proxyStatusMock.mockResolvedValue({ data: { tier: 'direct', target: 'github.com', autoDetect: false, noProxyMatch: false } })
+    const wrapper = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+    expect(proxyStatusMock).toHaveBeenCalledTimes(1)
+
+    const input = wrapper.find('input[placeholder*="socks5"]')
+    await input.setValue('http://127.0.0.1:7890')
+    const saveBtn = wrapper.findAll('button').find(b => b.text() === '保存')!
+    await saveBtn.trigger('click')
+    await flushPromises()
+    expect(settingsUpdateMock).toHaveBeenLastCalledWith({ updateProxy: 'http://127.0.0.1:7890' })
+    expect(proxyStatusMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('保存失败：开关展示态按服务端真值回滚，不发成功提示', async () => {
+    const wrapper = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+    const { autoDetect } = switches(wrapper)
+
+    settingsUpdateMock.mockRejectedValueOnce(new Error('save failed'))
+    settingsGetMock.mockResolvedValueOnce({ data: { updateProxyAutoDetect: false } })
+    await autoDetect.trigger('click')
+    await flushPromises()
+    expect(autoDetect.attributes('aria-checked')).toBe('false')
+    expect(messageMock.success).not.toHaveBeenCalled()
+  })
+})
 
 // 伴随校验资产拉取失败旗标（P-20261109-9）：后端检查判定此刻更新必被校验拒绝时
 // 置 companionFetchFailed + 逐资产原因——面板即时告警，「立即更新」保持可点

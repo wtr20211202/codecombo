@@ -9,6 +9,43 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.6] - 2026-11-11
+
+### Added
+
+- **Self-update downloads resume where they dropped** — large update
+  downloads keep a `.part` file and resume at the byte offset on retry;
+  splice safety is enforced with strong-ETag If-Range / 206 identity
+  checks (a changed or swapped remote is refused and cleared, never
+  spliced into your package); 200/416 responses fall back to a clean full
+  download; and the package swap happens only after the integrity gate
+  passes (atomic rename).
+- **Automatic retry folded into the resume chain** — transient download
+  failures retry with backoff and resume from the offset (progress never
+  resets); deterministic failures such as 403/404 don't waste attempts;
+  stale temp files are cleaned up after 7 days; and the failed-update
+  card gains a one-click "Retry update".
+- **Resume progress is visible** — the downloading state reports
+  "resumed xx MB" (new `resumedBytes` field), so a long update over a
+  flaky connection reads honestly instead of restarting at 0%.
+- **System proxy detection joins the update routing** — outbound routing
+  is now four-tier: explicit setting > environment variables > system
+  proxy auto-detection (off by default; reads the registry on Windows,
+  `scutil` on macOS, `gsettings` on GNOME) > direct. The detection tier
+  honors NO_PROXY, every proxied path remains guarded by the
+  official-domain allowlist, and the version panel shows the effective
+  route backed by a new proxy-status diagnostics endpoint (addresses
+  redacted, refreshable on demand).
+
+### Changed
+
+- **Update-proxy documentation** — the README gains a bilingual
+  update-proxy section (the four tiers, the NO_PROXY stance, when
+  detection runs); the Linux deploy guide shows systemd
+  `HTTPS_PROXY`/`NO_PROXY` examples with a daemon-reload note; and the
+  upgrade decision table adds the Windows-service row plus why re-running
+  the installer is safe.
+
 ## [0.0.1-beta.5] - 2026-11-10
 
 ### Added
@@ -272,7 +309,8 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.5...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.6...HEAD
+[0.0.1-beta.6]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.6
 [0.0.1-beta.5]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.5
 [0.0.1-beta.4]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.4
 [0.0.1-beta.3]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.3

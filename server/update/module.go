@@ -65,21 +65,27 @@ func (m *Module) Init(_ context.Context, k kernel.Kernel) error {
 // 源非法（非 https / 指向内网）时留痕并停用——更新通道是供应链入口，
 // 宁可不更新也不放宽；通道（stable/prerelease）随设置即时生效。
 // 出站代理（P-20261109-12）同点装配：显式设置项 > 环境变量 > 直连；代理串
-// 非法时留痕回直连（env 感知仍在）——宁降级不阻断，保存期校验挡住常规入口
+// 非法时留痕回直连（env 感知仍在）——宁降级不阻断，保存期校验挡住常规入口。
+// 系统代理探测档（P-20261110-1 S6，开关 updateProxyAutoDetect）同点装配：开关
+// 随出站态一并装配，开时在此同步探测一次（装配点挂点，S5 层 2s 短超时兜底；
+// Windows 注册表读 / macOS scutil 毫秒级）——设置保存返回时状态端点即读到新
+// 结果；开关关零探测，四档选路退化为三态原语义
 func ApplySource(cfg *config.Config) {
 	updateURL := strings.TrimSpace(cfg.Server.UpdateURL)
 	if updateURL == "" {
 		updateURL = config.UpdateURLOfficial
 	}
 	sourceHost := hostOfSourceURL(updateURL)
+	autoDetect := cfg.Server.UpdateProxyAutoDetect
 	if proxy := strings.TrimSpace(cfg.Server.UpdateProxy); proxy != "" {
-		if err := SetOutbound(proxy, sourceHost); err != nil {
+		if err := SetOutbound(proxy, sourceHost, autoDetect); err != nil {
 			slog.Warn("update: outbound proxy rejected — falling back to direct/env", "err", err)
-			_ = SetOutbound("", sourceHost)
+			_ = SetOutbound("", sourceHost, autoDetect)
 		}
 	} else {
-		_ = SetOutbound("", sourceHost)
+		_ = SetOutbound("", sourceHost, autoDetect)
 	}
+	refreshSystemProxyDetection(context.Background())
 	source, err := NewGitHubSource(updateURL)
 	if err != nil {
 		slog.Warn("update source rejected — update check disabled", "url", updateURL, "err", err)
@@ -95,7 +101,8 @@ func ApplySource(cfg *config.Config) {
 	GetManager().SetSource(source)
 }
 
-// Start 启动期清理：旧备份、过期更新结果、serve 临时缓存；挂结果观察窗
+// Start 启动期清理：旧备份、过期更新结果、serve 临时缓存、过期自更新临时目录
+// （P-20261110-1：.part 续传孤儿目录 7 天回收）；挂结果观察窗
 // （P-20261109-10：换包/回滚后的完成通知由本进程推送）与定时检查
 // （定时器无条件注册，UpdateChecks 开关由 autoCheck 每次 tick 实读——
 // P-20261106 热化：开关保存即生效，不必重启）
@@ -105,6 +112,7 @@ func (m *Module) Start(ctx context.Context, k kernel.Kernel) error {
 	dd := m.dataDirGen()
 	ClearOldUpdateResult(dd)
 	CleanupServeCache(dd)
+	CleanupOldUpdateTmp(dd)
 	slog.Debug("update: startup cleanup done")
 
 	wctx, cancel := context.WithCancel(ctx)
@@ -168,7 +176,7 @@ func (m *Module) autoCheck(ctx context.Context) {
 // 段注）：每 resultWatchInterval 读一次结果文件，可判定即收工，窗口到期或
 // 停机即退出
 func (m *Module) watchUpdateResult(ctx context.Context, dd string) {
-	deadline := time.Now().Add(resultWatchWindow)
+	deadline := time.Now().Add(resultWatchWindow.Load())
 	for {
 		if publishUpdateResult(dd, strings.TrimSpace(m.currentVerGen()), time.Now()) {
 			return
@@ -179,7 +187,7 @@ func (m *Module) watchUpdateResult(ctx context.Context, dd string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(resultWatchInterval):
+		case <-time.After(resultWatchInterval.Load()):
 		}
 	}
 }

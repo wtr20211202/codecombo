@@ -188,6 +188,7 @@ absolute path in the unit):
 | Check | Installed by | How to upgrade |
 |---|---|---|
 | `ExecStart` → `~/.local/bin/codecombo` | the install script above | 1 in-app update (preferred) · 2 re-run the script |
+| `sc.exe query Codecombo` lists the service | Windows install script (install.ps1, elevated) | 1 in-app update (preferred) · 2 re-run install.ps1 — the installer stops the running service itself |
 | `ExecStart` → `~/.codecombo/bin/codecombo` | remote deploy from a central instance | 1 in-app update · re-deploy remotely · 3 manual replacement — **never** re-run the script |
 | `ExecStart` → `/opt/codecombo/bin/codecombo` | manual `/opt` layout ([deploy-linux](docs/deploy-linux.md)) | 1 in-app update · 3 manual replacement |
 | `npm ls -g codecombo` lists it | npm | `npm i -g codecombo@latest` (the in-app updater steps aside) |
@@ -203,12 +204,16 @@ Script-installed (systemd-managed) instances: if the service has not come
 back on its own after updating, `sudo systemctl restart codecombo` finishes
 the rollout.
 
-**2. Re-run the install script (script installs only)** — read your original
-`--host`/`--port` from `ExecStart` (installed with a custom data dir? also
-pass its `CC_DATA_DIR` from the unit's `Environment=` line back as
-`CODECOMBO_DATA_DIR`); the env vars must sit on the `sh` side
-of the pipe (placed before `curl` they only apply to curl, and the port/bind
-fall back to the 9999/127.0.0.1 defaults):
+**2. Re-run the install script (script installs only)** — re-running is
+upgrade-safe: the script replaces the binary and the service registration
+only and never touches the data directory (all data, configuration and
+keys — the lock password included — live there and survive the re-run
+as-is). Read your original `--host`/`--port` from `ExecStart` (installed
+with a custom data dir? also pass its `CC_DATA_DIR` from the unit's
+`Environment=` line back as `CODECOMBO_DATA_DIR` — re-run with the same
+value); the env vars must sit on the `sh` side of the pipe (placed before
+`curl` they only apply to curl, and the port/bind fall back to the
+9999/127.0.0.1 defaults):
 
 ```bash
 sudo -v && curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=<original> CODECOMBO_PORT=<original> sh
@@ -226,9 +231,14 @@ overwrite drops `PATH`/`WorkingDirectory`/`NoNewPrivileges` and reverts the
 bind address to `127.0.0.1`, cutting remote access as soon as the service
 restarts; that layout upgrades in-app or via a fresh remote deploy from the
 central instance (use a central instance on v0.0.1-beta.3 or later — earlier
-deployers could fail to upgrade older installs in place). On Windows, run
-`sc.exe stop Codecombo` before re-running install.ps1 — Windows locks a
-running `.exe`, so the swap fails with the service up.
+deployers could fail to upgrade older installs in place). On Windows,
+re-run install.ps1 from an elevated PowerShell with the same
+`$env:CODECOMBO_*` values as the original install (the current
+`--port`/`--host`/`--data-dir` are in the `BINARY_PATH_NAME` line of
+`sc.exe qc Codecombo`) — the installer stops the running `Codecombo`
+service itself before the swap (Windows locks a running `.exe`, so the
+swap cannot succeed with the service up; a non-elevated re-run against the
+running service fails fast with that hint).
 
 **3. Manual binary replacement (Linux only)** — the full recipe (stop →
 verify SHA256 → keep a `.bak` → replace → start, plus the rollback step)
@@ -237,6 +247,52 @@ lives in [docs/deploy-linux.md](docs/deploy-linux.md) §6; the three-state
 doc. Mind the file size: binaries are ~50 MB (linux-amd64 ≈ 51–54 MB) — a
 file of tens of bytes means you clicked a `.sha256`/`.sig` sidecar instead
 of the binary.
+
+### Update proxy
+
+The update chain (release checks and binary downloads) picks its outbound
+route per request in one fixed priority order — **explicit setting >
+environment variables > system auto-detect (while the switch is on) >
+direct**:
+
+1. **Explicit setting** — `updateProxy`, the "Update Proxy" field in the
+   version panel (Settings → About). Accepts `http://` / `https://`
+   (CONNECT tunnel) and `socks5://` (`socks5h` is a synonym) — corporate
+   proxies and local clash client ports (`127.0.0.1:…`) are the intended
+   scenarios. An explicit proxy covers the whole update chain; `NO_PROXY`
+   is not consulted for it.
+2. **Environment variables** — the standard `HTTPS_PROXY` / `HTTP_PROXY` /
+   `NO_PROXY` semantics (lowercase variants included). On servers, put
+   them on the systemd unit's `Environment=` line and restart the service
+   ([docs/deploy-linux.md](docs/deploy-linux.md) §3 has the example).
+3. **System proxy auto-detect** — the "Auto-detect system proxy" switch
+   (`updateProxyAutoDetect`, off by default). When neither tier above
+   provides a proxy, the update chain uses the desktop system proxy
+   detected on the machine: Windows Internet settings, macOS network
+   settings (scutil), Linux GNOME (gsettings) — static proxy settings
+   only, PAC/WPAD auto-config scripts are not evaluated. The detected
+   proxy honors `NO_PROXY` (matching targets go direct). Detection runs
+   only at startup, settings saves and update attempts — never per
+   connection — so keeping the switch on adds no per-request latency.
+4. **Direct** — nothing above applied; direct connections keep the
+   dial-time private/reserved-IP guard.
+
+Both proxy settings are bound to the machine's network topology: they are
+excluded from settings sync/migration, so set them per instance.
+
+Troubleshooting "which route is the update actually taking": the version
+panel shows the **Effective route** tier next to the proxy settings, and
+`GET /api/updates/proxy-status` returns the machine-readable snapshot —
+`tier` (`explicit` / `env` / `sysdetect` / `direct`), the effective proxy
+address (credentials redacted), the switch state and the last detection
+result; `?refresh=1` re-detects immediately (still zero detection while
+the switch is off). Call it in a browser unlocked on this instance, or
+with an `Authorization: Bearer sc_…` access-token header.
+
+One security note: under any proxy tier the update target is resolved by
+the proxy, so the dial-time IP guard is replaced by an official-domain
+allowlist (GitHub's official update domains ∪ your explicitly configured
+update source host), checked on every hop including redirects.
 
 ### Build and run
 

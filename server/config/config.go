@@ -178,6 +178,13 @@ type ServerConfig struct {
 	// 走代理后目标由代理解析，拨号期 IP 守卫降级为官方域白名单（∪ 本更新源
 	// host），见 server/update/urlsafety.go；保存期校验见 system.UpdateSettings
 	UpdateProxy string `json:"updateProxy,omitempty"`
+	// UpdateProxyAutoDetect 系统代理自动探测开关（P-20261110-1 S6）：true = 显式
+	// 设置与环境变量都未给出代理时，更新链改用探测到的桌面系统代理（Windows
+	// Internet Settings / macOS scutil / GNOME gsettings，update.DetectSystemProxy）；
+	// 选路档序 显式 > env > 系统探测 > 直连，见 server/update/urlsafety.go。默认关
+	// （存量配置缺字段即关，行为零变化）；与 UpdateProxy 同属机器网络拓扑绑定，
+	// 不进同步/迁移白名单
+	UpdateProxyAutoDetect bool `json:"updateProxyAutoDetect,omitempty"`
 	// ExternalAccessURL 外部访问地址（P-20261019-10）：Tailscale/Cloudflare
 	// Tunnel/公网反代接入时的手机可达 origin（scheme+host+可选 port，无路径/
 	// query/fragment/凭据）。二维码接力在桌面端以回环地址打开时优先用它，

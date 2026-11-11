@@ -98,9 +98,10 @@ func TestPublishUpdateResultStaleOrPending(t *testing.T) {
 func TestWatchUpdateResultCatchesLateResult(t *testing.T) {
 	dd := t.TempDir()
 	notes := captureNotifications(t)
-	origWin, origInt := resultWatchWindow, resultWatchInterval
-	resultWatchWindow, resultWatchInterval = 3*time.Second, 10*time.Millisecond
-	t.Cleanup(func() { resultWatchWindow, resultWatchInterval = origWin, origInt })
+	origWin, origInt := resultWatchWindow.Load(), resultWatchInterval.Load()
+	resultWatchWindow.Store(3 * time.Second)
+	resultWatchInterval.Store(10 * time.Millisecond)
+	t.Cleanup(func() { resultWatchWindow.Store(origWin); resultWatchInterval.Store(origInt) })
 
 	m := NewModule("1.2.3")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -128,9 +129,10 @@ func TestWatchUpdateResultCatchesLateResult(t *testing.T) {
 
 // 停机即退出（内核契约「Stop 后无副作用」）
 func TestWatchUpdateResultStopsOnCancel(t *testing.T) {
-	origWin, origInt := resultWatchWindow, resultWatchInterval
-	resultWatchWindow, resultWatchInterval = time.Minute, 10*time.Millisecond
-	t.Cleanup(func() { resultWatchWindow, resultWatchInterval = origWin, origInt })
+	origWin, origInt := resultWatchWindow.Load(), resultWatchInterval.Load()
+	resultWatchWindow.Store(time.Minute)
+	resultWatchInterval.Store(10 * time.Millisecond)
+	t.Cleanup(func() { resultWatchWindow.Store(origWin); resultWatchInterval.Store(origInt) })
 
 	m := NewModule("1.2.3")
 	dd := t.TempDir()

@@ -110,7 +110,8 @@ type MigrationTokens struct {
 
 // MigrationPortableSettings 跨机可迁的系统设置白名单（ServerConfig 的策展
 // 子集）。**刻意排除**：Port/Host/TLS 证书路径/UpdateURL/UpdateProxy（更新链
-// 出站代理与机器网络形态绑定，P-20261109-12）/ExternalAccessURL/
+// 出站代理与机器网络形态绑定，P-20261109-12）/UpdateProxyAutoDetect（系统代理
+// 探测开关，同理绑定本机桌面网络，P-20261110-1 S6）/ExternalAccessURL/
 // TrustedProxies/SyncDestRoot/DshTargets 等机器与网络拓扑绑定字段——跨 OS 换机后这些
 // 值是垃圾甚至有害（端口冲突/证书路径不存在），迁移由用户在新机重配；
 // DshTargets 另含访问令牌且设置 GET 面本就不外发该字段，进 diff 预览等于

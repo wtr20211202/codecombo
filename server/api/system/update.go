@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -147,11 +148,12 @@ func GetUpdateStatus(c *gin.Context) {
 	st := mgr.GetStatus()
 
 	resp := model.UpdateStatusResponse{
-		Status:   string(st.Status),
-		Progress: st.Progress,
-		Total:    st.Total,
-		Version:  st.Version,
-		Error:    st.ErrMsg,
+		Status:       string(st.Status),
+		Progress:     st.Progress,
+		Total:        st.Total,
+		ResumedBytes: st.ResumedBytes,
+		Version:      st.Version,
+		Error:        st.ErrMsg,
 	}
 
 	// 终态或空闲时检查结果文件
@@ -166,6 +168,19 @@ func GetUpdateStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
+// GetUpdateProxyStatus 更新链出站档位只读透出（P-20261110-1 S6）：对更新目标
+// （github.com 口径）当前生效的档位 explicit/env/sysdetect/direct + 生效代理地址 +
+// 探测开关态 + 最近一次探测结果（地址/来源/时刻）。任何代理地址回显前脱敏
+// userinfo（相对 GET /settings 无泄露增量）；?refresh=1 先按探测挂点语义即时探测
+// 一次（写快照、非热路径；开关关仍零探测）。agent 代诊断「更新走哪条路」的原语；
+// 鉴权姿态同 GET /updates/status、GET /settings（全局 api 组，无额外 token 门）
+func GetUpdateProxyStatus(c *gin.Context) {
+	refresh, _ := strconv.ParseBool(c.Query("refresh"))
+	// 实时快照（探测结果随挂点刷新）：禁缓存，中间层/浏览器不得复用旧档位
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"data": update.CurrentProxyStatus(c.Request.Context(), refresh)})
 }
 
 // DeleteUpdateStatus 前端确认已读取更新结果。在途更新（下载/校验/替换/重启）

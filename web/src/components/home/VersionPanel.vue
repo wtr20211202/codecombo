@@ -15,6 +15,7 @@ import { useI18n } from '../../composables/useI18n'
 import { useNotificationStore } from '../../stores/notification'
 import { useUpdateProgressStore } from '../../stores/updateProgress'
 import { useUpdateCheckStore } from '../../stores/updateCheck'
+import type { UpdateProxyStatusPayload } from '../../api/domains/system'
 
 export interface VersionBuildInfo {
   version: string
@@ -238,15 +239,47 @@ const updatePrereleaseSaving = ref(false)
 // 显式配置优先于环境变量；保存即热化（服务端重装出站状态与更新源）
 const updateProxy = ref('')
 const updateProxySaving = ref(false)
+// 系统代理自动探测开关（P-20261110-1 S6）：默认关（存量零变化）；显式与 env 都
+// 未给出代理时更新链改用探测到的系统代理。保存走既有设置保存链（服务端装配点
+// 同步探测一次），失败按服务端真值回滚
+const updateProxyAutoDetect = ref(false)
+const updateProxyAutoDetectSaving = ref(false)
+// 当前生效档位（P-20261110-1 S6）：读 proxy-status（服务端与实际选路同源裁决，
+// 地址已脱敏）。端点失败静默降级为不展示，不阻断面板其余功能
+const proxyStatus = ref<UpdateProxyStatusPayload | null>(null)
+
+async function loadProxyStatus() {
+  try {
+    const res = await updateApi.proxyStatus({ silent: true })
+    proxyStatus.value = (res as unknown as { data?: UpdateProxyStatusPayload })?.data || null
+  } catch {
+    proxyStatus.value = null
+  }
+}
+
+// 档位文案 + 脱敏地址（direct 档无地址只显档位名）
+const proxyTierText = computed(() => {
+  const s = proxyStatus.value
+  if (!s) return ''
+  const keys: Record<string, string> = {
+    explicit: 'update.proxyTierExplicit',
+    env: 'update.proxyTierEnv',
+    sysdetect: 'update.proxyTierSysdetect',
+    direct: 'update.proxyTierDirect',
+  }
+  const label = t(keys[s.tier] || 'update.proxyTierDirect')
+  return s.proxy ? `${label} · ${s.proxy}` : label
+})
 
 async function loadUpdateSource() {
   try {
     const res = await settingsApi.get({ silent: true })
-    const data = res.data as { updateURL?: string; updateChecks?: boolean; updateChannel?: string; updateProxy?: string } | undefined
+    const data = res.data as { updateURL?: string; updateChecks?: boolean; updateChannel?: string; updateProxy?: string; updateProxyAutoDetect?: boolean } | undefined
     updateSourceUrl.value = data?.updateURL || ''
     updateChecks.value = data?.updateChecks !== false
     updatePrerelease.value = data?.updateChannel === 'prerelease'
     updateProxy.value = data?.updateProxy || ''
+    updateProxyAutoDetect.value = data?.updateProxyAutoDetect === true
   } catch { /* silent */ }
 }
 
@@ -309,6 +342,8 @@ async function saveUpdateProxy() {
   try {
     await settingsApi.update({ updateProxy: v })
     message.success(t('update.proxySaved'))
+    // 出站态保存即热化（服务端装配点重装配+探测）：档位展示跟随刷新
+    void loadProxyStatus()
   } catch {
     // 失败回滚输入框展示态（拦截器已出错误提示）
     loadUpdateSource()
@@ -317,9 +352,26 @@ async function saveUpdateProxy() {
   }
 }
 
+// 自动探测开关（P-20261110-1 S6）：保存即生效（服务端 ApplySource 单点重装配 +
+// 探测一次），档位展示跟随；失败按服务端真值回滚展示态（saveUpdateChecks 同款）
+async function saveUpdateAutoDetect(v: boolean) {
+  updateProxyAutoDetect.value = v
+  updateProxyAutoDetectSaving.value = true
+  try {
+    await settingsApi.update({ updateProxyAutoDetect: v })
+    message.success(t('update.proxyAutoDetectSaved'))
+    void loadProxyStatus()
+  } catch {
+    loadUpdateSource()
+  } finally {
+    updateProxyAutoDetectSaving.value = false
+  }
+}
+
 // 挂载即同步一次更新实况：服务端在途（他页/CLI 发起、或 F5 后）即接管轮询
 onMounted(() => {
   void loadUpdateSource()
+  void loadProxyStatus()
   void progress.sync()
 })
 </script>
@@ -522,6 +574,31 @@ onMounted(() => {
       </div>
       <div class="version-row">
         <span class="version-value muted">{{ t('update.proxyHintShort') }}</span>
+      </div>
+      <!-- 系统代理自动探测开关（P-20261110-1 S6）：显式与 env 都未给出代理时，
+           更新链改用探测到的桌面系统代理；保存即生效（服务端装配点同步探测） -->
+      <div class="version-row">
+        <span class="version-label">{{ t('update.proxyAutoDetectLabel') }}</span>
+        <n-switch
+          size="small"
+          data-testid="version-proxy-autodetect-switch"
+          :value="updateProxyAutoDetect"
+          :disabled="updateProxyAutoDetectSaving"
+          @update:value="saveUpdateAutoDetect"
+        />
+      </div>
+      <div class="version-row">
+        <span class="version-value muted">{{ t('update.proxyAutoDetectHint') }}</span>
+      </div>
+      <!-- 当前生效档位（P-20261110-1 S6）：读 proxy-status（与实际选路同源裁决，
+           地址已脱敏）；端点失败静默降级为不展示，不阻断面板其余功能 -->
+      <div
+        v-if="proxyStatus"
+        class="version-row"
+        data-testid="version-proxy-tier"
+      >
+        <span class="version-label">{{ t('update.proxyTierLabel') }}</span>
+        <span class="version-value">{{ proxyTierText }}</span>
       </div>
     </div>
 

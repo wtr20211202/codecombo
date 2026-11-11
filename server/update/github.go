@@ -44,8 +44,8 @@ func NewGitHubSource(repoURL string) (*GitHubSource, error) {
 	}
 	return &GitHubSource{
 		RepoURL: normalizeGitHubAPI(strings.TrimRight(repoURL, "/")),
-		// safeRoundTripper：出站路径每请求现选（显式代理/env 代理/直连三态，
-		// P-20261109-12）——设置保存即生效，无须重建源
+		// safeRoundTripper：出站路径每请求现选（显式代理/env 代理/系统探测代理/
+		// 直连四档，P-20261109-12 + P-20261110-1 S6）——设置保存即生效，无须重建源
 		client: &http.Client{Timeout: 30 * time.Second, Transport: safeRoundTripper{}},
 	}, nil
 }
@@ -146,7 +146,9 @@ func (s *GitHubSource) FetchLatest(ctx context.Context, platform, arch string) (
 // 覆盖全部尝试与退避，两资产并发——坏链路下 check 最坏耗时由旧口径「client
 // 30s × 两文件串行 = 60s」收到一份预算；首试 + 2 次退避重试吸收连接重置 /
 // DNS 抖动 / CDN 5xx 等瞬时故障。主包下载的重试牵动状态机（进度/半截文件），
-// 另立不并入。包级变量便于测试压缩时长
+// 独立实现于 manager.go 的 downloadResumableWithRetry（P-20261110-1-S2 补齐，续传
+// 重试——套在 S1 续传会话外层：downloadRetryAttempts 同预算 + 本处退避曲线复用），
+// 不与本预算共用上下文。包级变量便于测试压缩时长
 var (
 	companionFetchBudget   = 10 * time.Second
 	companionFetchAttempts = 3

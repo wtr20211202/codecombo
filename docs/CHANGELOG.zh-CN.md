@@ -6,6 +6,31 @@
 
 ## [Unreleased]
 
+## [0.0.1-beta.6] - 2026-11-11
+
+### 新增
+
+- **自更新下载断点续传** —— 大体积更新下载保留 `.part` 文件，重试从字节偏移
+  续传；拼接安全用强 ETag If-Range/206 身份核对强制保障（远端内容被换即拒绝
+  并清除，绝不拼进你的安装包）；200/416 响应回退干净的全量下载；换包只在
+  完整性闸通过后执行（原子改名）。
+- **自动重试收编进续传链** —— 瞬时下载失败自动退避重试并从偏移续传（进度
+  不回零）；403/404 等确定性失败不空耗尝试；残留临时文件 7 天后清理；
+  失败卡片新增「重试更新」一键。
+- **续传进度看得见** —— 下载中态显示「已续传 xx MB」（新增 `resumedBytes`
+  字段），弱网长更新如实呈现而非从 0% 重新计数。
+- **系统代理探测接入选路** —— 更新出站选路升级四档：显式设置 > 环境变量 >
+  系统代理自动探测（默认关；Windows 读注册表、macOS 读 `scutil`、GNOME 读
+  `gsettings`）> 直连。探测档尊重 NO_PROXY；一切代理路径仍受官方域白名单
+  守卫；版本面板展示当前生效档位，背后是新的 proxy-status 诊断端点
+  （地址脱敏、按需即时刷新）。
+
+### 变更
+
+- **更新代理文档补齐** —— README 新增双语更新代理节（四档、NO_PROXY 立场、
+  探测时机）；Linux 部署指南补 systemd `HTTPS_PROXY`/`NO_PROXY` 示例与
+  daemon-reload 说明；升级判别表补 Windows 服务行与「重跑安装器为何安全」。
+
 ## [0.0.1-beta.5] - 2026-11-10
 
 ### 新增
@@ -188,7 +213,8 @@
 - 文档全面刷新：快速开始前置、完整工具清单（What's inside）、典型场景
   走查、开放贡献指南（欢迎 DCO 签名的 PR）。
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.5...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.6...HEAD
+[0.0.1-beta.6]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.6
 [0.0.1-beta.5]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.5
 [0.0.1-beta.4]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.4
 [0.0.1-beta.3]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.3

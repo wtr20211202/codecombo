@@ -110,6 +110,11 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
       : 0
   })
 
+  /** 断点续传起点（P-20261110-1-S4）：本次下载尝试实际从 .part 续传的字节数，
+   *  服务端 downloadResumable 单一来源（全量回退归 0、omitempty 省略）。纯透传
+   *  不做门控——下载中态「已续传 xxMB」文案由消费方按 >0 自行显隐 */
+  const resumedBytes = computed(() => snapshot.value?.resumedBytes ?? 0)
+
   /** 面板结局块：本会话终局优先；未在跟踪时回落服务端快照里的上次失败/回滚
    *  （内存态失败 = 本进程内下载/校验失败；结果文件失败/回滚 = 换包链结局） */
   const lastOutcome = computed<UpdateOutcome | null>(() => {
@@ -295,6 +300,31 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
     outcome.value = null
   }
 
+  /**
+   * 失败态一键重试（P-20261110-1-S2）：复用 apply 受理端点——与「立即更新」同
+   * 一受理链（服务端对 failed 终态自 Reset 后重走受理，updateRetryable 既有语义），
+   * 不预清结果文件（受理成功点服务端自清）。先清本会话终局再发起：受理成功即进
+   * 跟踪（进度块接棒）；被拒（npm 形态 409 / 伴随预检仍失败 500 等）时终局回落为
+   * 本次拒因——重试的反馈不落在旧因上。错误对象如实上抛，调用方可再出提示
+   */
+  async function retry(opts?: { silent?: boolean }): Promise<'started' | 'tracking'> {
+    // 目标版本三取：本会话终局 > 跟踪遗留 > 服务端快照（sync 只入快照不设
+    // targetVersion——上次失败经快照回显时快照里的版本号是唯一在场的）
+    const version = outcome.value?.version || targetVersion.value || snapshot.value?.version || ''
+    outcome.value = null
+    try {
+      return await start(version, opts)
+    } catch (e) {
+      // start 内部已探实况：服务端失败态（伴随预检拒绝等）经快照回显新原因；
+      // 状态机不承载失败的拒绝（npm 409 等状态机仍空闲）快照回不了失败态，
+      // 用拒因兜底终局，结局块就地可见——本组件消费方（结局块/徽标）无 message
+      // 注入点，拒因不上墙就丢了
+      const err = e as { userMessage?: string; message?: string } | null
+      settle('failed', version, err?.userMessage || err?.message || '', '')
+      throw e
+    }
+  }
+
   /** 面板「知道了」：关闭终局并确认已读（DELETE 清结果文件与失败态；在途 409 静默） */
   async function acknowledge(): Promise<void> {
     outcome.value = null
@@ -324,7 +354,7 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
 
   return {
     snapshot, tracking, reconnecting, outcome, targetVersion,
-    inFlight, phase, percent, lastOutcome, badgeVisible,
-    init, sync, start, dismiss, acknowledge, resetForInstance, openPanel,
+    inFlight, phase, percent, resumedBytes, lastOutcome, badgeVisible,
+    init, sync, start, retry, dismiss, acknowledge, resetForInstance, openPanel,
   }
 })

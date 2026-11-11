@@ -449,7 +449,16 @@ commit/push/pull/reset/rollback/merge/rebase/stash/tag/worktree 等）与该项�
                                             externalAccessUrl/当前地址/局域网候选），空串=清除回落
                                             自动选址；改值即时生效（每次拼链现读），GET 同键回读。
                                             反代/隧道只转发主端口或分享域名独立时用它——agent 可
-                                            据此自诊断「外发链接能不能被对端打开」`,
+                                            据此自诊断「外发链接能不能被对端打开」
+- updateProxyAutoDetect 系统代理自动探测开关（P-20261110-1 S6）：
+                                            PUT /api/settings {"updateProxyAutoDetect":true}
+                                            显式代理与 env 都未给出时更新链改用探测到的
+                                            桌面系统代理（默认关，省略=不动）。诊断配套：
+                                            GET /api/updates/proxy-status 更新链当前生效
+                                            出站档位（tier: explicit/env/sysdetect/direct，
+                                            按更新目标 github.com 裁决）+ 生效代理地址
+                                            （userinfo 已脱敏）+ 最近一次探测结果——agent
+                                            可代诊断「更新走哪条路、为什么走不通」`,
 		},
 		Section{
 			ID: "system", Title: "系统网络与外部入口", Order: 21,

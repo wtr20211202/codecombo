@@ -161,6 +161,7 @@ npm 安装不生效——更新就是重跑安装命令。
 | 判别依据 | 安装方式 | 升级路径 |
 |---|---|---|
 | `ExecStart` → `~/.local/bin/codecombo` | 上方一键脚本装 | ① 应用内自更新（首选）· ② 重跑脚本 |
+| `sc.exe query Codecombo` 有结果 | Windows 一键脚本装（install.ps1，管理员运行） | ① 应用内自更新（首选）· ② 重跑 install.ps1——脚本自带停服换包 |
 | `ExecStart` → `~/.codecombo/bin/codecombo` | 中心实例远程部署装 | ① 应用内自更新 · 中心实例重新远程部署 · ③ 手工替换——**禁止**重跑脚本 |
 | `ExecStart` → `/opt/codecombo/bin/codecombo` | 手工 `/opt` 布局（[Linux 部署指南](deploy-linux.md)） | ① 应用内自更新 · ③ 手工替换 |
 | `npm ls -g codecombo` 有结果 | npm | `npm i -g codecombo@latest`（应用内更新自动让位） |
@@ -169,12 +170,14 @@ npm 安装不生效——更新就是重跑安装命令。
 GitHub 拉取新版本、失败自动回滚。两个注意点：早于 v0.0.1-beta.3 的版本
 检查链有缺陷、应用内看不到新版本（v0.0.1-beta.3 已修复）——先按下方脚本/
 手工方式升一次；beta 期（尚无正式版）GitHub 正式通道恒为空，先在版本面板
-打开**「跟进预发布版本」**再检查。脚本装（systemd 托管）的实例：更新后
+打开「**跟进预发布版本**」再检查。脚本装（systemd 托管）的实例：更新后
 服务若未自行拉起，`sudo systemctl restart codecombo` 收尾。
 
-**② 重跑安装脚本（仅限脚本装实例）**——原 `--host`/`--port` 读自
-`ExecStart`（装时指定过数据目录的，再从 unit 的 `Environment=` 行取
-`CC_DATA_DIR` 原值、以 `CODECOMBO_DATA_DIR` 带回），环境变量必须放在管道 `sh` 一侧（写在 `curl` 前只对 curl 生效，
+**② 重跑安装脚本（仅限脚本装实例）**——重跑升级是安全的：脚本只替换
+二进制与服务注册，数据目录零触碰（数据/配置/密钥全在数据目录，锁密码
+也在其中，重跑后原样沿用）。原 `--host`/`--port` 读自 `ExecStart`
+（装时指定过数据目录的，再从 unit 的 `Environment=` 行取 `CC_DATA_DIR`
+原值、以 `CODECOMBO_DATA_DIR` 带回——带同值重跑即可），环境变量必须放在管道 `sh` 一侧（写在 `curl` 前只对 curl 生效，
 端口/绑定回落默认 9999/127.0.0.1）：
 
 ```bash
@@ -189,14 +192,53 @@ sudo -v && curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/ma
 unit 被模板覆写会丢 `PATH`/`WorkingDirectory`/`NoNewPrivileges` 且绑定缩回
 `127.0.0.1`，服务一重启远程访问即断；该布局走应用内更新或中心实例重新远程
 部署（中心实例须 v0.0.1-beta.3 及以上——更早的部署器覆盖升级旧实例可能失败）。
-Windows 重跑 install.ps1 前先 `sc.exe stop Codecombo`——Windows 锁定运行中的
-`.exe`，服务在跑换包必败。
+Windows 重跑 install.ps1 用管理员 PowerShell，并带上与原安装相同的
+`$env:CODECOMBO_*` 值（当前 `--port`/`--host`/`--data-dir` 见
+`sc.exe qc Codecombo` 的 `BINARY_PATH_NAME` 行）——脚本自带停服换包
+（Windows 锁定运行中的 `.exe`，服务在跑换包必败；非管理员重跑撞上
+运行中的服务会快速失败并给出同样的提示）。
 
 **③ 手工替换二进制（仅 Linux）**：完整配方（stop → SHA256 校验 → 留
 `.bak` 备份 → 替换 → start，含回滚步）见 [Linux 部署指南](deploy-linux.md)
 §6；服务起不来的 `status=203/EXEC` 三态诊断见同篇 §7。注意文件体积：二进制
 约 50MB 量级（linux-amd64 约 51–54MB），只有几十字节说明点成了
 `.sha256`/`.sig` 伴随资产。
+
+### 更新链代理
+
+更新链（版本检查与二进制下载）按固定档序逐请求选出站路径——
+**显式设置 > 环境变量 > 系统代理自动探测（开关开时）> 直连**：
+
+1. **显式设置**——设置项 `updateProxy`，版本面板（设置 → 关于）
+   「更新代理」输入框。支持 `http://` / `https://`（CONNECT 隧道）与
+   `socks5://`（`socks5h` 同义）——公司内网代理与本地 clash 客户端端口
+   （`127.0.0.1:…`）正是目标场景。显式代理对更新链全量生效，
+   不解读 `NO_PROXY`。
+2. **环境变量**——标准 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 语义
+   （含小写变体）。服务器场景写在 systemd unit 的 `Environment=` 行，
+   改后重启服务即生效（示例见 [Linux 部署指南](deploy-linux.md) §3）。
+3. **系统代理自动探测**——版本面板「自动探测系统代理」开关（设置项
+   `updateProxyAutoDetect`，默认关）。上面两档都未给出代理时，
+   更新链改用本机桌面系统代理：Windows Internet 设置、
+   macOS 网络设置（scutil）、Linux GNOME（gsettings）——只认静态代理，
+   PAC/WPAD 自动配置脚本不求值。探测档尊重 `NO_PROXY`（命中的目标直连）。
+   探测只发生在启动、设置保存与更新尝试三类挂点，绝不逐连接探测——
+   开着开关不增加每次请求的延迟。
+4. **直连**——以上皆无时保持直连，拨号期内网/保留 IP 守卫原样生效。
+
+两个代理设置都绑定本机网络拓扑：不进设置同步/迁移，
+多实例场景按实例分别设置。
+
+排障「更新到底走的哪条路」：版本面板代理设置旁有「**当前生效**」档位展示；
+程序化口径是 `GET /api/updates/proxy-status`——返回 `tier`
+（`explicit` / `env` / `sysdetect` / `direct`）、生效代理地址（凭据已脱敏）、
+开关态与最近一次探测结果；`?refresh=1` 即时重新探测（开关关仍零探测）。
+在本实例已解锁的浏览器里直接打开该地址，
+或用 `Authorization: Bearer sc_…` 访问令牌头调用。
+
+安全口径一句：任一代理档生效时更新目标由代理解析，
+拨号期 IP 守卫由官方域白名单替代
+（GitHub 官方更新域 ∪ 显式配置的更新源 host），逐跳（含重定向）校验。
 
 ### 从源码构建
 

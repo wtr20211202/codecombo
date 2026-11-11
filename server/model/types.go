@@ -292,6 +292,10 @@ type UpdateStatusResponse struct {
 	// ResultAt 结果文件落盘时刻（RFC3339 UTC，P-20261109-10）：版本面板「上次
 	// 更新」块回显时间，零值省略
 	ResultAt string `json:"resultAt,omitempty"`
+	// ResumedBytes 本次下载尝试实际从 .part 续传的起点字节数（P-20261110-1-S4，
+	// 透传自 update.UpdateStatusResult；全量下载为 0 省略）。增量字段——旧前端
+	// 忽略未知字段，无 schema 变更
+	ResumedBytes int64 `json:"resumedBytes,omitempty"`
 }
 
 // LockConfig 锁定机制配置，持久化到 docstore 集合 "lock" 的 "config" 文档

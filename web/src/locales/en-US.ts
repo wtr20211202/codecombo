@@ -5797,6 +5797,15 @@ export default {
     proxyHintShort: 'Corporate proxy or local clash goes here; empty uses HTTPS_PROXY env',
     proxySaved: 'Update proxy saved',
     proxyInvalid: 'Proxy address must start with http://, https:// or socks5://',
+    // System proxy auto-detect + effective tier (P-20261110-1 S6)
+    proxyAutoDetectLabel: 'Auto-detect system proxy',
+    proxyAutoDetectHint: 'When neither the explicit proxy nor environment variables apply, use the detected system proxy (Windows Settings / macOS System Settings / GNOME) for the update chain; off by default',
+    proxyAutoDetectSaved: 'Auto-detect setting saved',
+    proxyTierLabel: 'Effective route',
+    proxyTierExplicit: 'Explicit proxy',
+    proxyTierEnv: 'Environment variable',
+    proxyTierSysdetect: 'System proxy',
+    proxyTierDirect: 'Direct',
     sourceUrlSaved: 'Distribution source saved',
     sourceUrlInvalid: 'URL must start with http:// or https://',
     sourceMissingHint: 'Update source disabled — self-update uses the built-in official repo; this only appears when the center distribution source URL is invalid and was rejected',
@@ -5858,6 +5867,9 @@ export default {
     // Version panel progress / outcome block
     progressInfo: {
       bytes: '{percent}% ({done} / {total})',
+      // Resumed-download surfacing (P-20261110-1-S4): appended to the byte detail
+      // while downloading a resumed session
+      resumed: 'resumed {bytes}',
       background: 'You can close this panel and keep working — progress shows in the update badge, results land in the notification center',
       reason: 'Reason: {reason}',
       at: 'At: {time}',
@@ -5865,6 +5877,10 @@ export default {
       unknownHint: 'The service has not come back for a while, so the result is unknown — check the service status or refresh later',
       refreshHint: 'The new version is live; this page still runs the previous UI — refresh to load the new one',
       refreshNow: 'Refresh page',
+      // One-click retry on the failed outcome (P-20261110-1-S2): reuses the
+      // apply endpoint; a refusal reason lands back in the reason line
+      retry: 'Retry update',
+      retrying: 'Retrying…',
       dismiss: 'Got it',
     },
     // Global update badge (App level, visible on every route)

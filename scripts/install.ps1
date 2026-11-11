@@ -15,6 +15,7 @@
 # Install method decides update method: binary installs (this script or a
 # manual download) update in-app from GitHub releases with automatic rollback;
 # npm installs update through npm (the in-app updater steps aside).
+# Re-run = upgrade; data dir untouched.
 #
 # Env vars: CODECOMBO_PREFIX (default $env:LOCALAPPDATA\Programs\codecombo),
 #           CODECOMBO_PORT (default 9999),
