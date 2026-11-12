@@ -8,6 +8,7 @@
     { "id": "frontend.clipboard", "verb": "frontend", "event": "frontend.clipboard", "payload": ["text"] },
     { "id": "frontend.download", "verb": "frontend", "event": "frontend.download", "payload": ["path", "projectId"] },
     { "id": "frontend.open", "verb": "frontend", "event": "frontend.open", "payload": ["url"] },
+    { "id": "frontend.reload", "verb": "frontend", "event": "frontend.reload", "payload": ["scope"] },
     { "id": "navigate.changes", "verb": "navigate", "event": "navigate", "payload": ["view"] },
     { "id": "navigate.diff", "verb": "navigate", "event": "navigate", "payload": ["file", "project", "view"], "deepLink": "file" },
     { "id": "navigate.file", "verb": "navigate", "event": "navigate", "payload": ["file", "line", "project"], "deepLink": "file" },

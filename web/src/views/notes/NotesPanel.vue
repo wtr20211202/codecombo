@@ -26,7 +26,8 @@ import { promptDialog } from '../../composables/useDialog'
 import { useNarrowLayout } from '../../composables/useNarrowLayout'
 import { useNotesKeyboard } from '../../composables/useNotesKeyboard'
 import { suggestNoteTitle } from '../../utils/noteTitle'
-import { NOTES_EXTERNAL_UPDATE, notesSaveUrl, useNotesMulti } from '../../composables/useNotesMulti'
+import { computeAnchoredSelection } from '../../utils/notesExternalSync'
+import { NOTES_EXTERNAL_UPDATE, NOTES_ORIGIN_HEADER, notesOriginNonce, notesSaveUrl, useNotesMulti } from '../../composables/useNotesMulti'
 import { OPS_NOTES_UPDATED, type NotesExternalUpdateDetail } from '../../utils/opsEvents'
 import NotesMigrationBanner from './NotesMigrationBanner.vue'
 import NotesPanelHeader from './NotesPanelHeader.vue'
@@ -162,11 +163,30 @@ function onMigrated(): void {
   if (sidebarOpen.value) void notes.loadTrash()
 }
 
+/** 换装前 DOM 现场（值 + 选区）：body 未挂载（loading/错误态）时 textarea
+ *  不存在，返回 null 免锚定 */
+function snapshotEditorSelection(): { value: string; selectionStart: number; selectionEnd: number } | null {
+  const el = editorRef.value
+  if (!el) return null
+  return { value: el.value, selectionStart: el.selectionStart, selectionEnd: el.selectionEnd }
+}
+
 /** 笔记被外部写回（服务端 notes.updated 直通分发 + 前端内部事件统一消费口）。
- *  服务端事件的 projectId = 笔记库哨兵 '_global'，引擎按其对位 */
-function onExternalUpdate(e: Event): void {
+ *  服务端事件的 projectId = 笔记库哨兵 '_global'，引擎按其对位。
+ *  S2 无扰换装（P-20261111-4）：同内容换装已被引擎拦为零触碰；真换装时引擎
+ *  返回现场，面板在事件抵达瞬间快照 textarea 值+选区，引擎换值、Vue 写入 DOM
+ *  后按新旧内容的前缀/后缀稳定段恢复光标。快照值与换装起点不一致（取数期间
+ *  用户又输入/换装的是刚聚焦的另一篇）即放弃锚定——视觉位置交给换装常态 */
+async function onExternalUpdate(e: Event): Promise<void> {
   const detail = (e as CustomEvent<NotesExternalUpdateDetail>).detail
-  void notes.onExternalUpdate(detail)
+  const snap = snapshotEditorSelection()
+  const swap = await notes.onExternalUpdate(detail)
+  if (!swap || !snap || swap.noteId !== notes.activeId.value || snap.value !== swap.oldContent) return
+  await nextTick()
+  const el = editorRef.value
+  if (!el) return
+  const anchored = computeAnchoredSelection(swap.oldContent, swap.newContent, snap.selectionStart, snap.selectionEnd)
+  el.setSelectionRange(anchored.selectionStart, anchored.selectionEnd)
 }
 
 /** 页面隐藏（切 tab/最小化）：防抖窗内的编辑全部落盘——多端/多标签场景
@@ -177,15 +197,19 @@ function onVisibility(): void {
 
 /** 卸载前的尽力而为：keepalive fetch 直发（uiState 关页补丁同款——sendBeacon
  *  只支持 POST，本族单篇保存只有 PUT 路由；且 sendBeacon 无法携 X-Lock-Token，
- *  锁定实例会被 401 拒收）。诚实边界：浏览器不保证送达、>64KB 载荷被浏览器
- *  截拒，丢失上界 = 防抖窗 */
+ *  锁定实例会被 401 拒收）。携 X-Notes-Origin 与 axios 写路径同口径（S1 回声
+ *  抑制——落盘成功的广播按本窗 nonce 跳过；窗即关，主要是协议一致性）。
+ *  诚实边界：浏览器不保证送达、>64KB 载荷被浏览器截拒，丢失上界 = 防抖窗 */
 function onBeforeUnload(): void {
   for (const id of notes.dirtyIds.value) {
     const content = notes.contents[id] ?? ''
     const base = notes.bases[id]
     const body = JSON.stringify({ content, baseUpdatedAt: base || undefined })
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        [NOTES_ORIGIN_HEADER]: notesOriginNonce(),
+      }
       const token = getUnlockToken()
       if (token) headers['X-Lock-Token'] = token
       fetch(notesSaveUrl(id), {

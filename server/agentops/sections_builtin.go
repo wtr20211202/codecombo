@@ -697,7 +697,15 @@ commit/push/pull/reset/rollback/merge/rebase/stash/tag/worktree 等）与该项�
                                             带 prompt 的新会话尾部由系统附一行「[系统注记]」
                                             （会话 id + 任务演化后重命名指令，设置
                                             agentNamingNoteEnabled 可关）；名字与任务不符时
-                                            按注记执行，与本条查重约定一致
+                                            按注记执行，与本条查重约定一致。
+                                            自动命名（P-20261111-6）：claude 运行时未手动
+                                            改名的会话（名字仍是系统派生形态）在首条用户
+                                            消息落盘后数秒内由服务端按其首行自动总结改名
+                                            （约 40 字符截断，同名自动消歧）——「会话名≈
+                                            首条任务语义」，按名字引用/汇报会话即可对准
+                                            任务；手动 rename 永远优先（改过名的会话不再
+                                            自动覆盖）；敏感首句静默跳过；设置
+                                            agentAutoNameEnabled 可关（默认开）
 - PUT    /api/terminals/:id/resize          调整尺寸 {"rows","cols"}
 - DELETE /api/terminals/:id                 关闭会话（tmux kill / PTY 终止）
 - POST   /api/terminals/broadcast-write     多终端广播输入（舰队式批量）{"ids":[...],"data":"..."}：
@@ -889,6 +897,27 @@ commit/push/pull/reset/rollback/merge/rebase/stash/tag/worktree 等）与该项�
                                             因果判断需人工；transcript 已删的
                                             会话不命中（宁漏报不误报）
 - WS     /ws/terminal/:id                   终端双向流（二进制输入输出）
+
+会话自定义分组（P-20261111-1-S3）：侧栏「自定义分组」是纯组织结构（uiState
+  agentTerminal.groups，不动会话本体），以下端点让 agent 可编程归置会话——
+  值班巡检自建分组归置同任务会话、交付前按主题归拢等。分组结构变更实时广播
+  agent.groups.changed，用户侧栏就地跟随；id 形态 at_<ts>_<rand> 服务端铸造
+  （POST 响应回权威 id），名称 trim 非空 ≤64 rune，组数 ≤100。归属判定 =
+  「会话 id 出现在某个组的 sessionIds 里」，不在任何组 = 未分组；
+- GET    /api/terminals/session-groups             分组清单 [{id,name,sessionIds}]（含空组）
+- POST   /api/terminals/session-groups             新建空组 {"name"}，201 回 {id,name,sessionIds:[]}；
+                                                  组数触顶 400 "session groups limit reached (100)"
+- PUT    /api/terminals/session-groups/:id         改名 {"name"}；组不存在 404
+- DELETE /api/terminals/session-groups/:id         删组；组内会话自动回未分组（不丢会话）
+- PUT    /api/terminals/session-groups/:id/sessions 移入 {"sessionIds":[...]}：会话从原组
+                                                  摘除入目标组尾部（前端拖拽同语义）；任一
+                                                  会话 id 不在册 404 整体不动（先 GET /api/terminals
+                                                  核对 id），空清单 400
+- DELETE /api/terminals/session-groups/:id/sessions/:sid  移出（回未分组）；组不存在或
+                                                  会话不在该组 404
+- 配方（归置 N 个同任务会话）：GET /api/terminals → POST 建组得 id →
+  PUT :id/sessions 一次移入全部 → 侧栏经 agent.groups.changed 就地跟随，
+  无需逐个通知
 - 环境变量：会话内已注入 CC_BASE_URL（API 基址，TLS 部署时为明文回环辅助端口，
   经代理转发）/ CC_LOCK_TOKEN（调用凭据）/ CC_TERMINAL_ID（本会话 id）。
   项目绑定会话另有 CC_PROJECT_ID（项目 id，全部 /api/projects/$CC_PROJECT_ID/*

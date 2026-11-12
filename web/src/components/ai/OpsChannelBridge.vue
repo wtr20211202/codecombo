@@ -12,11 +12,11 @@ import { useApprovalsStore } from '../../stores/approvals'
 import type { ApprovalRecord } from '../../api/domains/opsconfirm'
 import { useAsksStore } from '../../stores/asks'
 import type { AskRecord } from '../../api/domains/opsask'
-import { OPS_NOTIFY, OPS_NAVIGATE, OPS_SETTINGS_CHANGED, OPS_TASK_PROGRESS, OPS_APPROVAL_PENDING, OPS_APPROVAL_RESOLVED, OPS_INPUT_REQUEST, OPS_INPUT_RESOLVED, OPS_PREVIEW_PORT, OPS_QUEUE_CHANGED, OPS_CLIPBOARD_ARRIVED, OPS_TERMINAL_MESSAGE, OPS_TERMINAL_MESSAGE_READ, OPS_WATCH_INVITE, OPS_NOTIFY_PERSIST, OPS_FRONTEND_DOWNLOAD, OPS_FRONTEND_CLIPBOARD, OPS_FRONTEND_OPEN, type NavigateDetail, type PreviewPortDetail, type ClipArrivedDetail, type TerminalMessageDetail, type TerminalMessageReadDetail, type WatchInviteDetail, type NotifyPersistDetail, type FrontendDownloadDetail, type FrontendClipboardDetail, type FrontendOpenDetail } from '../../utils/opsEvents'
+import { OPS_NOTIFY, OPS_NAVIGATE, OPS_SETTINGS_CHANGED, OPS_TASK_PROGRESS, OPS_APPROVAL_PENDING, OPS_APPROVAL_RESOLVED, OPS_INPUT_REQUEST, OPS_INPUT_RESOLVED, OPS_PREVIEW_PORT, OPS_QUEUE_CHANGED, OPS_CLIPBOARD_ARRIVED, OPS_TERMINAL_MESSAGE, OPS_TERMINAL_MESSAGE_READ, OPS_WATCH_INVITE, OPS_NOTIFY_PERSIST, OPS_FRONTEND_DOWNLOAD, OPS_FRONTEND_CLIPBOARD, OPS_FRONTEND_OPEN, OPS_FRONTEND_RELOAD, type NavigateDetail, type PreviewPortDetail, type ClipArrivedDetail, type TerminalMessageDetail, type TerminalMessageReadDetail, type WatchInviteDetail, type NotifyPersistDetail, type FrontendDownloadDetail, type FrontendClipboardDetail, type FrontendOpenDetail, type FrontendReloadDetail } from '../../utils/opsEvents'
 import { handleAgentTaskProgressNotify, type AgentTaskProgressPayload } from '../../utils/agentTaskNotify'
 import { handlePreviewPortNotify } from '../../utils/previewPortNotify'
 import { handleWatchInviteNotify } from '../../utils/watchInviteNotify'
-import { handleFrontendDownload, handleFrontendClipboard, handleFrontendOpen } from '../../utils/frontendAtomActions'
+import { handleFrontendDownload, handleFrontendClipboard, handleFrontendOpen, handleFrontendReload } from '../../utils/frontendAtomActions'
 import { isForeignArrival } from '../../utils/clipRelay'
 import { playAlert, bindAudioUnlock } from '../../utils/alertSound'
 import { useDndStore } from '../../stores/dnd'
@@ -53,9 +53,10 @@ import { refreshCustomSensitivePatterns } from '../../composables/useCustomSensi
  * - notify.persist 事件 → 通知入账原语实时弹面（P-20261007-10）：服务端已入账
  *   （通知中心/webhook 全链生效），此处仅 toast 注意力面；免打扰时段静默
  * - clipboard.arrived 事件 → 跨设备剪贴板中继（P-20261002-32）：他机到达 toast 可点击取走（本机回声静默）
- * - frontend.download/clipboard/open 事件 → frontend 动词族三原子（P-20261023-4）：
- *   浏览器即时效应（下载框/剪贴板直写/开标签）——校验/开关/限频/可见 toast/回落链
- *   在 utils/frontendAtomActions，桥仅委托一行
+ * - frontend.download/clipboard/open/reload 事件 → frontend 动词族原子
+ *   （P-20261023-4 首批三原子 + P-20261111-3 整页·视图重载）：浏览器即时效应
+ *   （下载框/剪贴板直写/开标签/整页·当前视图重载）——校验/开关/限频/可见
+ *   toast/回落链在 utils/frontendAtomActions，桥仅委托一行
  * - terminal.message / terminal.message.read 事件 → 会话间定向消息（P-20261004-68）：
  *   接收会话 tab 未读徽标点亮 / 收件箱被拉取后熄灭
  * - navigate 事件 → 注意力引导四直达（P-20261005-223）：path 路由 / {file,line}
@@ -216,6 +217,9 @@ function onFrontendClipboard(e: Event) {
 function onFrontendOpen(e: Event) {
   handleFrontendOpen(((e as CustomEvent<FrontendOpenDetail>).detail || {}) as FrontendOpenDetail, message)
 }
+function onFrontendReload(e: Event) {
+  handleFrontendReload(((e as CustomEvent<FrontendReloadDetail>).detail || {}) as FrontendReloadDetail, message)
+}
 
 // 排队指令队列已变（P-20261003-248）：回执引擎弹队首后广播，前端拉全量对账
 // （徽标/面板的唯一实时感知通道；store 未加载过 = 无消费面板，刷新自会跳过）
@@ -372,6 +376,7 @@ onMounted(() => {
   window.addEventListener(OPS_FRONTEND_DOWNLOAD, onFrontendDownload)
   window.addEventListener(OPS_FRONTEND_CLIPBOARD, onFrontendClipboard)
   window.addEventListener(OPS_FRONTEND_OPEN, onFrontendOpen)
+  window.addEventListener(OPS_FRONTEND_RELOAD, onFrontendReload)
   // 等待音效自动播放解锁（P-20261003-33）：工作台长驻形态首次点击/按键即
   // 解锁 AudioContext（浏览器自动播放策略；未解锁态播不出则静默跳过）
   bindAudioUnlock()
@@ -417,6 +422,7 @@ onBeforeUnmount(() => {
   window.removeEventListener(OPS_FRONTEND_DOWNLOAD, onFrontendDownload)
   window.removeEventListener(OPS_FRONTEND_CLIPBOARD, onFrontendClipboard)
   window.removeEventListener(OPS_FRONTEND_OPEN, onFrontendOpen)
+  window.removeEventListener(OPS_FRONTEND_RELOAD, onFrontendReload)
 })
 </script>
 

@@ -73,7 +73,8 @@ type dshConfig struct {
 	ExposeAll     bool               // 反代绑定所有网卡（默认仅 127.0.0.1）
 	LaunchCommand string             // 一键启动命令
 	Targets       []config.DshTarget // 外部 dsh 目标
-	// AllowStandalone 独立标签页访问开关（默认 true；关闭时顶层导航返回引导页）
+	// AllowStandalone 独立标签页访问开关（默认关——未配置视为关闭，见
+	// DshAllowStandaloneOrDefault；关闭时顶层导航返回引导页）
 	AllowStandalone bool
 }
 

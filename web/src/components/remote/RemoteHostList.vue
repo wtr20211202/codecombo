@@ -38,7 +38,7 @@ const props = defineProps<{
   groups: RemoteGroup[]
   creating: Record<string, boolean>
   booting?: boolean
-  /** 侧栏宽度 px（P-20261106-5 可调，宿主经 SidebarResizer 持值与记忆；缺省 260 = 旧固定宽） */
+  /** 侧栏宽度 px（P-20261106-5 可调，宿主经 SidebarResizer 持值与记忆；缺省 320 = P-20261111-7 S2 提升后默认，与宿主 HOST_LIST_W_DEFAULT 同值） */
   width?: number
 }>()
 
@@ -361,7 +361,7 @@ async function retestAll() {
   <aside
     ref="sidebarRef"
     class="remote-sidebar"
-    :style="{ width: `${props.width ?? 260}px` }"
+    :style="{ width: `${props.width ?? 320}px` }"
     tabindex="0"
     @keydown="onSidebarKeydown"
   >
@@ -589,7 +589,7 @@ async function retestAll() {
 
 <style scoped>
 .remote-sidebar {
-  /* 宽度来自宿主（P-20261106-5 可调 + SidebarResizer 记忆），默认 260 = 旧固定宽 */
+  /* 宽度来自宿主（P-20261106-5 可调 + SidebarResizer 记忆），缺省 320 = P-20261111-7 S2 提升后默认（名称/IP 行少截断） */
   flex-shrink: 0;
   border-right: 1px solid var(--border-default);
   background: var(--bg-panel);

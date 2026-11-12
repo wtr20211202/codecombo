@@ -199,8 +199,14 @@ describe('VersionPanel 更新进度（P-20261109-10）', () => {
     await findCheckButton(wrapper).trigger('click')
     await flushPromises()
 
-    // 长 changelog 落在限高内滚容器里，「立即更新」在其后照常可达
-    expect(wrapper.find('[data-testid="version-changelog-body"]').text()).toContain('change line 79')
+    // 长 changelog：收起态只出摘要，展开后全量落在限高内滚容器里（P-20261112-2
+    // S1），「立即更新」在其后照常可达
+    const clBody = wrapper.find('[data-testid="version-changelog-body"]')
+    expect(clBody.text()).toContain('change line 0')
+    expect(clBody.text()).not.toContain('change line 79')
+    await wrapper.find('[data-testid="version-changelog-toggle"]').trigger('click')
+    expect(clBody.classes()).toContain('expanded')
+    expect(clBody.text()).toContain('change line 79')
     const updateNow = wrapper.find('[data-testid="version-update-now"]')
     expect(updateNow.exists()).toBe(true)
     notificationAdd.mockClear() // 「发现新版本」通知属检查面，此后只观察更新链
@@ -230,6 +236,150 @@ describe('VersionPanel 更新进度（P-20261109-10）', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="version-update-outcome-phase"]').text()).toBe('更新失败')
     expect(wrapper.find('[data-testid="version-update-outcome-reason"]').text()).toBe('原因：update verification failed: checksum mismatch')
+  })
+})
+
+// 更新内容渲染升级（P-20261112-2 S1）：发布说明 markdown 净化渲染（与 dsh 版本
+// 弹层同源 utils/changelogRender）+ 标题行 + 收起摘要/展开全量 + 页内锚点切换；
+// 净化策略本体由 utils/changelogRender.test.ts 钉住，这里守面板接线
+describe('VersionPanel 更新内容渲染（P-20261112-2 S1）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    resetNaiveRuntimeMocks()
+    checkMock.mockReset()
+    applyMock.mockReset()
+    statusMock.mockReset()
+    statusMock.mockResolvedValue({ data: { status: 'idle', progress: 0, total: 0, version: '' } })
+    notificationAdd.mockClear()
+  })
+
+  async function mountWithChangelog(changelog: string) {
+    checkMock.mockResolvedValue({ data: { currentVersion: '0.0.1', latestVersion: '0.0.2', hasUpdate: true, changelog } })
+    const wrapper = mount(VersionPanel, { props: { buildInfo }, attachTo: document.body })
+    await flushPromises()
+    await findCheckButton(wrapper).trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  const bilingual = [
+    '[中文](#中文) | [English](#english)',
+    '## 中文',
+    '### 新增',
+    '- **加粗** 条目',
+    '## English',
+    '### Added',
+    '- **bold** entry',
+  ].join('\n\n')
+
+  it('标题行带版本号；收起态为纯文本摘要，不裸露 markdown 标记', async () => {
+    const wrapper = await mountWithChangelog(bilingual)
+    expect(wrapper.find('[data-testid="version-changelog-title"]').text()).toBe('v0.0.2 更新内容')
+    const body = wrapper.find('[data-testid="version-changelog-body"]')
+    expect(body.classes()).not.toContain('expanded')
+    expect(body.text()).toBe('中文 | English 中文 新增 加粗 条目 English Added bold entry')
+    expect(wrapper.find('[data-testid="version-changelog-md"]').exists()).toBe(false)
+    const toggle = wrapper.find('[data-testid="version-changelog-toggle"]')
+    expect(toggle.text()).toBe('展开完整说明')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('展开：markdown 渲染为结构化 html；再点收起回摘要', async () => {
+    const wrapper = await mountWithChangelog(bilingual)
+    const toggle = wrapper.find('[data-testid="version-changelog-toggle"]')
+    await toggle.trigger('click')
+
+    const md = wrapper.find('[data-testid="version-changelog-md"]')
+    expect(md.exists()).toBe(true)
+    expect(md.findAll('h2').map(h => h.text())).toEqual(['中文', 'English'])
+    expect(md.findAll('h3').map(h => h.text())).toEqual(['新增', 'Added'])
+    expect(md.findAll('strong').map(h => h.text())).toEqual(['加粗', 'bold'])
+    expect(md.findAll('li')).toHaveLength(2)
+    expect(md.text()).not.toContain('**')
+    expect(md.text()).not.toContain('##')
+    // 展开态容器保留限高内滚语义（R11）且可聚焦滚动
+    const body = wrapper.find('[data-testid="version-changelog-body"]')
+    expect(body.classes()).toContain('expanded')
+    expect(body.attributes('tabindex')).toBe('0')
+    expect(toggle.text()).toBe('收起')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+
+    await toggle.trigger('click')
+    expect(wrapper.find('[data-testid="version-changelog-md"]').exists()).toBe(false)
+    expect(body.attributes('tabindex')).toBeUndefined()
+    expect(toggle.text()).toBe('展开完整说明')
+    wrapper.unmount()
+  })
+
+  it('「中文 | English」锚点行：点击在容器内滚到目标小节，不放行默认跳转', async () => {
+    const scrollSpy = vi.fn()
+    Element.prototype.scrollIntoView = scrollSpy // jsdom 无实现
+    const wrapper = await mountWithChangelog(bilingual)
+    await wrapper.find('[data-testid="version-changelog-toggle"]').trigger('click')
+    const md = wrapper.find('[data-testid="version-changelog-md"]')
+
+    for (const [label, id] of [['English', 'english'], ['中文', '中文']] as const) {
+      scrollSpy.mockClear()
+      const link = md.findAll('a').find(a => a.text() === label)!
+      const ev = new MouseEvent('click', { bubbles: true, cancelable: true })
+      link.element.dispatchEvent(ev)
+      expect(ev.defaultPrevented, label).toBe(true)
+      expect(scrollSpy).toHaveBeenCalledTimes(1)
+      expect(scrollSpy.mock.instances[0]).toBe(md.element.querySelector(`[id="${id}"]`))
+    }
+    wrapper.unmount()
+  })
+
+  it('无锚点行的说明自然降级：不出现切换行，渲染与展开收起照常', async () => {
+    const wrapper = await mountWithChangelog('### Added\n\n- item one')
+    await wrapper.find('[data-testid="version-changelog-toggle"]').trigger('click')
+    const md = wrapper.find('[data-testid="version-changelog-md"]')
+    expect(md.findAll('a')).toHaveLength(0)
+    expect(md.find('h3').text()).toBe('Added')
+    wrapper.unmount()
+  })
+
+  it('外部内容净化：脚本与事件处理器不进 DOM（v-html 只吃净化产物）', async () => {
+    const wrapper = await mountWithChangelog('hello\n\n<img src="x" onerror="window.__xss = 1">\n\n<script>window.__xss = 1</script>\n\n[x](javascript:alert(1))')
+    await wrapper.find('[data-testid="version-changelog-toggle"]').trigger('click')
+    const md = wrapper.find('[data-testid="version-changelog-md"]')
+    expect(md.find('script').exists()).toBe(false)
+    expect(md.find('img').attributes('onerror')).toBeUndefined()
+    expect(md.html()).not.toContain('__xss')
+    expect(md.html()).not.toContain('javascript:')
+    expect((window as unknown as { __xss?: number }).__xss).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  // 「查看发布页」外链（P-20261112-2 S2）：标题行右侧 dsh 弹层同位同款（新窗
+  // noopener）；releaseUrl 缺失（旧服务端/源未提供）不渲染零回退
+  it('标题行外链：releaseUrl 在位渲染新窗链接，缺失不渲染', async () => {
+    checkMock.mockResolvedValue({
+      data: {
+        currentVersion: '0.0.1', latestVersion: '0.0.2', hasUpdate: true,
+        changelog: bilingual,
+        releaseUrl: 'https://github.com/owner/repo/releases/tag/v0.0.2',
+      },
+    })
+    const wrapper = mount(VersionPanel, { props: { buildInfo }, attachTo: document.body })
+    await flushPromises()
+    await findCheckButton(wrapper).trigger('click')
+    await flushPromises()
+
+    const link = wrapper.find('[data-testid="version-release-link"]')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toBe('查看发布页')
+    expect(link.attributes('href')).toBe('https://github.com/owner/repo/releases/tag/v0.0.2')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toBe('noopener')
+    wrapper.unmount()
+
+    // 缺失：外链不渲染，标题行照常（上方 mountWithChangelog 的响应即无 releaseUrl）
+    const without = await mountWithChangelog(bilingual)
+    expect(without.find('[data-testid="version-release-link"]').exists()).toBe(false)
+    expect(without.find('[data-testid="version-changelog-title"]').text()).toBe('v0.0.2 更新内容')
+    without.unmount()
   })
 })
 

@@ -87,6 +87,8 @@ export interface UIStateData {
     sidebarCollapsed?: boolean
     /** 项目分组折叠集合（projectId 列表） */
     collapsedProjects?: string[]
+    /** 自定义分组折叠集合（P-20261111-1-S1，groupId 列表；缺键 = 全展开，旧数据零迁移） */
+    collapsedGroups?: string[]
     /** 项目分组展示序（projectId 有序表，未收录的项目按自然序排在尾部） */
     projectOrder?: string[]
     /** 项目内会话手动序（projectId -> sessionIds 有序表；default 排序模式生效） */
@@ -226,7 +228,7 @@ export const NESTED_UISTATE_SUBFIELDS = {
   terminal: { activeTabId: true },
   gitPanel: { collapsedSections: true, selectedBranch: true },
   remoteConsole: { tabs: true, groups: true, open: true, sidebarCollapsed: true },
-  agentTerminal: { groups: true, sidebarCollapsed: true, collapsedProjects: true, projectOrder: true, projectSessionOrder: true, lastViewedSessionId: true },
+  agentTerminal: { groups: true, sidebarCollapsed: true, collapsedProjects: true, collapsedGroups: true, projectOrder: true, projectSessionOrder: true, lastViewedSessionId: true },
   dshConsole: { open: true },
   dashboard: { landing: true },
   taskRunner: { recent: true },
@@ -595,6 +597,7 @@ export const useUIStateStore = defineStore('uiState', () => {
     groups: { id: string; name: string; sessionIds: string[] }[]
     sidebarCollapsed: boolean
     collapsedProjects: string[]
+    collapsedGroups: string[]
     projectOrder: string[]
     projectSessionOrder: Record<string, string[]>
     lastViewedSessionId: string
@@ -607,6 +610,8 @@ export const useUIStateStore = defineStore('uiState', () => {
       sidebarCollapsed: !!state?.agentTerminal?.sidebarCollapsed,
       collapsedProjects: Array.isArray(state?.agentTerminal?.collapsedProjects)
         ? state!.agentTerminal!.collapsedProjects! : [],
+      collapsedGroups: Array.isArray(state?.agentTerminal?.collapsedGroups)
+        ? state!.agentTerminal!.collapsedGroups! : [],
       projectOrder: Array.isArray(state?.agentTerminal?.projectOrder)
         ? state!.agentTerminal!.projectOrder! : [],
       projectSessionOrder: sessionOrder && typeof sessionOrder === 'object' && !Array.isArray(sessionOrder)
@@ -621,6 +626,7 @@ export const useUIStateStore = defineStore('uiState', () => {
     groups: { id: string; name: string; sessionIds: string[] }[]
     sidebarCollapsed: boolean
     collapsedProjects: string[]
+    collapsedGroups: string[]
     projectOrder: string[]
     projectSessionOrder: Record<string, string[]>
     lastViewedSessionId?: string

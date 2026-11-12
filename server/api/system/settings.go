@@ -98,6 +98,8 @@ func GetSettings(c *gin.Context) {
 			"agentProvider":            agentProvider,
 			// 会话命名系统注记注入开关（P-20261023-3）：未配置默认开
 			"agentNamingNoteEnabled": cfg.Server.AgentNamingNoteEnabledOrDefault(),
+			// 会话自动命名开关（P-20261111-6 S2）：未配置默认开
+			"agentAutoNameEnabled":   cfg.Server.AgentAutoNameEnabledOrDefault(),
 			"agentProviders":         agentops.ProviderNames(),
 			"agentLaunchCommands":    cfg.Server.AgentLaunchCommands,
 			"customAgents":           customAgentsJSON(cfg),
@@ -297,7 +299,10 @@ func UpdateSettings(c *gin.Context) {
 		AgentProvider            *string `json:"agentProvider"`
 		// AgentNamingNoteEnabled 会话命名系统注记注入开关（P-20261023-3）：
 		// 省略 = 不动；指针三态与既有开关字段同口径
-		AgentNamingNoteEnabled  *bool                       `json:"agentNamingNoteEnabled"`
+		AgentNamingNoteEnabled *bool `json:"agentNamingNoteEnabled"`
+		// AgentAutoNameEnabled 会话自动命名开关（P-20261111-6 S2）：省略 = 不动；
+		// 指针三态与既有开关字段同口径
+		AgentAutoNameEnabled    *bool                       `json:"agentAutoNameEnabled"`
 		AgentLaunchCommands     *map[string]string          `json:"agentLaunchCommands"`
 		AgentGuard              *bool                       `json:"agentGuard"`
 		AgentApprovalMode       *string                     `json:"agentApprovalMode"`
@@ -520,6 +525,12 @@ func UpdateSettings(c *gin.Context) {
 	if req.AgentNamingNoteEnabled != nil {
 		// 会话命名系统注记注入开关（P-20261023-3）：读端 OrDefault 同源默认开
 		cfg.Server.AgentNamingNoteEnabled = req.AgentNamingNoteEnabled
+	}
+	if req.AgentAutoNameEnabled != nil {
+		// 会话自动命名开关（P-20261111-6 S2）：读端 OrDefault 同源默认开；
+		// 保存后随 settings.changed 广播（observe 侧判定点每 tick 现读内存缓存，
+		// 无需重启）
+		cfg.Server.AgentAutoNameEnabled = req.AgentAutoNameEnabled
 	}
 	if req.AgentLaunchCommands != nil {
 		// 每运行时启动命令覆盖：整体替换语义（省略的 key 即删除）。

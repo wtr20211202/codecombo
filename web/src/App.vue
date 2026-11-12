@@ -55,8 +55,11 @@
           class="skip-link"
         >{{ t('common.skipToMain') }}</a>
         <!-- :key 实例切换机制：currentInstanceId 变化时当前视图整树 remount，
-           组件作用域状态（openFiles/终端 tabs/面板状态）随之销毁重初始化 -->
-        <RouterView :key="instanceStore.currentInstanceId" />
+           组件作用域状态（openFiles/终端 tabs/面板状态）随之销毁重初始化。
+           viewReloadTick（P-20261111-3 frontend.reload scope=view）：agent 要求
+           当前视图重取时翻转 key 强制 remount——路由/URL 零变化，与实例切换
+           同机制；未保存编辑由 IndexedDB 草稿自动保存兜底 -->
+        <RouterView :key="instanceStore.currentInstanceId + ':' + viewReloadTick" />
         <NotificationCenter />
         <!-- 失败会话复盘弹层（P-20261004-60）：App 层单一实例，入口两路
              （退出通知卡 postmortem 动作 / 会话行右键）经 postmortem store 共达
@@ -155,6 +158,7 @@ import { usePanelLayout } from './composables/usePanelLayout'
 import { useUiZoomStore } from './stores/ui-zoom'
 import { useUiDensityStore } from './stores/ui-density'
 import { initOpsChannel } from './composables/useOpsChannel'
+import { useViewReloadTick } from './composables/useViewReload'
 import { startFleetTaskBackflow, stopFleetTaskBackflow } from './composables/useFleetTaskBackflow'
 import { startFleetBatchWatch, stopFleetBatchWatch } from './composables/useFleetBatchWatch'
 import { updateFaviconBadge } from './utils/faviconBadge'
@@ -206,6 +210,9 @@ watch(() => lockStore.isLocked, (locked) => {
 // - 品牌名不随 locale 变化；document.title 赋值为 textContent 语义，项目名含
 //   特殊字符无 XSS 面
 const instanceStore = useInstanceStore()
+// frontend.reload scope=view 的 remount tick（P-20261111-3）：消费链 bump、
+// RouterView :key 读取——ref 定义放 store 装配点附近，模板绑定直接解包
+const viewReloadTick = useViewReloadTick()
 const projectStore = useProjectStore()
 const approvalsStore = useApprovalsStore()
 const asksStore = useAsksStore()

@@ -1,8 +1,11 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -810,4 +814,313 @@ func TestParseGitHubReleases(t *testing.T) {
 	if got := parseGitHubReleases([]byte(`not-json`)); got != nil {
 		t.Fatalf("invalid json should return nil, got %v", got)
 	}
+}
+
+// ============== 反代行为快照回归钉（P-20261111-2-S2） ==============
+
+// TestDshProxyBehaviorSnapshot 反代对 dsh 0.2.x 形态零破坏的行为快照钉。
+// 素材形态全部取自 S1 真浏览器诊断（merge 2f638464）验证过的发行形态，钉住
+// 「反代对 dsh 0.2.x 零破坏」防将来改写/路由逻辑回归：
+//   Ⓐ 无路由表全路径透传：0.2.x 插件合并包 URL /plugins/??a,b&rev=x 非标查询
+//     逐字节到达上游（url.Values 重编码会 404），fence 回环 Host 断言生效；
+//   Ⓑ 改写锚点 0.2.x 起已漂移成 no-op：无锚点 JS 在降级改写路径（LAN Host）
+//     上字节不变（ReplaceAll 缺锚点零改动=语法完整性），相似但不等价的串不误伤；
+//   Ⓒ 0.1.2 时代改写语义保留（版本感知分支不回归旧版能力）：LAN Host 下
+//     isLoopback 锚点仍被替换、HTML 仍注入 polyfill 且 remoteBootPatch 锚点
+//     存在才补丁；回环 Host 恒走零改写快路径；
+//   Ⓓ 304（无 Content-Type）不进改写缓冲原样透传（S1：dsh 0.2.2 新增静态
+//     ETag-304）；
+//   Ⓔ 101 WS 升级原样交还（ModifyResponse 101 分支，S1：插件面板 101 WS 全通）；
+//   Ⓕ 守卫 403 引导页命中顶层导航（含独立标签开关提示，中英各一）、iframe
+//     子资源放行——完整链路版（TestDshProxyHandlerStandaloneGuard 钉判定函数）。
+// 断言走生产构造（newDshReverseProxy + dshProxyHandler 全链），不测试侧复刻。
+func TestDshProxyBehaviorSnapshot(t *testing.T) {
+	// newChain 组全链夹具：store 指向临时目录 + 上游指向假 dsh + 生产反代构造
+	newChain := func(t *testing.T, upstreamURL string, allowStandalone bool) http.Handler {
+		doc := filestore.New(t.TempDir())
+		store.SetDefault(store.New(doc))
+		t.Cleanup(func() { store.SetDefault(nil) })
+		sc := store.Get().Settings.Get()
+		sc.Server.DshWebBase = upstreamURL
+		sc.Server.DshAllowStandalone = &allowStandalone
+		return dshProxyHandler(newDshReverseProxy())
+	}
+
+	t.Run("0.2.x合并包非标查询逐字节透传", func(t *testing.T) {
+		// S1 记录形态：首页模块合并包相对 URL（?? 开头 + rev=），0.2.1-rc.5
+		// 与 0.2.2-rc.1 同形态。query 自带一个字面 ?（与路径分隔符 ? 相连成
+		// 线上 ??）——httptest.NewRequest 解析 ?? 目标后 RawQuery 即 "?..." 形态
+		const mergedTarget = "/plugins/??@deepseek-ai/dsh-cost-meter@1.9.64,@deepseek-ai/another@0.0.2&rev=cddf5581d5d5"
+		const mergedQuery = "?@deepseek-ai/dsh-cost-meter@1.9.64,@deepseek-ai/another@0.0.2&rev=cddf5581d5d5"
+		const mergedBody = "merged bundle bytes"
+		var gotPath, gotQuery, gotHost, gotWire string
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath, gotQuery, gotHost, gotWire = r.URL.Path, r.URL.RawQuery, r.Host, r.RequestURI
+			w.Header().Set("Content-Type", "application/javascript")
+			fmt.Fprint(w, mergedBody)
+		}))
+		defer up.Close()
+
+		for _, bhost := range []string{"127.0.0.1:13081", "10.10.0.10:13081"} {
+			h := newChain(t, up.URL, false)
+			req := httptest.NewRequest(http.MethodGet, mergedTarget, nil)
+			req.Host = bhost
+			req.Header.Set("Sec-Fetch-Dest", "iframe") // 嵌入形态（守卫放行）
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("bhost=%q code = %d, want 200", bhost, rec.Code)
+			}
+			if gotBody := rec.Body.String(); gotBody != mergedBody {
+				t.Fatalf("bhost=%q body = %q, want byte-identical %q", bhost, gotBody, mergedBody)
+			}
+			if gotPath != "/plugins/" {
+				t.Fatalf("bhost=%q upstream path = %q, want /plugins/", bhost, gotPath)
+			}
+			if gotQuery != mergedQuery {
+				t.Fatalf("bhost=%q upstream rawquery = %q, want byte-identical %q", bhost, gotQuery, mergedQuery)
+			}
+			if gotWire != mergedTarget {
+				t.Fatalf("bhost=%q upstream wire RequestURI = %q, want %q", bhost, gotWire, mergedTarget)
+			}
+			// fence 回环断言：无论浏览器面向何地址，上游看到的 Host 一律回环
+			if !strings.HasPrefix(gotHost, "127.0.0.1:") {
+				t.Fatalf("bhost=%q upstream Host = %q, want loopback assertion", bhost, gotHost)
+			}
+			// LAN Host 走降级改写缓冲路径：Content-Length 与字节流必须一致
+			if bhost == "10.10.0.10:13081" {
+				if cl := rec.Header().Get("Content-Length"); cl != strconv.Itoa(len(mergedBody)) {
+					t.Fatalf("LAN Content-Length = %q, want %d", cl, len(mergedBody))
+				}
+			}
+		}
+	})
+
+	t.Run("0.2.x无锚点JS降级改写no-op字节不变", func(t *testing.T) {
+		// 相似但不等价的串（真实 0.2.x 发行物形态：锚点已漂移不存在）不被误伤
+		const js02x = `var h=loc.hostname;isLoopbackHostname(loc.hostname);if(h){boot()}`
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/javascript")
+			fmt.Fprint(w, js02x)
+		}))
+		defer up.Close()
+
+		h := newChain(t, up.URL, false)
+		req := httptest.NewRequest(http.MethodGet, "/assets/merged.js", nil)
+		req.Host = "10.10.0.10:13081" // 强制走降级改写路径（回环本就零改写）
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("code = %d, want 200", rec.Code)
+		}
+		if got := rec.Body.String(); got != js02x {
+			t.Fatalf("no-anchor JS must pass through byte-identical on rewrite path:\n got %q\nwant %q", got, js02x)
+		}
+	})
+
+	t.Run("0.1.2锚点改写语义保留与回环快路径", func(t *testing.T) {
+		const jsOld = `var v=isLoopbackHostname(pageLocation.hostname);go(v)`
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/javascript")
+			fmt.Fprint(w, jsOld)
+		}))
+		defer up.Close()
+
+		// LAN Host：锚点仍被替换（旧版语义不回归）
+		h := newChain(t, up.URL, false)
+		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+		req.Host = "10.10.0.10:13081"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if got := rec.Body.String(); got != "var v=true;go(v)" {
+			t.Fatalf("legacy anchor must still be rewritten on LAN path, got %q", got)
+		}
+
+		// 回环 Host：零改写快路径，字节不变
+		h2 := newChain(t, up.URL, false)
+		req2 := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+		req2.Host = "127.0.0.1:13081"
+		rec2 := httptest.NewRecorder()
+		h2.ServeHTTP(rec2, req2)
+		if got := rec2.Body.String(); got != jsOld {
+			t.Fatalf("loopback must stay on zero-rewrite fast path, got %q", got)
+		}
+	})
+
+	t.Run("HTML降级改写polyfill注入与boot补丁锚点条件", func(t *testing.T) {
+		// 锚点在场（0.1.x remote-web-ui 形态）：polyfill 注入 + boot 补丁单次替换
+		up1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, "<html><head><title>dsh</title></head><body>h=loc.hostname;if(ready){go}</body></html>")
+		}))
+		defer up1.Close()
+		h := newChain(t, up1.URL, false)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = "10.10.0.10:13081"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		body := rec.Body.String()
+		if !strings.Contains(body, "crypto.randomUUID") {
+			t.Fatal("LAN HTML must get secure-context polyfill injected")
+		}
+		if strings.Count(body, "if(true||") != 1 {
+			t.Fatalf("remoteBootPatch anchor present => exactly one rewrite, got %q", body)
+		}
+
+		// 锚点不在场（0.2.x 形态）：只注 polyfill，正文零改动
+		up2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, "<html><head><title>dsh</title></head><body>ok</body></html>")
+		}))
+		defer up2.Close()
+		h2 := newChain(t, up2.URL, false)
+		req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+		req2.Host = "10.10.0.10:13081"
+		rec2 := httptest.NewRecorder()
+		h2.ServeHTTP(rec2, req2)
+		body2 := rec2.Body.String()
+		if !strings.Contains(body2, "crypto.randomUUID") || strings.Contains(body2, "if(true||") {
+			t.Fatalf("0.2.x HTML must get polyfill only, got %q", body2)
+		}
+	})
+
+	t.Run("304无Content-Type不进缓冲原样透传", func(t *testing.T) {
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("If-None-Match") == `"rev1"` {
+				w.Header().Set("ETag", `"rev1"`)
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+			w.Header().Set("ETag", `"rev1"`)
+			fmt.Fprint(w, "asset")
+		}))
+		defer up.Close()
+
+		h := newChain(t, up.URL, false)
+		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+		req.Host = "10.10.0.10:13081"
+		req.Header.Set("If-None-Match", `"rev1"`)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotModified {
+			t.Fatalf("code = %d, want 304 passthrough", rec.Code)
+		}
+		if rec.Header().Get("ETag") != `"rev1"` {
+			t.Fatalf("ETag must survive passthrough, got %q", rec.Header().Get("ETag"))
+		}
+		if rec.Body.Len() != 0 {
+			t.Fatalf("304 must have empty body, got %d bytes", rec.Body.Len())
+		}
+	})
+
+	t.Run("101WS升级原样交还", func(t *testing.T) {
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Upgrade") != "websocket" {
+				http.Error(w, "not a upgrade", http.StatusBadRequest)
+				return
+			}
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "no hijack", http.StatusInternalServerError)
+				return
+			}
+			conn, buf, _ := hj.Hijack()
+			defer conn.Close()
+			_, _ = buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+			_ = buf.Flush()
+			_, _ = io.Copy(conn, buf) // WS 帧回显
+		}))
+		defer up.Close()
+
+		h := newChain(t, up.URL, false)
+		srv := httptest.NewServer(h)
+		defer srv.Close()
+
+		// 走真套接字：httptest.Recorder 无法 hijack，101 透传链只有真连接可验
+		conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		defer conn.Close()
+		reqStr := "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+			"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+		if _, err := conn.Write([]byte(reqStr)); err != nil {
+			t.Fatalf("write upgrade request: %v", err)
+		}
+		br := bufio.NewReader(conn)
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		status, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read status: %v", err)
+		}
+		if !strings.HasPrefix(status, "HTTP/1.1 101") {
+			t.Fatalf("status = %q, want 101 Switching Protocols passthrough", status)
+		}
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				t.Fatalf("read headers: %v", err)
+			}
+			if line == "\r\n" {
+				break
+			}
+		}
+		payload := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
+		if _, err := conn.Write(payload); err != nil {
+			t.Fatalf("write ws frame: %v", err)
+		}
+		got := make([]byte, len(payload))
+		if _, err := io.ReadFull(br, got); err != nil {
+			t.Fatalf("read echo: %v", err)
+		}
+		for i := range payload {
+			if got[i] != payload[i] {
+				t.Fatalf("echo mismatch at %d: got %v want %v", i, got, payload)
+			}
+		}
+	})
+
+	t.Run("守卫403引导页与iframe放行完整链路", func(t *testing.T) {
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "dsh-page")
+		}))
+		defer up.Close()
+
+		h := newChain(t, up.URL, false)
+		// 顶层导航命中守卫：403 引导页含「开启独立标签开关即解」提示（中/英各一向）
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = "127.0.0.1:13081"
+		req.Header.Set("Sec-Fetch-Dest", "document")
+		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("zh code = %d, want 403", rec.Code)
+		}
+		if zh := rec.Body.String(); !strings.Contains(zh, "允许独立标签页访问 dsh") || !strings.Contains(zh, "Codecombo") {
+			t.Fatalf("zh blocked page should hint the standalone switch, got %q", zh)
+		}
+
+		req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+		req2.Host = "127.0.0.1:13081"
+		req2.Header.Set("Sec-Fetch-Dest", "document")
+		rec2 := httptest.NewRecorder()
+		h.ServeHTTP(rec2, req2)
+		if rec2.Code != http.StatusForbidden {
+			t.Fatalf("en code = %d, want 403", rec2.Code)
+		}
+		if en := rec2.Body.String(); !strings.Contains(en, "Allow standalone tab access") {
+			t.Fatalf("en blocked page should hint the standalone switch, got %q", en)
+		}
+
+		// iframe 嵌入（S1 复现形态）：守卫放行直达上游
+		req3 := httptest.NewRequest(http.MethodGet, "/", nil)
+		req3.Host = "127.0.0.1:13081"
+		req3.Header.Set("Sec-Fetch-Dest", "iframe")
+		rec3 := httptest.NewRecorder()
+		h.ServeHTTP(rec3, req3)
+		if rec3.Code != http.StatusOK || rec3.Body.String() != "dsh-page" {
+			t.Fatalf("iframe embed must passthrough, code=%d body=%q", rec3.Code, rec3.Body.String())
+		}
+	})
 }

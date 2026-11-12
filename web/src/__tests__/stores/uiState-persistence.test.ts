@@ -44,6 +44,7 @@ describe('uiStateStore 命名空间读取器（脏数据防御）', () => {
       groups: [],
       sidebarCollapsed: false,
       collapsedProjects: [],
+      collapsedGroups: [],
       projectOrder: [],
       projectSessionOrder: {},
       lastViewedSessionId: '',
@@ -57,6 +58,7 @@ describe('uiStateStore 命名空间读取器（脏数据防御）', () => {
           groups: 'corrupted',
           sidebarCollapsed: 1,
           collapsedProjects: 'nope',
+          collapsedGroups: 3,
           projectOrder: null,
           projectSessionOrder: ['array-not-object'],
           lastViewedSessionId: 42,
@@ -68,6 +70,7 @@ describe('uiStateStore 命名空间读取器（脏数据防御）', () => {
       groups: [],
       sidebarCollapsed: true,
       collapsedProjects: [],
+      collapsedGroups: [],
       projectOrder: [],
       projectSessionOrder: {},
       lastViewedSessionId: '',
@@ -82,6 +85,7 @@ describe('uiStateStore 命名空间读取器（脏数据防御）', () => {
           groups,
           sidebarCollapsed: true,
           collapsedProjects: ['p1'],
+          collapsedGroups: ['g1'],
           projectOrder: ['p2', 'p1'],
           projectSessionOrder: { p1: ['t2', 't1'] },
           lastViewedSessionId: 't2',
@@ -91,6 +95,7 @@ describe('uiStateStore 命名空间读取器（脏数据防御）', () => {
     const store = useUIStateStore()
     const state = await store.getAgentTerminalState()
     expect(state.groups).toEqual(groups)
+    expect(state.collapsedGroups).toEqual(['g1'])
     expect(state.projectSessionOrder).toEqual({ p1: ['t2', 't1'] })
     expect(state.lastViewedSessionId).toBe('t2')
   })
@@ -377,6 +382,7 @@ describe('uiStateStore 保存语义（脏键 diff / 防抖 / PATCH）', () => {
       groups: [{ id: 'g1', name: '组', sessionIds: ['t1'] }],
       sidebarCollapsed: false,
       collapsedProjects: [],
+      collapsedGroups: ['g1'],
       projectOrder: [],
       projectSessionOrder: {},
       lastViewedSessionId: 't1',

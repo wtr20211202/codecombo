@@ -172,6 +172,7 @@ export interface SettingsData {
   uidensity?: string          // 界面密度档（P-20261003-322）：comfortable（默认）/ compact
   sessionContext?: string     // 会话启动上下文（P-20261006-47）：git/notes/todos/env 逗号多选或 none；未配置=git（P-176 默认行为零变化）
   agentNamingNoteEnabled?: boolean // 会话命名系统注记注入开关（P-20261023-3）：未配置=true（默认开）
+  agentAutoNameEnabled?: boolean // 会话自动命名开关（P-20261111-6 S2）：未配置=true（默认开）
   agentProvider: string       // AI 底层智能体选型：auto / claude / dsh / 自定义注册名
   agentProviders?: string[]   // 已注册 Provider 名单（后端派生只读字段，仅 GET 返回；新建会话下拉用）
   customAgents?: CustomAgent[] // 用户自定义智能体运行时列表（增删改走下方 customAgentApi）
@@ -333,6 +334,7 @@ export const settingsApi = {
     uidensity?: string // 界面密度档（P-20261003-322）：comfortable（默认）/ compact，settings.changed 广播多端跟随
     sessionContext?: string // 会话启动上下文（P-20261006-47）：git/notes/todos/env 逗号多选或 none；空串回落 git 默认，服务端白名单校验
     agentNamingNoteEnabled?: boolean // 会话命名系统注记注入开关（P-20261023-3）：省略=不动，未配置默认开
+    agentAutoNameEnabled?: boolean // 会话自动命名开关（P-20261111-6 S2）：省略=不动，未配置默认开
     agentProvider?: string
     agentLaunchCommands?: Record<string, string> // 每运行时启动命令覆盖（整体替换语义）
     agentGuard?: boolean // 智能体令牌高危操作服务端强制审批开关（默认开）

@@ -164,3 +164,57 @@ func TestCheckUpdateCompanionFlag(t *testing.T) {
 		t.Errorf("no update → no flag, got %+v", resp)
 	}
 }
+
+// TestCheckUpdateReleaseURLPassthrough 发布页直链透传（P-20261112-2-S2）：
+// ReleaseInfo.ReleaseURL → 响应 releaseUrl 同名透传（面板「查看发布页」外链
+// 数据源）；源未提供时字段省略（omitempty），旧前端忽略、新前端不显链接零回退
+func TestCheckUpdateReleaseURLPassthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// buildVersion 是包级变量：钉住「当前版本」使 HasUpdate 为真（同上方旗标用例）
+	oldVer := buildVersion
+	buildVersion = "0.0.1"
+	t.Cleanup(func() {
+		buildVersion = oldVer
+		update.GetManager().SetSource(nil)
+	})
+	do := func() (model.CheckUpdateResponse, []byte) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/updates/check", nil)
+		CheckUpdate(c)
+		var body struct {
+			Data model.CheckUpdateResponse `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return body.Data, w.Body.Bytes()
+	}
+
+	// 源提供直链：同名透传
+	update.GetManager().SetSource(&flagStubSource{info: &update.ReleaseInfo{
+		Version: "0.0.2", ReleaseURL: "https://github.com/owner/repo/releases/tag/v0.0.2",
+	}})
+	resp, raw := do()
+	if resp.ReleaseURL != "https://github.com/owner/repo/releases/tag/v0.0.2" {
+		t.Errorf("ReleaseURL = %q, want passthrough", resp.ReleaseURL)
+	}
+	if !strings.Contains(string(raw), `"releaseUrl":`) {
+		t.Errorf("response JSON missing releaseUrl key: %s", raw)
+	}
+
+	// 源未提供：字段省略（增量字段零负担），hasUpdate 等既有字段不受影响
+	update.GetManager().SetSource(&flagStubSource{info: &update.ReleaseInfo{
+		Version: "0.0.2",
+	}})
+	resp, raw = do()
+	if resp.ReleaseURL != "" {
+		t.Errorf("ReleaseURL = %q, want empty", resp.ReleaseURL)
+	}
+	if strings.Contains(string(raw), "releaseUrl") {
+		t.Errorf("empty ReleaseURL should be omitted: %s", raw)
+	}
+	if !resp.HasUpdate {
+		t.Errorf("hasUpdate should be unaffected, got %+v", resp)
+	}
+}

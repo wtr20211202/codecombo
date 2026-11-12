@@ -10,7 +10,8 @@ import (
 // Module 终端 API 生命周期模块：承载粘贴图片清理（roadmap M2.1，原 app 组合根
 // 的 StartPasteImageCleaner 裸 goroutine 迁入内核生命周期——首清一次 + 周期清理
 // 托管到内核调度器）+ 排队指令触发引擎装配与完成回执观察者注册（P-20261003-248）
-// ——两者都是终端 API 域的启动期装配，共用一个内核模块
+// + agent 会话自动命名观察器（P-20261111-6 S1，周期检测转写首条用户消息）
+// ——都是终端 API 域的启动期装配，共用一个内核模块
 type Module struct {
 	k kernel.Kernel
 	// unsubscribeQueueObserver 回执观察者退订句柄（Init 注册，Stop 退订——
@@ -34,12 +35,17 @@ func (m *Module) Init(_ context.Context, k kernel.Kernel) error {
 	return nil
 }
 
-// Start 先同步清一次（上次运行遗留），再注册周期清理 ticker
+// Start 先同步清一次（上次运行遗留），再注册周期清理 ticker；agent 会话自动
+// 命名观察器（P-20261111-6 S1）同为终端 API 域启动期装配——周期检测 claude
+// 会话首个用户消息落盘并按其总结会话名（语义与边界见 agent_autoname.go）
 func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 	m.k = k
 	CleanupStalePasteImages(pasteImageMaxAge)
 	k.Scheduler().AddTicker("paste-image-clean", pasteImageCleanInterval, func(context.Context) {
 		CleanupStalePasteImages(pasteImageMaxAge)
+	})
+	k.Scheduler().AddTicker("agent-auto-name", autoNameTickInterval, func(context.Context) {
+		autoNameTick()
 	})
 	return nil
 }

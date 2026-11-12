@@ -19,7 +19,10 @@ import { serverPath } from '../../tests/dualpath'
  *   4. frontend.open：window.open noopener 新标签（spy 承接不真开外链）；
  *      popup 被拦 → 回落通知中心 action=url 条目（既有形态，点击开）；
  *   5. 发布口注册表校验面（坏载荷 400 冻结原文）+ 手册=实现（/ops-manual 含
- *      三原子与组合配方小节；/api/meta ops.present-atoms 自动跟随）。
+ *      原子与组合配方小节；/api/meta ops.present-atoms 自动跟随）；
+ *   6. frontend.reload（P-20261111-3）：scope=page → 浏览器整页重载真实发生
+ *      （文档实例计数对账）；scope=view → 当前视图整树 remount（DOM 重建
+ *      打标消失）而路由/URL 零变化——两跳 navigate 绕行的一跳替代。
  * 夹具项目 spec 内自备/自清，不残留测试数据
  */
 
@@ -235,7 +238,7 @@ test('frontend.open → 新标签打开（noopener spy 承接）；popup 被拦�
   expect(found, '被拦回落应入账 action=url 通知条目').toBe(true)
 })
 
-test('发布口校验面 400 冻结原文；手册=实现（三原子 + 组合配方 + meta 能力项）', async ({ request }) => {
+test('发布口校验面 400 冻结原文；手册=实现（原子族 + 组合配方 + meta 能力项）', async ({ request }) => {
   test.setTimeout(60_000)
   const headers = await unlockHeaders(request)
   // 坏载荷 400：message 是注册表冻结原文（agent 侧分支依据不漂移）
@@ -246,6 +249,7 @@ test('发布口校验面 400 冻结原文；手册=实现（三原子 + 组合�
     ['frontend.clipboard', { text: 'x'.repeat(32 * 1024 + 1) }, 'invalid frontend.clipboard payload'],
     ['frontend.open', { url: 'javascript:alert(1)' }, 'invalid frontend.open payload'],
     ['frontend.open', { url: '/project?file=a.ts' }, 'invalid frontend.open payload'],
+    ['frontend.reload', { scope: 'session' }, 'invalid frontend.reload payload'],
   ]
   for (const [type, payload, want] of bad) {
     const res = await request.post(`${API_BASE}/api/ops-notify`, { headers, data: { type, payload } })
@@ -257,7 +261,7 @@ test('发布口校验面 400 冻结原文；手册=实现（三原子 + 组合�
   const manualRes = await fetch(`${API_BASE}/ops-manual`, { headers })
   expect(manualRes.status).toBe(200)
   const manual = ((await manualRes.json()) as { data?: { manual?: string } }).data?.manual || ''
-  for (const fragment of ['frontend.download', 'frontend.clipboard', 'frontend.open', '组合配方', 'notify.persist']) {
+  for (const fragment of ['frontend.download', 'frontend.clipboard', 'frontend.open', 'frontend.reload', '组合配方', 'notify.persist']) {
     expect(manual, `手册缺 ${fragment}`).toContain(fragment)
   }
   // 能力探测面：ops.present-atoms 族项（注册表扩容自动跟随，无需新族项）
@@ -265,4 +269,53 @@ test('发布口校验面 400 冻结原文；手册=实现（三原子 + 组合�
   expect(metaRes.status).toBe(200)
   const meta = (await metaRes.json()) as { capabilities?: string[] }
   expect(meta.capabilities || []).toContain('ops.present-atoms')
+})
+
+test('frontend.reload scope=page → 浏览器整页重载真实发生（P-20261111-3）', async ({ page, request }) => {
+  test.setTimeout(60_000)
+  const headers = await unlockHeaders(request)
+  // 文档实例计数：sessionStorage 同源同标签页跨文档存活（刷新天然存活、
+  // 关标签页即逝）——每次文档初始化 +1。window 全局变量每文档重置不可作
+  // 累计计数（首跑实测踩坑：reload 真发生了而 window 计数恒 1）；视图
+  // remount 不换文档、计数不动，恰好把「整页重载」与「路由跳转/视图重建」
+  // 区分开
+  await page.addInitScript(() => {
+    const n = Number(sessionStorage.getItem('__scPageInits') || '0') + 1
+    sessionStorage.setItem('__scPageInits', String(n))
+  })
+  await enterProject(page)
+  const initsBefore = await page.evaluate(() => Number(sessionStorage.getItem('__scPageInits')))
+  const res = await postAtom(page, headers, 'frontend.reload', { scope: 'page' })
+  expect(res.ok()).toBeTruthy()
+  // 整页重载真实发生：文档实例 +1（真实 location.reload——浏览器卸载重载，
+  // 非路由跳转）；重载后仍落 /project（URL 由 reload 语义保持）
+  await expect.poll(async () => page.evaluate(() => Number(sessionStorage.getItem('__scPageInits'))), {
+    timeout: 15_000,
+  }).toBe(initsBefore + 1)
+  await expect(page).toHaveURL(/\/project$/)
+})
+
+test('frontend.reload scope=view → 当前视图整树 remount、路由/URL 零变化（P-20261111-3）', async ({ page, request }) => {
+  test.setTimeout(60_000)
+  const headers = await unlockHeaders(request)
+  await enterProject(page)
+  // 探针：给项目视图（App 层 RouterView 子树）根元素打标——scope=view 走
+  // :key 翻转整树 remount，DOM 全量重建，打标节点被替换（属性消失）即
+  // 「视图重建」的确定性证据；打标的是 DOM 节点而非 app 状态，无侵入
+  const viewRoot = page.locator('.ide-root').first()
+  await viewRoot.evaluate((el) => el.setAttribute('data-sc-reload-probe', '1'))
+  expect(await page.locator('[data-sc-reload-probe]').count()).toBe(1)
+  const urlBefore = page.url()
+  const res = await postAtom(page, headers, 'frontend.reload', { scope: 'view' })
+  expect(res.ok()).toBeTruthy()
+  // 视图重建：打标消失（旧 DOM 被替换），新视图根重新在册
+  await expect.poll(async () => page.locator('[data-sc-reload-probe]').count(), {
+    timeout: 15_000,
+  }).toBe(0)
+  await expect(page.locator('.ide-root').first()).toBeVisible()
+  // 路由/URL 零变化——与「navigate 到别处再跳回」绕行的本质区别
+  expect(page.url()).toBe(urlBefore)
+  // 可见反馈 toast（无静默效应；toast 宿主在 App 层 message provider，
+  // RouterView remount 不带走它）
+  await expect(page.locator('[data-testid="ops-atom-reload-toast"]')).toBeVisible({ timeout: 5000 })
 })

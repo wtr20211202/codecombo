@@ -80,27 +80,28 @@ text-align:left;cursor:pointer;font-family:inherit}
 .more-theme{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 10px;
 font-size:12.5px;color:var(--muted)}
 .more-theme .theme-select{flex:1;min-width:0}
-/* 冻结快照时点横幅（P-20261005-168）：frozen 记录专属（live 零渲染）。
-   定格是特性不是错误——中性说明色（chip 底/常规文字/静音图标），刻意
-   不用终端页遮蔽声明横幅的警示黄；打印不隐藏（纸面留存的定格件同该
-   带时点声明，与水印不进打印隐藏清单同理） */
-.snap-banner{flex-shrink:0;display:flex;gap:8px;align-items:flex-start;
-background:var(--chip);border-bottom:1px solid var(--border);color:var(--text);
-padding:7px max(16px, env(safe-area-inset-right)) 7px max(16px, env(safe-area-inset-left));
-font-size:12px;line-height:1.55}
-.snap-banner svg{flex:0 0 auto;margin-top:2px;color:var(--muted)}
+/* 快照/过期紧凑状态条（P-20261111-5，合并 P-20261005-168 快照横幅与
+   P-20261020-5 有效期横幅）：两条全句横幅各占一行挤占首屏权重，收成
+   单行弱化条——时点短文案 + 静音配色（透明底/单底分隔线/muted 字色，
+   刻意不用终端页遮蔽声明横幅的警示黄），完整长句降为悬停 title 层。
+   frozen 记录必有快照段，非永久记录追加过期段，live 永久记录零渲染。
+   打印不隐藏（纸面留存件同带时点声明，与水印不进打印隐藏清单同理） */
+.status-banner{flex-shrink:0;display:flex;gap:7px;align-items:center;
+border-bottom:1px solid var(--border);color:var(--muted);
+padding:5px max(16px, env(safe-area-inset-right)) 5px max(16px, env(safe-area-inset-left));
+font-size:11.5px;line-height:1.5;white-space:nowrap;overflow:hidden}
+.status-banner svg{flex:0 0 auto;color:var(--muted)}
+.status-banner span{overflow:hidden;text-overflow:ellipsis}
 /* reader：顶栏之下的全部内容（目录/文件同壳；无卡片边框/阴影） */
 .reader{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .crumbs{flex-shrink:0;display:flex;flex-wrap:wrap;gap:4px;align-items:center;
 padding:7px max(16px, env(safe-area-inset-right)) 7px max(16px, env(safe-area-inset-left));
 border-bottom:1px solid var(--border)}
+/* P-20261111-5 顺带修复：P-20261020-5 曾把 .expiry-banner 规则块插进本
+   .crumb 规则内部——CSS 错误恢复会把整块吞成坏声明（横幅样式全丢，
+   .crumb 尾段属性被拆到块外才勉强生效）；横幅退役合并为 .status-banner
+   后恢复完整 .crumb 规则 */
 .crumb{background:transparent;color:var(--muted);border:none;border-radius:6px;padding:3px 6px;
-/* 有效期弱提示（P-20261020-5）：与快照横幅同款扁平条，无卡片框 */
-.expiry-banner{flex-shrink:0;display:flex;gap:8px;align-items:flex-start;
-background:var(--chip);border-bottom:1px solid var(--border);color:var(--text);
-padding:7px max(16px, env(safe-area-inset-right)) 7px max(16px, env(safe-area-inset-left));
-font-size:12px;line-height:1.55}
-.expiry-banner svg{flex:0 0 auto;margin-top:2px;color:var(--muted)}
 font-size:12px;cursor:pointer;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .crumb:hover{background:var(--hover);color:var(--text)}
 .crumb.cur{color:var(--text);font-weight:600;cursor:default;background:transparent}
@@ -388,7 +389,7 @@ padding-right:max(12px, env(safe-area-inset-right))}
 .header h1{font-size:14.5px}
 .header .sub{font-size:11px}
 .btn{padding:7px 12px;font-size:12.5px}
-.snap-banner,.crumbs,.filter-row{padding-left:max(12px, env(safe-area-inset-left));
+.status-banner,.crumbs,.filter-row{padding-left:max(12px, env(safe-area-inset-left));
 padding-right:max(12px, env(safe-area-inset-right))}
 .list th,.list td{padding-left:12px;padding-right:12px}
 .list th:first-child,.list td:first-child{padding-left:max(12px, env(safe-area-inset-left))}

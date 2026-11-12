@@ -10,6 +10,7 @@ import UpdateProgressBlock from './UpdateProgressBlock.vue'
 import UpdateCompanionWarning from './UpdateCompanionWarning.vue'
 import { settingsApi, updateApi } from '../../api/client'
 import { copyText } from '../../utils/clipboard'
+import { renderChangelog, changelogBrief, onChangelogClick } from '../../utils/changelogRender'
 import { confirmDialog } from '../../composables/useDialog'
 import { useI18n } from '../../composables/useI18n'
 import { useNotificationStore } from '../../stores/notification'
@@ -60,6 +61,9 @@ interface UpdateCheckResult {
   changelog?: string
   downloadUrl?: string
   fileSize?: number
+  // 发布页直链（P-20261112-2-S2，服务端 ReleaseInfo.ReleaseURL 同名透传）：
+  // 标题行「查看发布页」外链消费；缺失（旧服务端/源未提供）不显链接零回退
+  releaseUrl?: string
   // 检查失败分类（P-20261106 beta.2 误报实锚）：后端不再吞错，前端据标志诚实呈现
   channelEmpty?: boolean
   sourceMissing?: boolean
@@ -74,6 +78,13 @@ interface UpdateCheckResult {
 const updateInfo = ref<UpdateCheckResult | null>(null)
 // 检查中态：请求期禁用按钮 + 文案切换（GitHub API 1~3s 内给即时反馈，顺带防连点并发）
 const checking = ref(false)
+
+// 更新内容呈现（P-20261112-2 S1）：发布说明 markdown 净化渲染，收起态纯文本
+// 摘要 + 展开全量。渲染链与 dsh 版本弹层同源（utils/changelogRender——外部
+// 内容的净化策略单点）；computed 缓存——进度轮询等无关重渲染不重跑 marked
+const changelogExpanded = ref(false)
+const changelogHtml = computed(() => renderChangelog(updateInfo.value?.changelog || ''))
+const changelogSummary = computed(() => changelogBrief(updateInfo.value?.changelog || ''))
 
 // 已是最新态的回显版本：统一取「当前版本」而非 latest——hasUpdate=false 含
 // 「当前高于最新」形态（dev 构建领先官方 tag），回显 latest 会写出
@@ -424,20 +435,54 @@ onMounted(() => {
           <span class="version-label">{{ t('update.downloadSize') }}</span>
           <span class="version-value">{{ formatBytes(updateInfo.fileSize) }}</span>
         </div>
-        <!-- 更新说明限高滚动（P-20261109-10 R11）：双语长 changelog 整段渲染曾把
-             「立即更新」顶到数屏之外——限高内滚，操作区始终首屏可达 -->
+        <!-- 更新内容（P-20261112-2 S1）：收起态两行摘要，展开态 markdown 净化渲染
+             （v-html 只吃 renderChangelog 产物）；发布说明自带的「中文 | English」
+             锚点行经 onChangelogClick 容器内滚动切换，无锚点行的说明自然不显。
+             限高滚动（P-20261109-10 R11）保留为展开态容器：双语长 changelog 整段
+             渲染曾把「立即更新」顶到数屏之外——限高内滚，操作区始终首屏可达 -->
         <div
           v-if="updateInfo.changelog"
           class="version-changelog"
         >
-          <span class="version-label">{{ t('update.changelog') }}</span>
+          <!-- 标题行右侧「查看发布页」外链循 dsh 弹层同位同款（DshVersionsModal
+               ver-cl-head：新窗 noopener）；releaseUrl 缺失不渲染零回退 -->
+          <div class="version-cl-head">
+            <span data-testid="version-changelog-title">{{ t('update.clTitle', { version: updateInfo.latestVersion }) }}</span>
+            <a
+              v-if="updateInfo.releaseUrl"
+              class="version-cl-open"
+              data-testid="version-release-link"
+              :href="updateInfo.releaseUrl"
+              target="_blank"
+              rel="noopener"
+            >{{ t('update.clOpenPage') }}</a>
+          </div>
+          <!-- eslint-disable vue/no-v-html —— 外部发布说明经 renderChangelog（marked+DOMPurify）净化后渲染，净化不可省 -->
           <div
             class="version-changelog-body"
+            :class="{ expanded: changelogExpanded }"
             data-testid="version-changelog-body"
-            tabindex="0"
+            :tabindex="changelogExpanded ? 0 : undefined"
           >
-            <span class="version-value prewrap">{{ updateInfo.changelog }}</span>
+            <div
+              v-if="changelogExpanded"
+              class="version-cl-md"
+              data-testid="version-changelog-md"
+              @click="onChangelogClick"
+              v-html="changelogHtml"
+            />
+            <template v-else>
+              {{ changelogSummary || t('update.clEmpty') }}
+            </template>
           </div>
+          <!-- eslint-enable vue/no-v-html -->
+          <a
+            href="#"
+            class="version-cl-toggle"
+            data-testid="version-changelog-toggle"
+            :aria-expanded="changelogExpanded"
+            @click.prevent="changelogExpanded = !changelogExpanded"
+          >{{ changelogExpanded ? t('update.clCollapse') : t('update.clExpand') }}</a>
         </div>
         <!-- 伴随校验资产未取到（P-20261109-9）：按钮保持可点（点后服务端受理前先
              skipCache 重拉）；与「立即更新」同显隐——更新在途/本会话已更新成功时
@@ -679,7 +724,6 @@ onMounted(() => {
 .version-label { color: var(--text-dim); flex-shrink: 0; min-width: 64px; }
 .version-value { color: var(--text-primary); word-break: break-all; }
 .version-value.highlight { color: var(--accent-green); font-weight: 600; }
-.version-value.prewrap { white-space: pre-wrap; }
 .version-commit {
   font-family: var(--font-mono, monospace); font-size: 12px; color: var(--accent-blue);
   background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
@@ -696,12 +740,36 @@ onMounted(() => {
 .version-uptodate-icon { color: var(--status-success); flex-shrink: 0; }
 .version-uptodate-text { color: var(--text-primary); font-size: 13px; font-weight: 600; }
 .version-changelog { display: flex; flex-direction: column; gap: 4px; }
-/* 更新说明限高内滚（R11）：~8 行可见，超出滚动；描边示意可滚区域 */
+/* 标题行两端布局（dsh ver-cl-head 同款）：无外链时单子项仍居左，视觉不变 */
+.version-cl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.version-cl-open { font-size: 11px; font-weight: 400; color: var(--accent-blue); text-decoration: none; flex-shrink: 0; }
+.version-cl-open:hover { text-decoration: underline; }
+/* 收起态：两行摘要裁切；展开态限高内滚（R11）：~8 行可见，超出滚动；描边示意可滚区域 */
 .version-changelog-body {
-  max-height: 160px; overflow-y: auto;
+  max-height: 52px; overflow: hidden; box-sizing: border-box;
   padding: 6px 8px; border: 1px solid var(--border-default); border-radius: 6px;
   background: var(--bg-primary);
+  font-size: 12px; line-height: 1.6; color: var(--text-secondary); word-break: break-word;
 }
+.version-changelog-body.expanded { max-height: 160px; overflow-y: auto; }
+.version-cl-toggle { align-self: flex-start; font-size: 12px; color: var(--accent-blue); text-decoration: none; }
+.version-cl-toggle:hover { text-decoration: underline; }
+/* 渲染后的发布说明排版（v-html 内容无 scoped 标记，须 :deep；与 dsh 弹层 .ver-cl-body 同款） */
+.version-cl-md { line-height: 1.65; }
+.version-cl-md :deep(h1), .version-cl-md :deep(h2), .version-cl-md :deep(h3), .version-cl-md :deep(h4) {
+  font-size: 12.5px; color: var(--text-primary); margin: 10px 0 4px; font-weight: 600;
+}
+.version-cl-md :deep(> :first-child) { margin-top: 0; }
+.version-cl-md :deep(> :last-child) { margin-bottom: 0; }
+.version-cl-md :deep(p) { margin: 4px 0; }
+.version-cl-md :deep(ul), .version-cl-md :deep(ol) { padding-left: 18px; margin: 4px 0; }
+.version-cl-md :deep(li) { margin: 2px 0; }
+.version-cl-md :deep(a) { color: var(--accent-blue); text-decoration: none; }
+.version-cl-md :deep(a:hover) { text-decoration: underline; }
+.version-cl-md :deep(code) { font-family: var(--font-mono); font-size: 11px; background: var(--bg-elevated); padding: 1px 4px; border-radius: 3px; }
+.version-cl-md :deep(pre) { overflow-x: auto; }
+.version-cl-md :deep(img) { max-width: 100%; }
+.version-cl-md :deep(hr) { border: none; border-top: 1px solid var(--border-subtle); margin: 8px 0; }
 .version-changelog-body:focus-visible { outline: 1px solid var(--accent-blue); }
 .panel-btn {
   width: 100%; padding: 8px 0; border: 1px solid var(--border-default); border-radius: 6px;

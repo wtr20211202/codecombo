@@ -271,7 +271,7 @@ func TestPresentAtomValidators(t *testing.T) {
 	if a := AtomForEvent("navigate"); a != nil {
 		t.Errorf("navigate 族应无服务端校验（宽容语义），扫到 %s", a.ID)
 	}
-	for _, ev := range []string{"open-file-at", "watch.invite", "notify.persist", "locate-in-tree", "frontend.download", "frontend.clipboard", "frontend.open"} {
+	for _, ev := range []string{"open-file-at", "watch.invite", "notify.persist", "locate-in-tree", "frontend.download", "frontend.clipboard", "frontend.open", "frontend.reload"} {
 		if a := AtomForEvent(ev); a == nil {
 			t.Errorf("事件 %s 应有注册表校验原子（发布口收编后缺位）", ev)
 		}
@@ -389,6 +389,32 @@ func TestPresentAtomValidators(t *testing.T) {
 		// 与 notify.persist action=url 同防线：站内 host 形态也放行（主机不限）
 		if _, ok := ValidateFrontendOpen(map[string]interface{}{"url": "http://127.0.0.1:9999/monitor"}); !ok {
 			t.Error("http 绝对 URL 应通过")
+		}
+	})
+	t.Run("frontend.reload", func(t *testing.T) {
+		// 缺省规整 page（提案口径：agent 未指明粒度时整页重取）
+		v, ok := ValidateFrontendReload(nil)
+		if !ok {
+			t.Fatal("空载荷应通过（scope 缺省）")
+		}
+		if p := v.(FrontendReloadPayload); p.Scope != "page" {
+			t.Fatalf("scope 缺省应规整 page: %+v", p)
+		}
+		// view 档放行；空白规整
+		v, ok = ValidateFrontendReload(map[string]interface{}{"scope": " view "})
+		if !ok {
+			t.Fatal("view 档应通过")
+		}
+		if p := v.(FrontendReloadPayload); p.Scope != "view" {
+			t.Fatalf("scope 应规整为 view: %+v", p)
+		}
+		// 未知值拒绝：重载粒度是前端效应强度的直接开关，开放宽容会把
+		// agent 侧笔误静默放行为最重形态
+		if _, ok := ValidateFrontendReload(map[string]interface{}{"scope": "session"}); ok {
+			t.Error("未知 scope 应拒绝（白名单 page|view）")
+		}
+		if _, ok := ValidateFrontendReload(map[string]interface{}{"scope": 1}); ok {
+			t.Error("非字符串 scope 应拒绝")
 		}
 	})
 }

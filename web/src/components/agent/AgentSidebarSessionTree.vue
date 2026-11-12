@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, provide, ref } from 'vue'
 import { NDropdown, NIcon, NInput } from 'naive-ui'
-import { ChatboxEllipsesOutline, FolderOutline, LockClosedOutline, PulseOutline, TerminalOutline, WarningOutline } from '@vicons/ionicons5'
+import { ChatboxEllipsesOutline, ChevronDownOutline, ChevronForwardOutline, FolderOutline, LockClosedOutline, PulseOutline, TerminalOutline, WarningOutline } from '@vicons/ionicons5'
 import { useI18n } from '../../composables/useI18n'
 import { agentLabelOf } from '../../composables/useApprovalActions'
 import BrandIcon from '../common/BrandIcon.vue'
@@ -61,6 +61,8 @@ const props = defineProps<{
   activityMap?: Record<string, number>
   /** 项目分组折叠集合（透传项目树子组件） */
   collapsedProjects?: Set<string>
+  /** 自定义分组折叠集合（P-20261111-1-S1，宿主持有并持久化；缺省 = 全展开） */
+  collapsedGroups?: Set<string>
   /** 会话 id → 项目相对 dir（「在文件树中定位」可用性；无条目 = 不可定位置灰） */
   locateDirs?: Record<string, string>
   /** 直通输入持权中的会话 id → 持权投影（P-20261024-1，宿主投影自
@@ -80,6 +82,11 @@ const emit = defineEmits<{
   (e: 'attach-project', id: string): void
   /** 项目分组折叠切换 */
   (e: 'toggle-project', projectId: string): void
+  /** 自定义分组折叠切换（P-20261111-1-S1，持久化语义在宿主） */
+  (e: 'toggle-group', groupId: string): void
+  /** 共存提示行点击切回平铺视图（P-20261111-1-S3）：视图开关在宿主，本组件
+   *  只上抛意图（宿主 emit update:groupMode 'flat'） */
+  (e: 'exit-runtime-view'): void
   /** 项目分组右键菜单：新建项目会话 / 打开项目 */
   (e: 'project-action', payload: { projectId: string; key: 'create-session' | 'open' }): void
   /** 项目会话右键菜单：在文件树中定位 / 结束会话（确认由宿主承担） */
@@ -163,7 +170,8 @@ const {
   dragOverKey,
   startDrag,
   onDragOverGroupHead, onDragOverRootHead, onDragOverSessionItem,
-  onDragOverProjectGroupHead, onDragOverProjectSessionItem,
+  onDragOverGroupSection, onDragOverRootSection,
+  onDragOverProjectGroupHead, onDragOverProjectGroupSection, onDragOverProjectSessionItem,
   onDropGroupHead, onDropRootHead, onDropSessionItem,
   onDropProjectGroupHead, onDropProjectSessionItem,
   onDragEnd,
@@ -227,6 +235,12 @@ function onIdleBadgeClick(id: string, e: MouseEvent): void {
 const rtView = computed(() => props.runtimeView === true)
 /** 平铺呈现的自定义分组区（runtime 视图下置空让位，v-for 与视图开关不解耦） */
 const flatNamedGroups = computed(() => (rtView.value ? [] : props.filteredNamedGroups))
+
+/** 自定义分组折叠在否（P-20261111-1-S1）：集合由宿主持有并持久化（collapsedProjects
+ *  同款读写上抛形态），本组件只读投影 */
+function isGroupCollapsed(groupId: string): boolean {
+  return props.collapsedGroups?.has(groupId) ?? false
+}
 
 /** 行 tooltip：基础提示 + 会话 ID + 创建时间 + 运行时版本 + shell 集成检测行
  *  + 最近活动相对时间（有活动记录时）+ 静默 hover 提示。ID 行（P-20261004-123）：
@@ -296,7 +310,7 @@ function isResumedSession(s: AgentTermSession): boolean {
 provide(sidebarTreeSharedKey, {
   dragOverKey,
   startDrag,
-  onDragOverProjectGroupHead, onDragOverProjectSessionItem,
+  onDragOverProjectGroupHead, onDragOverProjectGroupSection, onDragOverProjectSessionItem,
   onDropProjectGroupHead, onDropProjectSessionItem,
   onDragEnd,
   renamingSessionId, renamingSessionName,
@@ -550,6 +564,20 @@ function emitBatchDestroy() {
        行模板块与未分组区有意保持同构——抽行组件需跨 provide/inject 与拖拽
        上下文重接线，收口留给行组件专项重构 -->
   <template v-if="rtView">
+    <!-- 共存提示（P-20261111-1-S3）：runtime 视图下自定义分组整区让位
+         （flatNamedGroups 置空），有分组的用户难辨「组空了」还是「组没了」——
+         弱提示行只计数不渲染组内容（不引入双渲染红线），点击切回平铺。
+         计数取 filteredNamedGroups（宿主按名称/时间/runtime 筛选收窄后的
+         平铺可见集）=「切回去你会看到几个组」，与过滤语义一致不虚报 -->
+    <button
+      v-if="filteredNamedGroups.length > 0"
+      type="button"
+      class="ats-rt-groups-hint"
+      data-test="session-runtime-groups-hint"
+      @click.stop="emit('exit-runtime-view')"
+    >
+      {{ t('agentTerminal.runtimeGroupsHidden', { n: filteredNamedGroups.length }) }}
+    </button>
     <div
       v-for="g in runtimeGroups"
       :key="`rt:${g.key}`"
@@ -725,14 +753,18 @@ function emitBatchDestroy() {
     </div>
   </template>
 
-  <!-- 未分组会话（平铺呈现；runtime 分组视图下让位） -->
+  <!-- 未分组会话（平铺呈现；runtime 分组视图下让位）。整区落点（P-20261111-1-S2）：
+       dragover/drop 挂组段容器——未分组行不是组内插入落点（行层恒拒绝），整区
+       承接即全部落点，拖会话归根不再要求精确命中组头窄行；高亮同键挂组段 -->
   <div
     v-if="!rtView && filteredRootSessions.length > 0"
     class="ats-section"
+    :class="{ 'ats-drag-over': dragOverKey === '__root__' }"
+    @dragover="onDragOverRootSection"
+    @drop.prevent="onDropRootHead"
   >
     <div
       class="ats-group-head"
-      :class="{ 'ats-drag-over': dragOverKey === '__root__' }"
       @dragover="onDragOverRootHead"
       @drop.prevent="onDropRootHead"
     >
@@ -885,22 +917,38 @@ function emitBatchDestroy() {
     </template>
   </div>
 
-  <!-- 分组（平铺呈现；runtime 分组视图下让位——组内会话已按运行时归组展示） -->
+  <!-- 分组（平铺呈现；runtime 分组视图下让位——组内会话已按运行时归组展示）。
+       整区落点（P-20261111-1-S2）：dragover/drop 上提到组段容器——组头/组内行/
+       行间空白都认（内层行 dragover 认领时让位，组源掠过会话行由组段兜底承接
+       重排序），体感「无法拖动自由排序」的组头窄行死区消灭；高亮同键挂组段
+       （整段组区虚线框，与会话行插入态的行级高亮互斥） -->
   <div
     v-for="g in flatNamedGroups"
     :key="g.id"
     class="ats-section"
+    :class="{ 'ats-drag-over': dragOverKey === `group:${g.id}` }"
+    @dragover="onDragOverGroupSection(g.id, $event)"
+    @drop.prevent="onDropGroupHead(g.id)"
   >
     <div
       class="ats-group-head is-group"
-      :class="{ 'ats-drag-over': dragOverKey === `group:${g.id}` }"
       draggable="true"
       @dragstart="startDrag({ kind: 'group', groupId: g.id }, $event)"
       @dragover="onDragOverGroupHead(g.id, $event)"
       @drop.prevent="onDropGroupHead(g.id)"
       @dragend="onDragEnd"
+      @click="emit('toggle-group', g.id)"
       @dblclick="startRenameGroup(g.id, g.name)"
     >
+      <!-- 折叠箭头（P-20261111-1-S1）：项目分组组头同款视觉语——组头整行即
+           点击目标，箭头只作折叠态指示；双击重命名与单击折叠并存（双击先
+           触发两次 click 净零态变化再进重命名，无副作用） -->
+      <n-icon
+        size="11"
+        class="ats-fold"
+      >
+        <component :is="isGroupCollapsed(g.id) ? ChevronForwardOutline : ChevronDownOutline" />
+      </n-icon>
       <n-icon size="12">
         <FolderOutline />
       </n-icon>
@@ -918,6 +966,10 @@ function emitBatchDestroy() {
         v-else
         class="ats-group-name"
       >{{ g.name }}</span>
+      <!-- 会话计数徽标（P-20261111-1-S1）：项目分组组头同款——组里有几条会话
+           一眼可辨（「像空组」的呈现修复）；恒显不随折叠，计数与会话行同源
+           （sessionsOf 过滤幽灵会话），折叠语义与项目树同款（计数恒显、折叠只藏行） -->
+      <span class="ats-group-count">{{ sessionsOf(g.id).length }}</span>
       <n-dropdown
         trigger="click"
         :options="groupMenuOptions"
@@ -933,142 +985,145 @@ function emitBatchDestroy() {
         </button>
       </n-dropdown>
     </div>
-    <!-- template v-for：行 + 排队面板同循环作用域（同未分组区） -->
-    <template
-      v-for="s in sessionsOf(g.id)"
-      :key="s.id"
-    >
-      <div
-        class="ats-item"
-        :class="{ active: s.id === (selectedId || activeId), 'ats-drag-over': dragOverKey === `session:${s.id}`, 'multi-selected': selectedIds.has(s.id) }"
-        :title="itemTitle(s.id, s.name, s.runtimeVersion)"
-        :data-sc-selection-drop="`session:${s.id}`"
-        draggable="true"
-        @dragstart="startDrag({ kind: 'session', sessionId: s.id, fromGroupId: g.id }, $event)"
-        @dragover="onDragOverSessionItem(s, $event)"
-        @drop.prevent="onDropSessionItem(s)"
-        @dragend="onDragEnd"
-        @click="onAgentItemClick(s, $event)"
-        @dblclick.stop="startRenameSession(s.id, s.name)"
-        @contextmenu.prevent="openSessionMenu(s, $event)"
+    <!-- template v-for：行 + 排队面板同循环作用域（同未分组区）；折叠（P-20261111-1-S1）
+         只藏行不藏组头——计数恒显语义随项目分组同款 -->
+    <template v-if="!isGroupCollapsed(g.id)">
+      <template
+        v-for="s in sessionsOf(g.id)"
+        :key="s.id"
       >
-        <n-input
-          v-if="renamingSessionId === s.id"
-          v-model:value="renamingSessionName"
-          size="tiny"
-          autofocus
-          @keyup.enter="confirmRenameSession"
-          @blur="confirmRenameSession"
-          @click.stop
-        />
-        <template v-else>
-          <!-- 未读活动点（P-20261003-310）：同未分组行 -->
-          <span
-            v-if="props.unreadMap?.[s.id]"
-            class="ats-item-unread"
-            :title="t('terminal.tabUnread')"
-          />
-          <!-- 直通输入徽标（P-20261024-1）：同未分组行 -->
-          <span
-            v-if="props.directHolds?.[s.id]"
-            class="ats-item-direct"
-            :title="t('terminal.directInputBadgeTitle', { nick: props.directHolds![s.id]!.nick || props.directHolds![s.id]!.visitorTail || '' })"
-            data-test="session-direct-badge"
-          />
-          <!-- 项目硬锁徽标（P-20261004-143）：同未分组行 -->
-          <n-icon
-            v-if="isLockedSession(s)"
-            class="ats-item-locked"
-            size="11"
-            :title="t('project.locked.terminalBadgeTitle')"
-            data-test="session-locked-badge"
-          >
-            <LockClosedOutline />
-          </n-icon>
-          <!-- 敏感角标（P-20261003-155）：同未分组行 -->
-          <n-icon
-            v-if="s.sensitive"
-            class="ats-item-sensitive"
-            size="11"
-            :title="t('terminal.sensitiveBadgeTip')"
-            data-test="session-sensitive-badge"
-          >
-            <WarningOutline />
-          </n-icon>
-          <!-- 直播中徽标（P-20261106-7）：同未分组行 -->
-          <span
-            v-if="props.liveTitles?.[s.id]"
-            class="ats-item-live"
-            :title="props.liveTitles[s.id]"
-            data-test="session-live-badge"
-          />
-          <span
-            class="ats-item-title"
-            :title="s.name"
-          >{{ s.name }}</span>
-        </template>
-        <!-- 接续/新徽标 + 行内时间（P-20261023-3）：同未分组行（本区无 cwd 徽标，
-             位次紧邻 idle 徽标前的尾区一致） -->
-        <span
-          v-if="isResumedSession(s)"
-          class="ats-item-resumed"
-          :title="t('agentTerminal.resumeBadgeTip')"
-          data-test="session-resumed-badge"
-        >{{ t('agentTerminal.resumeBadge') }}</span>
-        <span
-          v-else-if="isNewSession(s)"
-          class="ats-item-new"
-          :title="t('agentTerminal.newBadgeTip')"
-          data-test="session-new-badge"
-        >{{ t('agentTerminal.newBadge') }}</span>
-        <span
-          v-if="createdText(s)"
-          class="ats-item-time"
-          :title="t('agentTerminal.createdAtTip', { time: createdFull(s) })"
-          data-test="session-created-time"
-        >{{ createdText(s) }}<template v-if="activityShort(s.id)"> · {{ activityShort(s.id) }}</template></span>
-        <n-icon
-          v-if="!shellIntDetected(s.id)"
-          class="ats-item-shellint"
-          size="11"
-          :title="t('agentTerminal.shellIntOffTip')"
-          data-test="session-shellint-missing"
+        <div
+          class="ats-item"
+          :class="{ active: s.id === (selectedId || activeId), 'ats-drag-over': dragOverKey === `session:${s.id}`, 'multi-selected': selectedIds.has(s.id) }"
+          :title="itemTitle(s.id, s.name, s.runtimeVersion)"
+          :data-sc-selection-drop="`session:${s.id}`"
+          draggable="true"
+          @dragstart="startDrag({ kind: 'session', sessionId: s.id, fromGroupId: g.id }, $event)"
+          @dragover="onDragOverSessionItem(s, $event)"
+          @drop.prevent="onDropSessionItem(s)"
+          @dragend="onDragEnd"
+          @click="onAgentItemClick(s, $event)"
+          @dblclick.stop="startRenameSession(s.id, s.name)"
+          @contextmenu.prevent="openSessionMenu(s, $event)"
         >
-          <PulseOutline />
-        </n-icon>
-        <span
-          v-if="idleBadge(s.id)"
-          class="ats-item-idle"
-          :class="{ 'is-stall': isStallBadge(s.id) }"
-          :title="idleTip(s.id)"
-          @click="onIdleBadgeClick(s.id, $event)"
-        >{{ idleBadge(s.id) }}</span>
-        <!-- 排队指令入口（P-20261003-248）：同未分组行 -->
-        <button
-          class="ats-item-queue"
-          :class="{ 'has-items': queueCount(s.id) > 0 }"
-          :title="t('agentTerminal.queue.toggle')"
-          data-testid="session-queue-toggle"
-          @click.stop="toggleQueue(s.id)"
-        >
-          <n-icon size="11">
-            <ChatboxEllipsesOutline />
+          <n-input
+            v-if="renamingSessionId === s.id"
+            v-model:value="renamingSessionName"
+            size="tiny"
+            autofocus
+            @keyup.enter="confirmRenameSession"
+            @blur="confirmRenameSession"
+            @click.stop
+          />
+          <template v-else>
+            <!-- 未读活动点（P-20261003-310）：同未分组行 -->
+            <span
+              v-if="props.unreadMap?.[s.id]"
+              class="ats-item-unread"
+              :title="t('terminal.tabUnread')"
+            />
+            <!-- 直通输入徽标（P-20261024-1）：同未分组行 -->
+            <span
+              v-if="props.directHolds?.[s.id]"
+              class="ats-item-direct"
+              :title="t('terminal.directInputBadgeTitle', { nick: props.directHolds![s.id]!.nick || props.directHolds![s.id]!.visitorTail || '' })"
+              data-test="session-direct-badge"
+            />
+            <!-- 项目硬锁徽标（P-20261004-143）：同未分组行 -->
+            <n-icon
+              v-if="isLockedSession(s)"
+              class="ats-item-locked"
+              size="11"
+              :title="t('project.locked.terminalBadgeTitle')"
+              data-test="session-locked-badge"
+            >
+              <LockClosedOutline />
+            </n-icon>
+            <!-- 敏感角标（P-20261003-155）：同未分组行 -->
+            <n-icon
+              v-if="s.sensitive"
+              class="ats-item-sensitive"
+              size="11"
+              :title="t('terminal.sensitiveBadgeTip')"
+              data-test="session-sensitive-badge"
+            >
+              <WarningOutline />
+            </n-icon>
+            <!-- 直播中徽标（P-20261106-7）：同未分组行 -->
+            <span
+              v-if="props.liveTitles?.[s.id]"
+              class="ats-item-live"
+              :title="props.liveTitles[s.id]"
+              data-test="session-live-badge"
+            />
+            <span
+              class="ats-item-title"
+              :title="s.name"
+            >{{ s.name }}</span>
+          </template>
+          <!-- 接续/新徽标 + 行内时间（P-20261023-3）：同未分组行（本区无 cwd 徽标，
+               位次紧邻 idle 徽标前的尾区一致） -->
+          <span
+            v-if="isResumedSession(s)"
+            class="ats-item-resumed"
+            :title="t('agentTerminal.resumeBadgeTip')"
+            data-test="session-resumed-badge"
+          >{{ t('agentTerminal.resumeBadge') }}</span>
+          <span
+            v-else-if="isNewSession(s)"
+            class="ats-item-new"
+            :title="t('agentTerminal.newBadgeTip')"
+            data-test="session-new-badge"
+          >{{ t('agentTerminal.newBadge') }}</span>
+          <span
+            v-if="createdText(s)"
+            class="ats-item-time"
+            :title="t('agentTerminal.createdAtTip', { time: createdFull(s) })"
+            data-test="session-created-time"
+          >{{ createdText(s) }}<template v-if="activityShort(s.id)"> · {{ activityShort(s.id) }}</template></span>
+          <n-icon
+            v-if="!shellIntDetected(s.id)"
+            class="ats-item-shellint"
+            size="11"
+            :title="t('agentTerminal.shellIntOffTip')"
+            data-test="session-shellint-missing"
+          >
+            <PulseOutline />
           </n-icon>
           <span
-            v-if="queueCount(s.id) > 0"
-            class="ats-item-queue-count"
-          >{{ queueCount(s.id) }}</span>
-        </button>
-        <span
-          v-if="isRunning(s)"
-          class="ats-item-dot running"
+            v-if="idleBadge(s.id)"
+            class="ats-item-idle"
+            :class="{ 'is-stall': isStallBadge(s.id) }"
+            :title="idleTip(s.id)"
+            @click="onIdleBadgeClick(s.id, $event)"
+          >{{ idleBadge(s.id) }}</span>
+          <!-- 排队指令入口（P-20261003-248）：同未分组行 -->
+          <button
+            class="ats-item-queue"
+            :class="{ 'has-items': queueCount(s.id) > 0 }"
+            :title="t('agentTerminal.queue.toggle')"
+            data-testid="session-queue-toggle"
+            @click.stop="toggleQueue(s.id)"
+          >
+            <n-icon size="11">
+              <ChatboxEllipsesOutline />
+            </n-icon>
+            <span
+              v-if="queueCount(s.id) > 0"
+              class="ats-item-queue-count"
+            >{{ queueCount(s.id) }}</span>
+          </button>
+          <span
+            v-if="isRunning(s)"
+            class="ats-item-dot running"
+          />
+        </div>
+        <!-- 排队指令面板（同未分组行，手风琴共享 queueOpenId） -->
+        <AgentSessionQueuePanel
+          v-if="queueOpenId === s.id"
+          :session-id="s.id"
         />
-      </div>
-      <!-- 排队指令面板（同未分组行，手风琴共享 queueOpenId） -->
-      <AgentSessionQueuePanel
-        v-if="queueOpenId === s.id"
-        :session-id="s.id"
-      />
+      </template>
     </template>
   </div>
 
@@ -1111,6 +1166,18 @@ function emitBatchDestroy() {
 .ats-group-head.is-group { cursor: pointer; }
 .ats-group-head.is-group:hover { background: var(--bg-hover); color: var(--text-secondary); }
 .ats-group-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 自定义分组折叠箭头 + 计数徽标（P-20261111-1-S1）：项目分组组头同款视觉语
+   （AgentSidebarProjectTree 的 scoped 样式不出组件，此处同款复刻——两处形态
+   刻意一致，「自定义分组 = 项目分组」同一心智） */
+.ats-fold { flex-shrink: 0; color: var(--text-dim); }
+.ats-group-count {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--bg-hover);
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 15px;
+}
 /* runtime 组头计数（P-20261003-238）：弱样徽标——组头是导航不是状态，计数只作概览 */
 .ats-rt-count {
   flex-shrink: 0;
@@ -1120,6 +1187,32 @@ function emitBatchDestroy() {
   border-radius: 8px;
   background: color-mix(in srgb, var(--text-dim) 14%, transparent);
   color: var(--text-dim);
+}
+/* runtime 视图共存提示（P-20261111-1-S3）：弱化整行按钮——提示是辅助信息
+   （只计数不渲染组内容），hover/焦点态才升为可交互观感；button 语义自带
+   键盘可达（Enter/Space 触发），免手写 role/tabindex */
+.ats-rt-groups-hint {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--motion-base), background var(--motion-base);
+}
+.ats-rt-groups-hint:hover,
+.ats-rt-groups-hint:focus-visible {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+.ats-rt-groups-hint:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--text-dim) 50%, transparent);
 }
 .ats-group-more {
   background: none;
@@ -1280,7 +1373,8 @@ function emitBatchDestroy() {
 .ats-item-queue.has-items { color: var(--accent-blue); }
 .ats-item-queue-count { font-size: 0.72em; font-weight: 600; }
 
-/* 拖拽落点指示（分组头 / 组内会话条目 / 未分组头） */
+/* 拖拽落点指示（组段整区 / 组内会话条目行级插入态；S2 起组区高亮挂 .ats-section
+   整段，组头行不再单独描框——落点区与反馈面一致） */
 .ats-drag-over {
   outline: 1px dashed var(--accent-blue);
   outline-offset: -1px;

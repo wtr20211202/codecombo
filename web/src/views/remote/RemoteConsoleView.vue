@@ -71,12 +71,15 @@ const booting = ref(true)
 const showSnippetPanel = ref(false)
 // 主机侧栏折叠（终端全宽模式），持久化到 uiState.remoteConsole
 const sidebarCollapsed = ref(false)
-// 主机侧栏宽度可调（P-20261106-5）：200-480px 拖拽 + localStorage 记忆
+// 主机侧栏宽度可调（P-20261106-5）：220-480px 拖拽 + localStorage 记忆
 // （sc.remoteConsole.sidebarWidth，键名约定 sc.<panel>.sidebarWidth）；
-// 拖拽/记忆/键盘微调/双击复位全在 SidebarResizer（useSidebarWidth）内，本视图只持值
-const HOST_LIST_W_MIN = 200
+// 拖拽/记忆/键盘微调/双击复位全在 SidebarResizer（useSidebarWidth）内，本视图只持值。
+// 默认宽 260→320、min 200→220（P-20261111-7 S2）：名称行一般即 IP 地址，320px 下
+// 基本不截断；迁移口径——存量 localStorage 已记忆宽不被动改（260 等旧值原样生效，
+// 低于新 min 的记忆值循 load 既有 clamp 收到 220），双击把手复位即取新默认 320
+const HOST_LIST_W_MIN = 220
 const HOST_LIST_W_MAX = 480
-const HOST_LIST_W_DEFAULT = 260
+const HOST_LIST_W_DEFAULT = 320
 const hostListWidth = ref(HOST_LIST_W_DEFAULT)
 
 // 各 tab 终端实例（发送常用命令 + 右键菜单动作下发；能力与项目终端同层）

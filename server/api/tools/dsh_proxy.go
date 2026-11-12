@@ -206,7 +206,66 @@ func startProxyOnce(cfg dshConfig) {
 		_ = old.Shutdown(shutdownCtx)
 		cancel()
 	}
-	proxy := &httputil.ReverseProxy{
+	proxy := newDshReverseProxy()
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		proxyDegraded = fmt.Sprintf("listen %s failed: %v（端口被占用可在设置中调整 dshProxyPort）", addr, err)
+		fmt.Printf("[dsh-proxy] %s\n", proxyDegraded)
+		return
+	}
+	proxyDegraded = ""
+	srv := &http.Server{
+		Handler:           dshProxyHandler(proxy),
+		ReadHeaderTimeout: 10 * time.Second, // exposeAll 时防 slowloris（对齐主服务）
+	}
+	proxySrv = srv
+	proxyListenAddr = addr
+	proxyBaseUsed = cfg.Base
+	scheme := proxyScheme()
+	if scheme == "https" {
+		// 证书接受状态跨重启有效（浏览器例外持久 + 标志文件持久），提示不闪现
+		if _, err := os.Stat(filepath.Join(config.DataDir(), "dsh-tls-served.flag")); err == nil {
+			tlsServedOnce.Store(true)
+		}
+	}
+	go func() {
+		var err error
+		if scheme == "https" {
+			// 自签证书与主服务共用（SAN 覆盖 localhost/主机名/全部网卡 IP，
+			// DataDir/certs 生成一次重启复用）。浏览器侧信任需在新标签打开一次
+			// 反代地址接受证书，之后 iframe 内正常加载
+			certPath, keyPath, certErr := tlsutil.EnsureCert(filepath.Join(config.DataDir(), "certs"))
+			if certErr != nil {
+				proxyMu.Lock()
+				if proxySrv == srv {
+					proxySrv = nil
+				}
+				proxyDegraded = fmt.Sprintf("tls cert: %v", certErr)
+				proxyMu.Unlock()
+				return
+			}
+			err = srv.ServeTLS(ln, certPath, keyPath)
+		} else {
+			err = srv.Serve(ln)
+		}
+		if err != nil && err != http.ErrServerClosed {
+			proxyMu.Lock()
+			if proxySrv == srv {
+				proxySrv = nil
+			}
+			proxyDegraded = fmt.Sprintf("serve stopped: %v", err)
+			proxyMu.Unlock()
+		}
+	}()
+	fmt.Printf("[dsh-proxy] dsh Web UI 反代已启动: %s://%s → %s（token 自动签发；多目标 cookie 路由；scheme 跟随主服务）\n", scheme, addr, cfg.Base)
+}
+
+// newDshReverseProxy 构造回环反代实例（Director/ModifyResponse 全量行为链）。
+// 独立成函数是 P-20261111-2-S2 反代行为快照回归钉的前提：钉必须直接复用生产
+// 构造断言真实行为——测试侧复刻一份 Director/ModifyResponse 防不了本文件内
+// 改写逻辑的将来回归
+func newDshReverseProxy() *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
 		// 本机目标 base 每请求动态读取：设置页改动即时生效（监听地址固化在
 		// 首次启动，绑定面/端口改动经重绑定路径生效）。
 		// token 不在代理层注入：签发门（302）已按目标发放，代理若每请求再注入
@@ -309,57 +368,6 @@ func startProxyOnce(cfg dshConfig) {
 			return nil
 		},
 	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		proxyDegraded = fmt.Sprintf("listen %s failed: %v（端口被占用可在设置中调整 dshProxyPort）", addr, err)
-		fmt.Printf("[dsh-proxy] %s\n", proxyDegraded)
-		return
-	}
-	proxyDegraded = ""
-	srv := &http.Server{
-		Handler:           dshProxyHandler(proxy),
-		ReadHeaderTimeout: 10 * time.Second, // exposeAll 时防 slowloris（对齐主服务）
-	}
-	proxySrv = srv
-	proxyListenAddr = addr
-	proxyBaseUsed = cfg.Base
-	scheme := proxyScheme()
-	if scheme == "https" {
-		// 证书接受状态跨重启有效（浏览器例外持久 + 标志文件持久），提示不闪现
-		if _, err := os.Stat(filepath.Join(config.DataDir(), "dsh-tls-served.flag")); err == nil {
-			tlsServedOnce.Store(true)
-		}
-	}
-	go func() {
-		var err error
-		if scheme == "https" {
-			// 自签证书与主服务共用（SAN 覆盖 localhost/主机名/全部网卡 IP，
-			// DataDir/certs 生成一次重启复用）。浏览器侧信任需在新标签打开一次
-			// 反代地址接受证书，之后 iframe 内正常加载
-			certPath, keyPath, certErr := tlsutil.EnsureCert(filepath.Join(config.DataDir(), "certs"))
-			if certErr != nil {
-				proxyMu.Lock()
-				if proxySrv == srv {
-					proxySrv = nil
-				}
-				proxyDegraded = fmt.Sprintf("tls cert: %v", certErr)
-				proxyMu.Unlock()
-				return
-			}
-			err = srv.ServeTLS(ln, certPath, keyPath)
-		} else {
-			err = srv.Serve(ln)
-		}
-		if err != nil && err != http.ErrServerClosed {
-			proxyMu.Lock()
-			if proxySrv == srv {
-				proxySrv = nil
-			}
-			proxyDegraded = fmt.Sprintf("serve stopped: %v", err)
-			proxyMu.Unlock()
-		}
-	}()
-	fmt.Printf("[dsh-proxy] dsh Web UI 反代已启动: %s://%s → %s（token 自动签发；多目标 cookie 路由；scheme 跟随主服务）\n", scheme, addr, cfg.Base)
 }
 
 // stopProxy 关闭反代实例并清理状态（通道关闭/配置迁移时释放监听）

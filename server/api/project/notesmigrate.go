@@ -83,7 +83,9 @@ func migrateNotesToGlobal(trigger string, c *gin.Context, extraLabels map[string
 		} else {
 			st.Audit.Append(ev)
 		}
-		broadcastNotesUpdated(store.GlobalNotesScope, "", "migrated")
+		// 服务端自发起（启动期/手动续迁/项目删除前三入口）——origin 恒空：
+		// 迁移是作用域级批量并入，消费方按外部更新重拉（宁多刷不漏刷）
+		broadcastNotesUpdated(store.GlobalNotesScope, "", "migrated", "")
 		slog.Info("project notes merged into global notes library",
 			"trigger", trigger, "migrated", res.Migrated, "pending", res.Pending)
 	}

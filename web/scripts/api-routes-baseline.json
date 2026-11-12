@@ -25,7 +25,8 @@
     "/api/hooks": "入站事件 Hook 原语（P-20261003-23）——外部 CI/监控/脚本直投面（sch_ 凭据即门禁），浏览器内前端无调用点；凭据生命周期 /api/hook-token 已由 domains/system hookTokenApi 消费",
     "/s/": "分享访客面同源入口（P-20261020-2）——访客浏览器/手机直开的零依赖页面与子资源（页面/SSE/口令/留言），不经前端 api 层；分享链接由 utils/shareAddress 地址计划拼装（不调 api.*）",
     "/api/sync/units": "多实例同步对端面（P-20261023-1）：对端实例间 zip 打包/落位传输通道——本端前端经 /sync/pull|push 编排端点间接消费，不经 domains 直调",
-    "/api/projects/:id/file/download": "文件下载直链消费面（P-20261030-2 blob 反模式直链化）：utils/directDownload 构造同源 <a href download> 程序化点击 + frontendAtomActions ops 原子同款——浏览器原生 GET 自动携带锁 cookie 载体（P-20261019-2），不经 axios domains"
+    "/api/projects/:id/file/download": "文件下载直链消费面（P-20261030-2 blob 反模式直链化）：utils/directDownload 构造同源 <a href download> 程序化点击 + frontendAtomActions ops 原子同款——浏览器原生 GET 自动携带锁 cookie 载体（P-20261019-2），不经 axios domains",
+    "/api/terminals/session-groups": "终端会话自定义分组 agent 操作面（P-20261111-1-S3）——agent 可编程建组/改名/删组/会话归组移动，写 uiState 本地实例 agentTerminal.groups 后广播 agent.groups.changed 走前端既有重读链；浏览器前端零调用（分组全走页面内交互持久化）"
   },
   "routes": {
     "POST /api/audit/archive": "审计保留巡更手动触发（P-20261003-277）——运维/agent 维护面（归档自动进行，UI 无按钮；e2e 窗口翻转用例直打 API）",

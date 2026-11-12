@@ -75,6 +75,9 @@ export function useAgentTerminalGroups(deps: {
   // 组序 / 组内会话序 / 折叠集合均持久化在 uiState（projectGroups 消费端渲染序）。
   // 组内会话手动序仅 default 排序模式生效——name/activity 是显式排序意图，优先
   const collapsedProjects = ref(new Set<string>())
+  // 自定义分组折叠集合（P-20261111-1-S1）：与项目分组 collapsedProjects 同一
+  // persist 链路同一折叠语义（计数恒显、折叠只藏行）；缺键 = 全展开（旧数据零迁移）
+  const collapsedGroups = ref(new Set<string>())
   const projectOrder = ref<string[]>([])
   const projectSessionOrder = ref<Record<string, string[]>>({})
 
@@ -117,6 +120,25 @@ export function useAgentTerminalGroups(deps: {
     else next.add(projectId)
     collapsedProjects.value = next
     persistUi()
+  }
+  /** 自定义分组折叠切换（组头 click）：与 onToggleProject 同款不可变集更新 */
+  function onToggleGroup(groupId: string) {
+    const next = new Set(collapsedGroups.value)
+    if (next.has(groupId)) next.delete(groupId)
+    else next.add(groupId)
+    collapsedGroups.value = next
+    persistUi()
+  }
+  /** 折叠集剪枝：组结构变化（删组/外部恢复）后摘已不存在组的折叠态——已删组
+   *  id 不再复用（at_<ts>_rand），不剪会在持久化集合里无界累积（pinnedIds
+   *  会话消亡即剪枝同款卫生） */
+  function pruneCollapsedGroups() {
+    if (collapsedGroups.value.size === 0) return
+    const known = new Set(groups.value.map(g => g.id))
+    const kept = [...collapsedGroups.value].filter(id => known.has(id))
+    if (kept.length !== collapsedGroups.value.size) {
+      collapsedGroups.value = new Set(kept)
+    }
   }
   function onReorderProjectGroups(orderedIds: string[]) {
     const known = new Set(sessionsStore.sessionsByProject.keys())
@@ -176,6 +198,7 @@ export function useAgentTerminalGroups(deps: {
       groups: groups.value.map(g => ({ ...g, sessionIds: [...g.sessionIds] })),
       sidebarCollapsed: sidebarCollapsed.value,
       collapsedProjects: [...collapsedProjects.value],
+      collapsedGroups: [...collapsedGroups.value],
       projectOrder: [...projectOrder.value],
       projectSessionOrder: { ...projectSessionOrder.value },
       lastViewedSessionId: deps.lastViewedSessionId.value,
@@ -197,6 +220,7 @@ export function useAgentTerminalGroups(deps: {
       groups.value = ui.groups
       sidebarCollapsed.value = ui.sidebarCollapsed
       collapsedProjects.value = new Set(ui.collapsedProjects)
+      collapsedGroups.value = new Set(ui.collapsedGroups)
       projectOrder.value = ui.projectOrder
       projectSessionOrder.value = ui.projectSessionOrder
       // 恢复最后查看的会话（跨刷新延续查看上下文；须在 ensureDockedSelection 之前）
@@ -224,6 +248,7 @@ export function useAgentTerminalGroups(deps: {
     try {
       const ui = await uiStateStore.getAgentTerminalState()
       groups.value = ui.groups
+      pruneCollapsedGroups()
     } catch { /* silent：外部写回对账失败由下次 boot/恢复再对齐 */ }
   }
   onMounted(() => window.addEventListener(OPS_AGENT_GROUPS_CHANGED, onExternalGroupsChanged))
@@ -339,6 +364,7 @@ export function useAgentTerminalGroups(deps: {
     if (payload.key.startsWith('delete:')) {
       const gid = payload.key.slice(7)
       groups.value = groups.value.filter(gg => gg.id !== gid) // 组内会话回到未分组
+      pruneCollapsedGroups()
       persistUi()
     }
   }
@@ -391,9 +417,9 @@ export function useAgentTerminalGroups(deps: {
 
   return {
     groups, booting, sidebarCollapsed,
-    collapsedProjects, projectOrder, projectSessionOrder, projectGroups,
+    collapsedProjects, collapsedGroups, projectOrder, projectSessionOrder, projectGroups,
     boot, persistUi,
-    onToggleProject, onReorderProjectGroups, onReorderProjectSessions,
+    onToggleProject, onToggleGroup, onReorderProjectGroups, onReorderProjectSessions,
     openProject, projectCreateOptions, onCreateProjectSelect, createProjectSession,
     onProjectAction, onProjectSessionDestroy,
     onSessionAction, onGroupAction,

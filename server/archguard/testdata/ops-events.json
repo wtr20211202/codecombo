@@ -83,6 +83,13 @@
     ],
     "source": "agent"
   },
+  "frontend.reload": {
+    "anchor": "frontend.reload",
+    "payload": [
+      "scope"
+    ],
+    "source": "agent"
+  },
   "input.request": {
     "anchor": "input.request",
     "contractKey": "store.AgentAsk",
@@ -336,8 +343,14 @@
     "payload": [
       "action",
       "noteId",
+      "origin",
       "projectId"
     ],
+    "source": "server"
+  },
+  "agent.groups.changed": {
+    "anchor": "agent.groups.changed",
+    "payload": [],
     "source": "server"
   }
 }

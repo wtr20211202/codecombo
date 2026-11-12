@@ -40,8 +40,9 @@
 前端常驻订阅 `/ws/ops-channel`（`web/src/composables/useOpsChannel.ts`），
 把每条消息**二次分发为 window CustomEvent**，各视图按需 `addEventListener`：
 
-- **显式分发**：`useOpsChannel.ts` switch 列举 6 型（`projects.changed` /
-  `settings.changed` / `navigate` / `notify` / `task.progress` / `panel`），
+- **显式分发**：`useOpsChannel.ts` switch 列举 7 型（`projects.changed` /
+  `settings.changed` / `agent.groups.changed` / `navigate` / `notify` /
+  `task.progress` / `panel`），
   分发为对应的 `sc-ops:*` 常量（注意：显式型的 window 事件名与 type **不同名**，
   如 `projects.changed` → `sc-ops:projects-changed` 连字符）。
 - **直通分发**：未列举 type 一律 `sc-ops:<type>` 原样分发
@@ -82,6 +83,7 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
 |---|---|---|---|
 | `projects.changed` | `sc-ops:projects-changed`（`OPS_PROJECTS_CHANGED`） | 显式 | 服务端 |
 | `settings.changed` | `sc-ops:settings-changed`（`OPS_SETTINGS_CHANGED`） | 显式 | 服务端 |
+| `agent.groups.changed` | `sc-ops:agent-groups-changed`（`OPS_AGENT_GROUPS_CHANGED`） | 显式 | 服务端 |
 | `navigate` | `sc-ops:navigate`（`OPS_NAVIGATE`） | 显式 | agent |
 | `notify` | `sc-ops:notify`（`OPS_NOTIFY`） | 显式 | agent |
 | `task.progress` | `sc-ops:task.progress`（`OPS_TASK_PROGRESS`） | 显式 | agent + 服务端 |
@@ -106,6 +108,7 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
 | `frontend.download` | `sc-ops:frontend.download`（`OPS_FRONTEND_DOWNLOAD`） | 直通 | agent |
 | `frontend.clipboard` | `sc-ops:frontend.clipboard`（`OPS_FRONTEND_CLIPBOARD`） | 直通 | agent |
 | `frontend.open` | `sc-ops:frontend.open`（`OPS_FRONTEND_OPEN`） | 直通 | agent |
+| `frontend.reload` | `sc-ops:frontend.reload`（`OPS_FRONTEND_RELOAD`） | 直通 | agent |
 | `share.drop` | `sc-ops:share.drop`（`OPS_SHARE_DROP`） | 直通 | 服务端 |
 | `share.wtyping` | `sc-ops:share.wtyping`（`OPS_SHARE_WTYPING`） | 直通 | 服务端 |
 | `share.paste-review` | `sc-ops:share.paste-review`（`OPS_SHARE_PASTE_REVIEW`） | 直通 | 服务端 |
@@ -133,6 +136,21 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
 - **消费方**：`OpsChannelBridge.vue` → 终端主题重载 + 界面密度重载 +
   审批模式徽标刷新（多标签页/多端跟随）+ 自动检查更新开关重读（P-20261109-6，
   `updateChecks` → 前端 6h 自动检查电路即时起停）
+
+### agent.groups.changed
+
+- **window 事件**：`sc-ops:agent-groups-changed`（`OPS_AGENT_GROUPS_CHANGED`，
+  显式分发——window 事件名早于本服务端事件存在：P-20261004-79 前端内部事件
+  升级为服务端可播，保持连字符旧形态不走 `sc-ops:agent.groups.changed` 直通恒等）
+- **广播点**：`server/api/terminal/session_groups.go`（agent 分组操作面
+  `/api/terminals/session-groups` 族建组/改名/删组/移入/移出写 uiState 成功
+  后，P-20261111-1-S3）
+- **payload**：无（`gin.H{}`——消费方收到即拉全量，settings.changed 同纪律，
+  不信任载荷内容）
+- **消费方**：`useAgentTerminalGroups.ts` 既有外部变更重读链（live 挂载中的
+  会话管理页重读 uiState `agentTerminal.groups` 即时重应用；home overlay 与
+  project 内嵌双实例各自监听）。**双源窗口事件**：前端派发源（useWorkspaceSnapshot
+  工作区预设恢复链）与本服务端广播并存互不排斥（见 B 节 `OPS_AGENT_GROUPS_CHANGED` 行）
 
 ### navigate
 
@@ -476,6 +494,22 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
   blocker 是浏览器边界不硬求：被拦时回落通知中心 `action='url'` 条目——
   既有形态，用户点击开 + warning toast；效应面限频同上）
 
+### frontend.reload
+
+- **window 事件**：`sc-ops:frontend.reload`（`OPS_FRONTEND_RELOAD`，直通分发）
+- **广播点**：仅 agent 经 ops-notify 上报（发布口注册表校验——scope 可选
+  枚举 `page|view`，缺省规整 `page`，未知值 400 退回；P-20261111-3）
+- **payload**：`{scope: "page"|"view"}`——page = `location.reload()` 整页
+  重载（改配置推送/批量写完成后要求前端全量重取）；view = 当前路由整树
+  remount（App 层 `RouterView :key` 翻转，实例切换同机制，路由/URL 零变化，
+  各视图 onMounted 数据链重跑——视图状态机卡滞自救，替代两跳 navigate
+  绕行）
+- **消费方**：`OpsChannelBridge.vue` → `utils/frontendAtomActions`（page
+  先弹可见 toast 再重载——未保存编辑由既有 `beforeunload` 确认框与 IndexedDB
+  草稿自动保存兜底，用户可取消；view 直接 bump tick 重建 + 成功 toast）。
+  frontend 动词族第四原子：设置按原子开关（默认开）+ 效应面限频 10 次/分钟
+  同族收口，勿高频刷发
+
 ### share.drop
 
 - **window 事件**：`sc-ops:share.drop`（`OPS_SHARE_DROP`，直通分发）
@@ -524,14 +558,21 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
   **已下线的广播点**：项目兼容端点 PUT /projects/:id/notes 与 notes-multi 项目族
   随端点退役；sync notes/notes-multi 单元落位广播随单元退役——**单库化后笔记
   不再随实例同步**（旧对端回流的笔记单元落位侧拒收，不再产生本事件）
-- **payload**：`{projectId, noteId?, action}`——action ∈ `saved|created|
+- **payload**：`{projectId, noteId?, action, origin?}`——action ∈ `saved|created|
   renamed|trashed|restored|purged|migrated`；`noteId` 缺省 = 作用域级（清单可能
   已变，重拉列表）。`projectId` 为作用域键：恒为笔记库保留哨兵 `_global`
-  （字段名沿用多篇时代的项目维度命名，载荷形状不变）。仅元数据上广播面（标题/
+  （字段名沿用多篇时代的项目维度命名，载荷形状不变）。`origin`（P-20261111-4 S1
+  回声抑制）= 发起写请求的客户端窗口 nonce（写请求 `X-Notes-Origin` 头原样回带），
+  前端 `useNotesMulti.onExternalUpdate` 收到同 nonce 即跳过（本窗防抖自动保存的
+  回声不再触发整篇重读/清单重拉——textarea 换值会重置光标与 undo 栈打断连续输入；
+  窗口级非用户级，同源双开仍互见）；迁移广播（服务端自发起）与旧客户端请求无
+  origin，按外部更新处理向后兼容（宁多刷不漏刷，`clipboard.arrived` origin 同构）。
+  仅元数据上广播面（标题/
   内容不上——terminal.message 同纪律），消费方收到即拉服务端真值，不信任载荷内容
 - **消费方**：笔记面板（单库引擎 useNotesMulti）合并到既有内部事件
   `sc:notes-external-update` 消费——per-note 粒度（P-20261107-2 起）：当前篇被
-  外部改写且无未保存编辑时即时重读；清单变化重拉列表。只认 `_global` 键（旧服务端
+  外部改写且无未保存编辑时即时重读；清单变化重拉列表；origin 等于本窗 nonce
+  的回声整体跳过（本窗写路径已就地维护清单与内容）。只认 `_global` 键（旧服务端
   /旧形态带项目 id 的事件忽略——单库化无项目库可对位）。「沉淀到笔记」等人侧写
   路径继续走前端内部事件（同窗口无服务端往返，可携 `focus` 让视图聚焦该篇）
 
@@ -589,7 +630,7 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
 | `OPS_LOCATE_IN_TREE` | `sc-ops:locate-in-tree` | `{path, projectId, focus?}` | useTerminalTreeLocate.ts / useEditorTreeLocate.ts（终端/编辑器「在文件树中定位」） | FileTreeView.vue（保证侧栏可见 + 逐层展开滚动定位）；**双栖事件**——同为线上 `locate-in-tree` 的直通分发目标（见 A 节，P-20261022-3），侧栏不在 files 视图由 useLayoutViews 兜底适配层先切视图再重派发 |
 | `OPS_COLLAPSE_TREE` | `sc-ops:collapse-tree` | `{projectId}` | useLayoutReset.ts:53 / useLayoutShell.ts:213（一键重置布局） | FileTreeView.vue（收起全部目录；未挂载时清 localStorage 键已覆盖） |
 | `OPS_REMOTE_OPEN_IN_EDITOR` | `sc-ops:remote-open-in-editor` | `{hostId, path}` | RemoteFilePane.vue:157（远程文件右键） | useLayoutShell.ts:565（切编辑器主区 + `remote:<hostId>:<path>` 伪路径开签）、RemoteFileManager.vue |
-| `OPS_AGENT_GROUPS_CHANGED` | `sc-ops:agent-groups-changed` | 无（收到即拉全量） | useWorkspaceSnapshot.ts（工作区预设恢复链 applyAgentGroups 落盘成功后，P-20261004-79） | useAgentTerminalGroups.ts（live 挂载中的会话管理页重读 agentTerminal.groups 即时重应用；home overlay 与 project 内嵌双实例各自监听） |
+| `OPS_AGENT_GROUPS_CHANGED` | `sc-ops:agent-groups-changed` | 无（收到即拉全量） | useWorkspaceSnapshot.ts（工作区预设恢复链 applyAgentGroups 落盘成功后，P-20261004-79）；**双栖事件**——同为线上 `agent.groups.changed` 的显式分发目标（agent 分组操作面写端广播，见 A 节，P-20261111-1-S3） | useAgentTerminalGroups.ts（live 挂载中的会话管理页重读 agentTerminal.groups 即时重应用；home overlay 与 project 内嵌双实例各自监听） |
 | `OPS_WORKTREES_CHANGED` | `sc-ops:worktrees-changed` | 无（收到即拉全量） | CommitsPanel.vue:341 等跨组件创建/清理动作（历史检视 worktree 落档后，P-20261005-179） | GitWorktreesSection.vue（收到即重拉列表——面板自身只挂项目切换 watch，同项目异组件创建对其不可见） |
 | `OPS_AGENT_CRONS_CHANGED` | `sc-ops:agent-crons-changed` | 无（收到即拉全量） | useCronRetry.ts:77（cron-retry 一键重试成功后，P-20261006-14） | AgentCronSettings.vue（设置·定时任务分区收到即重拉列表） |
 | `NOTES_EXTERNAL_UPDATE` | `sc:notes-external-update`（**`sc:` 前缀历史命名**，非 `sc-ops:`） | `{projectId, noteId?, action?, focus?}`（projectId 恒为笔记库哨兵 `_global`，P-20261108-3） | useNotesDeposit.ts（任务终态「沉淀到笔记」追加进「[项目名] 交接」篇后，focus=true 聚焦该篇） | NotesPanel.vue（无未保存编辑时从服务端重读，防旧内容覆盖沉淀节；focus 时聚焦并重读该篇） |

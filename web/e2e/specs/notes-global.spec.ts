@@ -265,3 +265,109 @@ test('面板：单库无数据源切换；快捷新建 + Ctrl+S 保存命名 + C
   await panel.locator(`[data-testid="notes-tab-${first!.id}"]`).click()
   await expect(editor).toHaveValue('# 全局随手记', { timeout: 8000 })
 })
+
+async function defaultNoteContent(): Promise<string | undefined> {
+  const got = await (await fetch(`${API_BASE}/api/notes/default`, { headers })).json() as { data?: { content?: string } }
+  return got.data?.content
+}
+
+/** 光标读数（textarea selectionStart，UTF-16 码元偏移） */
+async function cursorOf(editor: ReturnType<import('@playwright/test').Page['locator']>): Promise<number> {
+  return editor.evaluate(el => (el as HTMLTextAreaElement).selectionStart)
+}
+
+test('外部更新无扰换装（P-20261111-4 S2）：同内容零触碰；异内容光标锚定；连续输入不被打断（409 冲突条兜底）', async ({ page }) => {
+  await purgeAllGlobal()
+
+  await fixedLocale(page)
+  await gotoAndUnlock(page, `${API_BASE}/`)
+  await projectCardByName(page, PROJ).click()
+  await page.waitForURL('**/project')
+  const panel = await openNotesPanel(page)
+  const editor = panel.locator('[data-testid="notes-editor"]')
+  await expect(editor).toBeVisible({ timeout: 8000 }) // 空库占位 default 篇
+
+  // 基线：占位篇输入 → 防抖自动保存落真身（default-upsert）
+  await editor.fill('基线内容一二三四五')
+  await expect.poll(defaultNoteContent, { timeout: 8000 }).toBe('基线内容一二三四五')
+  await editor.click()
+  await editor.evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(4, 4)) // 光标钉在「一」前
+
+  // ── 同内容态：外部重写同值（换 title 作清单收敛信号）→ 编辑面零触碰 ──
+  await fetch(`${API_BASE}/api/notes/default`, {
+    method: 'PUT', headers, body: JSON.stringify({ content: '基线内容一二三四五', title: '无扰' }),
+  })
+  // 清单收敛（quiet 后台合并完成，之后单篇 diff 也在同一事件链内收口）
+  await expect(panel.locator('[data-testid="notes-list-item"]').filter({ hasText: '无扰' }))
+    .toBeVisible({ timeout: 8000 })
+  // 零扰动：值与光标在观测窗内恒成立——若被旧实现整篇重读，光标即归 0
+  for (let i = 0; i < 5; i++) {
+    expect(await editor.inputValue()).toBe('基线内容一二三四五')
+    expect(await cursorOf(editor)).toBe(4)
+    await page.waitForTimeout(120)
+  }
+
+  // ── 异内容态：外部在文首插入前缀 → 换装 + 光标沿稳定后缀端平移（视觉位置不变）──
+  await fetch(`${API_BASE}/api/notes/default`, {
+    method: 'PUT', headers, body: JSON.stringify({ content: '前缀\n基线内容一二三四五', title: '无扰' }),
+  })
+  await expect(editor).toHaveValue('前缀\n基线内容一二三四五', { timeout: 8000 })
+  // '前缀\n' = 3 码元（2 CJK + 换行）；后缀锚定 = newLen(12) − 尾距(9−4=5) = 7，
+  // 光标仍停在「一」前——文首插入不推移视觉位置
+  await expect.poll(() => cursorOf(editor), { timeout: 4000 }).toBe(7)
+
+  // ── 连续输入态：dirty 期间外部异写 → 编辑面不被覆盖；落盘撞 409 由冲突条兜底 ──
+  await editor.fill('连续输入的草稿') // dirty（防抖窗内）
+  await fetch(`${API_BASE}/api/notes/default`, {
+    method: 'PUT', headers, body: JSON.stringify({ content: '连续输入期间的外部写' }),
+  })
+  await page.waitForTimeout(400) // 外部广播处理窗
+  await expect(editor).toHaveValue('连续输入的草稿') // 人的输入优先：内容让位编辑面
+  await expect(editor).toBeFocused()
+  await editor.pressSequentially('续写', { delay: 60 }) // 连续输入不被打断
+  await expect(editor).toHaveValue('连续输入的草稿续写')
+  // 防抖落盘：base 已被外部写推进 → 409 冲突条（覆盖保护三件套，不静默覆盖）
+  await expect(panel.locator('[data-testid="notes-conflict"]')).toBeVisible({ timeout: 8000 })
+  await expect(editor).toHaveValue('连续输入的草稿续写') // 冲突挂起不撤编辑面
+  await panel.locator('[data-testid="notes-conflict-load"]').click() // 载入服务端版本
+  await expect(panel.locator('[data-testid="notes-conflict"]')).toBeHidden({ timeout: 4000 })
+  await expect(editor).toHaveValue('连续输入期间的外部写', { timeout: 8000 })
+})
+
+test('双窗互写可见性（P-20261111-4 S2）：B 窗写入 A 窗换装可见，A 窗回写 B 窗可见', async ({ page }) => {
+  await purgeAllGlobal()
+
+  // A 窗（项目页笔记视图）
+  await fixedLocale(page)
+  await gotoAndUnlock(page, `${API_BASE}/`)
+  await projectCardByName(page, PROJ).click()
+  await page.waitForURL('**/project')
+  const panelA = await openNotesPanel(page)
+  const editorA = panelA.locator('[data-testid="notes-editor"]')
+  await expect(editorA).toBeVisible({ timeout: 8000 })
+  await editorA.fill('A 窗基线')
+  await expect.poll(defaultNoteContent, { timeout: 8000 }).toBe('A 窗基线')
+
+  // B 窗（同 context 新页 = 独立窗口 nonce；同库同数据）
+  const pageB = await page.context().newPage()
+  await fixedLocale(pageB)
+  await gotoAndUnlock(pageB, `${API_BASE}/`)
+  await projectCardByName(pageB, PROJ).click()
+  await pageB.waitForURL('**/project')
+  const panelB = await openNotesPanel(pageB)
+  const editorB = panelB.locator('[data-testid="notes-editor"]')
+  await expect(editorB).toBeVisible({ timeout: 8000 })
+  await expect(editorB).toHaveValue('A 窗基线', { timeout: 8000 })
+
+  // B 窗改写 → 自动保存（回声抑制只跳过 B 自己）→ A 窗（idle）换装可见
+  await editorB.fill('B 窗基线\nB 追加行')
+  await expect.poll(defaultNoteContent, { timeout: 8000 }).toBe('B 窗基线\nB 追加行')
+  await expect(editorA).toHaveValue('B 窗基线\nB 追加行', { timeout: 8000 })
+
+  // 反向：A 窗回写 → B 窗可见
+  await editorA.fill('A 窗回写\n第二行')
+  await expect.poll(defaultNoteContent, { timeout: 8000 }).toBe('A 窗回写\n第二行')
+  await expect(editorB).toHaveValue('A 窗回写\n第二行', { timeout: 8000 })
+
+  await pageB.close()
+})

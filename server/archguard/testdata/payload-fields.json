@@ -37,6 +37,7 @@
     "agentApprovalMode",
     "agentApprovalRules",
     "agentApprovalTimeoutMin",
+    "agentAutoNameEnabled",
     "agentGuard",
     "agentLaunchCommands",
     "agentNamingNoteEnabled",

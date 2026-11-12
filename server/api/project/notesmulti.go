@@ -28,8 +28,11 @@ import (
 // （?purge=1）仅人侧（agent 令牌硬拒 403，无需 AgentGuard：可恢复 30 天 +
 // 自托管 + 锁令牌门内，真实暴露面仅此）。
 //
-// 变更广播：写路径成功后 opschannel notes.updated（{projectId,noteId,action}），
-// 前端直通分发 sc-ops:notes.updated——已挂载面板即时重拉，防列表/内容陈旧。
+// 变更广播：写路径成功后 opschannel notes.updated（{projectId,noteId,action,origin?}），
+// 前端直通分发 sc-ops:notes.updated——已挂载面板即时重拉，防列表/内容陈旧；
+// origin（P-20261111-4 S1 回声抑制）= 写请求 X-Notes-Origin 头的客户端窗口
+// nonce 原样回带，前端收到同 nonce 即跳过（本窗自动保存的回声不触发整篇重读
+// 打断连续输入），空缺省按外部更新处理向后兼容。
 //
 // 作用域：实现体只认 notesScope（作用域键 + 审计归属名），由端点族 resolver
 // 产出。P-20261108-3 单库化后唯一端点族是全局库（resolver 固定保留哨兵
@@ -70,6 +73,29 @@ func toNotesMeta(n store.MultiNote) notesMeta {
 	return notesMeta{ID: n.ID, Title: n.Title, UpdatedAt: n.UpdatedAt, Size: n.Size(), DeletedAt: n.DeletedAt, DeletedBy: n.DeletedBy}
 }
 
+// notesOriginHeader 笔记写请求的客户端窗口 nonce 头（P-20261111-4 S1 回声抑制）：
+// 前端每个页面会话生成一个随机 nonce 携在 /api/notes 族写请求头，服务端写路径
+// 成功广播时经 payload.origin 原样回带——前端 onExternalUpdate 收到同 nonce 即
+// 跳过（本窗防抖自动保存的回声不再触发整篇重读：textarea 换值=光标/选区/undo
+// 栈重置，用户正要续写即被打断）。窗口级非用户级：同源双开/他窗/agent 写入不带
+// 本窗 nonce，照常按外部更新提示。缺省（curl 直调/旧客户端/服务端自发起广播）
+// 按「他人」处理——宁多刷不漏刷，clip.arrived origin 同构
+const notesOriginHeader = "X-Notes-Origin"
+
+// notesOriginMaxLen 回带 nonce 截断护栏：nonce 本体前端生成 ≤ 24 字符量级，
+// 上限只防异常客户端把任意长头原样透进广播载荷（载荷尺寸有界）
+const notesOriginMaxLen = 128
+
+// noteOriginFromRequest 提取写请求的本窗 nonce（rune 边界截断——截到半字符
+// 只损失回声抑制的精确匹配，不影响正确性：最坏退化为一次多余重拉）
+func noteOriginFromRequest(c *gin.Context) string {
+	r := []rune(strings.TrimSpace(c.GetHeader(notesOriginHeader)))
+	if len(r) > notesOriginMaxLen {
+		r = r[:notesOriginMaxLen]
+	}
+	return string(r)
+}
+
 // notesActionPayload notes.updated 广播载荷（ops-events 快照契约）。projectId
 // 为作用域键：全局笔记库取保留哨兵 store.GlobalNotesScope（"_global"——字段名
 // 沿用多篇时代的项目维度命名，载荷形状不变，旧消费方按项目 id 对位天然忽略）
@@ -77,13 +103,16 @@ type notesActionPayload struct {
 	ProjectID string `json:"projectId"`
 	NoteID    string `json:"noteId,omitempty"` // 空 = 作用域级（清单可能已变，重拉列表）
 	Action    string `json:"action"`           // saved|created|renamed|trashed|restored|purged|migrated
+	// Origin 发起本次写入的客户端窗口 nonce（notesOriginHeader 透传回带；空 =
+	// 服务端自发起/旧客户端——前端按外部更新处理，向后兼容）
+	Origin string `json:"origin,omitempty"`
 }
 
 // broadcastNotesUpdated 笔记写路径的统一广播口（异步不阻塞请求——opschannel
-// BroadcastEvent 既有语义）
-func broadcastNotesUpdated(projectID, noteID, action string) {
+// BroadcastEvent 既有语义）。origin 为发起写窗的 nonce（服务端自发起广播传空）
+func broadcastNotesUpdated(projectID, noteID, action, origin string) {
 	opschannel.BroadcastEvent(opschannel.EventNotesUpdated, notesActionPayload{
-		ProjectID: projectID, NoteID: noteID, Action: action,
+		ProjectID: projectID, NoteID: noteID, Action: action, Origin: origin,
 	})
 }
 
@@ -151,7 +180,7 @@ func notesCreate(c *gin.Context, resolve notesScopeResolver) {
 		notesError(c, err)
 		return
 	}
-	broadcastNotesUpdated(sc.key, n.ID, "created")
+	broadcastNotesUpdated(sc.key, n.ID, "created", noteOriginFromRequest(c))
 	c.JSON(http.StatusCreated, gin.H{"data": n})
 }
 
@@ -213,7 +242,7 @@ func notesPut(c *gin.Context, resolve notesScopeResolver) {
 	if req.Title != nil {
 		action = "renamed"
 	}
-	broadcastNotesUpdated(sc.key, n.ID, action)
+	broadcastNotesUpdated(sc.key, n.ID, action, noteOriginFromRequest(c))
 	c.JSON(http.StatusOK, gin.H{"data": n})
 }
 
@@ -243,7 +272,7 @@ func notesDelete(c *gin.Context, resolve notesScopeResolver) {
 			IP:     c.ClientIP(),
 			Detail: fmt.Sprintf("%s: %s", sc.label, noteID),
 		})
-		broadcastNotesUpdated(sc.key, noteID, "purged")
+		broadcastNotesUpdated(sc.key, noteID, "purged", noteOriginFromRequest(c))
 		c.JSON(http.StatusOK, gin.H{"message": "purged"})
 		return
 	}
@@ -258,7 +287,7 @@ func notesDelete(c *gin.Context, resolve notesScopeResolver) {
 		IP:     c.ClientIP(),
 		Detail: fmt.Sprintf("%s: %s", sc.label, noteID),
 	})
-	broadcastNotesUpdated(sc.key, noteID, "trashed")
+	broadcastNotesUpdated(sc.key, noteID, "trashed", noteOriginFromRequest(c))
 	c.JSON(http.StatusOK, gin.H{"message": "moved to trash"})
 }
 
@@ -279,7 +308,7 @@ func notesRestore(c *gin.Context, resolve notesScopeResolver) {
 		IP:     c.ClientIP(),
 		Detail: fmt.Sprintf("%s: %s", sc.label, noteID),
 	})
-	broadcastNotesUpdated(sc.key, noteID, "restored")
+	broadcastNotesUpdated(sc.key, noteID, "restored", noteOriginFromRequest(c))
 	c.JSON(http.StatusOK, gin.H{"message": "restored"})
 }
 

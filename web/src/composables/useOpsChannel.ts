@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 import { applyLockRejection, getUnlockToken, LOCK_REJECTED_CLOSE_CODE, useLockStore } from '../stores/lock'
-import { OPS_NAVIGATE, OPS_NOTIFY, OPS_PANEL, OPS_PROJECTS_CHANGED, OPS_SETTINGS_CHANGED, OPS_TASK_PROGRESS } from '../utils/opsEvents'
+import { OPS_AGENT_GROUPS_CHANGED, OPS_NAVIGATE, OPS_NOTIFY, OPS_PANEL, OPS_PROJECTS_CHANGED, OPS_SETTINGS_CHANGED, OPS_TASK_PROGRESS } from '../utils/opsEvents'
 
 /**
  * 智能操作通道客户端（AI Native 协议的前端侧）：
@@ -9,6 +9,7 @@ import { OPS_NAVIGATE, OPS_NOTIFY, OPS_PANEL, OPS_PROJECTS_CHANGED, OPS_SETTINGS
  *   以 window CustomEvent 二次分发，各视图按需订阅：
  *     projects.changed → 首页项目列表自动刷新
  *     settings.changed → 主题/终端皮肤等实时跟随
+ *     agent.groups.changed → 会话分组结构就地跟随（agent 分组操作面写端广播）
  *     navigate         → 前端路由跳转（外部 Agent 可驱动界面）
  *     notify           → 前端 toast
  * - 锁定态下服务端拒绝升级（无 token）：解锁 watch 立即重连；常态断线 5s 退避重连
@@ -72,6 +73,10 @@ function connect(): void {
       switch (ev.type) {
         case 'projects.changed': dispatch(OPS_PROJECTS_CHANGED, ev.payload); break
         case 'settings.changed': dispatch(OPS_SETTINGS_CHANGED, ev.payload); break
+        // agent.groups.changed（P-20261111-1-S3）：服务端分组操作面写 uiState 后
+        // 广播——映射到既有窗口事件（前端内部事件早于服务端事件存在，window 名
+        // 是连字符旧形态非直通恒等），消费方收事件即拉全量
+        case 'agent.groups.changed': dispatch(OPS_AGENT_GROUPS_CHANGED, ev.payload); break
         case 'navigate': dispatch(OPS_NAVIGATE, ev.payload); break
         case 'notify': dispatch(OPS_NOTIFY, ev.payload); break
         case 'task.progress': dispatch(OPS_TASK_PROGRESS, ev.payload); break

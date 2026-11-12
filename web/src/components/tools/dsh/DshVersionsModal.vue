@@ -18,6 +18,7 @@ const {
   showVersions, verLoading, currentVersion, latestVersion, newerVersions, selectedVersion,
   upState, upError, rollbackVersion, canRollback, rollingBack,
   showRollbackRow, showPrerelease, currentIsPrerelease, latestStableVersion,
+  currentKnownIssue, knownIssueOf,
   changelogEntries, changelogLoading, changelogExpanded,
   upgradeBadge, upgradeActionText,
   checkVersions, startUpgrade, doRollback, requestRollback,
@@ -58,6 +59,18 @@ const {
       >
         {{ t('dshConsole.recheck') }}
       </n-button>
+    </div>
+    <!-- 已知缺陷标注（P-20261111-2-S2）：当前版本命中登记条目时醒目引导升级——
+         嵌入页可能因该缺陷打不开，版本弹窗是 SC 侧仍可用的自救入口 -->
+    <div
+      v-if="currentKnownIssue"
+      class="ver-known-issue"
+      data-test="dsh-known-issue-banner"
+    >
+      {{ t('dshConsole.knownDefectBanner', {
+        issue: t('dshConsole.' + currentKnownIssue.issueKey),
+        fixed: currentKnownIssue.fixed,
+      }) }}
     </div>
     <!-- 常驻回退入口（P-20261010-2）：config 有回退点即呈现——升级流程成功但
          新版功能性损坏时也有逃生通道；失败态的醒目回退块保留，此行是静默兜底 -->
@@ -115,6 +128,16 @@ const {
           type="info"
         >
           {{ t('dshConsole.latestTag') }}
+        </n-tag>
+        <!-- 已知缺陷版本在可升级列表中标注（P-20261111-2-S2）：防止升「进」缺陷版本 -->
+        <n-tag
+          v-if="knownIssueOf(v.version)"
+          size="tiny"
+          type="error"
+          :bordered="false"
+          data-test="dsh-known-issue-tag"
+        >
+          {{ t('dshConsole.knownDefectTag') }}
         </n-tag>
         <span
           class="ver-date"
@@ -249,6 +272,17 @@ const {
   border-left: 2px solid var(--accent-red);
   border-radius: 6px;
   font-size: 12px;
+  color: var(--text-secondary);
+}
+/* 已知缺陷标注（P-20261111-2-S2）：与回退行同形的警示块，警示橙系 */
+.ver-known-issue {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--accent-orange);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
   color: var(--text-secondary);
 }
 .ver-list-head { display: flex; justify-content: flex-end; margin-bottom: 4px; }

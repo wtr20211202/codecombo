@@ -12,7 +12,7 @@ vi.mock('vue-i18n', async (importOriginal) =>
 )
 
 // 笔记库 API（P-20261108-3 单库化：唯一 /api/notes 族——项目族 notesMultiApi 已退役）
-const { listMock, getMock, createMock, saveMock, removeMock, restoreMock, purgeMock } = vi.hoisted(() => ({
+const { listMock, getMock, createMock, saveMock, removeMock, restoreMock, purgeMock, originState } = vi.hoisted(() => ({
   listMock: vi.fn<(trash?: boolean) => Promise<{ data?: Array<{ id: string; title: string; updatedAt: string; size: number; deletedAt?: string; deletedBy?: string }> }>>(),
   getMock: vi.fn<(noteId: string) => Promise<{ data: { id: string; title: string; content: string; createdAt: string; updatedAt: string } }>>(),
   createMock: vi.fn<(body: { title?: string; content?: string }) => Promise<{ data: { id: string; title: string; content: string; createdAt: string; updatedAt: string } }>>(),
@@ -20,6 +20,8 @@ const { listMock, getMock, createMock, saveMock, removeMock, restoreMock, purgeM
   removeMock: vi.fn<(noteId: string) => Promise<{ message: string }>>(),
   restoreMock: vi.fn<(noteId: string) => Promise<{ message: string }>>(),
   purgeMock: vi.fn<(noteId: string) => Promise<{ message: string }>>(),
+  // 本窗 nonce 可控桩（回声抑制用例按 originState.nonce 对位）
+  originState: { nonce: 'win-a' },
 }))
 
 vi.mock('@/api/client', () => ({
@@ -35,6 +37,8 @@ vi.mock('@/api/client', () => ({
     purge: purgeMock,
   },
   notesSaveUrl: (noteId: string) => `/api/notes/${noteId}`,
+  notesOriginNonce: () => originState.nonce,
+  resetNotesOriginNonceForTest: () => { originState.nonce = 'win-a' },
 }))
 
 import {
@@ -67,6 +71,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers()
   setActivePinia(createPinia())
+  originState.nonce = 'win-a' // 回声抑制对位锚：每用例重置本窗 nonce
   // 服务端清单序 = updatedAt 降序（store repo List 排序），mock 按服务端契约给序
   listMock.mockResolvedValue({ data: [meta('n2', 'B', '2026-11-07T10:00:00Z'), meta('n1', 'A', '2026-11-07T09:00:00Z')] })
   getMock.mockImplementation((noteId: string) =>
@@ -134,6 +139,27 @@ describe('useNotesMulti', () => {
     expect(notes.activeContent.value).toBe('my local edit') // 本地编辑不被静默替换
 
     // ②载入服务端版本
+    notes.resolveConflictLoadServer()
+    expect(notes.activeContent.value).toBe('server version')
+    expect(notes.conflict.value).toBeNull()
+  })
+
+  it('409 AppError 真实形态（api/http 拦截器重铸 status/data 平铺）同样挂起冲突态——e2e 揭出的既有缺陷回归锚', async () => {
+    const notes = await setup()
+    notes.edit('n2', 'my local edit')
+    // 真实链路：拦截器 reject AppError（status 平铺、data=响应体载荷），非 axios 原形
+    saveMock.mockRejectedValueOnce({
+      status: 409,
+      data: { code: 'notes.conflict', currentContent: 'server version', currentUpdatedAt: '2026-11-07T10:30:00Z' },
+    })
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(notes.conflict.value).toEqual({
+      noteId: 'n2',
+      currentContent: 'server version',
+      currentUpdatedAt: '2026-11-07T10:30:00Z',
+    })
+    expect(notes.activeContent.value).toBe('my local edit')
     notes.resolveConflictLoadServer()
     expect(notes.activeContent.value).toBe('server version')
     expect(notes.conflict.value).toBeNull()
@@ -254,6 +280,139 @@ describe('useNotesMulti', () => {
     await notes.onExternalUpdate(undefined)
     expect(listMock.mock.calls.length).toBe(listCalls)
     expect(getMock.mock.calls.length).toBe(getCalls)
+  })
+
+  it('回声抑制（P-20261111-4 S1）：origin=本窗 nonce 的服务端广播整体跳过——不重拉清单不重读（本窗自动保存回声零扰动）', async () => {
+    const notes = await setup()
+    const listCalls = listMock.mock.calls.length
+    const getBefore = getMock.mock.calls.length
+    await notes.onExternalUpdate({ projectId: '_global', noteId: 'n2', action: 'saved', origin: 'win-a' })
+    expect(listMock.mock.calls.length).toBe(listCalls) // loadList 全量重拉不发生（侧栏不闪动）
+    expect(getMock.mock.calls.length).toBe(getBefore) // 单篇重读不发生（textarea 换值=光标/undo 栈重置）
+    expect(notes.activeContent.value).toBe('content of n2') // 编辑面原地不动
+  })
+
+  it('回声抑制只认本窗：异窗/缺 origin 照常处理（同源双开仍互见；旧服务端事件向后兼容）', async () => {
+    const notes = await setup()
+    const getBefore = getMock.mock.calls.length
+    await notes.onExternalUpdate({ projectId: '_global', noteId: 'n2', action: 'saved', origin: 'other-window' })
+    expect(getMock.mock.calls.length).toBeGreaterThan(getBefore) // 异窗 nonce = 真外部更新
+    await notes.onExternalUpdate({ projectId: '_global', noteId: 'n2', action: 'saved' }) // 无 origin（旧服务端）
+    expect(getMock.mock.calls.length).toBeGreaterThan(getBefore + 1)
+  })
+
+  it('无扰换装·同内容（P-20261111-4 S2）：外部写同值 → 不触碰 contents（返回无换装现场），bases 保鲜到新 updatedAt 防下轮保存误 409', async () => {
+    const notes = await setup()
+    const before = notes.activeContent.value
+    getMock.mockImplementationOnce((noteId: string) =>
+      Promise.resolve({ data: { ...full(noteId, 'B', before), updatedAt: '2026-11-07T12:00:00Z' } }))
+    const swap = await notes.onExternalUpdate({ projectId: '_global', noteId: 'n2', action: 'saved' })
+    expect(swap).toBeNull() // 无换装现场（呈现层零介入）
+    expect(notes.activeContent.value).toBe(before) // 编辑面原地不动
+    expect(notes.bases['n2']).toBe('2026-11-07T12:00:00Z') // 基准保鲜（外部写推进了服务端 updatedAt）
+    expect(notes.saveStates['n2']).toBe('idle')
+  })
+
+  it('无扰换装·异内容（P-20261111-4 S2）：原子换值并返回换装现场（noteId/oldContent/newContent）', async () => {
+    const notes = await setup()
+    getMock.mockImplementationOnce((noteId: string) =>
+      Promise.resolve({ data: full(noteId, 'B', 'content of n2 + 外部追加', '2026-11-07T12:00:00Z') }))
+    const swap = await notes.onExternalUpdate({ projectId: '_global', noteId: 'n2', action: 'saved' })
+    expect(swap).toEqual({ noteId: 'n2', oldContent: 'content of n2', newContent: 'content of n2 + 外部追加' })
+    expect(notes.contents['n2']).toBe('content of n2 + 外部追加') // 已换装
+    expect(notes.bases['n2']).toBe('2026-11-07T12:00:00Z')
+    expect(notes.saveStates['n2']).toBe('idle') // 换装不置脏（无挂起编辑语义不变）
+  })
+
+  it('无扰换装守卫：取数期间用户输入 → 不换装（人的输入优先，草稿与 dirty 态保留）', async () => {
+    const notes = await setup()
+    const getBefore = getMock.mock.calls.length
+    listMock.mockImplementationOnce(() =>
+      new Promise(res => setTimeout(() => res({ data: [meta('n2', 'B', '2026-11-07T10:00:00Z'), meta('n1', 'A', '2026-11-07T09:00:00Z')] }), 500)))
+    const pending = notes.onExternalUpdate({ projectId: '_global', noteId: 'n2' })
+    notes.edit('n2', '取数期间的输入') // loadList 在途时用户开打
+    await vi.advanceTimersByTimeAsync(500)
+    const swap = await pending
+    expect(swap).toBeNull()
+    expect(getMock.mock.calls.length).toBe(getBefore) // 非 idle 守卫在 GET 前拦下（零读放大）
+    expect(notes.contents['n2']).toBe('取数期间的输入')
+    expect(notes.saveStates['n2']).toBe('dirty')
+  })
+
+  it('无扰换装守卫：saving 在途 → 不换装（保存响应与换装不打架，等收口后下一轮事件）', async () => {
+    const notes = await setup()
+    let releaseSave: (v: { data: { id: string; title: string; content: string; updatedAt: string; size: number } }) => void = () => {}
+    saveMock.mockImplementationOnce(() =>
+      new Promise(res => { releaseSave = res }))
+    notes.edit('n2', 'saving 期间的稿')
+    const saving = vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await vi.advanceTimersByTimeAsync(1) // 防抖到期发出 PUT（在途）
+    expect(notes.saveStates['n2']).toBe('saving')
+    const swap = await notes.onExternalUpdate({ projectId: '_global', noteId: 'n2' })
+    expect(swap).toBeNull() // 非 idle：不换装
+    expect(notes.contents['n2']).toBe('saving 期间的稿')
+    releaseSave({ data: { id: 'n2', title: '', content: 'saving 期间的稿', updatedAt: '2026-11-07T12:00:00Z', size: 9 } })
+    await saving
+    await flushPromises()
+    expect(notes.saveStates['n2']).toBe('idle')
+  })
+
+  it('清单 diff 守卫（P-20261111-4 S2）：外部更新走 quiet 后台刷新——loading 不翻转（面板 body 不卸载）、未变更条目身份复用', async () => {
+    const notes = await setup()
+    const firstRow = notes.notes.value[0]
+    // 清单在途期间 loading 恒 false（loading 态会把 body 换成 NSpin——编辑器/侧栏全量重挂）
+    listMock.mockImplementationOnce(() =>
+      new Promise(res => setTimeout(() => res({ data: [meta('n2', 'B', '2026-11-07T10:00:00Z'), meta('n1', 'A', '2026-11-07T09:00:00Z')] }), 500)))
+    const pending = notes.onExternalUpdate({ projectId: '_global' })
+    expect(notes.loading.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(500)
+    await pending
+    expect(notes.loading.value).toBe(false)
+    expect(notes.notes.value[0]).toBe(firstRow) // 未变更条目对象身份复用（keyed 行零 DOM 写入）
+  })
+
+  it('清单 loud 刷新回归：显式 loadList 仍翻 loading（首开/迁移等可见动作语义不变）', async () => {
+    const notes = await setup()
+    listMock.mockImplementationOnce(() =>
+      new Promise(res => setTimeout(() => res({ data: [meta('n2', 'B', '2026-11-07T10:00:00Z'), meta('n1', 'A', '2026-11-07T09:00:00Z')] }), 500)))
+    const pending = notes.loadList()
+    expect(notes.loading.value).toBe(true) // loud：spinner 生效（原语义）
+    await vi.advanceTimersByTimeAsync(500)
+    await pending
+    expect(notes.loading.value).toBe(false)
+  })
+
+  it('无扰换装守卫：占位篇（未落盘草稿）无服务端实体 → 不换装零 GET', async () => {
+    listMock.mockResolvedValue({ data: [] })
+    const notes = await setup()
+    expect(notes.isPlaceholder('default')).toBe(true)
+    const getBefore = getMock.mock.calls.length
+    const swap = await notes.onExternalUpdate({ projectId: '_global', noteId: 'default' })
+    expect(swap).toBeNull()
+    expect(getMock.mock.calls.length).toBe(getBefore)
+    expect(notes.activeContent.value).toBe('')
+  })
+
+  it('无扰换装·focus 路径：聚焦已缓存篇且服务端已改 → 换装现场返回（沉淀追加节可见 + 可锚定）', async () => {
+    const notes = await setup()
+    await notes.select('n1') // 缓存旧内容
+    await notes.select('n2')
+    getMock.mockImplementation((noteId: string) =>
+      Promise.resolve({ data: full(noteId, 'A', noteId === 'n1' ? 'old\n\n## 新沉淀节' : `content of ${noteId}`, '2026-11-07T12:00:00Z') }))
+    const swap = await notes.onExternalUpdate({ projectId: '_global', noteId: 'n1', focus: true })
+    expect(swap).toEqual({ noteId: 'n1', oldContent: 'content of n1', newContent: 'old\n\n## 新沉淀节' })
+    expect(notes.activeId.value).toBe('n1')
+    expect(notes.activeContent.value).toContain('新沉淀节')
+  })
+
+  it('createNote 成功就地摘除空库占位 tab（S1 回声抑制后占位收敛不再依赖 created 回声 loadList）', async () => {
+    listMock.mockResolvedValue({ data: [] }) // 空库 → 合成 default 占位
+    const notes = await setup()
+    expect(notes.isPlaceholder('default')).toBe(true)
+    await notes.createNote('新篇')
+    expect(notes.notes.value.map(n => n.id)).toEqual(['n-new']) // 占位 tab 已摘除
+    expect(notes.isPlaceholder('default')).toBe(false)
+    expect(notes.activeId.value).toBe('n-new')
   })
 
   it('onExternalUpdate focus（沉淀写回）：重拉后聚焦该篇并丢缓存重读——刚追加的节可见', async () => {

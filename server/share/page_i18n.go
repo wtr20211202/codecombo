@@ -111,9 +111,13 @@ var dictZh = map[string]string{
 	"outline":                "大纲",
 	"snippetLabel":           "文本片段",
 	"snippetExpiresAt":       "该片段将于 {time} 自动过期",
-	// 冻结快照时点横幅（P-20261005-168）：frozen 记录访客面的内容时点声明
-	// ——定格是特性不是错误，中性陈述语气；live 记录不出本条（横幅不渲染）
+	// 冻结快照时点声明（P-20261005-168）：frozen 记录访客面的内容时点声明
+	// ——定格是特性不是错误，中性陈述语气。P-20261111-5 起全句不再直出横幅，
+	// 降为紧凑状态条（snapshotShort）的悬停 title 说明；live 记录无该段
 	"snapshotBanner": "内容快照于 {time}——此后的源项目改动不影响本页",
+	// 紧凑状态条快照段（P-20261111-5）：条上实际直出的短文案（与过期段按
+	// 记录形态拼装成单行，见 compactStatusLine）
+	"snapshotShort": "快照 {time}",
 	// 链接元信息（P-20261020-11）：服务端直出 title/description/OG——
 	// 聊天工具/邮件网关不执行页面 JS，首屏 HTML 必须自带文件名与说明。
 	// 口令/一次性分享（Sensitive）只走 metaDescGeneric，绝不把记录字段
@@ -124,8 +128,12 @@ var dictZh = map[string]string{
 	"metaDescDir":       "{name} · 来自项目 {project} 的文件夹分享",
 	"metaDescDirPlain":  "{name} · 文件夹分享",
 	"metaDescSnippet":   "文本片段 · {name}",
-	// 有效期弱提示（P-20261020-5）：非永久分享在访客页声明到期时点
+	// 有效期声明（P-20261020-5）：P-20261111-5 起全句降为紧凑状态条
+	// （expiresShort）的悬停 title；非永久分享的条上只出 expiresShort 短段
 	"shareExpiresAt": "此链接将于 {time} 过期",
+	// 紧凑状态条过期段（P-20261111-5）：与快照段以「 · 」相连（快照段缺席
+	// 时单独成条）
+	"expiresShort": "{time} 过期",
 	// 访问口令门（P-20261006-25）：口令页文案
 	"gateHeading":     "此分享受口令保护",
 	"gateDesc":        "输入分享者提供的访问口令后继续查看内容",
@@ -250,10 +258,16 @@ var dictEn = map[string]string{
 	"outline":                "Outline",
 	"snippetLabel":           "Text snippet",
 	"snippetExpiresAt":       "This snippet expires automatically at {time}.",
-	// Frozen-snapshot time banner (P-20261005-168): content-time declaration for
-	// frozen shares — freezing is a feature, not an error, so neutral wording;
-	// live shares never render it
+	// Frozen-snapshot time declaration (P-20261005-168): content-time statement
+	// for frozen shares — freezing is a feature, not an error, so neutral wording.
+	// Since P-20261111-5 the full sentence is no longer a banner; it demotes to
+	// the hover title of the compact status line (snapshotShort). Live shares
+	// never carry this segment
 	"snapshotBanner": "Content snapshot from {time} — later changes to the source project do not affect this page.",
+	// Compact status line, snapshot segment (P-20261111-5): the short copy
+	// actually rendered on the line (assembled with the expiry segment per
+	// record shape, see compactStatusLine)
+	"snapshotShort": "Snapshot {time}",
 	// Link metadata (P-20261020-11): server-rendered title/description/OG —
 	// chat tools and mail gateways do not run page JS, so the first HTML byte
 	// must carry the file name and explanation. Protected shares (Sensitive)
@@ -264,8 +278,13 @@ var dictEn = map[string]string{
 	"metaDescDir":       "{name} · a folder shared from project {project}",
 	"metaDescDirPlain":  "{name} · folder share",
 	"metaDescSnippet":   "Text snippet · {name}",
-	// Validity hint (P-20261020-5)
+	// Validity statement (P-20261020-5): since P-20261111-5 the full sentence
+	// demotes to the hover title of the compact status line (expiresShort);
+	// non-permanent shares only show the compact segment on the line
 	"shareExpiresAt": "This link expires at {time}.",
+	// Compact status line, expiry segment (P-20261111-5): joined with the
+	// snapshot segment via " · " (stands alone when the snapshot segment is absent)
+	"expiresShort": "expires {time}",
 	// 访问口令门（P-20261006-25）：口令页文案
 	"gateHeading":     "This share is password protected",
 	"gateDesc":        "Enter the passphrase provided by the sender to view the content.",

@@ -122,7 +122,8 @@ func TestVisitorSurfaceNoStore(t *testing.T) {
 
 // TestFileShareExpiryMetaAndGuestBanner 有效期闭环（P-20261020-5）：文件/目录
 // 分享的 meta 透出 expiresAt（agent 程序化读取与访客页共用），访客页非永久
-// 记录渲染有效期弱提示横幅（与 frozen 快照横幅并列）；永久记录两者皆无
+// 记录在紧凑状态条上渲染有效期段（P-20261111-5 与快照声明合并单行）；
+// 永久记录零渲染
 func TestFileShareExpiryMetaAndGuestBanner(t *testing.T) {
 	// expiresAt 动态远期（截断到分钟）：硬编码日历时刻是定时炸弹——原
 	// 2026-11-01 12:00 local 一过 meta 即 410、横幅断言全红（share_collab
@@ -158,12 +159,13 @@ func TestFileShareExpiryMetaAndGuestBanner(t *testing.T) {
 		t.Fatalf("meta expiresAt = %q, want %v", meta.ExpiresAt, expiresAt)
 	}
 
-	// 访客页：有效期横幅（服务端直出，与快照横幅同款样式族/并列插槽）
+	// 访客页：有效期段随紧凑状态条（服务端直出；get 无 Accept-Language 落
+	// en，短文案 expires {time} 与悬停全句分层，此处锚条节点与本地时点）
 	page := get(t, srv.URL+"/s/"+ttlTok)
 	pageBody, _ := io.ReadAll(page.Body)
 	page.Body.Close()
-	if !strings.Contains(string(pageBody), `id="expiry-banner"`) {
-		t.Fatalf("non-permanent share page must carry the expiry banner\n%s", pageBody)
+	if !strings.Contains(string(pageBody), `id="status-banner"`) {
+		t.Fatalf("non-permanent share page must carry the expiry status bar\n%s", pageBody)
 	}
 	if !strings.Contains(string(pageBody), expiresAt.Format("2006-01-02 15:04")) {
 		t.Fatalf("expiry banner must carry the local expiry time\n%s", pageBody)
@@ -180,8 +182,8 @@ func TestFileShareExpiryMetaAndGuestBanner(t *testing.T) {
 	ppage := get(t, permSrv.URL+"/s/"+permTok)
 	ppageBody, _ := io.ReadAll(ppage.Body)
 	ppage.Body.Close()
-	if strings.Contains(string(ppageBody), `id="expiry-banner"`) {
-		t.Fatalf("permanent share page must not render the expiry banner")
+	if strings.Contains(string(ppageBody), `id="status-banner"`) {
+		t.Fatalf("permanent share page must not render the status bar")
 	}
 }
 

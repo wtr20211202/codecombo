@@ -90,7 +90,13 @@ jobs:
 
       # Release 页简要说明 = CHANGELOG 本版本段（Keep a Changelog 惯例——
       # 版本叙事唯一事实源在 CHANGELOG，发布页只做摘录不做第二份手写）。
-      # 双语：英文主源 + docs/CHANGELOG.zh-CN.md 中文对照，同段提取拼接
+      # 双语锚点化模板（P-20261112-3，循 deepseek-harness Release 页同款）：
+      # 顶部一行「English | 中文」锚点链接，英/中各自成带锚小节（英文在前）——
+      # 首屏默认英文（用户定向，P-20261112-4 翻转节序），「## 中文」标题退到
+      # 中文节起始处（锚点目标不可删、语义仍正确：标记中文节开始）；GitHub 对
+      # body 内 markdown 标题自动生成锚 id（`## 中文`→#中文、`## English`→
+      # #english，同平台同机制实证），点击切换行即跳语言小节，免滚长文找语言；
+      # 该 body 也是应用内更新面板渲染一行切换的载体（锚点拦截滚动与节序无关）
       - name: Extract release notes
         run: |
           VERSION="${RELREF#v}"
@@ -103,26 +109,40 @@ jobs:
               found { print }
             ' "$1"
           }
-          extract_section CHANGELOG.md > release-notes.md
+          en_notes=$(extract_section CHANGELOG.md)
+          zh_notes=""
           if [ -f docs/CHANGELOG.zh-CN.md ]; then
-            # 中文对照收进 <details> 折叠（Release body 是静态 Markdown，
-            # 无 JS 切换能力——details 是 GitHub 全站唯一可用折叠形态）：
-            # 默认只展英文，中文点开即读，页面干净
+            zh_notes=$(extract_section docs/CHANGELOG.zh-CN.md)
+          fi
+          # 两段提取全空（版本段不存在）→ 回落一行指引（模板装配只在有叙事时进行）
+          if [ -z "$(printf '%s%s' "$zh_notes" "$en_notes" | tr -d '[:space:]')" ]; then
+            echo "See [CHANGELOG.md](https://github.com/wtr20211202/codecombo/blob/main/CHANGELOG.md) for what is new." > release-notes.md
+          else
             {
+              echo "[English](#english) | [中文](#中文)"
+              echo ""
+              echo "## English"
+              echo ""
+              printf '%s\n' "$en_notes"
               echo ""
               echo "---"
               echo ""
-              echo "<details>"
-              echo "<summary><strong>简体中文（Chinese）—— 点击展开</strong></summary>"
+              echo "## 中文"
               echo ""
-              extract_section docs/CHANGELOG.zh-CN.md
-              echo ""
-              echo "</details>"
-            } >> release-notes.md
-          fi
-          # 去掉提取段落尾部的链接定义行后若整体为空，回落一行指引
-          if ! grep -q '[^[:space:]]' release-notes.md; then
-            echo "See [CHANGELOG.md](https://github.com/wtr20211202/codecombo/blob/main/CHANGELOG.md) for what is new." > release-notes.md
+              printf '%s\n' "$zh_notes"
+            } > release-notes.md
+            # 模板回归硬闸：切换行/两锚点小节/双语叙事在位且英文节在前——
+            # 断言不过即停本步，Release 不创建（红底不发布，防模板回归静默上线）
+            [ "$(sed -n '1p' release-notes.md)" = '[English](#english) | [中文](#中文)' ] \
+              || { echo "FATAL: 顶部「English | 中文」切换行不在位（模板回归）" >&2; exit 1; }
+            [ -n "$(printf '%s' "$zh_notes" | tr -d '[:space:]')" ] \
+              || { echo "FATAL: 中文叙事段为空——docs/CHANGELOG.zh-CN.md 缺本版本段" >&2; exit 1; }
+            [ -n "$(printf '%s' "$en_notes" | tr -d '[:space:]')" ] \
+              || { echo "FATAL: English 叙事段为空——CHANGELOG.md 缺本版本段" >&2; exit 1; }
+            zh_line=$(grep -nx '## 中文' release-notes.md | cut -d: -f1)
+            en_line=$(grep -nx '## English' release-notes.md | cut -d: -f1)
+            [ -n "$zh_line" ] && [ -n "$en_line" ] && [ "$en_line" -lt "$zh_line" ] \
+              || { echo "FATAL: 两锚点小节（## English / ## 中文）缺失或顺序错误（英文须在前）" >&2; exit 1; }
           fi
           cat release-notes.md
 

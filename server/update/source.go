@@ -11,6 +11,10 @@ type ReleaseInfo struct {
 	Changelog   string `json:"changelog"`
 	DownloadURL string `json:"downloadUrl"`
 	FileSize    int64  `json:"fileSize"`
+	// ReleaseURL 发布页直链（P-20261112-2-S2，GitHub 源取 html_url 网页形态）：
+	// check 响应同名透传（releaseUrl），面板「查看发布页」外链消费。可选增量
+	// 字段——源未提供（异常形态/非 GitHub 源）为空省略，前端不显链接零回退
+	ReleaseURL string `json:"releaseUrl,omitempty"`
 	// ChecksumSHA256 二进制 sha256（hex，大小写不敏感）。
 	// GitHub 源取伴随资产 <二进制名>.sha256；缺失时按无校验策略处理
 	ChecksumSHA256 string `json:"checksumSha256,omitempty"`

@@ -264,9 +264,9 @@ const { dirByTabId: dirBySessionId, locateTab: locateSessionInTree } = useTermin
 // ============== 侧栏数据模型（分组/项目分组/持久化/动作，useAgentTerminalGroups） ==============
 const {
   groups, booting, sidebarCollapsed,
-  collapsedProjects, projectGroups,
+  collapsedProjects, collapsedGroups, projectGroups,
   boot,
-  onToggleProject, onReorderProjectGroups, onReorderProjectSessions,
+  onToggleProject, onToggleGroup, onReorderProjectGroups, onReorderProjectSessions,
   openProject, projectCreateOptions, onCreateProjectSelect,
   onProjectAction, onProjectSessionDestroy: onGroupsProjectSessionDestroy,
   onSessionAction, onGroupAction,
@@ -614,6 +614,7 @@ async function onProjectSessionRename(payload: { sessionId: string; name: string
         :group-mode="sessionsStore.groupMode"
         :runtime-filter="sessionsStore.runtimeFilter"
         :collapsed-projects="collapsedProjects"
+        :collapsed-groups="collapsedGroups"
         :locate-dirs="dirBySessionId"
         :direct-holds="directHolds"
         :live-titles="liveTitles"
@@ -628,6 +629,7 @@ async function onProjectSessionRename(payload: { sessionId: string; name: string
         @open-project="openProject"
         @open-project-session="({ projectId, sessionId }) => openProject(projectId, sessionId)"
         @toggle-project="onToggleProject"
+        @toggle-group="onToggleGroup"
         @project-action="onProjectAction"
         @project-session-action="onProjectSessionAction"
         @locate-tree="locateSessionInTree"
@@ -764,10 +766,14 @@ async function onProjectSessionRename(payload: { sessionId: string; name: string
   background: var(--bg-panel);
 }
 /* 侧栏宽度拖拽把手：常显竖向握把纹（可发现性——纯透明把手等于不存在），
-   悬停/拖拽中整条高亮加宽命中区 */
+   悬停/拖拽中整条高亮加宽命中区。
+   命中区不对称（P-20261111-7 S1，与 SidebarResizer 共享组件同款几何）：
+   整体内收贴侧栏侧（左溢 8px、右溢 0）——右缘与侧栏分界线齐平、不压终端
+   pane，贴左缘起的 xterm 文本选区 pointerdown 不再落进命中区误触调宽；
+   带宽 8px 不变手感不劣化。握把纹同步贴右缘（盒中线已不落在分界线上） */
 .atv-side-resizer {
   width: 8px;
-  margin: 0 -4px;
+  margin-left: -8px;
   z-index: 5;
   cursor: col-resize;
   flex-shrink: 0;
@@ -779,9 +785,8 @@ async function onProjectSessionRename(payload: { sessionId: string; name: string
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
+  right: 0;
   width: 2px;
-  transform: translateX(-50%);
   border-radius: 1px;
   background: var(--border-default);
   opacity: 0.6;

@@ -64,6 +64,7 @@ func CheckUpdate(c *gin.Context) {
 		Changelog:      info.Changelog,
 		DownloadURL:    info.DownloadURL,
 		FileSize:       info.FileSize,
+		ReleaseURL:     info.ReleaseURL,
 	}
 	// 伴随校验资产拉取失败旗标（P-20261109-9，channelEmpty 同款 omitempty 先例）：
 	// 只在有更新且已注定被校验拒绝时置位——「更新将被拒」提示必须是真话

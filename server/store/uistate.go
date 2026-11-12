@@ -14,6 +14,13 @@ type UIStateStore interface {
 	// 整体为 null 表示清空该实例（布局重置/测试清理语义）。读-合并-写整体
 	// 原子（与 Update 同锁互斥），并发 PATCH/PUT 不会互相吞键
 	Merge(data map[string]interface{}) error
+	// MutateNamespace 命名空间级读-改-写（P-20261111-1-S3）：transform 在 repo
+	// 锁内收到该实例命名空间的当前值（缺失=nil），返回替换值（nil = 摘除该键）。
+	// 专为服务端写入方（agent ops 面）提供「只动一个命名空间内部、其余键原样、
+	// 与并发 PATCH 全程互斥」的手术通道——外部调用方拿 Get 结果自己改再 Merge
+	// 会携带陈旧副本，与并发前端补丁互吞（跨「读→改→写」无锁窗口，Merge 注释
+	// 同款根因）。err 非空中止不落盘
+	MutateNamespace(instance, ns string, transform func(current interface{}) (interface{}, error)) error
 }
 
 const uiStateKey = "default"
@@ -91,4 +98,39 @@ func (r *uiStateRepo) putLocked(data map[string]interface{}) error {
 		return err
 	}
 	return r.doc.Upsert("uistate", uiStateKey, raw)
+}
+
+// MutateNamespace 见接口注释：Get 当前全表 → 定位实例记录 → transform 命名
+// 空间值 → putLocked 回写，全程持 r.mu（与 Update/Merge 同锁互斥）。transform
+// 的入参是「命名空间当前值」（map[string]interface{} 或 nil），可直接就地改
+// 也可以返回全新值；返回 err 即整体放弃（不写盘）。
+// 实例记录缺失/非 map 时 current 传 nil（transform 自行决定新建语义）。
+func (r *uiStateRepo) MutateNamespace(instance, ns string, transform func(current interface{}) (interface{}, error)) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, _ := r.Get()
+	var cur interface{}
+	if inst, ok := current[instance].(map[string]interface{}); ok {
+		cur = inst[ns]
+	}
+	next, err := transform(cur)
+	if err != nil {
+		return err
+	}
+	if next == nil {
+		if _, exists := current[instance]; !exists {
+			return nil // 实例记录本就缺失，摘键无需落盘
+		}
+		if inst, ok := current[instance].(map[string]interface{}); ok {
+			delete(inst, ns)
+		}
+	} else {
+		inst, ok := current[instance].(map[string]interface{})
+		if !ok {
+			inst = map[string]interface{}{}
+		}
+		inst[ns] = next
+		current[instance] = inst
+	}
+	return r.putLocked(current)
 }

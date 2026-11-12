@@ -259,6 +259,11 @@ type ServerConfig struct {
 	// 区分"未配置"（默认开）与"显式关闭"；旗标形态（--resume）与纯 shell 会话
 	// 跳过（无 prompt 可注记 / 注记进 shell 命令行即污染）
 	AgentNamingNoteEnabled *bool `json:"agentNamingNoteEnabled,omitempty"`
+	// AgentAutoNameEnabled 会话自动命名开关（P-20261111-6 S2）：claude 运行时
+	// agent 会话的首条用户消息落盘后按其总结会话名（agent_autoname.go 观察器）。
+	// 指针区分「未配置」（默认开——本提案目的即行为变化，升级注记已知情告知）
+	// 与「显式关闭」；关闭即观察器整体旁路，既有手动改名链不受影响
+	AgentAutoNameEnabled *bool `json:"agentAutoNameEnabled,omitempty"`
 	// 每运行时的自定义启动命令覆盖（key=运行时注册名，经白名单校验）：
 	// 空值回落该运行时的官方默认（Provider.InteractiveCommand）。命令经 PTY
 	// 注入 shell 执行（本机用户权限，与用户手敲等价），非空校验 + 长度上限见
@@ -502,6 +507,16 @@ func (sc *ServerConfig) AgentNamingNoteEnabledOrDefault() bool {
 		return true
 	}
 	return *sc.AgentNamingNoteEnabled
+}
+
+// AgentAutoNameEnabledOrDefault 会话自动命名开关（P-20261111-6 S2，未配置默认
+// 开启）：读端统一收口，自动命名观察器（agent_autoname.go 每 tick 一次内存
+// 缓存读）与 GET /settings 同源取值
+func (sc *ServerConfig) AgentAutoNameEnabledOrDefault() bool {
+	if sc.AgentAutoNameEnabled == nil {
+		return true
+	}
+	return *sc.AgentAutoNameEnabled
 }
 
 // UISnapshotEnabledOrDefault 用户 UI 现场上报开关（未配置默认开启——隐私边界

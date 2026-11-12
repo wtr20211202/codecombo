@@ -399,6 +399,7 @@ onBeforeUnmount(() => {
       :latency-ms="latencyMs"
       :upgrade-badge="versions.upgradeBadge.value"
       :header-version-label="versions.headerVersionLabel.value"
+      :known-issue="!!versions.currentKnownIssue.value"
       :maximizable="maximizable"
       :maximized="maximized"
       :process-restarting="processRestarting"

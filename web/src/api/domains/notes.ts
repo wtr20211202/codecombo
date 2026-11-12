@@ -37,6 +37,38 @@ export interface MultiNoteMeta {
  *  projectId 取此值 = 笔记库已变（字段名沿用多篇时代命名，面板按此值对位） */
 export const GLOBAL_NOTES_SCOPE = '_global'
 
+/** 笔记写请求的本窗 nonce 头（P-20261111-4 S1 回声抑制）：写路径成功广播
+ *  notes.updated 时服务端经 payload.origin 原样回带，useNotesMulti.onExternalUpdate
+ *  收到同 nonce 即跳过——本窗防抖自动保存的回声不再触发整篇重读（textarea 换值
+ *  会重置光标/undo 栈打断连续输入）。写请求头名的单一事实源：notesGlobalApi
+ *  各写方法与 NotesPanel 的 beforeunload keepalive fetch 共用 */
+export const NOTES_ORIGIN_HEADER = 'X-Notes-Origin'
+
+// 本窗 nonce（窗口级非用户级、不持久化——刷新即换新；丢失的代价只是自家多刷
+// 一次）。不用 crypto.randomUUID：非安全上下文（LAN http 访问）下为 undefined
+// （clipRelay ownClipDeviceId 同款坑），这里只需要窗口内唯一性不需要密码学强度
+let originNonce = ''
+
+/** 本窗笔记写入 nonce（惰性生成、页面会话内稳定）：onExternalUpdate 回声判定
+ *  与写请求携头同源取值 */
+export function notesOriginNonce(): string {
+  if (!originNonce) {
+    originNonce = `notes-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  }
+  return originNonce
+}
+
+/** 测试钩子：重置本窗 nonce（用例间隔离；生产不触达） */
+export function resetNotesOriginNonceForTest(): void {
+  originNonce = ''
+}
+
+/** 写请求统一携本窗 nonce（读路径不广播不携；migration POST 不携——migrated
+ *  广播是服务端自发起的作用域级批量并入，消费方恒按外部更新处理） */
+function originHeaders(): Record<string, string> {
+  return { [NOTES_ORIGIN_HEADER]: notesOriginNonce() }
+}
+
 /** 单库化迁移滞留计数（GET /notes/migration；P-20261108-3）：pending = 仍未并入
  *  的旧项目笔记篇数，full = 笔记库已到 100 篇额度（满额中止的主因） */
 export interface NotesMigrationStatus {
@@ -58,22 +90,22 @@ export const notesGlobalApi = {
     api.get<{ data: MultiNoteMeta[] }>('/notes', { params: trash ? { trash: 1 } : undefined }) as unknown as Promise<{ data?: MultiNoteMeta[] }>,
   /** 新建一篇（id 服务端生成）→ 201；满 100 篇 400 notes.global_limit */
   create: (body: { title?: string; content?: string }) =>
-    api.post<{ data: MultiNote }>('/notes', body) as unknown as Promise<{ data: MultiNote }>,
+    api.post<{ data: MultiNote }>('/notes', body, { headers: originHeaders() }) as unknown as Promise<{ data: MultiNote }>,
   /** 读单篇 */
   get: (noteId: string) =>
     api.get<{ data: MultiNote }>(`/notes/${noteId}`) as unknown as Promise<{ data: MultiNote }>,
   /** 保存（title 携带即重命名；baseUpdatedAt 携带即乐观校验） */
   save: (noteId: string, body: { content: string; title?: string; baseUpdatedAt?: string }) =>
-    api.put<{ data: MultiNote }>(`/notes/${noteId}`, body) as unknown as Promise<{ data: MultiNote }>,
+    api.put<{ data: MultiNote }>(`/notes/${noteId}`, body, { headers: originHeaders() }) as unknown as Promise<{ data: MultiNote }>,
   /** 软删进回收站（幂等） */
   remove: (noteId: string) =>
-    api.delete<{ message: string }>(`/notes/${noteId}`) as unknown as Promise<{ message: string }>,
+    api.delete<{ message: string }>(`/notes/${noteId}`, { headers: originHeaders() }) as unknown as Promise<{ message: string }>,
   /** 彻底删除（人侧；不可恢复） */
   purge: (noteId: string) =>
-    api.delete<{ message: string }>(`/notes/${noteId}?purge=1`) as unknown as Promise<{ message: string }>,
+    api.delete<{ message: string }>(`/notes/${noteId}?purge=1`, { headers: originHeaders() }) as unknown as Promise<{ message: string }>,
   /** 回收站恢复（幂等） */
   restore: (noteId: string) =>
-    api.post<{ message: string }>(`/notes/${noteId}/restore`) as unknown as Promise<{ message: string }>,
+    api.post<{ message: string }>(`/notes/${noteId}/restore`, undefined, { headers: originHeaders() }) as unknown as Promise<{ message: string }>,
   /** 单库化迁移滞留计数（只读，面板续迁横幅数据源） */
   migrationStatus: () =>
     api.get<{ data: NotesMigrationStatus }>('/notes/migration') as unknown as Promise<{ data?: NotesMigrationStatus }>,

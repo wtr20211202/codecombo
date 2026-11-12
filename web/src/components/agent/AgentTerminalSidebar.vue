@@ -64,6 +64,8 @@ const props = defineProps<{
   createdMap?: Record<string, string>
   /** 项目分组折叠集合（宿主持有并持久化） */
   collapsedProjects?: Set<string>
+  /** 自定义分组折叠集合（P-20261111-1-S1，宿主持有并持久化） */
+  collapsedGroups?: Set<string>
   /** 会话 id → 项目相对 dir（「在文件树中定位」可用性；无条目 = 不可定位） */
   locateDirs?: Record<string, string>
   /** 直通输入持权投影（P-20261024-1，透传 AgentSidebarSessionTree）：会话行
@@ -92,6 +94,8 @@ const emit = defineEmits<{
   (e: 'open-project-session', payload: { projectId: string; sessionId: string }): void
   /** 项目分组折叠切换 */
   (e: 'toggle-project', projectId: string): void
+  /** 自定义分组折叠切换（P-20261111-1-S1，透传会话树） */
+  (e: 'toggle-group', groupId: string): void
   /** 项目分组右键菜单：新建项目会话 / 打开项目 */
   (e: 'project-action', payload: { projectId: string; key: 'create-session' | 'open' }): void
   /** 项目会话右键菜单：在文件树中定位 / 结束会话（确认由宿主承担） */
@@ -526,12 +530,15 @@ function openSortMenu(e: MouseEvent) {
         :activity-map="activityMap"
         :unread-map="unreadMap"
         :collapsed-projects="collapsedProjects"
+        :collapsed-groups="collapsedGroups"
         :locate-dirs="locateDirs"
         :direct-holds="directHolds"
         :live-titles="liveTitles"
         @select="(id) => emit('select', id)"
         @attach-project="(id) => emit('attach-project', id)"
         @toggle-project="(projectId) => emit('toggle-project', projectId)"
+        @toggle-group="(groupId) => emit('toggle-group', groupId)"
+        @exit-runtime-view="emit('update:groupMode', 'flat')"
         @project-action="(payload) => emit('project-action', payload)"
         @project-session-action="(payload) => emit('project-session-action', payload)"
         @capability-action="(payload) => emit('capability-action', payload)"

@@ -1,6 +1,7 @@
 import { computed, reactive, ref } from 'vue'
 import { useMessage } from 'naive-ui'
-import { DEFAULT_NOTE_ID, GLOBAL_NOTES_SCOPE, notesGlobalApi, type MultiNoteMeta } from '../api/client'
+import { DEFAULT_NOTE_ID, GLOBAL_NOTES_SCOPE, notesGlobalApi, notesOriginNonce, type MultiNoteMeta } from '../api/client'
+import { mergeNoteLists } from '../utils/notesExternalSync'
 import { useI18n } from './useI18n'
 import {
   createNotesConflictResolvers, type NoteSaveState, type NotesConflictState,
@@ -30,8 +31,18 @@ import { NOTES_EXTERNAL_UPDATE, type NotesExternalUpdateDetail } from '../utils/
 export type NotesConflict = NotesConflictState
 export type { NoteSaveState }
 
-/** 保存端点原始路径（面板 beforeunload keepalive fetch 直发用） */
-export { notesSaveUrl } from '../api/client'
+/** 外部换装现场（P-20261111-4-S2 无扰换装）：引擎已把 contents 从 oldContent
+ *  原子换到 newContent，呈现层据此在 DOM 写入后做光标锚定恢复 */
+export interface NotesExternalSwap {
+  noteId: string
+  oldContent: string
+  newContent: string
+}
+
+/** 保存端点原始路径（面板 beforeunload keepalive fetch 直发用）+ 本窗 nonce
+ *  与其请求头名（同一直发请求需携 X-Notes-Origin 回声抑制头，头名与 axios
+ *  写路径同源取值——面板单一导入面惯例） */
+export { NOTES_ORIGIN_HEADER, notesOriginNonce, notesSaveUrl } from '../api/client'
 
 // 防抖窗与单文档时代保持一致（2s 是丢失窗退化——评审修订点4维持 800ms）
 export const NOTES_SAVE_DEBOUNCE_MS = 800
@@ -83,13 +94,21 @@ export function createNotesEngine() {
   }
 
   /** 拉取在册清单并保底选中一篇（首开/清单重建共用）。保留内容缓存——
-   *  清单刷新不清 contents（未保存编辑态不因外部清单变化丢失） */
-  async function loadList(): Promise<void> {
-    loading.value = true
-    loadFailed.value = false
+   *  清单刷新不清 contents（未保存编辑态不因外部清单变化丢失）。
+   *  quiet（P-20261111-4-S2 外部更新后台刷新）：不翻 loading（loading 态会把
+   *  面板 body 整体换成 NSpin——编辑器/侧栏卸载重挂 = 光标/焦点/undo 全丢），
+   *  清单经 mergeNoteLists 按 id 复用未变更条目对象身份（keyed 行零 DOM 写入，
+   *  仅变更项原地更新）；失败保持现面不切错误态（后台静默刷新宁欠勿扰，下轮
+   *  事件或用户动作再试） */
+  async function loadList(opts?: { quiet?: boolean }): Promise<void> {
+    const quiet = opts?.quiet === true
+    if (!quiet) {
+      loading.value = true
+      loadFailed.value = false
+    }
     try {
       const res = await notesGlobalApi.list()
-      notes.value = res.data ?? []
+      notes.value = mergeNoteLists(notes.value, res.data ?? [])
       placeholderIds.clear()
       synthesizePlaceholderIfEmpty()
       if (!notes.value.some(n => n.id === activeId.value)) {
@@ -97,10 +116,11 @@ export function createNotesEngine() {
       }
       // 新进清单的篇拉一次内容（已有缓存的篇不动——未保存编辑优先）
       await ensureLoaded(activeId.value)
+      loadFailed.value = false
     } catch {
-      loadFailed.value = true
+      if (!quiet) loadFailed.value = true
     } finally {
-      loading.value = false
+      if (!quiet) loading.value = false
     }
   }
 
@@ -162,7 +182,11 @@ export function createNotesEngine() {
     await ensureLoaded(noteId)
   }
 
-  /** 新建一篇（空标题走服务端空串；内容空——空即建的 notepad 直觉） */
+  /** 新建一篇（空标题走服务端空串；内容空——空即建的 notepad 直觉）。
+   *  成功即就地摘除空库占位篇 tab：占位被真身取代后清单收敛此前依赖服务端
+   *  created 回声广播触发 loadList，S1 回声抑制（同 nonce 跳过）后本窗写路径
+   *  自收口（零网络往返的确定性形态；占位如有挂起草稿仅摘 tab——内容缓存与
+   *  dirty 态保留，flushAll 仍会经 default-upsert 落真身） */
   async function createNote(title?: string): Promise<MultiNoteMeta | null> {
     try {
       const res = await notesGlobalApi.create({ title: title ?? '' })
@@ -172,11 +196,22 @@ export function createNotesEngine() {
       bases[n.id] = n.updatedAt
       saveStates[n.id] = 'idle'
       activeId.value = n.id
+      discardPlaceholdersLocally()
       return toMeta(n)
     } catch (e) {
       message.error((e as { userMessage?: string }).userMessage || t('notes.panel.createFailed'))
       return null
     }
+  }
+
+  /** 就地摘除全部空库占位篇（清单面移除 + 占位标记清除）：createNote 成功后
+   *  库已非空，占位 tab 退出。内容缓存刻意不清（未保存编辑不因清单变化丢失
+   *  ——loadList 同纪律） */
+  function discardPlaceholdersLocally(): void {
+    if (placeholderIds.size === 0) return
+    const ids = [...placeholderIds]
+    notes.value = notes.value.filter(x => !placeholderIds.has(x.id))
+    for (const id of ids) placeholderIds.delete(id)
   }
 
   /** 重命名（乐观更新本地清单；服务端失败回滚 + 提示） */
@@ -260,11 +295,21 @@ export function createNotesEngine() {
     }
   }
 
-  /** 409 冲突挂起（冲突条三动作的数据源）。返回是否为冲突分支 */
+  /** 409 冲突挂起（冲突条三动作的数据源）。返回是否为冲突分支。
+   *  错误形态双认（isTooLarge 同款）：api/http.ts 响应拦截器把 axios 错误重铸
+   *  为 AppError（status/data 平铺，data=响应体结构化载荷）——真实链路的 409
+   *  形态是 err.status + err.data.code；axios 原形（err.response.*）留作兜底
+   *  （单测桩直注 axios 形态）。〔修 P-20261111-4-S2 e2e 揭出的既有缺陷：
+   *  原只认 axios 原形，真实保存链的 409 永远落 error toast 不挂冲突条〕 */
   function handleConflict(noteId: string, e: unknown): boolean {
-    const err = e as { response?: { status?: number; data?: { code?: string; currentContent?: string; currentUpdatedAt?: string } } }
-    const payload = err?.response?.data
-    if (err?.response?.status !== 409 || payload?.code !== 'notes.conflict') return false
+    const err = e as {
+      status?: number
+      data?: { code?: string; currentContent?: string; currentUpdatedAt?: string }
+      response?: { status?: number; data?: { code?: string; currentContent?: string; currentUpdatedAt?: string } }
+    }
+    const status = err?.response?.status ?? err?.status
+    const payload = err?.response?.data ?? err?.data
+    if (status !== 409 || payload?.code !== 'notes.conflict') return false
     conflict.value = {
       noteId,
       currentContent: payload?.currentContent ?? '',
@@ -327,43 +372,84 @@ export function createNotesEngine() {
     }
   }
 
+  /** 外部更新后的单篇无扰重读（P-20261111-4-S2 换装核心，onExternalUpdate /
+   *  focusNote 共用）：GET 服务端真值 → 与编辑面现值 diff——
+   *  · 逐字节相同（S1 漏网的回声/异窗写同内容/服务端重写同值）：只保鲜 bases
+   *    不触碰 contents（Vue :value 值不变不回写 DOM，textarea 光标/选区/undo
+   *    零扰动）。基准保鲜是同内容态的关键半边：外部写推进了服务端 updatedAt，
+   *    不同步基准会让下一轮本地保存拿旧 base 误触 409 冲突条；
+   *  · 不同：原子换值并返回换装现场（光标锚定数据源）。守卫链——占位篇无
+   *    服务端实体不换装、取数前非 idle 不换装、取数期间用户又输入（contents
+   *    已偏离快照）不换装、取数后保存链路在动不换装：人的输入优先（宁欠勿
+   *    覆盖），真冲突由 baseUpdatedAt 409 冲突条兜底。单篇读取失败维持现值
+   *    （loadList 已刷清单，不拖垮外部更新链路） */
+  async function reloadNoteExternal(noteId: string): Promise<NotesExternalSwap | null> {
+    if (!noteId || placeholderIds.has(noteId)) return null
+    const before = contents[noteId]
+    if (before === undefined || saveStates[noteId] !== 'idle') return null
+    let fresh: { content: string; updatedAt: string }
+    try {
+      const res = await notesGlobalApi.get(noteId)
+      fresh = res.data
+    } catch {
+      return null
+    }
+    if (contents[noteId] !== before) return null // 取数期间用户输入：让位
+    if (saveStates[noteId] !== 'idle') return null // 保存链路在动（saving/error）：不换装
+    if (before === fresh.content) {
+      bases[noteId] = fresh.updatedAt
+      return null
+    }
+    contents[noteId] = fresh.content
+    bases[noteId] = fresh.updatedAt
+    return { noteId, oldContent: before, newContent: fresh.content }
+  }
+
   /** 外部变更事件入口（服务端 notes.updated 直通分发 + 前端内部
    *  sc:notes-external-update 同址消费）：无挂起编辑即重拉清单与当前篇——
    *  有挂起编辑时只刷清单（标题/新篇可见），内容让位人的输入（宁欠勿覆盖，
    *  冲突由 baseUpdatedAt 兜底）。只认笔记库作用域键（GLOBAL_NOTES_SCOPE）——
    *  旧版本服务端/旧事件形态带项目 id 的一律忽略（单库化后无项目库可对位）。
-   *  focus（前端内部事件：沉淀写回）→ 重拉后聚焦该篇；该篇无挂起编辑时丢弃
-   *  内容缓存重读，确保刚追加的沉淀节可见 */
-  async function onExternalUpdate(detail?: NotesExternalUpdateDetail): Promise<void> {
-    if (!detail || detail.projectId !== GLOBAL_NOTES_SCOPE) return
+   *  回声抑制（P-20261111-4 S1）：本窗写请求（防抖自动保存/新建/删除）成功的
+   *  服务端广播经 payload.origin 回带本窗 nonce，同 nonce 整体跳过——整篇重读
+   *  会重置 textarea 光标/undo 栈打断连续输入，loadList 全量重拉伴侧栏闪动，
+   *  而本窗写路径已就地维护清单与内容（保存 echo 无信息量）。无 origin（旧
+   *  服务端/服务端自发起迁移广播/前端内部事件）或异窗 nonce 照常处理——
+   *  宁多刷不漏刷，clipboard.arrived origin 同构。
+   *  无扰换装（P-20261111-4 S2 兜底层）：清单走 quiet 后台合并（loading 态会
+   *  卸载面板 body，侧栏/编辑器全量重挂）；当前篇/聚焦篇重读经
+   *  reloadNoteExternal diff 后决定触碰与否，发生内容换装时返回现场给呈现层
+   *  做光标锚定恢复。
+   *  focus（前端内部事件：沉淀写回）→ 重拉后聚焦该篇；该篇无挂起编辑时无扰
+   *  重读，确保刚追加的沉淀节可见 */
+  async function onExternalUpdate(detail?: NotesExternalUpdateDetail): Promise<NotesExternalSwap | null> {
+    if (!detail || detail.projectId !== GLOBAL_NOTES_SCOPE) return null
+    if (detail.origin && detail.origin === notesOriginNonce()) return null
     const focusId = detail.focus ? detail.noteId : undefined
     if (dirtyIds.value.length > 0) {
-      await loadList()
-      if (focusId) await focusNote(focusId)
-      return
+      await loadList({ quiet: true })
+      return focusId ? focusNote(focusId) : null
     }
-    await loadList()
-    if (focusId) {
-      await focusNote(focusId)
-      return
-    }
+    await loadList({ quiet: true })
+    if (focusId) return focusNote(focusId)
     if (activeId.value) {
-      // 无未保存编辑：单篇重读（内容级外部改写即时可见）
-      delete contents[activeId.value]
-      await ensureLoaded(activeId.value)
+      // 无未保存编辑：单篇无扰重读（同内容零触碰/异内容换装，内容级外部改写即时可见）
+      return reloadNoteExternal(activeId.value)
     }
+    return null
   }
 
-  /** 聚焦指定篇（外部写回后的「点啥显示啥」）：无挂起编辑丢缓存重读，有挂起
-   *  编辑保留（人的输入优先，保存时 baseUpdatedAt 冲突条兜底） */
-  async function focusNote(noteId: string): Promise<void> {
-    if (!notes.value.some(n => n.id === noteId)) return
-    const st = saveStates[noteId]
-    if (st !== 'dirty' && st !== 'error' && st !== 'saving') {
-      delete contents[noteId]
-    }
+  /** 聚焦指定篇（外部写回后的「点啥显示啥」）：已缓存篇无扰重读（同内容零
+   *  触碰/异内容换装返回现场），未缓存篇照旧拉取，挂起编辑保留（人的输入
+   *  优先，保存时 409 兜底） */
+  async function focusNote(noteId: string): Promise<NotesExternalSwap | null> {
+    if (!notes.value.some(n => n.id === noteId)) return null
     activeId.value = noteId
-    await ensureLoaded(noteId)
+    if (contents[noteId] === undefined) {
+      await ensureLoaded(noteId)
+      return null
+    }
+    return reloadNoteExternal(noteId)
   }
 
   function toMeta(n: { id: string; title: string; updatedAt: string; size?: number }): MultiNoteMeta {

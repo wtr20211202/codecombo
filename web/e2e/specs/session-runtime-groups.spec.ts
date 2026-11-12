@@ -12,6 +12,11 @@ import { API_BASE } from '../../tests/api-base'
  * - 服务端数据面：GET /terminals 快照携 runtime（applySessionMetaSnapshot meta
  *   反查）——创建响应的 runtime 是内存态，快照不落则刷新后分组退化单组，本
  *   spec 的「开页即分组」断言同时守门该字段。
+ * - 共存提示与 agent 分组操作面（P-20261111-1-S3）：runtime 视图下自定义分组
+ *   整区让位时的弱提示行（只计数不渲染组内容，点击切回平铺）；以及分组成为
+ *   智能体可操作实体——session-groups API 建组/移入/移出/删组写 uiState 后
+ *   广播 agent.groups.changed，live 侧栏经既有 OPS_AGENT_GROUPS_CHANGED 重读
+ *   链就地跟随（免 reload 全链）。
  *
  * 测试数据：注册自定义运行时（command=node，e2e 环境前端构建必备二进制，
  * agent-runtime-version.spec 同款），API 直建 2 shell + 1 自定义 runtime 会话；
@@ -193,4 +198,115 @@ test.describe('会话中心按 runtime 分组视图（P-20261003-238）', () => 
     await expect(view.locator('.ats-item')).toHaveCount(3)
     await expect(view.locator('[data-test="session-time-chips"]')).toBeVisible()
   })
+
+  test('共存提示：runtime 视图让位区提示行计数、点击切回平铺（P-20261111-1-S3）', async ({ page, request }) => {
+    test.setTimeout(60000)
+    page.on('pageerror', e => console.log('[PAGE-ERR]', e.message))
+    const headers = await unlockHeaders(request)
+    // 防残留：既有分组全清（dogfood 新端点），保证计数断言确定
+    await cleanupGroups(request, headers)
+    const view = await openManager(page)
+
+    // 平铺视图建一个分组（footer 内联输入，S2 spec 同款）
+    await view.locator('.ats-footer button').click()
+    const input = view.locator('.ats-footer input')
+    await expect(input).toBeVisible()
+    await input.fill('提示组甲')
+    await input.press('Enter')
+    await expect(view.locator('.ats-section:has(.ats-group-name:text-is("提示组甲"))')).toBeVisible()
+
+    // 切 runtime 视图：自定义分组整区让位 → 提示行在场携计数（只计数，
+    // 组头/组内容不渲染——不双渲染）；toggle 仍在激活态
+    await view.locator('[data-test="session-group-toggle"]').click()
+    const hint = view.locator('[data-test="session-runtime-groups-hint"]')
+    await expect(hint).toBeVisible()
+    await expect(hint).toContainText('1')
+    await expect(hint).toContainText('自定义分组')
+    await expect(view.locator('.ats-section:has(.ats-group-name:text-is("提示组甲"))')).toHaveCount(0)
+    await expect(view.locator('[data-test="session-runtime-group"]').first()).toBeVisible()
+
+    // 点击提示行 → 切回平铺：组段还原、toggle 退出激活态（与 toggle 点击同语义）
+    await hint.click()
+    await expect(view.locator('[data-test="session-runtime-group"]')).toHaveCount(0)
+    await expect(view.locator('.ats-section:has(.ats-group-name:text-is("提示组甲"))')).toBeVisible()
+    await expect(view.locator('[data-test="session-group-toggle"]')).not.toHaveClass(/active/)
+
+    // 清场（dogfood DELETE）
+    await cleanupGroups(request, headers)
+  })
+
+  test('agent 分组操作面：API 建组/移入/移出/删组，live 侧栏就地跟随（P-20261111-1-S3）', async ({ page, request }) => {
+    test.setTimeout(60000)
+    page.on('pageerror', e => console.log('[PAGE-ERR]', e.message))
+    const headers = await unlockHeaders(request)
+    await cleanupGroups(request, headers)
+
+    // 先开页再动 API：建组/移入的断言才能证明「广播→重读链」live 跟随
+    //（组若先建后开页，出现走的是 boot 而非广播）
+    const view = await openManager(page)
+
+    // 会话 id 取自 GET /terminals（手册配方：先列清单核对 id）
+    const listRes = await request.get(`${API_BASE}/api/terminals`, { headers })
+    const sessions = ((await listRes.json()) as { data?: { id?: string; name?: string }[] }).data || []
+    const byName = (n: string) => sessions.find(s => s.name === n)!.id!
+    const shellA = byName(SHELL_A)
+    const node = byName(NODE)
+
+    // API 校验语义：空名 400 / 组不存在 404
+    const emptyRes = await request.post(`${API_BASE}/api/terminals/session-groups`, { headers, data: { name: '  ' } })
+    expect(emptyRes.status()).toBe(400)
+    const ghostRes = await request.put(`${API_BASE}/api/terminals/session-groups/at_missing_x/sessions`, {
+      headers, data: { sessionIds: [shellA] },
+    })
+    expect(ghostRes.status()).toBe(404)
+
+    // 建组：201 + 服务端铸 id；live 侧栏就地出现（广播→OPS_AGENT_GROUPS_CHANGED
+    // 重读链，免 reload——页已开，出现只能来自广播）
+    const createRes = await request.post(`${API_BASE}/api/terminals/session-groups`, { headers, data: { name: 'api归置组' } })
+    expect(createRes.status()).toBe(201)
+    const created = ((await createRes.json()) as { data?: { id?: string } }).data!
+    expect(created.id).toMatch(/^at_\d+/)
+    const group = view.locator('.ats-section:has(.ats-group-name:text-is("api归置组"))')
+    await expect(group).toBeVisible({ timeout: 10000 })
+
+    // 移入 2 会话：侧栏组内出现两行；服务端清单同形（读到的是落盘后真值）
+    const moveRes = await request.put(`${API_BASE}/api/terminals/session-groups/${created.id}/sessions`, {
+      headers, data: { sessionIds: [shellA, node] },
+    })
+    expect(moveRes.status()).toBe(200)
+    await expect(group.locator('.ats-item', { hasText: SHELL_A })).toBeVisible({ timeout: 10000 })
+    await expect(group.locator('.ats-item', { hasText: NODE })).toBeVisible()
+    await expect(group.locator('.ats-item')).toHaveCount(2)
+    const groupsAfterMove = await listGroups(request, headers)
+    expect(groupsAfterMove.find(g => g.id === created.id)?.sessionIds.sort()).toEqual([shellA, node].sort())
+
+    // 移出 1 会话（回未分组）：行实时归位
+    const removeRes = await request.delete(`${API_BASE}/api/terminals/session-groups/${created.id}/sessions/${shellA}`, { headers })
+    expect(removeRes.status()).toBe(200)
+    await expect(group.locator('.ats-item', { hasText: SHELL_A })).toHaveCount(0, { timeout: 10000 })
+    await expect(group.locator('.ats-item')).toHaveCount(1)
+    await expect(view.locator('.ats-item', { hasText: SHELL_A }).first()).toBeVisible()
+
+    // 删组：组段消失，余下成员自然回未分组（归属随组消失归位）；全程未移动的
+    // SHELL_B 始终在未分组区
+    const delRes = await request.delete(`${API_BASE}/api/terminals/session-groups/${created.id}`, { headers })
+    expect(delRes.status()).toBe(200)
+    await expect(group).toHaveCount(0, { timeout: 10000 })
+    await expect(view.locator('.ats-item', { hasText: NODE }).first()).toBeVisible()
+    await expect(view.locator('.ats-item', { hasText: SHELL_B }).first()).toBeVisible()
+  })
 })
+
+/** 分组清单 dogfood helper：GET /api/terminals/session-groups */
+async function listGroups(request: APIRequestContext, headers: Record<string, string>) {
+  const res = await request.get(`${API_BASE}/api/terminals/session-groups`, { headers })
+  expect(res.status()).toBe(200)
+  return ((await res.json()) as { data?: { id?: string }[] }).data || []
+}
+
+/** 清空全部分组（防残留：重复跑/他 spec 残留分组影响计数断言） */
+async function cleanupGroups(request: APIRequestContext, headers: Record<string, string>): Promise<void> {
+  for (const g of await listGroups(request, headers)) {
+    await request.delete(`${API_BASE}/api/terminals/session-groups/${g.id}`, { headers })
+  }
+}

@@ -366,6 +366,21 @@ install.sh 已自动同装 polkit 放行规则（服务用户自重启授权）�
 早期版本脚本装且从未重跑过的实例（缺规则被 polkit 拒），重跑一次 install.sh
 即补装。
 
+换包收尾按当前监管形态路由（P-20261112-1），本篇涉及两类：
+
+- **systemd 托管布局**（§3 手工 unit / install.sh 脚本装 / 远程部署器装）：
+  换包完成后由更新子进程 `systemctl restart` 交还 systemd——状态机、
+  `Restart=` 策略与日志归属不变，重启窗口正常属预期；缺 polkit 规则的早期
+  实例见上段收尾；
+- **手动 `codecombo start`（后台守护）或 `--serve` 前台**起的实例：更新
+  完成后以**原启动参数**重新拉起并转后台守护——`--host`/`--data-dir`/
+  TLS 等旗标原样保留（早期版本只传端口、旗标静默丢失），且脱离原终端
+  会话：前台实例更新后关闭终端窗口不再导致服务退出；子进程 stdout/stderr
+  落数据目录 `logs/update-restart.log`，更新结果注记「已转后台守护」。
+
+Windows 服务与 macOS launchd 形态的差异（`sc.exe query` 短暂 STOPPED 属
+预期 / KeepAlive 自动拉起）见 README「升级」节。
+
 ### 6b. 重跑 install.sh（仅限脚本装布局）
 
 ```bash
@@ -506,6 +521,12 @@ launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 
 注意：Darwin 版本需在 mac 上构建（`./build.sh`）；升级同样先 `launchctl unload`
 再替换二进制。
+
+应用内自更新在 launchd 形态的行为（P-20261112-1）：换包完成后更新子进程
+不另起进程，由上述 plist 的 `KeepAlive` 自动拉起新版本；更新健康检查轮询
+容忍 KeepAlive 先行重拉的竞态，15s 超时自动回滚——先恢复旧二进制再按数据
+目录 PID 文件结束重拉进程，KeepAlive 随即拉回旧版本（无需手动 `launchctl`
+收尾；各形态差异总表见 README「升级」节）。
 
 ## 7. 故障速查
 

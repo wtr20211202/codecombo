@@ -134,6 +134,7 @@ type MigrationPortableSettings struct {
 	TerminalDefaultShell     string                     `json:"terminalDefaultShell,omitempty"`
 	AgentProvider            string                     `json:"agentProvider"`
 	AgentNamingNoteEnabled   *bool                      `json:"agentNamingNoteEnabled,omitempty"`
+	AgentAutoNameEnabled     *bool                      `json:"agentAutoNameEnabled,omitempty"`
 	AgentLaunchCommands      map[string]string          `json:"agentLaunchCommands,omitempty"`
 	CustomAgents             []config.CustomAgent       `json:"customAgents,omitempty"`
 	AgentGuard               *bool                      `json:"agentGuard,omitempty"`

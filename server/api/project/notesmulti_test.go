@@ -5,11 +5,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"codecombo/server/api/opschannel"
 	"codecombo/server/store"
 )
 
@@ -28,9 +30,17 @@ func postNote(r *gin.Engine, path, body string) *httptest.ResponseRecorder {
 }
 
 func putNote(r *gin.Engine, path, body string) *httptest.ResponseRecorder {
+	return putNoteOrigin(r, path, body, "")
+}
+
+// putNoteOrigin PUT 附带本窗 nonce 头（回声抑制链路用例；origin 空串 = 不携头）
+func putNoteOrigin(r *gin.Engine, path, body, origin string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	if origin != "" {
+		req.Header.Set(notesOriginHeader, origin)
+	}
 	r.ServeHTTP(w, req)
 	return w
 }
@@ -221,5 +231,67 @@ func TestNotesMulti_Export(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/notes/"+n.ID+"/export?format=txt", nil))
 	if !strings.Contains(w.Header().Get("Content-Disposition"), ".txt") {
 		t.Errorf("expected .txt filename, got %q", w.Header().Get("Content-Disposition"))
+	}
+}
+
+// TestNotesMulti_OriginEchoRoundTrip 回声抑制 nonce 链路（P-20261111-4 S1）：
+// 写请求 X-Notes-Origin 头经广播 payload.origin 原样回带（前端 onExternalUpdate
+// 收到同 nonce 跳过——本窗防抖自动保存的回声不触发整篇重读）；无头请求（agent
+// /curl 直调、旧客户端）广播不带 origin 字段（JSON omitempty——前端按外部更新
+// 处理向后兼容）；超长头 rune 边界截断（载荷尺寸有界，最坏退化为一次多余重拉）
+func TestNotesMulti_OriginEchoRoundTrip(t *testing.T) {
+	r := setupNotesGlobalTest(t)
+	n := createGlobalNote(t, r, "", "v1")
+
+	var mu sync.Mutex
+	var got []notesActionPayload
+	unsub := opschannel.AddObserver(func(ev opschannel.Event) {
+		if ev.Type != opschannel.EventNotesUpdated {
+			return
+		}
+		if p, ok := ev.Payload.(notesActionPayload); ok {
+			mu.Lock()
+			got = append(got, p)
+			mu.Unlock()
+		}
+	})
+	t.Cleanup(unsub)
+
+	// 带本窗 nonce 的保存：origin 原样回带（作用域键/篇 id/动作随行）
+	if w := putNoteOrigin(r, "/api/notes/"+n.ID, `{"content":"v2"}`, "win-a"); w.Code != http.StatusOK {
+		t.Fatalf("put with origin: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	mu.Lock()
+	if len(got) != 1 || got[0].Origin != "win-a" || got[0].Action != "saved" ||
+		got[0].NoteID != n.ID || got[0].ProjectID != store.GlobalNotesScope {
+		t.Fatalf("broadcast payload with origin: %+v", got)
+	}
+	got = got[:0]
+	mu.Unlock()
+
+	// 无 nonce 头：广播不带 origin 字段（旧客户端按外部更新处理——宁多刷不漏刷）
+	if w := putNote(r, "/api/notes/"+n.ID, `{"content":"v3"}`); w.Code != http.StatusOK {
+		t.Fatalf("put without origin: expected 200, got %d", w.Code)
+	}
+	mu.Lock()
+	if len(got) != 1 || got[0].Origin != "" {
+		t.Fatalf("broadcast payload without origin: %+v", got)
+	}
+	if b, err := json.Marshal(got[0]); err != nil || strings.Contains(string(b), `"origin"`) {
+		t.Errorf("absent origin must be omitted in payload JSON: %s err=%v", b, err)
+	}
+	got = got[:0]
+	mu.Unlock()
+
+	// 超长 nonce：rune 边界截断到护栏上限
+	long := strings.Repeat("窗", notesOriginMaxLen+10)
+	if w := putNoteOrigin(r, "/api/notes/"+n.ID, `{"content":"v4"}`, long); w.Code != http.StatusOK {
+		t.Fatalf("put with long origin: expected 200, got %d", w.Code)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0].Origin != strings.Repeat("窗", notesOriginMaxLen) {
+		t.Fatalf("long origin not truncated to %d runes: got %d runes (%q)",
+			notesOriginMaxLen, len([]rune(got[0].Origin)), got[0].Origin)
 	}
 }

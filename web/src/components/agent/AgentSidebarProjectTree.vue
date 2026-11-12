@@ -54,7 +54,7 @@ const { t } = useI18n()
 const {
   dragOverKey,
   startDrag,
-  onDragOverProjectGroupHead, onDragOverProjectSessionItem,
+  onDragOverProjectGroupHead, onDragOverProjectGroupSection, onDragOverProjectSessionItem,
   onDropProjectGroupHead, onDropProjectSessionItem,
   onDragEnd,
   renamingSessionId, renamingSessionName,
@@ -160,14 +160,19 @@ function onProjectSessionMenu(key: string) {
 </script>
 
 <template>
+  <!-- 组段整区落点（P-20261111-1-S2）：与自定义分组同款——dragover/drop 上提
+       到组段容器，组头窄行死区消灭（内层行 dragover 认领时让位，组源掠过
+       项目会话行由组段兜底承接组序）；高亮同键挂组段，与自定义分组视觉一致 -->
   <div
     v-for="pg in projectGroups"
     :key="pg.projectId"
     class="ats-section"
+    :class="{ 'ats-drag-over': dragOverKey === `pgroup:${pg.projectId}` }"
+    @dragover="onDragOverProjectGroupSection(pg.projectId, $event)"
+    @drop.prevent="onDropProjectGroupHead(pg.projectId)"
   >
     <div
       class="ats-group-head is-group"
-      :class="{ 'ats-drag-over': dragOverKey === `pgroup:${pg.projectId}` }"
       draggable="true"
       :title="t('agentTerminal.projectGroupDragTip')"
       @dragstart="startDrag({ kind: 'project-group', projectId: pg.projectId }, $event)"
@@ -410,7 +415,8 @@ function onProjectSessionMenu(key: string) {
 .ats-item-queue.has-items { color: var(--accent-blue); }
 .ats-item-queue-count { font-size: 0.72em; font-weight: 600; }
 
-/* 拖拽落点指示（项目分组头 / 项目会话条目） */
+/* 拖拽落点指示（项目组段整区 / 项目会话条目行级插入态；S2 起组区高亮挂
+   .ats-section 整段——与自定义分组同款同键，两树视觉一致） */
 .ats-drag-over {
   outline: 1px dashed var(--accent-blue);
   outline-offset: -1px;

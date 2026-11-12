@@ -1,6 +1,6 @@
 {
   "comment": "API 路由契约面快照（P-20261004-77）：RegisterRoutes 组合根真实注册的路由全集（gin Routes），过滤到 axios 可达五方法 GET/POST/PUT/DELETE/PATCH。消费方：web/scripts/check-api-routes.mjs（npm run check:api-routes）做前端 domains 调用面对账。勿手改——路由变更后以 CC_UPDATE_API_ROUTES=1 go test ./server/archguard/ -run TestAPIRouteDump 重写。",
-  "routeCount": 535,
+  "routeCount": 541,
   "routes": [
     {"method": "GET", "path": "/api/agent-chains"},
     {"method": "POST", "path": "/api/agent-chains"},
@@ -470,6 +470,12 @@
     {"method": "GET", "path": "/api/terminals/queues"},
     {"method": "GET", "path": "/api/terminals/running-count"},
     {"method": "GET", "path": "/api/terminals/search"},
+    {"method": "GET", "path": "/api/terminals/session-groups"},
+    {"method": "POST", "path": "/api/terminals/session-groups"},
+    {"method": "DELETE", "path": "/api/terminals/session-groups/:id"},
+    {"method": "PUT", "path": "/api/terminals/session-groups/:id"},
+    {"method": "PUT", "path": "/api/terminals/session-groups/:id/sessions"},
+    {"method": "DELETE", "path": "/api/terminals/session-groups/:id/sessions/:sid"},
     {"method": "GET", "path": "/api/terminals/shell-candidates"},
     {"method": "GET", "path": "/api/terminals/tmux-info"},
     {"method": "POST", "path": "/api/terminals/tmux-install"},

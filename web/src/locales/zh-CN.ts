@@ -417,14 +417,16 @@ export default {
     mouseDropTermPath: '拖文件树文件进终端＝路径粘贴到输入行（不执行）',
     mouseBroadcastSelect: '广播模式（终端工具条开启）下点终端标签＝选中/取消，一次输入发全部',
   },
-  // frontend 动词族原子反馈（P-20261023-4）：agent 经操作通道触发浏览器即时
-  // 效应（下载框/剪贴板/开标签）的可见 toast 与设置开关文案——无静默效应是
-  // 安全边界的一部分，toast 刻意不参与免打扰静默
+  // frontend 动词族原子反馈（P-20261023-4 首批 + P-20261111-3 重载）：agent 经
+  // 操作通道触发浏览器即时效应（下载框/剪贴板/开标签/整页·视图重载）的可见
+  // toast 与设置开关文案——无静默效应是安全边界的一部分，toast 刻意不参与
+  // 免打扰静默
   opsAtom: {
     atom: {
       download: '下载文件',
       clipboard: '写入剪贴板',
       open: '打开网页',
+      reload: '刷新页面/视图',
     },
     downloadStarted: '智能体请求下载「{name}」，已开始',
     clipboardWritten: '智能体已写入剪贴板：{preview}',
@@ -433,6 +435,8 @@ export default {
     opened: '智能体已在新标签打开 {host}',
     openBlocked: '浏览器拦截了弹出窗口，已转入通知中心：点击通知打开 {host}',
     openBlockedTitle: '智能体请求打开外部链接：{host}',
+    pageReloading: '智能体请求刷新页面，即将重载…',
+    viewReloaded: '智能体已刷新当前视图',
     rateLimited: '{atom}请求过于频繁（10 次/分钟），本次已忽略',
     disabledNotice: '{atom}已在设置中关闭，本次请求已忽略',
   },
@@ -493,6 +497,10 @@ export default {
     // 在 prompt 尾部附命名指令注记，任务演化改名由此驱动
     agentNamingNoteLabel: '新建会话附带命名注记（任务演化后用 ≤16 字简称重命名）',
     agentNamingNoteHint: '带任务指令创建会话时，在指令尾部自动附一行系统注记：告知会话 ID 并要求任务改名时先查重再重命名。同名会话由服务端自动步进「·2」后缀消歧，此开关只管注入注记这一层。',
+    // 会话自动命名（P-20261111-6 S2）：claude 会话首条用户消息落盘后按内容
+    // 总结会话名，侧栏/标签即时跟随；改名过的会话永不覆盖
+    agentAutoNameLabel: '会话自动命名（按首条消息总结会话名）',
+    agentAutoNameHint: 'Claude 会话发出首条消息后，服务端按其内容自动总结会话名（约 40 字符截断），侧栏与标签即时跟随；手动改名过的会话永不覆盖，敏感首句静默跳过。关闭后回落纯手动改名。',
     // 新建分享默认有效期（P-20261020-5）：创建弹层未主动改选时应用
     shareDefaultTTL: '新建分享默认有效期',
     shareDefaultTTLDesc: '创建文件分享时预选的有效期，可在创建弹层按次覆盖；缺省「永久」保持既有行为。仅影响实时视图文件分享——冻结快照默认 30 天，其余分享形态各有固定窗口',
@@ -503,11 +511,13 @@ export default {
     previewCompatConfirmTitle: '开启预览兼容模式？',
     previewCompatConfirmBody: '关闭沙箱后，被预览页面的脚本将获得本应用权限：可读取解锁令牌与 Cookie、以你的身份调用本应用接口、操作页面内容。仅在你完全信任被预览的项目及其全部依赖时开启。',
     previewCompatConfirmYes: '仍要开启',
-    // frontend 原子管制（P-20261023-4）：agent 经操作通道触发的浏览器即时效应
-    // 按原子开关——下载框/剪贴板直写/开标签，每次效应都带可见提示
+    // frontend 原子管制（P-20261023-4 + P-20261111-3 重载）：agent 经操作通道
+    // 触发的浏览器即时效应按原子开关——下载框/剪贴板直写/开标签/页面·视图
+    // 重载，每次效应都带可见提示
     opsAtomDownload: '允许智能体触发文件下载（弹出浏览器下载框）',
     opsAtomClipboard: '允许智能体写入剪贴板（写入前带内容预告）',
     opsAtomOpen: '允许智能体打开网页（新标签打开站外链接）',
+    opsAtomReload: '允许智能体刷新页面或当前视图（未保存内容有草稿自动保存与确认框兜底）',
     opsAtomsHint: '以上为智能体经操作通道在你的浏览器上的即时效应（每次都有可见提示，限频 10 次/分钟）；关闭后对应请求被忽略，智能体会收到「已关闭」提示',
     // 上下文警示阈值（P-20261006-33）：设备本地偏好，调高给尾部结论生成留余量
     contextWarnThreshold: '上下文警示阈值',
@@ -743,7 +753,7 @@ export default {
     dshProxyPort: '反代端口',
     dshExposeAll: '开放所有 IP 访问',
     dshAllowStandalone: '允许独立标签页访问 dsh',
-    dshAllowStandaloneHint: '默认关闭：直接在浏览器标签打开 dsh 嵌入通道地址只会看到引导页，dsh 仅在 Codecombo 内嵌使用；开启后允许独立访问（仍受 dsh 自身令牌保护）。',
+    dshAllowStandaloneHint: '默认关闭：直接在浏览器标签打开 dsh 嵌入通道地址只会看到引导页，dsh 仅在 Codecombo 内嵌使用；开启后允许独立访问（仍受 dsh 自身令牌保护）。经新标签使用 dsh 遇到「dsh 嵌入通道」引导页（403）即为此开关未开启，开启即解。',
     dshNpmCommand: 'npm 命令',
     dshNpmCommandPlaceholder: '默认：npm；dsh 在 WSL 时可配 wsl.exe npm',
     dshLaunchCommand: '启动命令',
@@ -1326,6 +1336,9 @@ export default {
     // agentLabelOf 既有运行时显示名映射，品牌名不随 locale 翻译）
     groupByRuntime: '按运行时分组',
     groupFlat: '恢复平铺视图',
+    // runtime 视图共存提示（P-20261111-1-S3）：自定义分组整区让位时只计数
+    // 不渲染组内容，点击整行切回平铺视图
+    runtimeGroupsHidden: '此视图隐藏了 {n} 个自定义分组——点击切回平铺视图',
     searchPlaceholder: '搜索会话 / 项目',
     noMatchSession: '无匹配会话',
     // 时间过滤 chips（P-20261003-174）：与名称即时筛选 AND 叠加的时间维定位
@@ -2057,6 +2070,12 @@ export default {
     prereleaseChannel: '您在预发布通道',
     upToDatePrerelease: '已是预发布最新（稳定版：v{stable}）',
     upToDatePrereleaseOnly: '已是预发布最新',
+    // 已知缺陷标注（P-20261111-2-S2）：S1 诊断实锤 0.2.2-rc.1 插件加载失败拖垮页面，
+    // 反代面零兜底——版本面标注+引导升级（issueKey 逐条登记见 useDshVersions）
+    knownDefectTag: '已知缺陷',
+    knownDefectTitle: '当前版本存在已知缺陷——点此查看详情与升级引导',
+    knownDefectBanner: '当前版本存在已知缺陷：{issue}建议升级到 v{fixed} 或更高（预发布版本需勾选「显示预发布版本」后选择）。',
+    knownIssuePluginLoad: '已启用/已装插件加载失败会拖垮整个 Web 页面（典型表现：左侧插件工具栏点不开、页面无法启动）。',
     versionCheckFailed: '版本检查失败（npm registry 不可达？）',
     versionsHint: '升级经 npm 全局安装执行（npm 命令可在设置中配置）；安装完成后自动重启 dsh，新版本启动失败时可一键回退到升级前版本。',
     manageTargets: '管理 dsh 连接',
@@ -5701,7 +5720,12 @@ export default {
     currentVersion: '当前版本',
     latestVersion: '最新版本',
     downloadSize: '下载大小',
-    changelog: '更新内容',
+    // 更新内容块（P-20261112-2）：标题/展开收起循 dshConsole.cl* 惯例
+    clTitle: 'v{version} 更新内容',
+    clOpenPage: '查看发布页',
+    clEmpty: '该版本暂无发布说明',
+    clExpand: '展开完整说明',
+    clCollapse: '收起',
     updateNow: '立即更新',
     updating: '更新中…',
     restarting: '重启中…',

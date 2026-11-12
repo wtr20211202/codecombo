@@ -12,6 +12,8 @@ export interface AgentSidebarTreeShared {
   dragOverKey: Ref<string>
   startDrag: (source: DragSource, e: DragEvent) => void
   onDragOverProjectGroupHead: (projectId: string, e: DragEvent) => void
+  /** 项目组段整区落点（P-20261111-1-S2）：组头窄行外扩到整段组区的 dragover 兜底 */
+  onDragOverProjectGroupSection: (projectId: string, e: DragEvent) => void
   onDragOverProjectSessionItem: (target: { id: string; projectId?: string }, projectId: string, e: DragEvent) => void
   onDropProjectGroupHead: (projectId: string) => void
   onDropProjectSessionItem: (target: { id: string }, projectId: string) => void

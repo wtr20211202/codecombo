@@ -1,7 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { isNewerVersion, isPrereleaseVersion } from '../utils/version'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { changelogBrief, renderChangelog, onChangelogClick } from '../utils/changelogRender'
 import { settingsApi } from '../api/client'
 import { confirmDialog } from './useDialog'
 import { useI18n } from './useI18n'
@@ -31,6 +30,22 @@ export interface DshChangelogEntry {
   publishedAt: string
   url: string
 }
+
+/** dsh 上游已知缺陷条目：affected 精确版本号 + fixed 起始修复版本 + issueKey
+ *  （dshConsole 命名空间下的缺陷描述文案键） */
+interface DshKnownIssue {
+  affected: string
+  fixed: string
+  issueKey: string
+}
+
+/** dsh 上游已知缺陷登记（P-20261111-2-S2）：S1 诊断实锤 0.2.2-rc.1 的已启用/
+ *  已装插件加载失败会拖垮整个 Web 页面（插件工具栏点不开等），rc.2 修复条目
+ *  直接命中，反代面零缺陷零兜底——版本弹窗对命中版本标注并引导升级。
+ *  数据驱动登记便于后续追加条目（上游再出缺陷时只加行不动 UI） */
+const DSH_KNOWN_ISSUES: DshKnownIssue[] = [
+  { affected: '0.2.2-rc.1', fixed: '0.2.2-rc.2', issueKey: 'knownIssuePluginLoad' },
+]
 
 export function useDshVersions(options: { reload: () => Promise<void> }) {
   const { t } = useI18n()
@@ -65,6 +80,17 @@ export function useDshVersions(options: { reload: () => Promise<void> }) {
     const asc = allVersions.value.slice().reverse()
     return asc.find(v => !isPrereleaseVersion(v.version))?.version || ''
   })
+
+  // ============== 上游已知缺陷标注（P-20261111-2-S2） ==============
+  /** 当前安装版本命中的已知缺陷（探测值可能带 v 前缀，归一后精确匹配）——
+   *  版本弹窗据此呈现警示引导升级 */
+  const currentKnownIssue = computed(() =>
+    DSH_KNOWN_ISSUES.find(i => i.affected === currentVersion.value.replace(/^v/, '')) || null)
+
+  /** 可升级列表条目命中的已知缺陷（防止用户升级「进」缺陷版本） */
+  function knownIssueOf(version: string): DshKnownIssue | undefined {
+    return DSH_KNOWN_ISSUES.find(i => i.affected === version.replace(/^v/, ''))
+  }
 
   // 比当前版本新的列表（新→旧）；当前版本未知（独立安装且无法探测）时全列出。
   // 预发布默认滤除（P-20261010-2）：检查更新推荐面只取稳定版，alpha 不再被
@@ -112,38 +138,9 @@ export function useDshVersions(options: { reload: () => Promise<void> }) {
       ?? changelogEntries.value.find(c => isNewerVersion(version, c.version) === false && version === c.version)
   }
 
-  /** changelog 简要：strip 常见 markdown 标记后的前两行（列表内直接可读） */
-  function changelogBrief(body: string): string {
-    if (!body.trim()) return ''
-    const div = document.createElement('div')
-    div.innerHTML = renderChangelog(body)
-    const text = (div.textContent || '').replace(/\s+/g, ' ').trim()
-    return text.length > 150 ? text.slice(0, 150) + '…' : text
-  }
-
-  /** changelog markdown → 消毒后的 HTML（GitHub release notes 含 html 标签，
-   *  与 MonacoEditor 的 markdown 预览同一条 marked+DOMPurify 管线） */
-  function renderChangelog(body: string): string {
-    const html = marked.parse(body || '', { async: false }) as string
-    return DOMPurify.sanitize(html, { ADD_ATTR: ['target'] })
-  }
-
-  /** changelog 内的页内锚链接（中/英文小节切换）拦截：preventDefault 防止
-   *  hash 写进 SPA 地址栏，改为在 changelog 滚动容器内平滑滚动到目标小节 */
-  function onChangelogClick(e: MouseEvent) {
-    const a = (e.target as HTMLElement).closest('a')
-    if (!a) return
-    const href = a.getAttribute('href') || ''
-    if (!href.startsWith('#')) return
-    const container = e.currentTarget as HTMLElement
-    const target = container.querySelector('[id="' + href.slice(1) + '"]')
-    if (!target) {
-      e.preventDefault()
-      return
-    }
-    e.preventDefault()
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  // changelogBrief / renderChangelog / onChangelogClick 渲染链单源在
+  // utils/changelogRender（P-20261112-2-S1 抽出，自更新面板同源消费）；
+  // 本 composable 原样透出，弹层调用面不变
 
   async function fetchChangelog() {
     if (changelogLoading.value || changelogEntries.value.length) return
@@ -280,6 +277,7 @@ export function useDshVersions(options: { reload: () => Promise<void> }) {
     showVersions, verLoading, currentVersion, latestVersion, allVersions, selectedVersion,
     upState, upError, rollbackVersion, canRollback, rollingBack,
     showRollbackRow, showPrerelease, currentIsPrerelease, latestStableVersion,
+    currentKnownIssue, knownIssueOf,
     newerVersions, upgradeBadge, headerVersionLabel, upgradeActionText, upInFlight,
     changelogEntries, changelogLoading, changelogUnavailable, changelogExpanded,
     openVersions, checkVersions, startUpgrade, doRollback, requestRollback,

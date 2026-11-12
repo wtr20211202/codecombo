@@ -71,6 +71,9 @@ func normalizeGitHubAPI(raw string) string {
 type githubRelease struct {
 	TagName string `json:"tag_name"`
 	Body    string `json:"body"`
+	// HtmlURL 发布页直链（GitHub API html_url，网页形态）——透传 ReleaseInfo
+	// 供面板「查看发布页」外链（P-20261112-2-S2，dshConsole.clOpenPage 同款）
+	HtmlURL string `json:"html_url"`
 	Assets  []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
@@ -129,6 +132,7 @@ func (s *GitHubSource) FetchLatest(ctx context.Context, platform, arch string) (
 			Changelog:   release.Body,
 			DownloadURL: downloadURL,
 			FileSize:    fileSize,
+			ReleaseURL:  release.HtmlURL,
 		}
 		// 伴随校验资产（安全 backlog A5）：<二进制名>.sha256 / <二进制名>.sig。
 		// 三态（P-20261109-9）：不在列表=缺失（留空，ApplyUpdate 按无校验策略

@@ -105,10 +105,13 @@ const (
 	// EventNotesUpdated 笔记库已变（P-20261107-2 多篇笔记 → P-20261108-3 单库化）：
 	// 服务端在笔记写路径（/api/notes 族 create/update/delete/restore/purge）与
 	// 单库化迁移有迁入时（启动期/手动续迁/项目删除前）成功后广播，载荷
-	// {projectId,noteId,action}——projectId 为作用域键（全局库恒为保留哨兵
+	// {projectId,noteId,action,origin?}——projectId 为作用域键（全局库恒为保留哨兵
 	// "_global"，字段名沿用多篇时代的项目维度命名、形状不变）；action ∈ saved|
 	// created|renamed|trashed|restored|purged|migrated；noteId 为空 = 作用域全部
-	// 篇可能已变（迁移批量并入，消费方重拉清单）。仅元数据上广播面（标题/内容
+	// 篇可能已变（迁移批量并入，消费方重拉清单）。origin（P-20261111-4 S1 回声
+	// 抑制）= 写请求 X-Notes-Origin 头的客户端窗口 nonce 原样回带，前端收到同
+	// nonce 即跳过（本窗自动保存的回声不触发整篇重读打断连续输入）；迁移广播与
+	// 旧客户端请求无 origin，按外部更新处理向后兼容。仅元数据上广播面（标题/内容
 	// 不上——terminal.message 同纪律）；消费方收到即拉取服务端真值，不信任载荷
 	// 内容。前端直通分发 sc-ops:notes.updated，笔记面板合并到既有
 	// sc:notes-external-update 内部事件消费（per-note 粒度）。sync 笔记单元落位
@@ -146,6 +149,15 @@ const (
 	// 打开。popup blocker 是浏览器边界不硬求：被拦时回落通知中心 action=url
 	// 条目（既有形态），用户点击开——功能不缺失只是多一次点击
 	EventFrontendOpen = "frontend.open"
+	// EventFrontendReload 重载原语（P-20261111-3，frontend 动词族第四原子）：
+	// agent 经 ops-notify 上报，载荷 {scope}（发布口注册表校验：page|view 可选
+	// 枚举，缺省规整 page）——page=location.reload() 整页重载；view=当前路由
+	// 整树 remount（前端 RouterView :key 翻转，路由/URL 零变化，与实例切换
+	// 同机制）。动机：配置推送/批量写后「要求前端重取全量状态」此前只能两跳
+	// navigate 绕行（跳走再跳回，带路由副作用），一跳直达。未保存编辑有
+	// IndexedDB 草稿自动保存（2s 防抖）+ scope=page 时既有 beforeunload
+	// 确认框兜底（用户可取消），滥用对策沿 frontend 动词族四层收口
+	EventFrontendReload = "frontend.reload"
 	// EventShareDrop 协作素材到达（P-20261024-1）：访客经分享协作通道上传
 	// 素材成功后广播一次，载荷 {token,shareName,terminalId?,id,name,size,kind,
 	// nick?}（仅元数据——内容不上广播面，terminal.message 同纪律）。前端
@@ -174,6 +186,17 @@ const (
 	// agent 监听同一事件感知「公网入口还活着吗」（免轮询 GET /remoteaccess/tunnel）。
 	// 直通分发语义（sc-ops:remoteaccess.status），source 恒为服务端
 	EventRemoteAccessStatus = "remoteaccess.status"
+
+	// EventAgentGroupsChanged 终端会话自定义分组结构变更（P-20261111-1-S3）：
+	// agent 分组操作面（/api/terminals/session-groups 族建组/改名/删组/移入/
+	// 移出）写 uiState 成功后广播，载荷恒空——消费方收到即拉全量（settings.changed
+	// 同纪律，不信任载荷内容）。前端 useOpsChannel 显式 case 映射到既有窗口事件
+	// OPS_AGENT_GROUPS_CHANGED（sc-ops:agent-groups-changed——窗口事件名早于本
+	// 服务端事件存在：工作区预设恢复链 P-20261004-79 的前端内部事件升级为服务端
+	// 可播，window 事件名保持连字符旧形态不走直通恒等），落到
+	// useAgentTerminalGroups 既有外部变更重读链就地跟随；该窗口事件的原派发源
+	// （前端预设恢复链）与本服务端广播并存互不排斥。source 恒为服务端
+	EventAgentGroupsChanged = "agent.groups.changed"
 
 	// EventRateLimited 限流回告：system: 保留前缀仅服务端可发（同上
 	// SystemEventPrefix），前端无消费者不受扰

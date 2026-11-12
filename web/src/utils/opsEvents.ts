@@ -315,14 +315,16 @@ export interface SharePasteReviewDetail {
   at?: number
 }
 
-// frontend 动词族三原子（P-20261023-4）：协议从「引导注意力」升维「替用户
-// 执行浏览器动作」——下载框弹出 / 剪贴板直写 / 新标签开外链。三原子都是
-// 用户设备上的即时效应，前端消费链（utils/frontendAtomActions）必带可见
-// toast（无静默效应）+ 效应面限频 + 设置按原子开关（stores/opsAtomPrefs，
-// 默认开）。直通分发语义同 terminals.changed（sc-ops:frontend.*）
+// frontend 动词族（P-20261023-4 首批三原子 + P-20261111-3 整页·视图重载）：
+// 协议从「引导注意力」升维「替用户执行浏览器动作」——下载框弹出 / 剪贴板
+// 直写 / 新标签开外链 / 整页·当前视图重载。族内原子都是用户设备上的即时
+// 效应，前端消费链（utils/frontendAtomActions）必带可见 toast（无静默效应）
+// + 效应面限频 + 设置按原子开关（stores/opsAtomPrefs，默认开）。直通分发
+// 语义同 terminals.changed（sc-ops:frontend.*）
 export const OPS_FRONTEND_DOWNLOAD = 'sc-ops:frontend.download'
 export const OPS_FRONTEND_CLIPBOARD = 'sc-ops:frontend.clipboard'
 export const OPS_FRONTEND_OPEN = 'sc-ops:frontend.open'
+export const OPS_FRONTEND_RELOAD = 'sc-ops:frontend.reload'
 
 /** OPS_FRONTEND_DOWNLOAD 事件 detail（发布口注册表已校验项目相对形态） */
 export interface FrontendDownloadDetail {
@@ -343,6 +345,16 @@ export interface FrontendClipboardDetail {
 export interface FrontendOpenDetail {
   /** 外链 URL（scheme 白名单 http/https，window.open noopener 直开） */
   url: string
+}
+
+/** OPS_FRONTEND_RELOAD 事件 detail（发布口已校验 scope 枚举并规整缺省 page；
+ * 前端消费口仍防其它来源复验——直通分发面任何脚本都可派发同名事件） */
+export interface FrontendReloadDetail {
+  /** 重载范围：page = location.reload() 整页重载（未保存编辑由既有
+   *  beforeunload 确认框 + IndexedDB 草稿自动保存兜底）；view = 当前路由
+   *  整树 remount（App 层 RouterView :key 翻转，路由/URL 零变化，各视图
+   *  onMounted 数据链重跑）。缺省 = page（服务端已规整） */
+  scope?: 'page' | 'view'
 }
 
 /** OPS_CLIPBOARD_ARRIVED 事件 detail（服务端广播载荷，无内容字段） */
@@ -416,6 +428,11 @@ export interface NotesExternalUpdateDetail {
   noteId?: string
   /** 变更动作（saved|created|renamed|trashed|restored|purged|migrated；仅观测面，不作为分支依据——消费方一律重拉真值） */
   action?: string
+  /** 发起写入的客户端窗口 nonce（服务端写路径回带写请求 X-Notes-Origin 头；
+   *  消费方同 nonce 即本窗写回声，跳过重拉——本窗防抖自动保存不再触发整篇
+   *  重读打断连续输入，clipboard.arrived origin 同构。缺省 = 旧服务端/前端
+   *  内部事件，按外部更新处理向后兼容） */
+  origin?: string
   /** 前端内部事件专用：重拉后聚焦 noteId 篇（沉淀写回「点啥显示啥」——刚追加
    *  的结论节在编辑面可见） */
   focus?: boolean

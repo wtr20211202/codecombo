@@ -7,14 +7,20 @@ import { API_BASE } from '../../tests/api-base'
  *   1. 拖拽调宽：把手 pointer 拖拽 → .remote-sidebar 实时变宽 + localStorage
  *      记忆落盘（sc.remoteConsole.sidebarWidth）；反向拖过下界收在 min 钳制；
  *   2. 宽度记忆：拖宽后刷新页面恢复持久宽度（load 读回）；双击把手恢复默认
- *      260；键盘（聚焦后方向键/Home/End）微调即落盘——ARIA slider 语义。
+ *      320；键盘（聚焦后方向键/Home/End）微调即落盘——ARIA slider 语义。
+ *   3. 命中区不对称（P-20261111-7 S1）：把手盒右缘与侧栏右缘齐平、不越过
+ *      主区左缘（零重叠）——贴主区左缘起拖的 pointerdown 不再误触调宽，
+ *      把手带内 pointerdown 照常调宽（手感不劣化对照组）。
+ * 默认宽 260→320、min 200→220（P-20261111-7 S2）：断言常量随实现常量同步提升；
+ * 存量记忆宽语义（旧值原样生效、双击复位取新默认）由第 2 条用例的刷新恢复 +
+ * 双击复位链覆盖。
  * 主机经 API 播种/清理，不动其他 spec 依赖的既有主机（WSL 等）。
  */
 
 const BASE = API_BASE
 const WIDTH_KEY = 'sc.remoteConsole.sidebarWidth'
-const DEFAULT_W = 260
-const MIN_W = 200
+const DEFAULT_W = 320
+const MIN_W = 220
 const MAX_W = 480
 const HOST_NAMES = ['e2e-resize-alpha', 'e2e-resize-beta']
 
@@ -108,7 +114,7 @@ test('拖拽调宽：侧栏实时变宽 + localStorage 落盘 + 越下界收在 
   await openRemoteConsole(page)
   await expectSeededHosts(page)
 
-  // 默认宽度 = 旧固定宽 260（行为兼容：未拖拽过的存量会话形态不变）
+  // 默认宽度 = 320（P-20261111-7 S2 提升：无记忆值的全新会话直接受益）
   expect(await sidebarWidth(page)).toBeCloseTo(DEFAULT_W, 0)
 
   // 右拖 +120：侧栏实时变宽，松开落盘
@@ -118,7 +124,7 @@ test('拖拽调宽：侧栏实时变宽 + localStorage 落盘 + 越下界收在 
   const stored = await page.evaluate((k) => localStorage.getItem(k), WIDTH_KEY)
   expect(stored, '宽度应写入 localStorage 记忆键').toBe(String(DEFAULT_W + 120))
 
-  // 左拖远超下界（380-300=80 < 200）：收在 200 钳制（参数化 min，不塌缩到不可用）
+  // 左拖远超下界（440-300=140 < 220）：收在 220 钳制（参数化 min，不塌缩到不可用）
   await dragResizer(page, -300)
   expect(await sidebarWidth(page)).toBeCloseTo(MIN_W, 0)
   expect(await page.evaluate((k) => localStorage.getItem(k), WIDTH_KEY)).toBe(String(MIN_W))
@@ -128,8 +134,8 @@ test('宽度记忆：刷新恢复持久宽度；双击复位默认；键盘方�
   await openRemoteConsole(page)
   await expectSeededHosts(page)
 
-  // 拖宽到 400 → 刷新 → 重新进入远程管理 → 恢复 400（非默认 260 = load 读回生效）
-  await dragResizer(page, 140)
+  // 拖宽到 400 → 刷新 → 重新进入远程管理 → 恢复 400（非默认 320 = load 读回生效）
+  await dragResizer(page, 80)
   expect(await sidebarWidth(page)).toBeCloseTo(400, 0)
   await page.reload()
   await openRemoteConsoleAfterReload(page)
@@ -142,7 +148,7 @@ test('宽度记忆：刷新恢复持久宽度；双击复位默认；键盘方�
   await expect(handle).toHaveAttribute('aria-valuemax', String(MAX_W))
   await expect(handle).toHaveAttribute('aria-valuenow', '400')
 
-  // 双击复位默认 260 并落盘
+  // 双击复位默认 320 并落盘（P-20261111-7 S2：存量记忆宽不被动改，复位即取新默认）
   await handle.dblclick()
   expect(await sidebarWidth(page)).toBeCloseTo(DEFAULT_W, 0)
   expect(await page.evaluate((k) => localStorage.getItem(k), WIDTH_KEY)).toBe(String(DEFAULT_W))
@@ -160,4 +166,48 @@ test('宽度记忆：刷新恢复持久宽度；双击复位默认；键盘方�
   await page.keyboard.press('End')
   expect(await sidebarWidth(page)).toBeCloseTo(MAX_W, 0)
   expect(await page.evaluate((k) => localStorage.getItem(k), WIDTH_KEY)).toBe(String(MAX_W))
+})
+
+test('命中区不对称：把手右缘齐侧栏分界线不越主区（贴左缘选区不误触调宽）', async ({ page }) => {
+  await openRemoteConsole(page)
+  await expectSeededHosts(page)
+
+  const handle = page.locator('.remote-root .sidebar-resizer')
+  const sidebarBox = await page.locator('.remote-sidebar').boundingBox()
+  const handleBox = await handle.boundingBox()
+  const mainBox = await page.locator('.remote-main').boundingBox()
+  expect(sidebarBox && handleBox && mainBox, '侧栏/把手/主区均应有 boundingBox').toBeTruthy()
+
+  // CSS 契约：命中区内收贴侧栏侧（左溢 8px、右溢 0）
+  const margins = await handle.evaluate((el) => {
+    const cs = getComputedStyle(el)
+    return { left: cs.marginLeft, right: cs.marginRight }
+  })
+  expect(margins.left).toBe('-8px')
+  expect(margins.right).toBe('0px')
+
+  // 几何契约：把手右缘与侧栏右缘齐平（P-20261111-7 前为骑跨分界线、右缘压主区
+  // 4px），且不越过主区左缘——主区/终端侧零重叠
+  const handleRight = handleBox!.x + handleBox!.width
+  const sidebarRight = sidebarBox!.x + sidebarBox!.width
+  expect(Math.abs(handleRight - sidebarRight), '把手右缘应齐平侧栏分界线').toBeLessThanOrEqual(0.5)
+  expect(handleRight, '把手不得越入主区').toBeLessThanOrEqual(mainBox!.x + 0.5)
+
+  // 行为契约（痛点回归）：pointerdown 落在主区左缘内 2px（旧几何下把手右溢
+  // 4px 正压此处、起拖即误触调宽）横向拖 30px——宽度与落盘记忆均不动
+  const cy = handleBox!.y + handleBox!.height / 2
+  await page.mouse.move(mainBox!.x + 2, cy)
+  await page.mouse.down()
+  await page.mouse.move(mainBox!.x + 32, cy, { steps: 3 })
+  await page.mouse.up()
+  expect(await sidebarWidth(page)).toBeCloseTo(DEFAULT_W, 0)
+  expect(await page.evaluate((k) => localStorage.getItem(k), WIDTH_KEY)).toBeNull()
+
+  // 对照组（手感不劣化）：同一 y 上把手带内（右缘内 2px）pointerdown 仍正常调宽
+  await page.mouse.move(handleRight - 2, cy)
+  await page.mouse.down()
+  await page.mouse.move(handleRight - 2 + 40, cy, { steps: 3 })
+  await page.mouse.up()
+  expect(await sidebarWidth(page)).toBeCloseTo(DEFAULT_W + 40, 0)
+  expect(await page.evaluate((k) => localStorage.getItem(k), WIDTH_KEY)).toBe(String(DEFAULT_W + 40))
 })

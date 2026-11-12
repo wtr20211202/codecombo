@@ -37,6 +37,7 @@ func portableSettingsFromConfig(s config.ServerConfig) *MigrationPortableSetting
 		TerminalDefaultShell:     s.TerminalDefaultShell,
 		AgentProvider:            s.AgentProvider,
 		AgentNamingNoteEnabled:   s.AgentNamingNoteEnabled,
+		AgentAutoNameEnabled:     s.AgentAutoNameEnabled,
 		AgentLaunchCommands:      s.AgentLaunchCommands,
 		CustomAgents:             s.CustomAgents,
 		AgentGuard:               s.AgentGuard,
@@ -84,6 +85,7 @@ func applyPortableToConfig(in *MigrationPortableSettings, s *config.ServerConfig
 	s.TerminalDefaultShell = in.TerminalDefaultShell
 	s.AgentProvider = in.AgentProvider
 	s.AgentNamingNoteEnabled = in.AgentNamingNoteEnabled
+	s.AgentAutoNameEnabled = in.AgentAutoNameEnabled
 	s.AgentLaunchCommands = in.AgentLaunchCommands
 	s.CustomAgents = in.CustomAgents
 	s.AgentGuard = in.AgentGuard

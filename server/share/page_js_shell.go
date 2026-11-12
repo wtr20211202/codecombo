@@ -106,15 +106,13 @@ async function exportCardImage(btn){
     xmeta.appendChild(el('div', 'sub', subEl.textContent));
     xhead.append(xicon, xmeta);
     wrap.appendChild(xhead);
-    // 冻结快照时点声明随导出图（P-20261005-168）：导出是最常见的截图外传
-    // 途径，导出件缺时点声明同样会被误当现状（水印随导出图的同款理由；
-    // live 记录无该节点，零变化）。有效期弱提示（P-20261020-5）同理由随导出
-    const snapBanner = document.getElementById('snap-banner');
-    if (snapBanner) wrap.appendChild(snapBanner.cloneNode(true));
+    // 快照/过期状态条随导出图（P-20261005-168 时点声明，P-20261111-5 起合并
+    // 为单行紧凑条）：导出是最常见的截图外传途径，导出件缺时点声明同样会
+    // 被误当现状（水印随导出图的同款理由；live 永久记录无该节点，零变化）。
     // 导出克隆源 = reader 内容区（原 .card；P-20261020-7 去卡片后同一
     // 语义——标题头自述 + 当前内容，不含顶栏操作控件）。
-    const expiryBanner = document.getElementById('expiry-banner');
-    if (expiryBanner) wrap.appendChild(expiryBanner.cloneNode(true));
+    const statusBanner = document.getElementById('status-banner');
+    if (statusBanner) wrap.appendChild(statusBanner.cloneNode(true));
     // 根层级的面包屑只是"文件分享 › 文件名"的重复（标题头已自述），
     // 仅子目录层级保留以呈现路径上下文
     const readerClone = readerEl.cloneNode(true);
@@ -375,12 +373,11 @@ function toggleWide(){
 }
 
 function buildShell(){
-  // 服务端为 frozen 记录预渲染的快照时点横幅（P-20261005-168）与有效期弱
-  // 提示（P-20261020-5）：下面的 replaceChildren 会清掉静态壳，先摘下、
-  // header 就位后按原序插回（横幅随 HTML 直出、不依赖本脚本执行成功）；
-  // 无对应记录时节点不存在，零变化
-  const snapBanner = document.getElementById('snap-banner');
-  const expiryBanner = document.getElementById('expiry-banner');
+  // 服务端预渲染的快照/过期紧凑状态条（P-20261005-168 时点声明，P-20261111-5
+  // 起合并为单行）：下面的 replaceChildren 会清掉静态壳，先摘下、header
+  // 就位后插回原位（条随 HTML 直出、不依赖本脚本执行成功）；live 永久
+  // 记录节点不存在，零变化
+  const statusBanner = document.getElementById('status-banner');
   $app.replaceChildren();
   headerEl = el('div', 'header');
   const ic = el('div', 'icon'); ic.innerHTML = ICONS.info;
@@ -459,8 +456,7 @@ function buildShell(){
 
   headerEl.appendChild(actions);
   $app.appendChild(headerEl);
-  if (snapBanner) $app.appendChild(snapBanner);
-  if (expiryBanner) $app.appendChild(expiryBanner);
+  if (statusBanner) $app.appendChild(statusBanner);
 
   // reader = 顶栏之下的唯一内容容器（无卡片边框/阴影）；文件根页隐藏
   // 面包屑（标题已自述），目录/子路径保留返回链（refresh 里按 entry 判定）

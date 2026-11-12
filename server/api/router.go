@@ -1123,6 +1123,17 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 	api.GET("/terminals/tmux-info", terminal.GetTmuxInfo)
 	api.POST("/terminals/tmux-install", terminal.InstallTmux)
 	api.POST("/terminals/paste-image", terminal.UploadPasteImage)
+	// 终端会话自定义分组智能体操作面（P-20261111-1-S3）：分组 CRUD + 会话归组
+	// 移动（写 uiState 本地实例 agentTerminal.groups，store 层 MutateNamespace
+	// 手术式 RMW；成功广播 agent.groups.changed 走前端既有 OPS_AGENT_GROUPS_CHANGED
+	// 重读链）。组织元数据非破坏面，不经 AgentGuard 高危审批；静态段先于 :id
+	// 动态段登记（与 search/queues 同款先例）
+	api.GET("/terminals/session-groups", terminal.ListSessionGroups)
+	api.POST("/terminals/session-groups", terminal.CreateSessionGroup)
+	api.PUT("/terminals/session-groups/:id", terminal.RenameSessionGroup)
+	api.DELETE("/terminals/session-groups/:id", terminal.DeleteSessionGroup)
+	api.PUT("/terminals/session-groups/:id/sessions", terminal.MoveSessionsIntoGroup)
+	api.DELETE("/terminals/session-groups/:id/sessions/:sid", terminal.RemoveSessionFromGroup)
 	// 高危命令影响面预览（P-20261005-191）：命令串 → 结构化判定（模式表 +
 	// rm glob 展开/git status 动态计数）——前端粘贴链/palette 直达插入链的
 	// 确认卡数据源 + agent 执行前自检原语。只读面（读元数据不执行不入硬锁）；

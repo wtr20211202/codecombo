@@ -7,22 +7,26 @@ import { copyText } from './clipboard'
 import { maskSensitive } from './sensitiveMask'
 import { useNotificationStore } from '../stores/notification'
 import { useOpsAtomPrefs, type FrontendAtomId } from '../stores/opsAtomPrefs'
-import type { FrontendClipboardDetail, FrontendDownloadDetail, FrontendOpenDetail } from './opsEvents'
+import type { FrontendClipboardDetail, FrontendDownloadDetail, FrontendOpenDetail, FrontendReloadDetail } from './opsEvents'
 import { useClipRelay } from '../composables/useClipRelay'
+import { bumpViewReload } from '../composables/useViewReload'
 
 /**
- * frontend 动词族三原子的前端消费链（P-20261023-4）：下载框弹出 / 剪贴板直写 /
- * 新标签开外链——协议从「引导注意力」升维「替用户执行浏览器动作」的首批原子。
- * OpsChannelBridge 每事件委托一行，本模块不持视图状态——与 previewPortNotify
+ * frontend 动词族原子的前端消费链（P-20261023-4 首批三原子 + P-20261111-3
+ * 整页·视图重载）：下载框弹出 / 剪贴板直写 / 新标签开外链 / 整页·当前视图
+ * 重载——协议从「引导注意力」升维「替用户执行浏览器动作」。OpsChannelBridge
+ * 每事件委托一行，本模块不持视图状态（view 重载的 tick 状态收口在
+ * composables/useViewReload，本模块只 bump）——与 previewPortNotify
  * （P-20261002-70）/ watchInviteNotify（P-20261005-165）同构拆分。
  *
- * 安全边界（三原子都是用户设备上的即时效应，滥用对策四层，缺一不可）：
+ * 安全边界（族内原子都是用户设备上的即时效应，滥用对策四层，缺一不可）：
  * ①服务端发布口 60 条/分钟/会话限流（ai/opsentry.go opsNotifyLimiter）；
  * ②下方效应面独立预算（10 次/分钟/原子，超限**可见** warning——效应面丢弃
  *   不允许静默，agent 侧 bug 死循环下载会变成下载框轰炸）；
- * ③全部必带可见反馈 toast——下载/剪贴板/打开均无静默效应（剪贴板的写入前
- *   可见预告是投毒防线第一层；此处刻意**不**参与免打扰静默：安全反馈与
- *   notify.toast 的即逝提醒不同性质，夜间挂机也不许在用户设备上无痕生效）；
+ * ③全部必带可见反馈 toast——下载/剪贴板/打开/重载均无静默效应（剪贴板的
+ *   写入前可见预告是投毒防线第一层；整页重载本身就是最响的可见效应，toast
+ *   承担归因提示。此处刻意**不**参与免打扰静默：安全反馈与 notify.toast 的
+ *   即逝提醒不同性质，夜间挂机也不许在用户设备上无痕生效）；
  * ④设置按原子开关（stores/opsAtomPrefs，默认开；关闭后 handler 门控跳过，
  *   每窗口至多一条「已关闭」提示——agent 可感知而非静默失联）。
  */
@@ -234,5 +238,34 @@ export function handleFrontendOpen(d: FrontendOpenDetail, message: AtomMessage):
     actionPayload: url,
   })
   message.warning(atomToast(t('opsAtom.openBlocked', { host }), 'ops-atom-open-blocked-toast'))
+  return true
+}
+
+// scope=page 的 toast 上屏窗口：naive-ui message 下一帧即渲染，留出一次可见
+// 上屏再触发卸载（即时 reload 会连 toast 一起带走）；对重载体感无感知差异
+const PAGE_RELOAD_TOAST_DELAY_MS = 300
+
+/**
+ * frontend.reload（P-20261111-3）：要求前端重载——page = location.reload()
+ * 整页重载；view = 当前路由整树 remount（bump useViewReloadTick 翻转 App 层
+ * RouterView :key，路由/URL 零变化）。未保存编辑有 IndexedDB 草稿自动保存
+ * 兜底，page 档另有既有 beforeunload 确认框（脏文件在位时浏览器弹确认，
+ * 用户可取消——重载被拒是用户裁决，非静默失败）。
+ * 返回 true = 已触发（含触顶/关闭被拒的可见反馈已给出），false = 载荷非法静默忽略
+ */
+export function handleFrontendReload(d: FrontendReloadDetail, message: AtomMessage): boolean {
+  // scope 复验（服务端已规整枚举，此处防其它来源——同三原子防呆口径）：
+  // 未知值按缺省 page 收敛而非静默丢弃——重载意图明确，粒度存疑时取更彻底
+  // 的重取形态（与提案「scope 缺省 page」同向）
+  const scope = d.scope === 'view' ? 'view' : 'page'
+  if (!ensureAtomEnabled('reload', message)) return false
+  if (!consumeAtomBudget('reload', message)) return false
+  if (scope === 'view') {
+    bumpViewReload()
+    message.success(atomToast(t('opsAtom.viewReloaded'), 'ops-atom-reload-toast'))
+    return true
+  }
+  message.info(atomToast(t('opsAtom.pageReloading'), 'ops-atom-reload-toast'))
+  window.setTimeout(() => { window.location.reload() }, PAGE_RELOAD_TOAST_DELAY_MS)
   return true
 }

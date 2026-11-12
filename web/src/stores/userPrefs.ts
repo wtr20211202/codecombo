@@ -32,8 +32,9 @@ import { onUserPrefsDirty } from './userPrefsLink'
  *   （防把用户刚改的偏好回滚）。
  *
  * 键域（提案①漫游清单）：keymap / notify{dnd,sound,simple} / terminal
- * {copyOnSelect,followAppTheme} / opsAtoms{download,clipboard,open}（P-20261023-4
- * frontend 原子管制）。后续新用户偏好在此登记一行即完成收编。
+ * {copyOnSelect,followAppTheme} / opsAtoms{download,clipboard,open,reload}
+ * （P-20261023-4 frontend 原子管制 + P-20261111-3 reload）。后续新用户偏好
+ * 在此登记一行即完成收编。
  */
 
 // 键位覆盖表（sc.keymapOverrides）等存储键常量已由各 store 导出；此处集中
@@ -47,9 +48,10 @@ export interface UserPrefsPayload {
   keymap?: Record<string, string>
   notify?: { dnd?: Record<string, unknown>; sound?: boolean; simple?: boolean }
   terminal?: { copyOnSelect?: boolean; followAppTheme?: boolean }
-  /** frontend 原子管制（P-20261023-4）：true = 出厂默认（开），稀疏偏差集只存
-   * 关档项——缺省段/缺键 = 回默认开，与 sound 等布尔偏好同一整表替换语义 */
-  opsAtoms?: { download?: boolean; clipboard?: boolean; open?: boolean }
+  /** frontend 原子管制（P-20261023-4 + P-20261111-3 reload）：true = 出厂默认
+   * （开），稀疏偏差集只存关档项——缺省段/缺键 = 回默认开，与 sound 等布尔
+   * 偏好同一整表替换语义 */
+  opsAtoms?: { download?: boolean; clipboard?: boolean; open?: boolean; reload?: boolean }
 }
 
 // 本地变更上云的防抖：偏好 setter 可能被设置页保存链一次触发多次（通知分区

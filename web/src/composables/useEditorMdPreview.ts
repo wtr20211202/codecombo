@@ -8,7 +8,7 @@ import type { EditorMdMode } from '../stores/uiState'
 import { OPS_OPEN_FILE_AT, type OpenFileAtDetail } from '../utils/opsEvents'
 import { resolveMdLinkTarget, resolveMdAnchorTarget } from '../views/editor/mdPreviewLinks'
 import { jumpToMdAnchor } from '../views/editor/mdAnchorNav'
-import { createMdHeadingSlugger } from '../utils/mdAnchorSlug'
+import '../utils/markedHeadingIds'
 
 /**
  * Monaco Markdown 模式与预览管线（P-20261003-301 自 MonacoEditor.vue 原样搬运）：
@@ -19,35 +19,9 @@ import { createMdHeadingSlugger } from '../utils/mdAnchorSlug'
  * 路径与内容经 getter 读取实时 props。
  */
 
-// ── heading id 生成（P-20261007-7 页内锚点二阶段的渲染侧）──
-// marked.use 突变的是全局 marked 实例（HelpCenter/NotesPanel/useDshVersions
-// 同船消费方），且 renderer 包装器会在重复 use 时层层叠裹（去重计数被翻倍），
-// 故只在模块加载时安装一次。副作用仅「heading 多挂一个 id 属性」：id 是惰性
-// 属性，各消费方 DOMPurify 默认允许面含 id（SANITIZE_DOM 会剥与 document 属性
-// 撞名的 id，如 title/body——该形态锚点落入坏锚点回退，不炸）；其余渲染产物
-// 字节不变。slug 规则与重名去重单源在 utils/mdAnchorSlug（点击侧按 id 精确
-// 匹配不重算，两侧行为靠同源保证）。
-const headingSlugger = createMdHeadingSlugger()
-marked.use({
-  hooks: {
-    // 每个 parse 开始时复位重名计数（parse 同步执行，无重入交错）
-    preprocess(src: string) {
-      headingSlugger.reset()
-      return src
-    },
-  },
-  renderer: {
-    heading(token) {
-      // slug 取纯文本口径：textRenderer 剥行内标记（[link](url) 计 text 不计
-      // url），与 GitHub slug 语义一致
-      const plain = this.parser.parseInline(token.tokens, this.parser.textRenderer)
-      const id = headingSlugger(plain)
-      if (!id) return false // 空 slug（纯标点标题）不挂 id，false 回落默认 renderer
-      // slug 规则保证 id 无 HTML 特殊字符（字母/数字/连字符/下划线/CJK），可直插
-      return `<h${token.depth} id="${id}">${this.parser.parseInline(token.tokens)}</h${token.depth}>\n`
-    },
-  },
-})
+// heading id 生成（P-20261007-7 页内锚点二阶段的渲染侧）：marked 全局 renderer hook
+// 收在 utils/markedHeadingIds 模块单点安装（文件头 import，与发布说明渲染链
+// utils/changelogRender 共用，P-20261112-2-S1）
 
 export interface EditorMdPreviewDeps {
   /** 当前文件路径（props.path 实时读取） */

@@ -11,12 +11,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"codecombo/server/config"
 	"codecombo/server/errmarkers"
+	"codecombo/server/servicectx"
 	"codecombo/server/sysinfo"
 )
 
@@ -839,19 +842,84 @@ func CleanupServeCache(dataDir string) {
 	}
 }
 
-// LaunchUpdateSubprocess 启动 _do_update 子进程执行二进制替换。
-// env 正名 CODECOMBO_UPDATE_* + 旧名 SIMPLE_CODING_UPDATE_* 双写一个版本期：
-// 跨版本矩阵「旧中心二进制下载新包后以新二进制 _do_update 拉起」时 env 由
-// 旧代码下发旧名，新代码 getenvOr 双读兜底（同版本子进程读正名）
-func LaunchUpdateSubprocess(currentBinary, newBinary string, port, pid int, dataDir, version, prevVersion string) error {
-	cmd := exec.Command(newBinary, "_do_update", currentBinary, newBinary, fmt.Sprintf("%d", port), fmt.Sprintf("%d", pid))
-	cmd.Env = append(os.Environ(),
+// 测试注入口（环境依赖探测的测试纪律）：服务上下文探测平台锁定（仅 Windows
+// SCM 服务为真，非 Windows 恒否）、launchd 依赖 GOOS+ppid 宿主实况——单测
+// 注入可控值。launchd 判定与页面重启链同口径（server/app RegisterRestart 的
+// darwin && ppid==1）：非 darwin 一律否——ppid==1 在 Linux/Windows 语义完全
+// 不同（init/SCM 服务），不可泛化
+var (
+	isServiceFn      = servicectx.IsService
+	launchdManagedFn = func() bool { return runtime.GOOS == "darwin" && os.Getppid() == 1 }
+)
+
+// currentSuperviseForm 主进程侧监管形态探测（env 契约下发源）：判定链与页面
+// 重启链同构——Windows 服务→launchd→其余 bare。systemd 形态不探测也不在
+// 契约值域内：更新子进程自查 /proc/self/cgroup 且自查优先（restart.go
+// superviseFromEnv），对 systemd 形态下发 bare 即可
+func currentSuperviseForm() superviseForm {
+	if isServiceFn() {
+		return superviseWindowsService
+	}
+	if launchdManagedFn() {
+		return superviseLaunchd
+	}
+	return superviseBare
+}
+
+// currentSuperviseFormFn 监管形态探测取值口（默认 currentSuperviseForm）：
+// 单测注入以断言 env 契约按形态下发
+var currentSuperviseFormFn = currentSuperviseForm
+
+// origArgsFn 主进程原参数取值口（P-20261112-1-S2 argv 契约下发源）：bare/前台
+// 形态换包后按原参数原样重启（历史只传 --serve --port 静默丢 --host/--data-dir
+// 等，host 无 env 回写面全仓无读取——用户点名「直接 start 的必须用老参数原样
+// 启动」）。os.Args[0] 是自身路径，新进程 argv[0] 由 currentBinary 权威替代，
+// 故只下发 [1:]。取值口注入（环境依赖探测的测试纪律）——单测注入可控值
+var origArgsFn = func() []string { return os.Args[1:] }
+
+// updateSubprocessEnv 换包子进程 env 契约组装（纯函数便于单测断言，真实
+// spawn 由 LaunchUpdateSubprocess 负责）：正名+旧名双写一个版本期（注释见
+// LaunchUpdateSubprocess）+ 监管形态提示后置——Go 1.19+ exec 对重复键取末
+// 值，外部预置的同名陈旧变量以本次探测下发为准。
+// S2 增 argv 列式契约（envUpdateArgvN + envUpdateArgvPrefix 逐键承载
+// origArgs）：逐键 env 天然免疫参数内空白/引号/分隔符歧义（长度前缀方案需
+// 自拼编码，逐键即列式）；N=0（无参数）读侧按无契约回落，无需特殊形态。
+// 可选字段无旧名双写（本字段诞生前不存在任何名字的下发）：旧主进程不下发、
+// 旧 _do_update 忽略未知 env——跨版本双向矩阵安全
+func updateSubprocessEnv(dataDir, version, prevVersion string, form superviseForm, origArgs []string) []string {
+	env := append(os.Environ(),
 		envUpdateDataDir+"="+dataDir,
 		envUpdateVersion+"="+version,
 		envUpdatePrevVer+"="+prevVersion,
 		envUpdateDataDirOld+"="+dataDir,
 		envUpdateVersionOld+"="+version,
 		envUpdatePrevVerOld+"="+prevVersion,
+		envUpdateSupervise+"="+string(form),
 	)
-	return cmd.Start()
+	env = append(env, envUpdateArgvN+"="+strconv.Itoa(len(origArgs)))
+	for i, arg := range origArgs {
+		env = append(env, envUpdateArgvPrefix+strconv.Itoa(i)+"="+arg)
+	}
+	return env
+}
+
+// newUpdateCmd 组装换包子进程命令（不启动）。拆出便于单测断言 argv 与 env
+// 契约注入——测试绝不真实 spawn 换包进程（launchUpdateSubprocessFn 注释
+// 同款护栏）
+func newUpdateCmd(currentBinary, newBinary string, port, pid int, dataDir, version, prevVersion string, form superviseForm, origArgs []string) *exec.Cmd {
+	cmd := exec.Command(newBinary, "_do_update", currentBinary, newBinary, fmt.Sprintf("%d", port), fmt.Sprintf("%d", pid))
+	cmd.Env = updateSubprocessEnv(dataDir, version, prevVersion, form, origArgs)
+	return cmd
+}
+
+// LaunchUpdateSubprocess 启动 _do_update 子进程执行二进制替换。
+// env 正名 CODECOMBO_UPDATE_* + 旧名 SIMPLE_CODING_UPDATE_* 双写一个版本期：
+// 跨版本矩阵「旧中心二进制下载新包后以新二进制 _do_update 拉起」时 env 由
+// 旧代码下发旧名，新代码 getenvOr 双读兜底（同版本子进程读正名）。
+// P-20261112-1-S1 增发可选监管形态提示 CODECOMBO_UPDATE_SUPERVISE（缺省回落
+// bare=旧对端行为不劣化，语义见 do_update.go 契约块）。
+// P-20261112-1-S2 增发可选 argv 列式契约（origArgsFn=本进程 os.Args[1:]）：
+// bare/前台形态换包后按原参数原样重启，见 updateSubprocessEnv
+func LaunchUpdateSubprocess(currentBinary, newBinary string, port, pid int, dataDir, version, prevVersion string) error {
+	return newUpdateCmd(currentBinary, newBinary, port, pid, dataDir, version, prevVersion, currentSuperviseFormFn(), origArgsFn()).Start()
 }

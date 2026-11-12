@@ -2,9 +2,11 @@ package update
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +64,67 @@ func TestFetchLatestChannel(t *testing.T) {
 	}
 
 	// 无本平台产物的 release 被跳过：列表首项换成纯 Windows beta → linux 应取到第二项 stable
+}
+
+// TestFetchLatestReleaseURLPassthrough 发布页直链透传（P-20261112-2-S2）：
+// GitHub API html_url → ReleaseInfo.ReleaseURL，stable 与 prerelease 两通道
+// 同样携带；源缺 html_url（异常形态）留空——omitempty 使 check 响应不含该键，
+// 前端不显「查看发布页」链接零回退
+func TestFetchLatestReleaseURLPassthrough(t *testing.T) {
+	const stableBody = `{"tag_name":"v0.2.0","html_url":"https://github.com/owner/repo/releases/tag/v0.2.0","assets":[
+		{"name":"codecombo-linux-amd64","browser_download_url":"https://example/stable","size":1}]}`
+	const listBody = `[{"tag_name":"v0.2.0-beta.1","html_url":"https://github.com/owner/repo/releases/tag/v0.2.0-beta.1","assets":[
+		{"name":"codecombo-linux-amd64","browser_download_url":"https://example/beta","size":2}]}]`
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/owner/repo/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(stableBody))
+	})
+	mux.HandleFunc("/owner/repo/releases", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("per_page") == "" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(listBody))
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	src, err := NewGitHubSource("https://github.com/owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.RepoURL = ts.URL + "/owner/repo"
+	src.client = ts.Client()
+
+	// stable 通道透传
+	info, err := src.FetchLatest(context.Background(), "linux", "amd64")
+	if err != nil {
+		t.Fatalf("stable channel: %v", err)
+	}
+	if info.ReleaseURL != "https://github.com/owner/repo/releases/tag/v0.2.0" {
+		t.Errorf("stable ReleaseURL = %q", info.ReleaseURL)
+	}
+
+	// prerelease 通道（列表端点）透传
+	src.IncludePrerelease = true
+	info, err = src.FetchLatest(context.Background(), "linux", "amd64")
+	if err != nil {
+		t.Fatalf("prerelease channel: %v", err)
+	}
+	if info.ReleaseURL != "https://github.com/owner/repo/releases/tag/v0.2.0-beta.1" {
+		t.Errorf("prerelease ReleaseURL = %q", info.ReleaseURL)
+	}
+
+	// 源未提供 html_url：留空且 JSON 省略（增量字段零负担）
+	info.ReleaseURL = ""
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "releaseUrl") {
+		t.Errorf("empty ReleaseURL should be omitted: %s", data)
+	}
 }
 
 // releaseHasPlatformAsset 双名模板任一命中即真

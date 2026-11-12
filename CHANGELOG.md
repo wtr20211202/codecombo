@@ -9,6 +9,67 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.7] - 2026-11-12
+
+### Added
+
+- **Update restarts respect how the app is supervised** — after a
+  self-update, the restart is routed per supervision form: Windows
+  services hand back to SCM (`sc.exe start`), macOS launchd forms let
+  KeepAlive relaunch, and bare/foreground processes respawn with the
+  original command-line arguments — previously `--host`/`--data-dir`
+  flags were silently lost on update. The new process detaches from the
+  console (closing the window no longer kills it), its output lands in a
+  log file under the data directory, and rollback chains follow the same
+  per-form routing.
+- **Session auto-naming** — agent terminal sessions are automatically
+  named from their first user message (a short content summary); manual
+  renames always win, and a settings switch turns auto-naming off (hot).
+- **Terminal session groups** — custom groups gain collapse chevrons with
+  member-count badges (parity with project groups), drag-and-drop with
+  whole-section drop targets (drop anywhere on a group; reordering works
+  from both surfaces), and a live hint when the runtime view hides
+  groups. Agents can manage groups over the ops API
+  (create/rename/reorder/delete, move sessions in and out) with change
+  broadcasts to every open UI.
+- **Release notes rendered in the update panel** — the in-app update
+  panel shows the release notes as sanitized markdown with
+  expand/collapse, plus a "view release page" external link.
+- **`frontend.reload` agent primitive** — agents can trigger a page or
+  view reload (handy after batch edits), gated by the same per-atom
+  settings as the other frontend primitives.
+- **dsh 0.2.2-rc.1 known-defect marking** — the version dialog flags the
+  known-broken dsh release with a warning and upgrade guidance to
+  rc.2+.
+
+### Changed
+
+- **Bilingual release notes get anchor navigation** — GitHub release
+  pages now open with a language switch line ([English] | [中文]) and
+  each language in its own anchored section (English first), replacing
+  the collapsed fold; the switch line, both sections and their order are
+  asserted at assembly time, so a malformed template fails the release
+  instead of shipping silently.
+- **Update restart troubleshooting docs** — README and the Linux deploy
+  guide now document how each supervision form behaves across a
+  self-update (systemd, Windows service incl. the transient STOPPED
+  window, launchd, bare/daemonized), with logs and rollback notes.
+- **Share visitor page status bar** — the snapshot/expiry two-line hint
+  merges into one compact bar (full sentences remain on hover).
+
+### Fixed
+
+- **Notes handle external edits without disruption** — your own saves no
+  longer echo back as external updates (per-window origin nonce);
+  external changes from other windows swap in without unmounting the
+  editor (cursor and selection stay anchored; identical content is a
+  no-op); and the 409 conflict bar now actually appears on the real save
+  path (it previously never fired due to an error-shape mismatch).
+- **Sidebar resizer no longer steals text selection** — resize handles
+  only respond on the sidebar side of the divider; the remote host list
+  default width rises to 320 px (min 220), existing remembered widths
+  are untouched.
+
 ## [0.0.1-beta.6] - 2026-11-11
 
 ### Added
@@ -309,7 +370,8 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.6...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.7...HEAD
+[0.0.1-beta.7]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.7
 [0.0.1-beta.6]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.6
 [0.0.1-beta.5]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.5
 [0.0.1-beta.4]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.4

@@ -432,14 +432,16 @@ export default {
     mouseBroadcastSelect: 'In broadcast mode (terminal toolbar toggle), click tabs = select/deselect, one input sends to all',
   },
   // Frontend atom toasts (P-20261023-4): visible feedback for agent-triggered
-  // browser effects (download box / clipboard write / open tab) and the settings
-  // switches — no silent effect is part of the safety boundary, so these toasts
-  // deliberately do not participate in do-not-disturb silencing
+  // browser effects (download box / clipboard write / open tab / page·view reload
+  // P-20261111-3) and the settings switches — no silent effect is part of the
+  // safety boundary, so these toasts deliberately do not participate in
+  // do-not-disturb silencing
   opsAtom: {
     atom: {
       download: 'file download',
       clipboard: 'clipboard write',
       open: 'open page',
+      reload: 'page/view reload',
     },
     downloadStarted: 'Agent requested download of "{name}" — started',
     clipboardWritten: 'Agent wrote to your clipboard: {preview}',
@@ -448,6 +450,8 @@ export default {
     opened: 'Agent opened {host} in a new tab',
     openBlocked: 'The browser blocked the popup; it was moved to the notification center — click the notification to open {host}',
     openBlockedTitle: 'Agent requested to open an external link: {host}',
+    pageReloading: 'Agent requested a page refresh — reloading…',
+    viewReloaded: 'Agent refreshed the current view',
     rateLimited: '{atom} requests are too frequent (10/min); this one was dropped',
     disabledNotice: '{atom} is disabled in Settings; this request was ignored',
   },
@@ -510,6 +514,10 @@ export default {
     // with a task prompt — the driver for rename-on-task-evolution
     agentNamingNoteLabel: 'Attach naming note to new sessions (rename to a short label of at most 16 chars when the task evolves)',
     agentNamingNoteHint: 'When a session is created with a task prompt, a system note line is appended after it: it states the session ID and asks the agent to check for duplicates before renaming. Same-name sessions are auto-stepped with a numeric suffix server-side; this toggle only controls the note injection.',
+    // Session auto-naming (P-20261111-6 S2): the session is named after its
+    // first message; sidebar/tabs follow live; manual renames are never overwritten
+    agentAutoNameLabel: 'Auto-name sessions from the first message',
+    agentAutoNameHint: 'After a Claude session receives its first message, the server summarizes it into the session name (~40 chars truncated). Sidebar and tabs follow immediately; manually renamed sessions are never overwritten, and sensitive first messages are skipped silently. Turn off to fall back to manual renaming only.',
     // Default validity for new shares (P-20261020-5): applied when the create dialog is left untouched
     shareDefaultTTL: 'Default validity for new shares',
     shareDefaultTTLDesc: 'Validity preselected when creating a file share; can be overridden per share in the create dialog. "Permanent" (default) keeps the existing behavior. Applies to live file shares only — frozen snapshots default to 30 days, and other share kinds have fixed windows',
@@ -520,11 +528,13 @@ export default {
     previewCompatConfirmTitle: 'Enable preview compatibility mode?',
     previewCompatConfirmBody: 'With the sandbox disabled, scripts in the previewed page gain this app\'s permissions: they can read the unlock token and cookies, call this app\'s APIs as you, and manipulate the page. Enable only if you fully trust the previewed project and all of its dependencies.',
     previewCompatConfirmYes: 'Enable anyway',
-    // Frontend atom switches (P-20261023-4): agent-triggered browser effects,
-    // togglable per atom — download box / clipboard write / open tab
+    // Frontend atom switches (P-20261023-4 + reload P-20261111-3): agent-triggered
+    // browser effects, togglable per atom — download box / clipboard write /
+    // open tab / page·view reload
     opsAtomDownload: 'Allow agents to trigger file downloads (open the browser download box)',
     opsAtomClipboard: 'Allow agents to write the clipboard (with a visible preview before writing)',
     opsAtomOpen: 'Allow agents to open web pages (external links in a new tab)',
+    opsAtomReload: 'Allow agents to reload the page or current view (unsaved content is covered by draft autosave and a confirmation prompt)',
     opsAtomsHint: 'These are instant browser effects agents trigger via the ops channel (each with a visible toast, rate-limited to 10/min); when off, matching requests are ignored and the agent is told the atom is disabled',
     // Context warn threshold (P-20261006-33): device-local pref; raise it to leave room for tail conclusions
     contextWarnThreshold: 'Context warn threshold',
@@ -763,7 +773,7 @@ export default {
     dshProxyPort: 'Proxy port',
     dshExposeAll: 'Expose to all IPs',
     dshAllowStandalone: 'Allow standalone tab access to dsh',
-    dshAllowStandaloneHint: 'Off by default: opening the dsh embed channel address directly in a browser tab shows a guide page — dsh is only usable inside Codecombo; turn on to allow standalone access (still protected by the dsh token).',
+    dshAllowStandaloneHint: 'Off by default: opening the dsh embed channel address directly in a browser tab shows a guide page — dsh is only usable inside Codecombo; turn on to allow standalone access (still protected by the dsh token). Seeing the "dsh Embed Channel" guide page (403) when using dsh in a new tab means this switch is off — enabling it resolves that.',
     dshNpmCommand: 'npm command',
     dshNpmCommandPlaceholder: 'Default: npm; for WSL-installed dsh use wsl.exe npm',
     dshLaunchCommand: 'Launch command',
@@ -1350,6 +1360,9 @@ export default {
     // the shared agentLabelOf runtime labels — brand names are locale-neutral)
     groupByRuntime: 'Group by runtime',
     groupFlat: 'Back to flat view',
+    // Coexistence hint (P-20261111-1-S3): custom groups yield the whole section
+    // in this view — count only (no group content rendered), click switches back
+    runtimeGroupsHidden: 'This view hides {n} custom group(s) — click to switch to flat view',
     searchPlaceholder: 'Search sessions / projects',
     noMatchSession: 'No matching sessions',
     // Time filter chips (P-20261003-174): AND-combined with the name filter
@@ -2093,6 +2106,13 @@ export default {
     prereleaseChannel: 'On the prerelease channel',
     upToDatePrerelease: 'Latest prerelease (stable: v{stable})',
     upToDatePrereleaseOnly: 'Latest prerelease',
+    // Known-defect annotation (P-20261111-2-S2): S1 diagnosis confirmed 0.2.2-rc.1
+    // plugin load failures take down the page; the proxy face has no workaround —
+    // annotate the version face and guide the upgrade (issueKey entries in useDshVersions)
+    knownDefectTag: 'Known defect',
+    knownDefectTitle: 'The current version has a known defect — click for details and upgrade guidance',
+    knownDefectBanner: 'The current version has a known defect: {issue}Upgrade to v{fixed} or later (enable "Show prerelease versions" below to pick a prerelease fix).',
+    knownIssuePluginLoad: 'a failed enabled/installed plugin can take down the whole Web page (typical symptoms: the left plugin toolbar does not open, or the page fails to start).',
     versionCheckFailed: 'Version check failed (npm registry unreachable?)',
     versionsHint: 'Upgrades run via a global npm install (configure the npm command in Settings); dsh restarts automatically after install. If the new version fails to start, you can roll back to the pre-upgrade version with one click.',
     manageTargets: 'Manage dsh connections',
@@ -5823,7 +5843,12 @@ export default {
     currentVersion: 'Current Version',
     latestVersion: 'Latest Version',
     downloadSize: 'Download Size',
-    changelog: 'Changelog',
+    // Release-notes block (P-20261112-2): title / expand-collapse follow the dshConsole.cl* convention
+    clTitle: 'v{version} release notes',
+    clOpenPage: 'Open release page',
+    clEmpty: 'No release notes for this version',
+    clExpand: 'Show full notes',
+    clCollapse: 'Collapse',
     updateNow: 'Update Now',
     updating: 'Updating...',
     restarting: 'Restarting...',

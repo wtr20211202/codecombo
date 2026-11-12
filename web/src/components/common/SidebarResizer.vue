@@ -13,7 +13,8 @@ import { useSidebarWidth } from '../../composables/useSidebarWidth'
  * - 双击：恢复 defaultWidth；布局锁定时拖拽入口在 useSidebarWidth 短路
  * - 视觉与 ide-side-resizer / atv-side-resizer 同设计语言（8px 命中区 +
  *   2px 握把纹 + 悬停/拖拽高亮；body.sc-layout-locked cursor 归位在
- *   assets/main.css 统一挂 `.sidebar-resizer`）
+ *   assets/main.css 统一挂 `.sidebar-resizer`）。命中区不对称（P-20261111-7
+ *   S1）：内收贴侧栏侧、主区侧零重叠——atv-side-resizer 同步同款几何
  */
 const props = withDefaults(defineProps<{
   /** 宽度记忆键（sc.<panel>.sidebarWidth） */
@@ -93,10 +94,15 @@ function onKeydown(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-/* 8px 命中区 + 常显 2px 握把纹（与 ide-side-resizer / atv-side-resizer 同款） */
+/* 8px 命中区 + 常显 2px 握把纹（与 ide-side-resizer / atv-side-resizer 同款）。
+   命中区不对称（P-20261111-7 S1）：整体内收贴侧栏侧（左溢 8px、右溢 0）——
+   右缘与侧栏分界线齐平、不压主区/终端 pane，贴左缘起的文本选区 pointerdown
+   不再落进命中区误触调宽；带宽 8px 不变，pointerdown 落在带内即拖拽，手感不劣化。
+   （曾用 margin: 0 -4px 对称骑跨分界线：右缘 4px 压在主区上，xterm 最左列
+   选区被截胡——实测负 margin 只移主区不移把手盒，收右溢须同步加大左溢） */
 .sidebar-resizer {
   width: 8px;
-  margin: 0 -4px;
+  margin-left: -8px;
   z-index: 5;
   cursor: col-resize;
   flex-shrink: 0;
@@ -108,9 +114,10 @@ function onKeydown(e: KeyboardEvent) {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
+  /* 握把纹贴命中区右缘：与侧栏分界线对齐（命中区内收后盒中线已不落在
+     分界线上，取中会浮进侧栏 4px）；纹不越过右缘，主区侧零视觉侵入 */
+  right: 0;
   width: 2px;
-  transform: translateX(-50%);
   border-radius: 1px;
   background: var(--border-default);
   opacity: 0.6;

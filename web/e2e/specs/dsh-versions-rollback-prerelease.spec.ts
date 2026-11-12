@@ -162,3 +162,60 @@ test('已是 prerelease：通道提示 + 双信息文案，不自动降级，回
   await expect(row).toBeVisible()
   await expect(row).toContainText('升级前版本：v0.21.0')
 })
+
+// 已知缺陷标注（P-20261111-2-S2）：S1 诊断实锤 0.2.2-rc.1 插件加载失败拖垮页面
+// （rc.2 修复条目直接命中），版本面标注+引导升级，反代面零兜底
+test('当前版本命中已知缺陷登记：弹窗警示引导升级 rc.2+，工具栏版本标签转警示态', async ({ page }) => {
+  // 形态 = 用户实测故障版本：current 0.2.2-rc.1（修复版 0.2.2-rc.2 为预发布，
+  // 默认稳定档列表为空——引导文案须点名「显示预发布版本」开关）
+  const { dlg } = await openVersionsModal(page, {
+    current: '0.2.2-rc.1',
+    latest: '0.2.2-rc.2',
+    versions: [
+      { version: '0.2.1-rc.5', date: T0 },
+      { version: '0.2.2-rc.1', date: T1 },
+      { version: '0.2.2-rc.2', date: T2 },
+    ],
+    rollbackVersion: '0.2.1-rc.5',
+  })
+
+  // 弹窗警示块：命中登记条目，交代缺陷表现并引导升级到 rc.2+
+  const banner = dlg.locator('[data-test="dsh-known-issue-banner"]')
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('已启用/已装插件加载失败')
+  await expect(banner).toContainText('v0.2.2-rc.2')
+
+  // 工具栏版本标签转警示态（title 可断言；naive-ui tag type 只进 CSS 变量不进 class）
+  const tag = page.locator('.dsh-upgrade-tag')
+  await expect(tag).toHaveAttribute('title', '当前版本存在已知缺陷——点此查看详情与升级引导')
+  await expect(tag).toHaveText('v0.2.2-rc.1')
+
+  // 当前版本自身不进可升级列表；开预发布开关后 rc.2 可见可选（升级动作可达）
+  await expect(dlg.locator('.ver-item')).toHaveCount(0)
+  await dlg.locator('[data-test="dsh-prerelease-toggle"]').click()
+  await expect(dlg.locator('.ver-item').filter({ hasText: 'v0.2.2-rc.2' })).toBeVisible()
+})
+
+test('已知缺陷版本出现在可升级列表：条目标注「已知缺陷」防升进缺陷版本', async ({ page }) => {
+  const { dlg } = await openVersionsModal(page, {
+    current: '0.2.1-rc.5',
+    latest: '0.2.2-rc.2',
+    versions: [
+      { version: '0.2.1-rc.5', date: T0 },
+      { version: '0.2.2-rc.1', date: T1 },
+      { version: '0.2.2-rc.2', date: T2 },
+    ],
+    rollbackVersion: '',
+  })
+
+  // 当前版本未命中登记：无警示块
+  await expect(dlg.locator('[data-test="dsh-known-issue-banner"]')).toHaveCount(0)
+
+  // 预发布开关打开：rc.1 条目带「已知缺陷」标注，rc.2 无标注
+  await dlg.locator('[data-test="dsh-prerelease-toggle"]').click()
+  const rc1 = dlg.locator('.ver-item').filter({ hasText: 'v0.2.2-rc.1' })
+  await expect(rc1).toBeVisible()
+  await expect(rc1.locator('[data-test="dsh-known-issue-tag"]')).toHaveText('已知缺陷')
+  const rc2 = dlg.locator('.ver-item').filter({ hasText: 'v0.2.2-rc.2' })
+  await expect(rc2.locator('[data-test="dsh-known-issue-tag"]')).toHaveCount(0)
+})

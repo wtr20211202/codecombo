@@ -261,6 +261,10 @@ type CheckUpdateResponse struct {
 	Changelog      string `json:"changelog"`
 	DownloadURL    string `json:"downloadUrl"`
 	FileSize       int64  `json:"fileSize"`
+	// ReleaseURL 发布页直链（P-20261112-2-S2）：源 html_url 同名透传（TS 镜像
+	// releaseUrl），面板「查看发布页」外链消费。增量可选字段（omitempty）——
+	// 旧前端忽略未知字段；缺失（旧二进制/源未提供）新前端不显链接零回退
+	ReleaseURL string `json:"releaseUrl,omitempty"`
 	// 检查失败细分（beta.2 误报实锚：此前一切检查错误吞成 hasUpdate:false，
 	// 前端再依「分发源字段为空」猜成「未配置更新源」——而自更新源已内置，
 	// 真缺源仅剩「配置的非法分发源被拒」一途）。零值省略，成功路径零负担

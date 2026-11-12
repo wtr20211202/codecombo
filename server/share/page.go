@@ -37,13 +37,13 @@ type pageData struct {
 	Description string
 	PageURL     string
 	Boot        template.JS
-	// SnapshotBanner 冻结分享的快照时点横幅文案（P-20261005-168，服务端
-	// 双语拼装完成——横幅随 HTML 直出，不依赖页面 JS 就位；空串 = live
-	// 记录不出横幅，访客面零变化）
-	SnapshotBanner string
-	// ExpiryBanner 非永久分享的有效期弱提示文案（P-20261020-5，服务端双语
-	// 拼装；空串 = 永久分享/snippet→ 零渲染。snippet 由内容区既有提示承接）
-	ExpiryBanner string
+	// StatusBanner 快照/过期合并的单行紧凑状态条文案（P-20261111-5，服务端
+	// 双语拼装——条随 HTML 直出，不依赖页面 JS 就位；空串 = live 永久记录
+	// 两段皆无 → 零渲染，访客面零变化）
+	StatusBanner string
+	// StatusTitle 状态条的悬停 title（P-20261111-5：紧凑条只留时点短文案，
+	// 完整长句降为悬停说明层——信息不丢；与 StatusBanner 同条件渲染）
+	StatusTitle string
 	// BoardCSS/BoardJS 访客留言区共享资产（P-20261006-13，guestboard.go
 	// 单一事实源——三形态访客页同一段脚本挂载，样式/文案键三页同表）
 	BoardCSS template.CSS
@@ -76,8 +76,7 @@ const pageTmplSrc = `<!doctype html>
 <body>
 <div class="blob b1"></div><div class="blob b2"></div>
 <div id="app" class="wrap">
-{{if .SnapshotBanner}}<div class="snap-banner" id="snap-banner"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>{{.SnapshotBanner}}</span></div>{{end}}
-{{if .ExpiryBanner}}<div class="expiry-banner" id="expiry-banner"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>{{.ExpiryBanner}}</span></div>{{end}}
+{{if .StatusBanner}}<div class="status-banner" id="status-banner" title="{{.StatusTitle}}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>{{.StatusBanner}}</span></div>{{end}}
 <div class="spin"></div></div>
 <script>
 ` + pageTmplJsCoreSrc + pageTmplJsShellSrc + pageTmplJsNavSrc + `</body>
@@ -87,42 +86,72 @@ var pageTmpl = template.Must(template.New("share").Parse(pageTmplSrc))
 
 // renderSharePage 输出分享页（已知 token）。wm 为溯源水印文本（P-20261005-193，
 // 空串 = 记录未开水印，boot 不携带、页面不出水印层）。frozen + snapshotAt 为
-// 冻结快照分享的时点声明横幅（P-20261005-168）：观看者有权知道看到的是创建
-// 时刻的定格副本——横幅文案走 lang 双语字典服务端拼装（{time} 占位替换，
+// 冻结快照分享的时点声明（P-20261005-168；P-20261111-5 起与有效期声明合并为
+// 单行紧凑状态条，完整长句降为悬停 title）：观看者有权知道看到的是创建时刻
+// 的定格副本——文案走 lang 双语字典服务端拼装（{time} 占位替换，
 // csvTruncated/snippetExpiresAt 同款占位约定），时刻取记录 CreatedAt（幂等
 // 重建不刷新，正是「首次定格」语义）；snapshotAt 零值（live 记录/防御分支）
-// 不出横幅，live 访客面零变化。
-// meta 为链接元信息（P-20261020-11）；expiresAt 非零时另出有效期弱提示横幅
+// 无该段，live 永久记录两段皆空 → 整条零渲染。
+// meta 为链接元信息（P-20261020-11）；expiresAt 非零时状态条追加过期段
 // （P-20261020-5；snippet 由内容区既有提示承接，调用方传零值避免重复声明）
 func renderSharePage(w io.Writer, token, lang, wm string, frozen bool, snapshotAt, expiresAt time.Time, meta pageMeta, collab bool) error {
 	d := dictFor(lang)
-	banner := ""
-	if frozen && !snapshotAt.IsZero() {
-		banner = strings.Replace(d["snapshotBanner"], "{time}", snapshotAt.Format("2006-01-02 15:04"), 1)
-	}
 	title, desc := pageLinkMeta(d, meta)
-	expiryBanner := ""
+	// 快照/过期合并单行紧凑状态条（P-20261111-5）：此前快照横幅（P-20261005-168）
+	// 与有效期横幅（P-20261020-5）各占一行完整长句、挤占首屏视觉权重，收成
+	// 「快照 {t} · {t} 过期」单行弱化条，完整长句降为悬停 title——信息不丢。
+	// 永久分享（无过期）只显快照段；两段皆空整条不出
+	snapAt, expAt := "", ""
+	if frozen && !snapshotAt.IsZero() {
+		snapAt = snapshotAt.Format("2006-01-02 15:04")
+	}
 	if !expiresAt.IsZero() {
 		// Local()：显式时点可能以 UTC/带偏移的 RFC3339 落库，访客看到的是
 		// 服务端部署时区的本地时间（与快照横幅同一呈现口径）
-		expiryBanner = strings.Replace(d["shareExpiresAt"], "{time}",
-			expiresAt.Local().Format("2006-01-02 15:04"), 1)
+		expAt = expiresAt.Local().Format("2006-01-02 15:04")
 	}
+	statusLine, statusTitle := compactStatusLine(d, lang, snapAt, expAt)
 	boot, err := json.Marshal(bootState{Token: token, Lang: lang, Dict: d, Wm: wm, MsgMax: boardMsgMax(collab)})
 	if err != nil {
 		return err
 	}
 	return pageTmpl.Execute(w, pageData{
-		Lang:           lang,
-		Title:          title,
-		Description:    desc,
-		PageURL:        meta.URL,
-		Boot:           template.JS(boot),
-		SnapshotBanner: banner,
-		ExpiryBanner:   expiryBanner,
-		BoardCSS:       template.CSS(guestBoardCSS),
-		BoardJS:        template.JS(guestBoardJS),
+		Lang:         lang,
+		Title:        title,
+		Description:  desc,
+		PageURL:      meta.URL,
+		Boot:         template.JS(boot),
+		StatusBanner: statusLine,
+		StatusTitle:  statusTitle,
+		BoardCSS:     template.CSS(guestBoardCSS),
+		BoardJS:      template.JS(guestBoardJS),
 	})
+}
+
+// compactStatusLine 紧凑状态条与悬停 title 的拼装（P-20261111-5）：短段键
+// snapshotShort/expiresShort（各一个 {time} 占位）按段存在与否拼为单行
+// 「快照 {t} · {t} 过期」，全句键 snapshotBanner/shareExpiresAt 同步拼为
+// title——两段都在时短文案以「 · 」相连、全句按语言连接（zh 分号；en 全句
+// 自带句点，空格即可）；快照段缺席（live+TTL）单独出过期段，两段皆空零渲染
+func compactStatusLine(d map[string]string, lang, snapAt, expAt string) (string, string) {
+	line, full := "", ""
+	if snapAt != "" {
+		line = strings.Replace(d["snapshotShort"], "{time}", snapAt, 1)
+		full = strings.Replace(d["snapshotBanner"], "{time}", snapAt, 1)
+	}
+	if expAt == "" {
+		return line, full
+	}
+	seg := strings.Replace(d["expiresShort"], "{time}", expAt, 1)
+	fullSeg := strings.Replace(d["shareExpiresAt"], "{time}", expAt, 1)
+	if line == "" {
+		return seg, fullSeg
+	}
+	joiner := "；"
+	if lang != "zh" {
+		joiner = " "
+	}
+	return line + " · " + seg, full + joiner + fullSeg
 }
 
 // metaLine 链接元信息的单行文本：控制字符折叠为空格、连续空白压缩，

@@ -11,18 +11,19 @@ vi.mock('@/api/domains/system', async (importOriginal) => ({
 }))
 vi.mock('@/utils/clipboard', () => ({ copyText: copyTextMock }))
 import {
-  handleFrontendDownload, handleFrontendClipboard, handleFrontendOpen,
+  handleFrontendDownload, handleFrontendClipboard, handleFrontendOpen, handleFrontendReload,
   isProjectRelativePath, isHTTPExternalURL, resetFrontendAtomStateForTest,
 } from './frontendAtomActions'
 import { useOpsAtomPrefs } from '../stores/opsAtomPrefs'
 import { useNotificationStore } from '../stores/notification'
+import { useViewReloadTick } from '../composables/useViewReload'
 
 /**
- * frontend 动词族三原子前端消费链单测（P-20261023-4）：载荷复验守卫 / 设置
- * 开关门控（关档 + 每窗口一条提示）/ 效应面限频（10 次/分钟/原子，超限可见
- * warning）/ 下载 anchor 组装 / 剪贴板直写与中继回落 / 开标签与 popup 拦截
- * 回落。模块级预算经 reset 钩子在用例间隔离；pinia 与 localStorage 由全局
- * setup 每用例重建
+ * frontend 动词族原子前端消费链单测（P-20261023-4 首批 + P-20261111-3 重载）：
+ * 载荷复验守卫 / 设置开关门控（关档 + 每窗口一条提示）/ 效应面限频（10 次/
+ * 分钟/原子，超限可见 warning）/ 下载 anchor 组装 / 剪贴板直写与中继回落 /
+ * 开标签与 popup 拦截回落 / 整页·视图重载分档。模块级预算经 reset 钩子在
+ * 用例间隔离；pinia 与 localStorage 由全局 setup 每用例重建
  */
 
 type FakeMessage = {
@@ -250,12 +251,67 @@ describe('handleFrontendOpen', () => {
   })
 })
 
+describe('handleFrontendReload（P-20261111-3）', () => {
+  beforeEach(() => {
+    resetFrontendAtomStateForTest()
+  })
+
+  it('scope=view → bump remount tick + 成功 toast（不走整页分档）', () => {
+    const before = useViewReloadTick().value
+    const msg = fakeMessage()
+    expect(handleFrontendReload({ scope: 'view' }, msg as never)).toBe(true)
+    expect(useViewReloadTick().value).toBe(before + 1)
+    expect(toastIds(msg.success)).toContain('ops-atom-reload-toast')
+    expect(msg.info).not.toHaveBeenCalled()
+  })
+
+  it('scope=page / 缺省 / 未知值 → 走整页分档（info toast；真实重载由 e2e 钉）', () => {
+    // jsdom 的 location 是 Unforgeable 属性不可 spy——整页重载本体在
+    // ops-frontend-atoms.spec 用真实浏览器钉；此处钉分档决策与可见反馈。
+    // fake timers 吞掉 300ms 重载回调（jsdom reload 本体是 no-op 报
+    // Not implemented，不触发即无噪音）
+    vi.useFakeTimers()
+    const msg = fakeMessage()
+    expect(handleFrontendReload({}, msg as never)).toBe(true)
+    expect(toastIds(msg.info)).toContain('ops-atom-reload-toast')
+    expect(msg.success).not.toHaveBeenCalled()
+    // 未知值按 page 收敛（重载意图明确，粒度存疑取更彻底的重取形态）
+    const msg2 = fakeMessage()
+    expect(handleFrontendReload({ scope: 'bogus' as 'page' }, msg2 as never)).toBe(true)
+    expect(toastIds(msg2.info)).toContain('ops-atom-reload-toast')
+    vi.useRealTimers()
+  })
+
+  it('设置开关关闭 → 效应不发生 + 「已关闭」提示', () => {
+    useOpsAtomPrefs().set('reload', false)
+    const before = useViewReloadTick().value
+    const msg = fakeMessage()
+    expect(handleFrontendReload({ scope: 'view' }, msg as never)).toBe(false)
+    expect(useViewReloadTick().value).toBe(before)
+    expect(toastIds(msg.info)).toContain('ops-atom-disabled-toast')
+    expect(msg.success).not.toHaveBeenCalled()
+  })
+
+  it('效应面限频按原子独立：reload 10 次后触顶可见 warning，不影响 download 预算', () => {
+    const before = useViewReloadTick().value
+    for (let i = 0; i < 10; i++) expect(handleFrontendReload({ scope: 'view' }, fakeMessage() as never)).toBe(true)
+    expect(useViewReloadTick().value).toBe(before + 10)
+    const msg = fakeMessage()
+    expect(handleFrontendReload({ scope: 'view' }, msg as never)).toBe(false)
+    expect(useViewReloadTick().value).toBe(before + 10)
+    expect(toastIds(msg.warning)).toContain('ops-atom-rate-limited-toast')
+    // 独立预算：download 原子不受 reload 触顶影响
+    expect(handleFrontendDownload({ path: 'a.md', projectId: 'p' }, fakeMessage() as never)).toBe(true)
+  })
+})
+
 describe('opsAtomPrefs 开关 store', () => {
   it('默认全开；set(false) 落 localStorage 镜像并可回开', () => {
     const prefs = useOpsAtomPrefs()
     expect(prefs.enabled('download')).toBe(true)
     expect(prefs.enabled('clipboard')).toBe(true)
     expect(prefs.enabled('open')).toBe(true)
+    expect(prefs.enabled('reload')).toBe(true)
     prefs.set('clipboard', false)
     expect(prefs.enabled('clipboard')).toBe(false)
     expect(localStorage.getItem('ops-atom-clipboard')).toBe('0')

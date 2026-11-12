@@ -787,9 +787,9 @@ func (s *Service) handlePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	// 冻结快照时点横幅（P-20261005-168）：frozen 记录向观看者声明「内容定格
-	// 于创建时刻」——诚实性横幅惯例族（与终端页遮蔽声明同族）；live 记录
-	// 零值不出横幅。
+	// 冻结快照时点声明（P-20261005-168）：frozen 记录向观看者声明「内容定格
+	// 于创建时刻」——诚实性声明惯例族（与终端页遮蔽声明同族）；P-20261111-5
+	// 起与有效期声明合并为单行紧凑状态条；live 永久记录零渲染。
 	// 链接元信息（P-20261020-11）：服务端直出文件名/项目/类型——IM 与邮件
 	// 网关不执行页面 JS，首屏 title/description/OG 是它们唯一能看到的说明。
 	// 口令/一次性分享在 OG 层泛化（即便将来出现新的解锁前渲染路径，记录
@@ -802,8 +802,8 @@ func (s *Service) handlePage(w http.ResponseWriter, r *http.Request) {
 		Sensitive:   sh.PassphraseHash != "" || sh.ViewOnce,
 		URL:         sharePageURL(r, token),
 	}
-	// 有效期弱提示（P-20261020-5）：非永久记录（显式 TTL/默认档/frozen 30 天）
-	// 在页首声明到期时点；snippet 的内容区已有既有提示（P-20261003-29），
+	// 有效期声明（P-20261020-5）：非永久记录（显式 TTL/默认档/frozen 30 天）
+	// 在页首状态条出过期段；snippet 的内容区已有既有提示（P-20261003-29），
 	// 传零值避免同一页面重复声明
 	pageExpiry := sh.ExpiresAt
 	if sh.Kind == store.ShareKindSnippet {

@@ -24,6 +24,9 @@ defineProps<{
   /** 升级徽标（空串 = 无新版本） */
   upgradeBadge: string
   headerVersionLabel: string
+  /** 当前 dsh 版本命中已知缺陷登记（P-20261111-2-S2）：标签转警示态并提示——
+   *  嵌入页可能因该缺陷打不开，工具栏标签是用户唯一可见的自救入口 */
+  knownIssue?: boolean
   maximizable: boolean
   maximized: boolean
   processRestarting: boolean
@@ -84,10 +87,12 @@ const emit = defineEmits<{
     >{{ latencyMs }}ms</span>
     <n-tag
       size="tiny"
-      :type="upgradeBadge ? 'success' : 'default'"
+      :type="knownIssue ? 'error' : upgradeBadge ? 'success' : 'default'"
       round
       class="dsh-upgrade-tag"
-      :title="upgradeBadge ? t('dshConsole.upgradableTitle') : t('dshConsole.versionsTitle')"
+      :title="knownIssue
+        ? t('dshConsole.knownDefectTitle')
+        : upgradeBadge ? t('dshConsole.upgradableTitle') : t('dshConsole.versionsTitle')"
       @click="emit('open-versions')"
     >
       {{ headerVersionLabel }}

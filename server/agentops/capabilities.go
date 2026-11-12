@@ -237,6 +237,7 @@ func RecipesDoc() string {
 	sb.WriteString("  - 部署完成可达：preview.port（预览端口直达）+ notify.persist action=preview（通知中心一键进面板）\n")
 	sb.WriteString("  - 改完引导复核：open-file-at（打开文件定位行）+ navigate {view:\"diff\"}（工作区差异视图）\n")
 	sb.WriteString("  - 佐证外链：frontend.open（新标签开 CI 日志/PR）+ notify.persist（留痕佐证入口）\n")
+	sb.WriteString("  - 批量写后对账：批量 REST 调用收尾 + frontend.reload {\"scope\":\"page\"}（前端全量重取，免两跳 navigate 绕行）\n")
 	return sb.String()
 }
 
@@ -600,17 +601,18 @@ func isHTTPExternalURL(target string) bool {
 //
 // 此前的呈现原语全部是「引导注意力」类（把用户带到某处/告知某事），交付链
 // 最后一厘米——「替用户执行浏览器动作」——零覆盖：agent 产出报告后只能给
-// 路径/发通知，下载框弹不出来、剪贴板写不进、标签页开不了。frontend 三原子
-// 补上这一层：只收「单一浏览器效应」原语，「导出报告并发送」这类业务编排
-// 拒绝入表（那是 agent 的组合层，见 PresentAtomsDoc 的组合配方小节），防
-// 注册表腐化成功能清单。
+// 路径/发通知，下载框弹不出来、剪贴板写不进、标签页开不了。frontend 原子族
+// （下载/剪贴板/开标签 P-20261023-4，整页·视图重载 P-20261111-3）补上这一层：
+// 只收「单一浏览器效应」原语，「导出报告并发送」这类业务编排拒绝入表（那是
+// agent 的组合层，见 PresentAtomsDoc 的组合配方小节），防注册表腐化成功能清单。
 //
-// 安全边界（三原子都是用户设备上的即时效应，滥用对策四层）：①服务端发布口
+// 安全边界（族内原子都是用户设备上的即时效应，滥用对策四层）：①服务端发布口
 // 既有 60 条/分钟/会话限流（ai/opsentry.go opsNotifyLimiter，本族零特判直接
 // 受辖）；②前端效应面独立更紧预算（10 次/分钟/原子，超限可见 warning 不
-// 静默）；③全部必带可见反馈 toast——下载/剪贴板/打开均无静默效应（剪贴板
-// 的可见预告是投毒防线的第一层）；④设置按原子开关（默认开，前端
-// opsAtomPrefs，随 userPrefs 漫游）。
+// 静默）；③全部必带可见反馈 toast——下载/剪贴板/打开/重载均无静默效应
+// （剪贴板的可见预告是投毒防线的第一层；整页重载本身就是最响的可见效应，
+// toast 承担归因提示）；④设置按原子开关（默认开，前端 opsAtomPrefs，随
+// userPrefs 漫游）。
 
 // FrontendDownloadPayload frontend.download 事件载荷：agent 产出交付物（截图
 // 实证/带宽分析报告等）后直接触发浏览器下载框——下载走既有文件下载端点
@@ -704,6 +706,42 @@ func ValidateFrontendOpen(payload interface{}) (interface{}, bool) {
 	return p, true
 }
 
+// FrontendReloadPayload frontend.reload 事件载荷（P-20261111-3）：agent 要求
+// 前端重载——配置变更后/视图状态机卡滞/批量操作后「重取全量状态」一跳完成，
+// 替代两跳 navigate 绕行（跳走再跳回，带路由副作用）。scope 选重载粒度
+type FrontendReloadPayload struct {
+	// Scope 重载范围：page = location.reload() 整页重载（浏览器卸载重载，
+	// 未保存编辑由前端既有 beforeunload 确认框 + IndexedDB 草稿自动保存兜底）；
+	// view = 当前路由整树 remount（前端 RouterView :key 翻转——实例切换同
+	// 机制的生产先例，路由/URL 零变化，组件作用域状态销毁重初始化，各视图
+	// onMounted 数据链重跑，语义与「navigate 到别处再跳回」的挂载生命周期
+	// 同构而零路由副作用）。缺省规整 page（提案口径：默认最重载形态，
+	// agent 未指明粒度时以「整页重取」为安全语义）
+	Scope string `json:"scope,omitempty"`
+}
+
+// ValidateFrontendReload 校验并规整 frontend.reload 载荷：scope 可选，缺省
+// 规整 page；在位时白名单 page|view（未知值 400 拒绝——重载粒度是前端效应
+// 强度的直接开关，开放宽容会把 agent 侧笔误静默放行为最重形态）
+func ValidateFrontendReload(payload interface{}) (interface{}, bool) {
+	var p FrontendReloadPayload
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return p, false
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return p, false
+	}
+	p.Scope = strings.TrimSpace(p.Scope)
+	if p.Scope == "" {
+		p.Scope = "page"
+	}
+	if p.Scope != "page" && p.Scope != "view" {
+		return p, false
+	}
+	return p, true
+}
+
 // ============== 注册表装配（首批收编） ==============
 
 func init() {
@@ -743,6 +781,20 @@ func init() {
                  通知中心带 url 动作条目，用户点击开——功能不缺失只是多一次点击`,
 		Validate:              ValidateFrontendOpen,
 		InvalidPayloadMessage: "invalid frontend.open payload: url (required) must be an absolute http(s) URL with a host",
+	})
+	RegisterPresentAtom(PresentAtom{
+		ID: "frontend.reload", Verb: "frontend", Event: "frontend.reload",
+		Summary:       "要求前端重载：整页刷新（page）或当前视图重建（view），重取全量状态一跳完成",
+		Payload:       `{"scope":"page"}`,
+		PayloadFields: []string{"scope"},
+		Detail: `scope 可选 page|view（缺省 page）。page = 浏览器整页重载——改配置
+                 推送后/批量写完成后要求前端全量重取时用；用户侧未保存编辑有
+                 草稿自动保存与确认框兜底，勿高频刷发（效应面限频 10 次/分钟）。
+                 view = 仅重建当前视图（路由/URL 不变）——视图状态机卡滞自救，
+                 比 page 轻。勿用本原语替代 navigate：要「去某个视图」用
+                 navigate，要「当前视图重取」才用 reload`,
+		Validate:              ValidateFrontendReload,
+		InvalidPayloadMessage: "invalid frontend.reload payload: scope (optional) must be \"page\" or \"view\"",
 	})
 	RegisterPresentAtom(PresentAtom{
 		ID: "navigate.changes", Verb: "navigate", Event: "navigate",

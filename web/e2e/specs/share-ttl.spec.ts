@@ -7,7 +7,8 @@ import { DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, projectCardByName, rightC
  *      恢复永久（null 清窗）→ 设过去时点（模拟到期）→ 访客 410 Gone 明确
  *      文案（非 404 模糊）→ 记录被惰性清除 → snippet 拒绝调整（400）
  *   2. 创建有效期闭环：显式 ttl / settings.shareDefaultTTL 默认档 / 显式永久
- *      覆盖默认档；meta 透出 expiresAt；访客页出「此链接将于 … 过期」弱提示
+ *      覆盖默认档；meta 透出 expiresAt；访客页紧凑状态条出「… 过期」段
+ *      （P-20261111-5 与快照声明合并单行，全句降为悬停 title）
  *   3. UI 链路：结果卡有效期行（默认「永久」零变化）→ 选 1 天即刻生效 →
  *      管理列表倒计时标记 → 模拟过期后列表「已过期」标记 → 访客 410 文案 →
  *      记录被清
@@ -162,8 +163,10 @@ test('创建有效期闭环：ttl 预设 / 默认档 / 显式永久 / meta 与�
     const page1 = await request.get(`${shareBase}/s/${s1!.token}`, { headers: { 'Accept-Language': 'zh-CN' } })
     expect(page1.status()).toBe(200)
     const page1Body = await page1.text()
-    expect(page1Body).toContain('id="expiry-banner"')
-    expect(page1Body).toContain('此链接将于')
+    // 紧凑状态条（P-20261111-5）：条节点在，且悬停 title 带完整全句
+    // （title= 前缀保证命中服务端直出层而非 boot 字典 JSON）
+    expect(page1Body).toContain('id="status-banner"')
+    expect(page1Body).toContain('title="此链接将于')
 
     // 默认档 7d：未显式选择的创建应用 settings.shareDefaultTTL
     await setShareDefaultTtl(request, '7d')
@@ -177,7 +180,7 @@ test('创建有效期闭环：ttl 预设 / 默认档 / 显式永久 / meta 与�
     expect(Math.floor(Date.parse(((await meta2.json()) as { expiresAt?: string }).expiresAt || '') / 1000))
       .toBe(Math.floor(exp2 / 1000))
     const page2 = await request.get(`${shareBase}/s/${s2!.token}`, { headers: { 'Accept-Language': 'zh-CN' } })
-    expect(await page2.text()).toContain('id="expiry-banner"')
+    expect(await page2.text()).toContain('id="status-banner"')
 
     // 显式 permanent 优先于默认档：清窗后 meta 不再携带 expiresAt（永久零值
     // 不落 0001-01-01 哨兵——访客页也不出到期提示）
@@ -189,8 +192,8 @@ test('创建有效期闭环：ttl 预设 / 默认档 / 显式永久 / meta 与�
     expect(((await meta3.json()) as { expiresAt?: string }).expiresAt).toBeUndefined()
     const page3 = await request.get(`${shareBase}/s/${s3!.token}`, { headers: { 'Accept-Language': 'zh-CN' } })
     // 页面 boot 字典恒含 shareExpiresAt 词条（未渲染也存在于 JS 文案表）——
-    // 断言横幅节点缺席而非文本缺席
-    expect(await page3.text()).not.toContain('id="expiry-banner"')
+    // 断言状态条节点缺席而非文本缺席
+    expect(await page3.text()).not.toContain('id="status-banner"')
   } finally {
     await setShareDefaultTtl(request, 'permanent')
   }
@@ -305,9 +308,13 @@ test.describe('TTL UI 链路（zh-CN context：访客 410 页按 Accept-Language
       await expect(ttlModal).toBeHidden()
       await expect(row.locator('[data-testid="sm-countdown"]')).toContainText(/分钟后过期|小时后过期/)
 
-      // 访客页：非永久分享出到期弱提示（服务端双语拼装，zh-CN 上下文中文）
+      // 访客页：非永久分享状态条出「… 过期」段（P-20261111-5 与快照声明合并
+      // 单行，服务端双语拼装，zh-CN 上下文中文；全句降为悬停 title）
       await page.goto(`${shareBase}/s/${token}`)
-      await expect(page.locator('#expiry-banner')).toContainText('此链接将于')
+      const bar = page.locator('#status-banner')
+      await expect(bar).toBeVisible()
+      await expect(bar).toContainText('过期')
+      await expect(bar).toHaveAttribute('title', /此链接将于/)
     } finally {
       await setShareDefaultTtl(request, 'permanent')
     }

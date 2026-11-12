@@ -14,7 +14,9 @@ import { API_BASE } from '../../tests/api-base'
  *   4. 失败通知「查看详情」回面板——服务端通知（titleKey 模板 + update-panel
  *      动作）点击后设置弹窗定位「关于」，原因原文在面板结局块可见；「知道了」
  *      确认已读（DELETE /updates/status）；
- *   5. 长 changelog 限高内滚，「立即更新」首屏可达；
+ *   5. 长 changelog 收起态摘要 + 展开限高内滚，「立即更新」首屏可达；更新内容
+ *      markdown 净化渲染与页内锚点切换（P-20261112-2 S1）；标题行「查看发布页」
+ *      外链新窗直达 Release 页、同行布局不回归、releaseUrl 缺失不显（S2）；
  *   6. 断点续传透出（P-20261110-1-S4）——续传态「已续传 xxMB」标记在面板内可见，
  *      全量回退（服务端归 0 省略）后消隐，百分比分母不随之失真。
  *   7. 失败态一键重试（P-20261110-1-S2）：结局块重试按钮复用 apply 受理端点，
@@ -316,7 +318,7 @@ test('升级链中断恢复全链（P-20261110-1-S7）：下载失败→重试�
   expect(applies).toHaveLength(1)
 })
 
-test('长 changelog：限高内滚，「立即更新」首屏可达', async ({ page }) => {
+test('长 changelog：收起态摘要不顶屏，展开限高内滚，「立即更新」首屏可达', async ({ page }) => {
   await routeStatus(page, { status: 'idle', progress: 0, total: 0, version: '' })
   await page.route('**/api/updates/check*', async (route) => {
     const changelog = Array.from({ length: 120 }, (_, i) => `- 变更条目 ${i}`).join('\n')
@@ -330,11 +332,121 @@ test('长 changelog：限高内滚，「立即更新」首屏可达', async ({ p
   await expect(card).toBeVisible({ timeout: 5000 })
   await card.locator('.version-update-section > button.panel-btn').first().click()
 
+  // 标题行循 dsh clTitle 惯例；收起态两行摘要，不随 120 条内容增高
+  await expect(card.locator('[data-testid="version-changelog-title"]')).toHaveText('v9.9.9 更新内容')
   const body = card.locator('[data-testid="version-changelog-body"]')
   await expect(body).toBeVisible()
-  // 限高（不随内容无限增高）
-  const height = await body.evaluate(el => el.getBoundingClientRect().height)
-  expect(height).toBeLessThanOrEqual(200)
+  const collapsedHeight = await body.evaluate(el => el.getBoundingClientRect().height)
+  expect(collapsedHeight).toBeLessThanOrEqual(200)
   // 「立即更新」在视口内（首屏可达）
   await expect(card.getByRole('button', { name: '立即更新' })).toBeVisible()
+
+  // 展开态：markdown 渲染（列表符成 li，不再裸露「-」），仍限高内滚
+  await card.locator('[data-testid="version-changelog-toggle"]').click()
+  const md = card.locator('[data-testid="version-changelog-md"]')
+  await expect(md).toBeVisible()
+  await expect(md.locator('li')).toHaveCount(120)
+  await expect(md).toContainText('变更条目 119')
+  const expandedHeight = await body.evaluate(el => el.getBoundingClientRect().height)
+  expect(expandedHeight).toBeLessThanOrEqual(200)
+  await expect(card.getByRole('button', { name: '立即更新' })).toBeVisible()
+
+  // 收起回摘要
+  await card.locator('[data-testid="version-changelog-toggle"]').click()
+  await expect(card.locator('[data-testid="version-changelog-toggle"]')).toHaveText('展开完整说明')
+})
+
+test('更新内容 markdown 净化渲染与页内锚点切换（P-20261112-2 S1）', async ({ page }) => {
+  await routeStatus(page, { status: 'idle', progress: 0, total: 0, version: '' })
+  await page.route('**/api/updates/check*', async (route) => {
+    // 发布说明真实形态：中英文锚点行 + 小节标题；夹带一段危险 html 验证净化
+    const changelog = [
+      '[中文](#中文) | [English](#english)',
+      '<script>window.__xss = 1</script>',
+      '## 中文',
+      '- **加粗** 条目',
+      '## English',
+      '- **bold** entry',
+    ].join('\n\n')
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: { currentVersion: '0.0.1', latestVersion: '9.9.9', hasUpdate: true, changelog } }) })
+  })
+  await fixedLocale(page)
+  await gotoAndUnlock(page, `${API_BASE}/`)
+
+  await page.locator('[data-testid="home-logo"]').click()
+  const card = page.locator('.version-card')
+  await expect(card).toBeVisible({ timeout: 5000 })
+  await card.locator('.version-update-section > button.panel-btn').first().click()
+
+  await card.locator('[data-testid="version-changelog-toggle"]').click()
+  const md = card.locator('[data-testid="version-changelog-md"]')
+  await expect(md).toBeVisible()
+  // 净化：脚本剥除、变量不落全局；加粗渲染为 strong，不再裸露标记
+  await expect(md.locator('script')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as { __xss?: unknown }).__xss)).toBeUndefined()
+  await expect(md.locator('strong')).toHaveText(['加粗', 'bold'])
+  // heading 挂 slug id，锚点行渲染为页内链接
+  await expect(md.locator('h2#english')).toHaveText('English')
+  const anchorHref = await md.locator('a', { hasText: 'English' }).first().getAttribute('href')
+  expect(anchorHref).toContain('#english')
+
+  // 点锚点：容器内平滑滚动到目标小节，hash 不进 SPA 地址栏（地址逐字不变）
+  const urlBefore = page.url()
+  await md.locator('a', { hasText: 'English' }).first().click()
+  await expect(md.locator('h2#english')).toBeInViewport()
+  expect(page.url()).toBe(urlBefore)
+  await expect(md).toBeVisible()
+})
+
+test('查看发布页外链（P-20261112-2 S2）：标题行右侧新窗直达 Release 页；同行布局不回归，缺失不显', async ({ page }) => {
+  await routeStatus(page, { status: 'idle', progress: 0, total: 0, version: '' })
+  // 响应可切换：先带 releaseUrl（S2 数据面），再回落缺失形态（旧服务端零回退）
+  let withReleaseUrl = true
+  await page.route('**/api/updates/check*', async (route) => {
+    const data = withReleaseUrl
+      ? { currentVersion: '0.0.1', latestVersion: '9.9.9', hasUpdate: true, changelog: '- 修复若干问题', releaseUrl: 'https://github.com/owner/repo/releases/tag/v9.9.9' }
+      : { currentVersion: '0.0.1', latestVersion: '9.9.9', hasUpdate: true, changelog: '- 修复若干问题' }
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data }) })
+  })
+  await fixedLocale(page)
+  await gotoAndUnlock(page, `${API_BASE}/`)
+
+  await page.locator('[data-testid="home-logo"]').click()
+  const card = page.locator('.version-card')
+  await expect(card).toBeVisible({ timeout: 5000 })
+  await card.locator('.version-update-section > button.panel-btn').first().click()
+
+  // 外链：标题行右侧，新窗 noopener 直达发布页；文案循 dshConsole.clOpenPage 惯例
+  const title = card.locator('[data-testid="version-changelog-title"]')
+  const link = card.locator('[data-testid="version-release-link"]')
+  await expect(title).toHaveText('v9.9.9 更新内容')
+  await expect(link).toHaveText('查看发布页')
+  await expect(link).toHaveAttribute('href', 'https://github.com/owner/repo/releases/tag/v9.9.9')
+  await expect(link).toHaveAttribute('target', '_blank')
+  await expect(link).toHaveAttribute('rel', /noopener/)
+
+  // 标题行布局不回归：标题与外链同行（y 重叠）、标题在左外链在右
+  const titleBox = await title.boundingBox()
+  const linkBox = await link.boundingBox()
+  expect(titleBox).toBeTruthy()
+  expect(linkBox).toBeTruthy()
+  expect(Math.abs(titleBox!.y - linkBox!.y)).toBeLessThan(4)
+  expect(titleBox!.x).toBeLessThan(linkBox!.x)
+
+  // 外链在场时展开/收起照常（S1 交互形态不被标题行改动波及）
+  await card.locator('[data-testid="version-changelog-toggle"]').click()
+  await expect(card.locator('[data-testid="version-changelog-md"]')).toBeVisible()
+  await card.locator('[data-testid="version-changelog-toggle"]').click()
+  await expect(card.locator('[data-testid="version-changelog-toggle"]')).toHaveText('展开完整说明')
+
+  // releaseUrl 缺失（旧服务端增量字段惯例）：外链不渲染，标题行与渲染照常
+  withReleaseUrl = false
+  await gotoAndUnlock(page, `${API_BASE}/`)
+  await page.locator('[data-testid="home-logo"]').click()
+  const card2 = page.locator('.version-card')
+  await expect(card2).toBeVisible({ timeout: 5000 })
+  await card2.locator('.version-update-section > button.panel-btn').first().click()
+  await expect(card2.locator('[data-testid="version-changelog-title"]')).toHaveText('v9.9.9 更新内容')
+  await expect(card2.locator('[data-testid="version-release-link"]')).toHaveCount(0)
+  await expect(card2.locator('[data-testid="version-changelog-toggle"]')).toHaveText('展开完整说明')
 })

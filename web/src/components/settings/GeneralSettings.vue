@@ -55,9 +55,11 @@ const GENERAL_DEFAULTS = {
   opsAtomDownload: true,
   opsAtomClipboard: true,
   opsAtomOpen: true,
+  opsAtomReload: true,
   sessionContext: 'git',
   shareDefaultTTL: 'permanent',
   agentNamingNoteEnabled: true,
+  agentAutoNameEnabled: true,
   previewCompatMode: false,
 } as const
 
@@ -92,7 +94,7 @@ const uiSnapshotEnabled = ref(true)
 // 效应按原子可关。本地编辑副本语义同分区其余行（确认保存时才经 opsAtomPrefs.set
 // 落地 + userPrefs 漫游），恢复钮复位 pending 值仍走「保存」链
 const opsAtomStore = useOpsAtomPrefs()
-const opsAtomLocal = ref<Record<FrontendAtomId, boolean>>({ download: true, clipboard: true, open: true })
+const opsAtomLocal = ref<Record<FrontendAtomId, boolean>>({ download: true, clipboard: true, open: true, reload: true })
 function resetOpsAtomLocal() {
   for (const id of OPS_ATOM_IDS) opsAtomLocal.value[id] = opsAtomStore.enabled(id)
 }
@@ -113,6 +115,10 @@ const sessionContextSelected = ref<SessionContextOption[]>(parseSessionContext('
 // 会话命名系统注记注入（P-20261023-3，默认开）：带 prompt 创建会话时尾部附
 // 命名指令注记——任务演化改名注入层的用户开关（服务端创建漏斗消费）
 const agentNamingNoteEnabled = ref(true)
+// 会话自动命名（P-20261111-6 S2，默认开）：claude 会话首条用户消息落盘后服务
+// 端按其总结会话名（agent_autoname.go 观察器）——本提案目的即行为变化，存量
+// 升级后开始自动命名（whatsnew 随版本段落告知）；关闭回落纯手动改名
+const agentAutoNameEnabled = ref(true)
 // 预览面板同源兼容模式（P-20261019-1，默认关 = 沙箱隔离）：开启是安全姿态
 // 降级（预览内容获得本应用权限），勾选时红色警示显式确认后才进 pending 值，
 // 仍走本分区「保存」链落盘；PreviewPanel 经 settings.changed 广播跟随重建
@@ -228,7 +234,7 @@ async function copyInstallCmd(name: string) {
 const agentProviderOptions = ref<{ label: string; value: string }[]>([])
 
 // === 关闭护栏：未保存修改在 × / 关闭 / Esc 任一路径都不再静默丢弃 ===
-const savedGeneral = ref({ autoFetch: false, fetchInterval: '300', externalAccessUrl: '', sharePublicBaseUrl: '', agentProvider: 'auto', agentGuard: true, agentApprovalMode: 'ask', approvalRecording: false, approvalTimeoutMin: 0, uiSnapshotEnabled: true, sessionContext: 'git', shareDefaultTTL: 'permanent', agentNamingNoteEnabled: true, previewCompatMode: false, opsAtomDownload: true, opsAtomClipboard: true, opsAtomOpen: true })
+const savedGeneral = ref({ autoFetch: false, fetchInterval: '300', externalAccessUrl: '', sharePublicBaseUrl: '', agentProvider: 'auto', agentGuard: true, agentApprovalMode: 'ask', approvalRecording: false, approvalTimeoutMin: 0, uiSnapshotEnabled: true, sessionContext: 'git', shareDefaultTTL: 'permanent', agentNamingNoteEnabled: true, agentAutoNameEnabled: true, previewCompatMode: false, opsAtomDownload: true, opsAtomClipboard: true, opsAtomOpen: true, opsAtomReload: true })
 
 async function load() {
   // frontend 原子开关住本地/漫游 store（非服务端 settings 字段），分区打开时
@@ -261,6 +267,8 @@ async function load() {
     sessionContextSelected.value = parseSessionContext(res.data?.sessionContext ?? '')
     // 未配置/旧服务端缺键默认开（与创建漏斗 OrDefault 同源）
     agentNamingNoteEnabled.value = res.data?.agentNamingNoteEnabled !== false
+    // 未配置/旧服务端缺键默认开（与观察器 OrDefault 同源，P-20261111-6 S2）
+    agentAutoNameEnabled.value = res.data?.agentAutoNameEnabled !== false
     // 未配置/旧服务端缺键默认关（= 沙箱隔离生效，P-20261019-1）
     previewCompatMode.value = res.data?.previewCompatMode === true
     void loadAgentRuntimes()
@@ -283,9 +291,11 @@ async function load() {
     opsAtomDownload: opsAtomLocal.value.download,
     opsAtomClipboard: opsAtomLocal.value.clipboard,
     opsAtomOpen: opsAtomLocal.value.open,
+    opsAtomReload: opsAtomLocal.value.reload,
     sessionContext: serializeSessionContext(sessionContextSelected.value),
     shareDefaultTTL: shareDefaultTTL.value,
     agentNamingNoteEnabled: agentNamingNoteEnabled.value,
+    agentAutoNameEnabled: agentAutoNameEnabled.value,
     previewCompatMode: previewCompatMode.value,
   }
 }
@@ -324,9 +334,11 @@ function isDirty(): boolean {
     || opsAtomLocal.value.download !== savedGeneral.value.opsAtomDownload
     || opsAtomLocal.value.clipboard !== savedGeneral.value.opsAtomClipboard
     || opsAtomLocal.value.open !== savedGeneral.value.opsAtomOpen
+    || opsAtomLocal.value.reload !== savedGeneral.value.opsAtomReload
     || serializeSessionContext(sessionContextSelected.value) !== savedGeneral.value.sessionContext
     || shareDefaultTTL.value !== savedGeneral.value.shareDefaultTTL
     || agentNamingNoteEnabled.value !== savedGeneral.value.agentNamingNoteEnabled
+    || agentAutoNameEnabled.value !== savedGeneral.value.agentAutoNameEnabled
     || previewCompatMode.value !== savedGeneral.value.previewCompatMode
 }
 
@@ -357,6 +369,7 @@ async function save() {
     sessionContext: serializeSessionContext(sessionContextSelected.value),
     shareDefaultTTL: shareDefaultTTL.value,
     agentNamingNoteEnabled: agentNamingNoteEnabled.value,
+    agentAutoNameEnabled: agentAutoNameEnabled.value,
     previewCompatMode: previewCompatMode.value,
   })
   // frontend 原子开关经 store 正门落地（localStorage + userPrefs 漫游双写在
@@ -558,6 +571,28 @@ defineExpose({ load, save, isDirty })
     data-testid="settings-agent-naming-note-hint"
   >
     {{ t('settings.agentNamingNoteHint') }}
+  </div>
+  <!-- 会话自动命名（P-20261111-6 S2）：claude 会话首条用户消息落盘后服务端
+       按其总结会话名（~40 字符截断，手动改名过永不覆盖）——多会话列表可读性；
+       默认开（本提案目的即行为变化），关闭回落纯手动改名 -->
+  <div
+    class="setting-row"
+    data-testid="settings-agent-auto-name"
+  >
+    <n-checkbox v-model:checked="agentAutoNameEnabled">
+      {{ t('settings.agentAutoNameLabel') }}
+    </n-checkbox>
+    <SettingModifiedMark
+      :modified="agentAutoNameEnabled !== GENERAL_DEFAULTS.agentAutoNameEnabled"
+      @restore="agentAutoNameEnabled = GENERAL_DEFAULTS.agentAutoNameEnabled"
+    />
+  </div>
+  <div
+    class="setting-hint"
+    style="margin-top: -2px"
+    data-testid="settings-agent-auto-name-hint"
+  >
+    {{ t('settings.agentAutoNameHint') }}
   </div>
   <!-- 新建分享默认有效期（P-20261020-5）：创建弹层未主动改选时应用；
        缺省永久 = 存量行为零变化。仅影响 live 文件分享（frozen 固定 30 天
@@ -803,9 +838,10 @@ defineExpose({ load, save, isDirty })
   >
     {{ t('settings.previewCompatHint') }}
   </div>
-  <!-- frontend 原子管制（P-20261023-4）：agent 经操作通道触发的浏览器即时效应
-       按原子可关（下载框/剪贴板/开标签）——三效应每次都带可见提示（无静默
-       效应），关档后 agent 对应请求被忽略并每窗口至多一条提示 -->
+  <!-- frontend 原子管制（P-20261023-4 + P-20261111-3 重载）：agent 经操作通道
+       触发的浏览器即时效应按原子可关（下载框/剪贴板/开标签/页面·视图重载）
+       ——每次效应都带可见提示（无静默效应），关档后 agent 对应请求被忽略
+       并每窗口至多一条提示 -->
   <div
     class="setting-row"
     style="margin-top: 4px"
@@ -841,6 +877,18 @@ defineExpose({ load, save, isDirty })
     <SettingModifiedMark
       :modified="opsAtomLocal.open !== GENERAL_DEFAULTS.opsAtomOpen"
       @restore="opsAtomLocal.open = GENERAL_DEFAULTS.opsAtomOpen"
+    />
+  </div>
+  <div
+    class="setting-row"
+    data-testid="settings-ops-atom-reload"
+  >
+    <n-checkbox v-model:checked="opsAtomLocal.reload">
+      {{ t('settings.opsAtomReload') }}
+    </n-checkbox>
+    <SettingModifiedMark
+      :modified="opsAtomLocal.reload !== GENERAL_DEFAULTS.opsAtomReload"
+      @restore="opsAtomLocal.reload = GENERAL_DEFAULTS.opsAtomReload"
     />
   </div>
   <div

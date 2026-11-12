@@ -70,6 +70,7 @@ describe('注册表快照 ⇄ opsEvents.ts 接口（漂移门禁）', () => {
       ['frontend.download', 'FrontendDownloadDetail'],
       ['frontend.clipboard', 'FrontendClipboardDetail'],
       ['frontend.open', 'FrontendOpenDetail'],
+      ['frontend.reload', 'FrontendReloadDetail'],
     ]
     for (const [event, iface] of cases) {
       const fields = interfaceFields(iface)
