@@ -424,7 +424,9 @@ Details and screenshots per tool in [Highlights](#highlights).
 ## Highlights
 
 Each module below keeps a short summary + screenshot; the full walkthroughs
-live in the official docs — [Getting started](https://wtr20211202.github.io/codecombo/guide/getting-started.html) ·
+and the module-by-module guide live in the official docs —
+[Getting started](https://wtr20211202.github.io/codecombo/guide/getting-started.html) ·
+[Features](https://wtr20211202.github.io/codecombo/guide/features.html) ·
 [FAQ](https://wtr20211202.github.io/codecombo/guide/faq.html) (in-repo sources: [site/guide/](site/guide/)).
 
 ### Agent ops channel
@@ -437,7 +439,7 @@ handbook (`GET /api/ops-manual`) agents can read; downloads, clipboard,
 open-at-line, preview links and cross-device notifications ride the same
 channel.
 
-Details → [official docs](https://wtr20211202.github.io/codecombo/guide/getting-started.html#agent-setup) · [in-repo source](site/guide/getting-started.html#agent-setup)
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/features.html#agent-sessions) · [in-repo source](site/guide/features.html#agent-sessions)
 
 ### AI agent sessions
 
@@ -448,7 +450,7 @@ the page and replay the full scrollback.
 
 ![Agent session running a real PTY](docs/img/agent-session.png)
 
-Details → [official docs](https://wtr20211202.github.io/codecombo/guide/getting-started.html#agent-setup) · [in-repo source](site/guide/getting-started.html#agent-setup)
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/features.html#agent-sessions) · [in-repo source](site/guide/features.html#agent-sessions)
 
 ### On-call dashboard
 
@@ -459,6 +461,8 @@ stalled-session triage, and approval cards waiting for judgement.
 
 ![On-call dashboard](docs/img/oncall-dashboard.png)
 
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/features.html#oncall) · [in-repo source](site/guide/features.html#oncall)
+
 ### Approval center
 
 Agents don't get a blank check. High-risk commands and mass file replacements
@@ -468,7 +472,7 @@ cloud keys) are redacted on the way out.
 
 ![Approval card for a high-risk git reset](docs/img/approval-card.png)
 
-Details → [official docs](https://wtr20211202.github.io/codecombo/guide/getting-started.html#agent-setup) · [in-repo source](site/guide/getting-started.html#agent-setup)
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/features.html#approvals) · [in-repo source](site/guide/features.html#approvals)
 
 ### Multi-instance sync
 
@@ -480,6 +484,8 @@ credentials, settings and project contexts).
 
 ![Instance sync center with a dual-instance topology](docs/img/instance-sync.png)
 
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/features.html#sync) · [in-repo source](site/guide/features.html#sync)
+
 ### Sharing links
 
 Share a file, a folder, a text snippet, or a live terminal with visitors via
@@ -488,7 +494,7 @@ toggle away; visitors need no account.
 
 ![Share dialog](docs/img/share-dialog.png)
 
-Details → [official docs](https://wtr20211202.github.io/codecombo/guide/getting-started.html#share-notes) · [in-repo source](site/guide/getting-started.html#share-notes)
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/features.html#sharing) · [in-repo source](site/guide/features.html#sharing)
 
 ### …and a complete Git workbench
 
@@ -498,6 +504,8 @@ worktrees, submodules, LFS, GPG-signed commits, reflog, patch export/import,
 and a commit graph you can cherry-pick / squash / extract from.
 
 ![Project workspace](docs/img/project-editor.png)
+
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/features.html#git-workbench) · [in-repo source](site/guide/features.html#git-workbench)
 
 ## Highlights (continued): the rest of the toolbox
 
@@ -518,9 +526,9 @@ and a commit graph you can cherry-pick / squash / extract from.
   instances. Zero-config: the official repo is the built-in default source.
   Automatic checks run every 24h and notify on new versions — toggle in the
   version panel to opt out. Which upgrade path applies depends on how you
-  installed — see [Upgrading](#upgrading) and the upgrade-paths table in the
-  docs FAQ: [official docs](https://wtr20211202.github.io/codecombo/guide/faq.html#upgrading) ·
-  [in-repo source](site/guide/faq.html#upgrading).
+  installed — see [Upgrading](#upgrading); module guide entry in the docs
+  Features page: [official docs](https://wtr20211202.github.io/codecombo/guide/features.html#more) ·
+  [in-repo source](site/guide/features.html#more).
 - **i18n & themes** — English / 简体中文 UI; four built-in themes
   (Dark / Light / One Dark / Dracula).
 
@@ -556,6 +564,7 @@ Two entry points, by audience:
 Highlights above link into:
 
 - [Getting started](https://wtr20211202.github.io/codecombo/guide/getting-started.html) — install → set the lock → add a project (or let an agent do it) → restart recovery → share & notes · in-repo source: [site/guide/getting-started.html](site/guide/getting-started.html)
+- [Features](https://wtr20211202.github.io/codecombo/guide/features.html) — every module of the workbench in one guide: what each one is for and where to find it · in-repo source: [site/guide/features.html](site/guide/features.html)
 - [FAQ](https://wtr20211202.github.io/codecombo/guide/faq.html) — ports & access, data & backups, which upgrade path is yours, lock & remote access, common errors (203/EXEC …) · in-repo source: [site/guide/faq.html](site/guide/faq.html)
 
 **Architecture & design documents — for contributors**, live in

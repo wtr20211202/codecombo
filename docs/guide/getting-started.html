@@ -20,6 +20,9 @@
     详情链接——P-20261112-12-S1 落地，README Highlights 典型场景叙事的事实源
     即本页 #restart-restore / #share-notes，改长文先改本页）。各块「源=」注记
     照旧溯 upstream；素材重组不新造——改动前先核对源文件实况。
+    P-20261115-2-S2 起 #agent-setup / #restart-restore / #share-notes 三节尾
+    回指 features 页对应模块节（features 侧「深入指南」列链接既存，双向互达；
+    双语同 PR 同改纪律适用）。
 
     截图路径基准：docs/img 唯一截图事实源。源码态（site/guide/*.html，比
     landing 深一层）用 ../img/*；发布树落 docs/guide/*.html 后由
@@ -73,6 +76,7 @@
       <p class="side-head"><span data-lang-en>Documentation</span><span data-lang-zh>文档</span></p>
       <nav aria-label="Docs">
         <a href="getting-started.html" aria-current="page"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a>
+        <a href="features.html"><span data-lang-en>Features</span><span data-lang-zh>功能全览</span></a>
         <a href="faq.html"><span data-lang-en>FAQ</span><span data-lang-zh>常见问题</span></a>
       </nav>
       <p class="side-head"><span data-lang-en>On this page</span><span data-lang-zh>本页目录</span></p>
@@ -188,7 +192,7 @@
         </div>
         <div class="cmd-lines">
           <div class="cmd-row">
-            <code class="cmd-text">codecombo reset-lock</code><span class="qs-cmt" data-lang-en"># forgot the password? run on the machine</span><span class="qs-cmt" data-lang-zh># 忘记密码？在机器上执行</span>
+            <code class="cmd-text">codecombo reset-lock</code><span class="qs-cmt" data-lang-en># forgot the password? run on the machine</span><span class="qs-cmt" data-lang-zh># 忘记密码？在机器上执行</span>
             <button class="copy-btn" type="button" data-copy="codecombo reset-lock" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
           </div>
         </div>
@@ -268,6 +272,15 @@
             <span data-lang-zh>智能体会话——聊天经结构化 ops API 驱动工作台</span>
           </figcaption>
         </figure>
+        <p class="doc-p">
+          <!-- 反向互指（P-20261115-2-S2）：features 页对应模块节链接回本节（「深入指南」列），双向互达 -->
+          <span data-lang-en>Module-by-module detail — sessions, the ops channel and approvals —
+          lives in the features guide: <a href="features.html#agent-sessions">Agent sessions</a> ·
+          <a href="features.html#approvals">Approval center</a>.</span>
+          <span data-lang-zh>会话、ops 通道与审批的逐模块详解在功能全览里：
+          <a href="features.html#agent-sessions">终端会话管理</a> ·
+          <a href="features.html#approvals">审批中心</a>。</span>
+        </p>
       </section>
 
       <!-- ============ 5. Restart & restore（源=landing 典型场景 + docs/deploy-linux.md §3（tmux 持久化/KillMode）+ ops 手册 sessions 节（timeline 回放），改先改源） ============ -->
@@ -283,6 +296,13 @@
           （持久化终端后端让它们存活），每个会话都保留完整可回放的输出历史。打开 Codecombo，
           对任意智能体说一句：<i>「恢复我之前的会话。」</i>每个项目的会话原样回来，全部输出
           可在会话时间线里回看与回放。</span>
+        </p>
+        <p class="doc-p">
+          <!-- 反向互指（P-20261115-2-S2）：features 页 Web 终端模块节链接回本节，双向互达 -->
+          <span data-lang-en>The web terminal and its persistence switches are mapped in the
+          features guide: <a href="features.html#web-terminal">Web terminal</a>.</span>
+          <span data-lang-zh>Web 终端与其持久化开关的模块详解在功能全览里：
+          <a href="features.html#web-terminal">Web 终端</a>。</span>
         </p>
       </section>
 
@@ -302,6 +322,14 @@
           channel too.</span>
           <span data-lang-zh>查到的结论记进内置<b>笔记</b>，别散落临时文件——可搜索、随手可达，
           智能体经 ops 通道也能读写。</span>
+        </p>
+        <p class="doc-p">
+          <!-- 反向互指（P-20261115-2-S2）：features 页分享/笔记两模块节链接回本节，双向互达 -->
+          <span data-lang-en>The full module views — live-terminal shares, link revocation and the
+          shared notes library — are in the features guide:
+          <a href="features.html#sharing">Sharing links</a> · <a href="features.html#notes">Notes</a>.</span>
+          <span data-lang-zh>完整模块面——实时终端分享、链接吊销与共享笔记库——见功能全览的
+          <a href="features.html#sharing">分享中心</a> · <a href="features.html#notes">笔记库</a>。</span>
         </p>
         <p class="doc-next">
           <span data-lang-en>Something not behaving as described? Check the
@@ -323,6 +351,9 @@
       </div>
       <nav class="footer-nav" aria-label="Footer">
         <a href="../index.html"><span data-lang-en>← Home</span><span data-lang-zh>← 返回官网</span></a>
+        <!-- Features 页尾项（P-20261115-2-S2）：guide 三页页尾全族互链（features 页本列
+             Getting started/FAQ，此处同款形态补 Features） -->
+        <a href="features.html"><span data-lang-en>Features</span><span data-lang-zh>功能全览</span></a>
         <a href="faq.html"><span data-lang-en>FAQ</span><span data-lang-zh>常见问题</span></a>
         <a href="https://github.com/wtr20211202/codecombo" target="_blank" rel="noopener">
           <span data-lang-en>GitHub</span><span data-lang-zh>GitHub</span>

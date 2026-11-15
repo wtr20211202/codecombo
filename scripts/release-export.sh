@@ -237,9 +237,9 @@ done
 for must in main.go go.mod go.sum LICENSE NOTICE README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md \
             build.sh build.bat .gitignore .golangci.yml \
             site/index.html site/assets/site.css site/assets/site.js site/assets/og-image.png \
-            site/guide/getting-started.html site/guide/faq.html \
+            site/guide/getting-started.html site/guide/features.html site/guide/faq.html \
             docs/index.html docs/assets/site.css docs/img/project-editor.png \
-            docs/guide/getting-started.html docs/guide/faq.html \
+            docs/guide/getting-started.html docs/guide/features.html docs/guide/faq.html \
             docs/whatsnew.md docs/EXTENSION_POINTS.md docs/README.zh-CN.md docs/adr/README.md \
             server/api/tools/dsh.go server/share/assets/xterm.js web/public/fonts/LICENSE-JetBrainsMono.txt \
             web/package.json web/package-lock.json scripts/e2e-seed.sh scripts/check-event-names.mjs \

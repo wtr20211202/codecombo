@@ -51,11 +51,15 @@
       </a>
       <nav class="header-nav" aria-label="Page">
         <a href="#quickstart" data-lang-en>Quickstart</a><a href="#quickstart" data-lang-zh>快速上手</a>
-        <a href="#features" data-lang-en>Features</a><a href="#features" data-lang-zh>功能</a>
+        <!-- Features 锚自 P-20261115-2-S2 起指 docs 功能全览页（原页内 #features 锚——
+             Highlights 栅格紧随快速上手滚动可达，且节题本为 Highlights，锚名与目的地就此对齐；
+             顶栏零新增链接不触碰 S3 量得的 ≤760 收起阶梯：en 文案等宽零漂移、zh 功能全览
+             +29px 仍在隐藏带内，761px+ 溢出探针全绿）；页尾另有 Features guide 直链同款形态 -->
+        <a href="guide/features.html" data-lang-en>Features</a><a href="guide/features.html" data-lang-zh>功能全览</a>
         <a href="#scenarios" data-lang-en>Scenarios</a><a href="#scenarios" data-lang-zh>场景</a>
         <!-- Docs 入口指入文档分页族（P-20261112-10-S3）：相对路径 guide/getting-started.html
              在源码态（site/ 根）与导出态（发布树 docs/ 根，guide 页同落 docs/guide/）两态皆通；
-             ≤640px 顶导航锚链接按既有响应式规则收起（site.css .header-nav > a 隐藏行），
+             ≤760px 顶导航锚链接按 S3 阶梯收起（site.css .header-nav > a 隐藏行，原 ≤640 上移），
              文档入口由页尾 Docs 链接承接（footer-nav 移动端不隐藏）。 -->
         <a href="guide/getting-started.html" data-lang-en>Docs</a><a href="guide/getting-started.html" data-lang-zh>文档</a>
         <span class="lang-toggle" role="group" aria-label="Language">
@@ -361,6 +365,12 @@
              Elsewhere 到达；标签零新增，相对路径两态皆通同顶导航注记） -->
         <a href="guide/getting-started.html">
           <span data-lang-en>Docs</span><span data-lang-zh>文档</span>
+        </a>
+        <!-- Features guide 直链（P-20261115-2-S2）：与 Docs 同款双语相对路径形态，
+             footer-nav flex-wrap 承接、不涉顶栏收起阶梯（guide 三页页尾同步补
+             Features 项成全族互链） -->
+        <a href="guide/features.html">
+          <span data-lang-en>Features guide</span><span data-lang-zh>功能全览</span>
         </a>
         <a href="https://github.com/wtr20211202/codecombo/blob/main/SECURITY.md" target="_blank" rel="noopener">
           <span data-lang-en>Security</span><span data-lang-zh>安全</span>

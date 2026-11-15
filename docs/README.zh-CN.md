@@ -370,7 +370,8 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 
 ## 特色能力
 
-以下每模块收敛为摘要+截图；完整走读在官网文档——[快速上手](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN) ·
+以下每模块收敛为摘要+截图；完整走读与逐模块指南在官网文档——[快速上手](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN) ·
+[功能全览](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN) ·
 [常见问题](https://wtr20211202.github.io/codecombo/guide/faq.html?lang=zh-CN)（仓内源文件：[site/guide/](../site/guide/)）。
 
 ### 智能体操作通道
@@ -380,7 +381,7 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 给你裁决，弹下载、写剪贴板、按行号开文件、预览链接、跨设备通知走同一条通道。
 全部能力登记在单一注册表并渲染为智能体可读的手册（`GET /api/ops-manual`）。
 
-详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN#agent-setup) · [仓内源文件](../site/guide/getting-started.html#agent-setup)
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN#agent-sessions) · [仓内源文件](../site/guide/features.html#agent-sessions)
 
 ### 智能体会话
 
@@ -389,7 +390,7 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 
 ![真实运行的智能体会话（PTY 带命令输出）](img/agent-session.png)
 
-详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN#agent-setup) · [仓内源文件](../site/guide/getting-started.html#agent-setup)
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN#agent-sessions) · [仓内源文件](../site/guide/features.html#agent-sessions)
 
 ### 值班大屏
 
@@ -399,6 +400,8 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 
 ![值班大屏](img/oncall-dashboard.png)
 
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN#oncall) · [仓内源文件](../site/guide/features.html#oncall)
+
 ### 审批中心
 
 智能体没有空白支票：高危命令与批量文件替换以审批卡回流，附终端过程实况录制
@@ -407,7 +410,7 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 
 ![高危命令的审批卡](img/approval-card.png)
 
-详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN#agent-setup) · [仓内源文件](../site/guide/getting-started.html#agent-setup)
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN#approvals) · [仓内源文件](../site/guide/features.html#approvals)
 
 ### 多实例同步
 
@@ -417,6 +420,8 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 
 ![多实例同步中心（双实例拓扑）](img/instance-sync.png)
 
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN#sync) · [仓内源文件](../site/guide/features.html#sync)
+
 ### 访客分享链接
 
 文件、目录、文本片段、甚至实时终端，一键生成分享链接——TTL / 口令 / 阅后即焚 /
@@ -424,7 +429,7 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 
 ![分享弹层](img/share-dialog.png)
 
-详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN#share-notes) · [仓内源文件](../site/guide/getting-started.html#share-notes)
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN#sharing) · [仓内源文件](../site/guide/features.html#sharing)
 
 ### 以及一个完整的 Git 工作台
 
@@ -433,6 +438,8 @@ hunk 级暂存与丢弃、三路差异、拖拽式交互变基、合并预演、
 可 cherry-pick / squash / extract 的提交图。
 
 ![项目工作区](img/project-editor.png)
+
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN#git-workbench) · [仓内源文件](../site/guide/features.html#git-workbench)
 
 ### 工具箱其余部分
 
@@ -447,9 +454,9 @@ hunk 级暂存与丢弃、三路差异、拖拽式交互变基、合并预演、
 - **自更新** —— 基于 GitHub Release 的更新检查与失败自动回滚；中心实例可
   缓存转发二进制给子实例。零配置：官方仓库即内置默认更新源；自动检查每 24
   小时一轮，新版本可用时推送通知，版本面板可关闭。走哪条升级路径取决于安装
-  方式——见[升级](#升级)；升级判别表另见官网文档 FAQ：
-  [官网文档](https://wtr20211202.github.io/codecombo/guide/faq.html?lang=zh-CN#upgrading) ·
-  [仓内源文件](../site/guide/faq.html#upgrading)。
+  方式——见[升级](#升级)；官网文档功能全览的模块条目：
+  [官网文档](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN#more) ·
+  [仓内源文件](../site/guide/features.html#more)。
 - **双语与主题** —— 简体中文 / English 界面；Dark / Light / One Dark /
   Dracula 四主题。
 
@@ -484,6 +491,7 @@ codecombo/
 **官网用户文档**（中英双语），即上文特色能力逐项链接的同一组页面：
 
 - [快速上手](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN) —— 安装 → 首启设锁 → 添加项目（或让智能体代办）→ 重启不丢现场 → 分享与笔记 · 仓内源文件：[site/guide/getting-started.html](../site/guide/getting-started.html)
+- [功能全览](https://wtr20211202.github.io/codecombo/guide/features.html?lang=zh-CN) —— 工作台全部模块一页过：每个模块是干什么的、在工作台哪里找到它 · 仓内源文件：[site/guide/features.html](../site/guide/features.html)
 - [常见问题](https://wtr20211202.github.io/codecombo/guide/faq.html?lang=zh-CN) —— 端口与访问、数据与备份、升级路径判别、锁与远程访问、常见报错（203/EXEC 等） · 仓内源文件：[site/guide/faq.html](../site/guide/faq.html)
 
 **内部架构文档**（贡献者向），位于 [`docs/`](./)——中文撰写，英文化在 Roadmap：

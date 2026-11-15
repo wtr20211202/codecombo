@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Features — Codecombo Docs</title>
+  <!--
+    Codecombo 文档模块（P-20261115-2-S1，guide/ 分页族第三页：全模块功能指南）。
+    零框架纯 HTML，样式复用 site/assets/site.css 登记组件类（SHARED-CLASS
+    REGISTRY；本页零新类零页内 <style>），交互复用 assets/site.js（语言切换/
+    一键复制与本页同链路；平台探测下载仅 landing 有，本页无 #dl-primary 即
+    自动跳过）。建页实勘矩阵=docs/features-page-matrix.md（12 模块口径×
+    素材源矩阵，S2/S3 的硬输入）。
+
+    「同 PR 双语同改」纪律（本页族成文）：本页全部文案以 <span data-lang-en> /
+    <span data-lang-zh> 双份内联，任何文案改动必须在同一个 PR 内同时改两种语言
+    的同一处——发现单语改动即视为半成品，不许合入。侧边导航/顶栏是分页族共享
+    骨架的静态复制（零框架无 partial 机制）：改导航结构须 guide/ 全部页面同
+    PR 同改。
+
+    素材源逐块标注（「源=」注记溯 upstream）：素材白名单=README What's inside
+    表 + Highlights 节 + getting-started/faq 既有长文 + docs/deploy-linux.md /
+    docs/remote-access.md 指针 + 产品行为实勘（面板注册表/首页入口/i18n 文案，
+    见矩阵 §3 逐行锚点）；**黑名单=产品内 ops 手册**（agent API 向，文档模块
+    不含 ops 手册复制防双源漂移）。步骤素材实质为零的模块（远程管理/笔记库/
+    TODO/环境画像/dsh 版本管理等）**如实降格为「定位+入口路径」短条目**——
+    不硬凑、不新造步骤（评审修正③b 定案）。
+
+    截图路径基准：docs/img 唯一截图事实源。源码态（site/guide/*.html，比
+    landing 深一层）用 ../../docs/img/*；发布树落 docs/guide/*.html 后由
+    release-export.sh 的 img 改写统一处理——尾段 ../docs/img/ 命中产出
+    ../img/*，恰为 docs/guide/ 页的正确相对路径（getting-started 页头注记
+    同款，2026-11-12 导出树逐引用解析实测零断链）——两种落位语义都要顾。
+
+    SEO：本页独立 title/meta/og（分页族每页独立成卡）；hreflang 指向 ?lang
+    查询变体（与 landing 同机制，site.js 读取查询参数切换语言）。
+  -->
+  <meta name="description" content="Every module of the workbench in one guide: Git workbench, web terminal, remote machines, agent sessions, approvals, notes, TODOs, environment profile, on-call dashboard, instance sync, sharing links and dsh integration — where each one lives and what it does.">
+  <link rel="alternate" hreflang="en" href="features.html">
+  <link rel="alternate" hreflang="zh-CN" href="features.html?lang=zh-CN">
+  <link rel="icon" type="image/svg+xml" href="../assets/logo/codecombo-icon-auto.svg">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Features — Codecombo Docs">
+  <meta property="og:description" content="The whole toolbox, module by module: what each one is for, where to find it, and which guide covers it in depth.">
+  <meta property="og:image" content="../assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#0d1117">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+  <!-- ============ Header（分页族共享骨架，guide/ 各页同构） ============ -->
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="../index.html" aria-label="Codecombo home">
+        <img class="brand-icon" src="../assets/logo/codecombo-icon-auto.svg" alt="" width="30" height="30">
+        <span class="brand-name">Codecombo</span><span class="beta-chip">Beta</span>
+      </a>
+      <nav class="header-nav" aria-label="Site">
+        <a href="getting-started.html"><span data-lang-en>Docs</span><span data-lang-zh>文档</span></a>
+        <span class="lang-toggle" role="group" aria-label="Language">
+          <button type="button" class="lang-btn" data-lang-set="en" aria-pressed="true">EN</button>
+          <button type="button" class="lang-btn" data-lang-set="zh" aria-pressed="false">中文</button>
+        </span>
+        <a class="gh-link" href="https://github.com/wtr20211202/codecombo" target="_blank" rel="noopener">
+          <svg class="gh-mark" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="wrap guide-layout">
+    <!-- ============ Sidebar（分页族共享骨架：改导航 guide/ 全页同 PR 同改） ============ -->
+    <aside class="guide-side">
+      <p class="side-head"><span data-lang-en>Documentation</span><span data-lang-zh>文档</span></p>
+      <nav aria-label="Docs">
+        <a href="getting-started.html"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a>
+        <a href="features.html" aria-current="page"><span data-lang-en>Features</span><span data-lang-zh>功能全览</span></a>
+        <a href="faq.html"><span data-lang-en>FAQ</span><span data-lang-zh>常见问题</span></a>
+      </nav>
+      <p class="side-head"><span data-lang-en>On this page</span><span data-lang-zh>本页目录</span></p>
+      <nav aria-label="Sections">
+        <a href="#overview"><span data-lang-en>All modules</span><span data-lang-zh>模块总览</span></a>
+        <a href="#git-workbench"><span data-lang-en>Git workbench</span><span data-lang-zh>Git 工作台</span></a>
+        <a href="#web-terminal"><span data-lang-en>Web terminal</span><span data-lang-zh>Web 终端</span></a>
+        <a href="#remote"><span data-lang-en>Remote machines</span><span data-lang-zh>远程管理</span></a>
+        <a href="#agent-sessions"><span data-lang-en>Agent sessions</span><span data-lang-zh>终端会话管理</span></a>
+        <a href="#approvals"><span data-lang-en>Approval center</span><span data-lang-zh>审批中心</span></a>
+        <a href="#notes"><span data-lang-en>Notes</span><span data-lang-zh>笔记库</span></a>
+        <a href="#todos"><span data-lang-en>TODO list</span><span data-lang-zh>TODO 清单</span></a>
+        <a href="#env-profile"><span data-lang-en>Environment profile</span><span data-lang-zh>环境画像</span></a>
+        <a href="#oncall"><span data-lang-en>On-call dashboard</span><span data-lang-zh>值班大屏</span></a>
+        <a href="#sync"><span data-lang-en>Instance sync</span><span data-lang-zh>多实例同步</span></a>
+        <a href="#sharing"><span data-lang-en>Sharing links</span><span data-lang-zh>分享中心</span></a>
+        <a href="#dsh"><span data-lang-en>dsh integration</span><span data-lang-zh>dsh 集成</span></a>
+        <a href="#more"><span data-lang-en>Also in the box</span><span data-lang-zh>还有这些</span></a>
+      </nav>
+      <p class="side-head"><span data-lang-en>Elsewhere</span><span data-lang-zh>更多去处</span></p>
+      <nav aria-label="Resources">
+        <a href="../index.html"><span data-lang-en>← Product home</span><span data-lang-zh>← 返回官网</span></a>
+        <a href="getting-started.html"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a>
+        <a href="https://github.com/wtr20211202/codecombo/blob/main/README.md" target="_blank" rel="noopener"><span data-lang-en>README</span><span data-lang-zh>README</span></a>
+      </nav>
+    </aside>
+
+    <main class="guide-main">
+      <!-- ============ Page hero ============ -->
+      <div class="doc-hero">
+        <h1><span data-lang-en>Features</span><span data-lang-zh>功能全览</span></h1>
+        <p class="doc-lede">
+          <span data-lang-en>The whole toolbox, module by module — what each one is for, where to
+          find it in the workbench, and which guide covers it in depth. Install and first
+          steps live in <a href="getting-started.html">Getting started</a>; this page maps
+          the rest.</span>
+          <span data-lang-zh>整个工具箱逐模块过一遍——它是干什么的、在工作台哪里找到它、
+          哪篇指南把它讲透。安装与上手步骤在<a href="getting-started.html">快速上手</a>，
+          本页负责其余全部。</span>
+        </p>
+      </div>
+
+      <!-- ============ 0. Overview（源=README §What's inside 表 12 模块口径归并，矩阵 docs/features-page-matrix.md §2；改口径先改矩阵再改源） ============ -->
+      <section class="doc-section" id="overview">
+        <h2><span data-lang-en>All modules at a glance</span><span data-lang-zh>模块总览</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>Twelve modules, one per section below. Click a row to jump to it;
+          the “deep dive” column points at the long-form guide when one exists.</span>
+          <span data-lang-zh>十二个模块，对应下文十二节。点行内链接直达对应小节；
+          「深入指南」列指向已成文的长文（若有）。</span>
+        </p>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th><span data-lang-en>Module</span><span data-lang-zh>模块</span></th>
+              <th><span data-lang-en>In one line</span><span data-lang-zh>一句话</span></th>
+              <th><span data-lang-en>Deep dive</span><span data-lang-zh>深入指南</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="#git-workbench"><span data-lang-en>Git workbench</span><span data-lang-zh>Git 工作台</span></a></td>
+              <td><span data-lang-en>Visual Git from hunk-level staging to interactive rebase.</span><span data-lang-zh>从 hunk 级暂存到交互式 rebase 的可视化 Git。</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><a href="#web-terminal"><span data-lang-en>Web terminal</span><span data-lang-zh>Web 终端</span></a></td>
+              <td><span data-lang-en>Real PTYs with optional tmux persistence and output replay.</span><span data-lang-zh>真实 PTY，可选 tmux 持久化与输出回放。</span></td>
+              <td><a href="getting-started.html#restart-restore"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a></td>
+            </tr>
+            <tr>
+              <td><a href="#remote"><span data-lang-en>Remote machines</span><span data-lang-zh>远程管理</span></a></td>
+              <td><span data-lang-en>SSH hosts, remote terminals, one-click deployment pipelines.</span><span data-lang-zh>SSH 主机、远程终端、一键部署流水线。</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><a href="#agent-sessions"><span data-lang-en>Agent sessions</span><span data-lang-zh>终端会话管理</span></a></td>
+              <td><span data-lang-en>Claude / Codex / dsh sessions as real PTYs, driven from chat.</span><span data-lang-zh>claude / codex / dsh 会话即真实 PTY，聊天直接驱动。</span></td>
+              <td><a href="getting-started.html#agent-setup"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a></td>
+            </tr>
+            <tr>
+              <td><a href="#approvals"><span data-lang-en>Approval center</span><span data-lang-zh>审批中心</span></a></td>
+              <td><span data-lang-en>Risky agent actions come back as approval cards, not blank checks.</span><span data-lang-zh>高危动作以审批卡回流，不是空白支票。</span></td>
+              <td><a href="getting-started.html#agent-setup"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a></td>
+            </tr>
+            <tr>
+              <td><a href="#notes"><span data-lang-en>Notes</span><span data-lang-zh>笔记库</span></a></td>
+              <td><span data-lang-en>One notepad shared by you and your agents, across projects.</span><span data-lang-zh>你与智能体共享的笔记库，跨项目一份。</span></td>
+              <td><a href="getting-started.html#share-notes"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a></td>
+            </tr>
+            <tr>
+              <td><a href="#todos"><span data-lang-en>TODO list</span><span data-lang-zh>TODO 清单</span></a></td>
+              <td><span data-lang-en>Code-comment TODO / FIXME / HACK markers, aggregated into one board.</span><span data-lang-zh>代码注释里的 TODO / FIXME / HACK，聚合一块看板。</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><a href="#env-profile"><span data-lang-en>Environment profile</span><span data-lang-zh>环境画像</span></a></td>
+              <td><span data-lang-en>A read-only résumé per project: ports, sentinels, deploy targets.</span><span data-lang-zh>每个项目的只读简历：端口、哨兵、部署目标。</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><a href="#oncall"><span data-lang-en>On-call dashboard</span><span data-lang-zh>值班大屏</span></a></td>
+              <td><span data-lang-en>One screen for instance health, activity and stalled sessions.</span><span data-lang-zh>实例健康、活动热力、停滞会话一屏总览。</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><a href="#sync"><span data-lang-en>Instance sync</span><span data-lang-zh>多实例同步</span></a></td>
+              <td><span data-lang-en>Manage many instances from one; migrate a machine as one .scpkg.</span><span data-lang-zh>一屏管理多实例；整机迁移一个 .scpkg。</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><a href="#sharing"><span data-lang-en>Sharing links</span><span data-lang-zh>分享中心</span></a></td>
+              <td><span data-lang-en>One-click links for files, folders, snippets and live terminals.</span><span data-lang-zh>文件、文件夹、片段、实时终端，一键成链。</span></td>
+              <td><a href="getting-started.html#share-notes"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a></td>
+            </tr>
+            <tr>
+              <td><a href="#dsh"><span data-lang-en>dsh integration</span><span data-lang-zh>dsh 集成</span></a></td>
+              <td><span data-lang-en>The dsh Web UI embedded in the workbench, with version management.</span><span data-lang-zh>dsh Web UI 嵌入工作台，附带版本管理。</span></td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="doc-note">
+          <p>
+            <span data-lang-en><b>Not listed as modules:</b> the global lock, secret encryption and
+            audit log (<a href="faq.html#security">FAQ · Lock &amp; remote access</a>), self-update
+            (<a href="faq.html#upgrading">FAQ · Upgrading</a>), and language &amp; themes — see
+            <a href="#more">also in the box</a> at the end.</span>
+            <span data-lang-zh><b>不单列成模块的：</b>全局锁、敏感值加密与审计日志
+            （<a href="faq.html#security">常见问题 · 锁与远程访问</a>）、自更新
+            （<a href="faq.html#upgrading">常见问题 · 升级路径</a>）以及语言与主题——见文末
+            <a href="#more">还有这些</a>。</span>
+          </p>
+        </div>
+      </section>
+
+      <!-- ============ 1. Git workbench（源=README §What's inside「Git workbench」行 + §Highlights「…and a complete Git workbench」节；改先改源） ============ -->
+      <section class="doc-section" id="git-workbench">
+        <h2><span data-lang-en>1 · Git workbench</span><span data-lang-zh>1 · Git 工作台</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>Visual Git for people who don't want to memorize flags. Stage down to
+          the hunk, read three-way diffs, resolve conflicts, and run an interactive rebase
+          by dragging commits — the workbench shows the merge preview before you commit to it.</span>
+          <span data-lang-zh>给不想背参数的人的可视化 Git：按 hunk 暂存、读三方 diff、解冲突，
+          拖拽提交即完成交互式 rebase——动手之前，工作台先把合并预览摆给你看。</span>
+        </p>
+        <ul class="doc-list">
+          <li>
+            <span data-lang-en><b>Everyday Git, visual:</b> hunk-level staging, changelists and
+            shelves, commit graph with cherry-pick / squash / extract, reflog, patch
+            export/import.</span>
+            <span data-lang-zh><b>日常 Git 全可视化：</b>hunk 级暂存、changelist 与 shelf、提交图上
+            cherry-pick / squash / 摘取提交、reflog、补丁导出导入。</span>
+          </li>
+          <li>
+            <span data-lang-en><b>Advanced repo shapes:</b> worktrees, submodules, LFS and
+            GPG-signed commits are first-class, not add-ons.</span>
+            <span data-lang-zh><b>高级仓库形态一等公民：</b>worktree、子模块、LFS、GPG 签名提交
+            都是原生支持，不是外挂。</span>
+          </li>
+          <li>
+            <span data-lang-en><b>Where to find it:</b> the Git panel from the activity bar
+            (docked as a bottom tab too); staging lives in the sidebar commit panel.</span>
+            <span data-lang-zh><b>入口：</b>活动栏的 Git 图标打开 Git 面板（也可停靠为底部标签）；
+            暂存走侧栏的提交面板。</span>
+          </li>
+        </ul>
+        <figure class="doc-shot">
+          <!-- 源=docs/img/commit-diff.png（截图唯一事实源 docs/img，只引用不复制） -->
+          <img src="../../docs/img/commit-diff.png" alt="Codecombo Git workbench — commit diff view" loading="lazy">
+          <figcaption>
+            <span data-lang-en>Commit diff — three-way view with hunk-level actions</span>
+            <span data-lang-zh>提交 diff——三方视图，按 hunk 操作</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ============ 2. Web terminal（源=README §What's inside「Web terminal」行 + getting-started #restart-restore 持久化叙事；改先改源） ============ -->
+      <section class="doc-section" id="web-terminal">
+        <h2><span data-lang-en>2 · Web terminal</span><span data-lang-zh>2 · Web 终端</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>A real terminal in the browser tab you already have open — real PTYs
+          (ConPTY on Windows, pty on Unix), split panes and floating windows, bookmarks,
+          command blocks, image paste upload. Turn on tmux persistence and terminals survive
+          restarts with their full scrollback replayable.</span>
+          <span data-lang-zh>就在你开着的浏览器标签里给一个真终端——真实 PTY（Windows 走
+          ConPTY，Unix 走 pty）、分屏与悬浮窗、书签、命令块、图片粘贴上传。打开 tmux
+          持久化后，终端跨重启存活，全部输出可回放。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en><b>Where to find it:</b> the terminal icon in the activity bar, or the
+          terminal bottom tab. Persistence and restart recovery are covered step by step in
+          <a href="getting-started.html#restart-restore">Getting started · Restart &amp; restore</a>.</span>
+          <span data-lang-zh><b>入口：</b>活动栏的终端图标，或底部「终端」标签。持久化与重启恢复的
+          分步说明见<a href="getting-started.html#restart-restore">快速上手 · 重启与恢复</a>。</span>
+        </p>
+      </section>
+
+      <!-- ============ 3. Remote machines（源=README §What's inside「Remote machines」行 + docs/deploy-linux.md §2§3 部署流水线 + docs/remote-access.md 隧道形态；步骤素材零→定位+入口短条目，改先改源） ============ -->
+      <section class="doc-section" id="remote">
+        <h2><span data-lang-en>3 · Remote machines</span><span data-lang-zh>3 · 远程管理</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>Keep your other boxes inside the same workbench. Manage SSH hosts with
+          encrypted credentials, open remote terminals (remote tmux included), forward
+          ports, and watch live deploy logs.</span>
+          <span data-lang-zh>把你的其他机器装进同一个工作台：托管 SSH 主机（凭据加密存储）、
+          开远程终端（含远程 tmux）、转发端口、盯部署日志实时输出。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en><b>Where to find it:</b> the globe icon in the activity bar opens the
+          remote console; add a host and it becomes a first-class target for terminals and
+          deployments. The one-click deployment pipeline (bootstrap → runtime → systemd) is
+          documented for operators in the
+          <a href="https://github.com/wtr20211202/codecombo/blob/main/docs/deploy-linux.md" target="_blank" rel="noopener">Linux deploy guide</a>;
+          reverse-tunnel reach-in is covered in the ops-oriented
+          <a href="https://github.com/wtr20211202/codecombo/blob/main/docs/remote-access.md" target="_blank" rel="noopener">remote access notes</a>.</span>
+          <span data-lang-zh><b>入口：</b>活动栏的地球图标打开远程管理；添加主机后，它即可作为终端
+          与部署的一等目标。一键部署流水线（bootstrap → runtime → systemd）的运维向说明在
+          <a href="https://github.com/wtr20211202/codecombo/blob/main/docs/deploy-linux.md" target="_blank" rel="noopener">Linux 部署指南</a>；
+          SSH 反向隧道接入见
+          <a href="https://github.com/wtr20211202/codecombo/blob/main/docs/remote-access.md" target="_blank" rel="noopener">远程接入说明</a>。</span>
+        </p>
+      </section>
+
+      <!-- ============ 4. Agent sessions（源=README §What's inside「AI agent sessions」行 + §Highlights「AI agent sessions」「Agent ops channel」节（ops 通道并入本节叙事）+ getting-started #agent-setup 长文；改先改源） ============ -->
+      <section class="doc-section" id="agent-sessions">
+        <h2><span data-lang-en>4 · Agent sessions</span><span data-lang-zh>4 · 终端会话管理</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>Run claude / codex / dsh as managed sessions — starting one needs no
+          project, and any project can host many. Sessions auto-name themselves after their
+          first task, organize into custom groups, and are restored as they were after power
+          loss or reboot. Every session is a real PTY: refresh the page and replay the full
+          scrollback.</span>
+          <span data-lang-zh>把 claude / codex / dsh 当受管会话跑——开会话不需要任何项目，每个
+          项目也可以同时跑多个。会话以首个任务自动命名、归入自定义分组，断电重启后原样恢复。
+          每个会话都是真实 PTY：刷新页面即可回放全部输出。</span>
+        </p>
+        <ul class="doc-list">
+          <li>
+            <span data-lang-en><b>Fleet features:</b> side-by-side runs of two agents on the same
+            task, continuation chains, scheduled agent jobs, reusable runbooks, and fleet
+            execution across many sessions.</span>
+            <span data-lang-zh><b>机群能力：</b>两个智能体同题并跑、接续链、定时任务、可复用
+            运行手册，以及跨多会话的编队执行。</span>
+          </li>
+          <li>
+            <span data-lang-en><b>Agents drive the workbench itself:</b> the ops channel gives
+            them a structured API over downloads, clipboard, open-at-line, preview links and
+            cross-device notifications, with a rendered handbook (<code>/ops-manual</code>)
+            served by your own instance — its knowledge matches your running version.</span>
+            <span data-lang-zh><b>智能体驱动工作台本身：</b>ops 通道以结构化 API 提供下载、剪贴板、
+            定位打开、预览链接与跨设备通知，并附渲染版手册（<code>/ops-manual</code>）——
+            由你自己的实例提供，手册与运行版本永远一致。</span>
+          </li>
+          <li>
+            <span data-lang-en><b>Where to find it:</b> the chat-bubbles icon in the activity bar
+            opens session management; a full walkthrough is in
+            <a href="getting-started.html#agent-setup">Getting started · Let an agent set it up</a>.</span>
+            <span data-lang-zh><b>入口：</b>活动栏的对话气泡图标打开终端会话管理；完整走查见
+            <a href="getting-started.html#agent-setup">快速上手 · 智能体代办</a>。</span>
+          </li>
+        </ul>
+        <figure class="doc-shot">
+          <!-- 源=docs/img/agent-session.png（截图唯一事实源 docs/img，只引用不复制） -->
+          <img src="../../docs/img/agent-session.png" alt="AI agent session running in a real PTY" loading="lazy">
+          <figcaption>
+            <span data-lang-en>Agent session — chat drives the workbench over the structured ops API</span>
+            <span data-lang-zh>智能体会话——聊天经结构化 ops API 驱动工作台</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ============ 5. Approval center（源=README §What's inside「Approval center」行 + §Highlights「Approval center」节；非 registry 面板 id 按功能名口径（矩阵 §2）；改先改源） ============ -->
+      <section class="doc-section" id="approvals">
+        <h2><span data-lang-en>5 · Approval center</span><span data-lang-zh>5 · 审批中心</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>Agents don't get a blank check. When a high-risk command or a mass
+          file replacement comes up, it returns as an <b>approval card</b> with a live
+          terminal recording — watch what the agent did, then approve, deny, or edit per
+          item. Sensitive values (tokens, passwords, cloud keys) are redacted on the way out.</span>
+          <span data-lang-zh>智能体拿不到空白支票。高危命令或批量文件替换出现时，会以
+          <b>审批卡</b>回流，附实时终端录像——先看智能体做了什么，再逐条允许、拒绝或改写。
+          敏感值（令牌、密码、云密钥）在回流路上就已脱敏。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en><b>Where to find it:</b> approval cards come to you in the session
+          flow; cards waiting for judgement are also visible on the
+          <a href="#oncall">on-call dashboard</a>, and the keyboard-shortcut cheat sheet can
+          filter by approval scope. Ground rules for what triggers a card are in
+          <a href="getting-started.html#agent-setup">Getting started</a>.</span>
+          <span data-lang-zh><b>入口：</b>审批卡在会话流中回流；等待裁决的卡同样出现在
+          <a href="#oncall">值班大屏</a>，键盘快捷键备忘单可按「审批等待」作用域筛选。
+          什么动作会触发审批卡的地面规则见
+          <a href="getting-started.html#agent-setup">快速上手</a>。</span>
+        </p>
+        <figure class="doc-shot">
+          <!-- 源=docs/img/approval-card.png（截图唯一事实源 docs/img，只引用不复制） -->
+          <img src="../../docs/img/approval-card.png" alt="Approval card for a high-risk git reset" loading="lazy">
+          <figcaption>
+            <span data-lang-en>Approval card — the risky action, the recording, and your call</span>
+            <span data-lang-zh>审批卡——高危动作、实况录像与你的裁决</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ============ 6. Notes（源=README §What's inside「Notes」行 + getting-started #share-notes 长文；步骤素材零→定位+入口短条目，改先改源） ============ -->
+      <section class="doc-section" id="notes">
+        <h2><span data-lang-en>6 · Notes</span><span data-lang-zh>6 · 笔记库</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>One notepad you share with your agents — a project-independent
+          notes library. Agents read and write the same library over the ops API, depositing
+          handoff notes so the next session picks up where the last one left off. Searchable,
+          always one panel away.</span>
+          <span data-lang-zh>你与智能体共享的便签层——一个项目无关的笔记库。智能体经 ops API
+          读写同一个库，交接笔记留在里面，下一个会话从上一个的断点继续。可搜索、随手可达。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en><b>Where to find it:</b> the note icon in the activity bar opens the
+          notes view. The handoff workflow (ask an agent to deposit a note, then let the next
+          session pick it up) is in
+          <a href="getting-started.html#share-notes">Getting started · Share &amp; notes</a>.</span>
+          <span data-lang-zh><b>入口：</b>活动栏的笔记图标打开笔记视图。交接工作流（让智能体把
+          交接笔记存进库里，下个会话接着干）见
+          <a href="getting-started.html#share-notes">快速上手 · 分享与笔记</a>。</span>
+        </p>
+      </section>
+
+      <!-- ============ 7. TODO list（源=README §What's inside「TODO list」行；步骤素材零→定位+入口短条目，改先改源） ============ -->
+      <section class="doc-section" id="todos">
+        <h2><span data-lang-en>7 · TODO list</span><span data-lang-zh>7 · TODO 清单</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>The IOU list humans leave for the next round of agent work: code-comment
+          <code>TODO</code> / <code>FIXME</code> / <code>XXX</code> / <code>HACK</code> markers
+          aggregated into one board. Instead of telling the agent what to fix next, point it
+          at the board.</span>
+          <span data-lang-zh>人类留给下一轮智能体工作的赊账清单：代码注释里的
+          <code>TODO</code> / <code>FIXME</code> / <code>XXX</code> / <code>HACK</code> 标记
+          聚合成一块看板。不用逐条告诉智能体要修什么——把它指到看板上。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en><b>Where to find it:</b> the clipboard icon in the activity bar opens
+          the TODO panel for the current project.</span>
+          <span data-lang-zh><b>入口：</b>活动栏的剪贴板图标打开当前项目的 TODO 面板。</span>
+        </p>
+      </section>
+
+      <!-- ============ 8. Environment profile（源=README §What's inside「Environment profile」行；步骤素材零（只读画像）→定位+入口短条目，改先改源） ============ -->
+      <section class="doc-section" id="env-profile">
+        <h2><span data-lang-en>8 · Environment profile</span><span data-lang-zh>8 · 环境画像</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>A read-only “environment résumé” per project, so a newcomer — human
+          or agent — stops guessing: dev ports observed in terminals or reported by agents,
+          visible output-sentinel rules, and deploy target hosts, on one sidebar page.</span>
+          <span data-lang-zh>每个项目的只读「环境简历」，让新来者——无论人还是智能体——不再
+          猜：终端观测到或智能体上报的 dev 端口、可见的输出哨兵规则、部署目标主机，
+          一页看全。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en><b>Where to find it:</b> the server icon in the activity bar opens the
+          profile; it fills itself in as work happens, no form to maintain.</span>
+          <span data-lang-zh><b>入口：</b>活动栏的服务器图标打开环境画像；画像随工作发生自动充实，
+          无表单要维护。</span>
+        </p>
+      </section>
+
+      <!-- ============ 9. On-call dashboard（源=README §What's inside「On-call dashboard」+「Change stream」行（并入）+ §Highlights「On-call dashboard」节；改先改源） ============ -->
+      <section class="doc-section" id="oncall">
+        <h2><span data-lang-en>9 · On-call dashboard</span><span data-lang-zh>9 · 值班大屏</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>One screen for “what is my box doing right now”: instance health
+          (memory / goroutines / git process pressure), a 52-week activity heatmap, a live
+          change stream, agent collaboration flow, stalled-session triage — and approval
+          cards waiting for judgement.</span>
+          <span data-lang-zh>一块屏回答「我的机器现在在干嘛」：实例健康（内存 / goroutine /
+          git 进程压力）、52 周活动热力图、实时变更流、智能体协作流、停滞会话分诊——
+          以及等待裁决的审批卡。</span>
+        </p>
+        <ul class="doc-list">
+          <li>
+            <span data-lang-en><b>Project dashboard:</b> a per-project home in the activity bar —
+            git status, sessions, problems and recent activity on four cards, with direct
+            wiring into each.</span>
+            <span data-lang-zh><b>项目仪表盘：</b>活动栏里的项目级常态首页——git 状态、会话、
+            问题、近期活动四卡一屏，各自可直达。</span>
+          </li>
+          <li>
+            <span data-lang-en><b>Change stream:</b> the same cross-project timeline as an in-workbench
+            panel — “what just changed anywhere”, beyond the dashboard card.</span>
+            <span data-lang-zh><b>跨项目变更流：</b>同一条跨项目时间线也有工作台内入口——大屏卡
+            之外的「哪里刚变了」。</span>
+          </li>
+          <li>
+            <span data-lang-en><b>Where to find it:</b> the dashboard button on the home toolbar
+            opens the on-call screen; the change-stream panel sits in the activity bar.</span>
+            <span data-lang-zh><b>入口：</b>首页工具条的「值班大屏」按钮打开大屏；变更流面板在
+            活动栏。</span>
+          </li>
+        </ul>
+        <figure class="doc-shot">
+          <!-- 源=docs/img/oncall-dashboard.png（截图唯一事实源 docs/img，只引用不复制） -->
+          <img src="../../docs/img/oncall-dashboard.png" alt="On-call dashboard — instance health, heatmap and live change stream" loading="lazy">
+          <figcaption>
+            <span data-lang-en>On-call dashboard — health, activity and change in one screen</span>
+            <span data-lang-zh>值班大屏——健康、活动与变更一屏总览</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ============ 10. Instance sync（源=README §What's inside「Multi-instance sync」行 + §Highlights「Multi-instance sync」节；改先改源） ============ -->
+      <section class="doc-section" id="sync">
+        <h2><span data-lang-en>10 · Instance sync</span><span data-lang-zh>10 · 多实例同步</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>One Codecombo instance can manage many others — local or remote —
+          through a central proxy: instance switching with a health overview, terminal and
+          panel take-over of a remote instance, instance-to-instance sync of projects and
+          contexts, and one-shot machine migration (export/import an encrypted
+          <code>.scpkg</code> package with credentials, settings and project contexts).</span>
+          <span data-lang-zh>一个 Codecombo 实例经中心代理管理其他多个实例——本地或远程皆可：
+          实例切换带健康总览、远程实例的终端与面板接管、项目与上下文的实例间同步，
+          以及一次性整机迁移（导出/导入加密 <code>.scpkg</code> 包——凭据、设置与项目
+          上下文随包走）。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en><b>Where to find it:</b> the cloud icon in the activity bar opens the
+          sync center; contexts on both sides cover snippets, runtimes, approval rules,
+          continuation chains and UI preferences.</span>
+          <span data-lang-zh><b>入口：</b>活动栏的云环图标打开同步中心；两侧可同步的上下文覆盖
+          片段、运行时、审批规则、接续链与界面偏好。</span>
+        </p>
+        <figure class="doc-shot">
+          <!-- 源=docs/img/instance-sync.png（截图唯一事实源 docs/img，只引用不复制） -->
+          <img src="../../docs/img/instance-sync.png" alt="Instance sync center with a dual-instance topology" loading="lazy">
+          <figcaption>
+            <span data-lang-en>Sync center — one screen over many instances</span>
+            <span data-lang-zh>同步中心——一屏管多实例</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ============ 11. Sharing links（源=README §What's inside「Sharing links」行 + §Highlights「Sharing links」节 + getting-started #share-notes 长文事实源 + 终端只读直播（产品实勘 zh-CN share 域）；改先改源） ============ -->
+      <section class="doc-section" id="sharing">
+        <h2><span data-lang-en>11 · Sharing links</span><span data-lang-zh>11 · 分享中心</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>Share a file, a folder, a text snippet, or a <b>live terminal</b> with
+          visitors via one-click links — TTL, password, view-once and frozen-snapshot are all
+          one toggle away, and you can revoke any link at any moment. Visitors need no
+          account; live terminal shares are read-only and masked.</span>
+          <span data-lang-zh>把文件、文件夹、文本片段或<b>实时终端</b>一键成链分享给访客——
+          TTL、口令、阅后即焚与冻结快照随手可开，任何链接随时可吊销。访客无需账号；
+          实时终端分享为只读且经遮蔽处理。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en><b>Where to find it:</b> right-click any file → <b>Share</b> for a
+          one-click link; the link icon in the activity bar opens the share manager where
+          every link you've issued can be reviewed and revoked. The day-trip walkthrough is
+          in <a href="getting-started.html#share-notes">Getting started · Share &amp; notes</a>.</span>
+          <span data-lang-zh><b>入口：</b>右键任意文件 → <b>分享</b>即得一键链接；活动栏的链接
+          图标打开分享管理，你发过的每条链接都可查看与吊销。一日游走查见
+          <a href="getting-started.html#share-notes">快速上手 · 分享与笔记</a>。</span>
+        </p>
+        <figure class="doc-shot">
+          <!-- 源=docs/img/share-dialog.png（截图唯一事实源 docs/img，只引用不复制） -->
+          <img src="../../docs/img/share-dialog.png" alt="Share dialog with TTL, password and view-once options" loading="lazy">
+          <figcaption>
+            <span data-lang-en>Share dialog — TTL, passphrase, view-once and frozen snapshot</span>
+            <span data-lang-zh>分享弹窗——TTL、口令、阅后即焚与冻结快照</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ============ 12. dsh integration（源=README §What's inside「dsh integration」行 + landing toolbox-more 摘要；步骤素材零→定位+入口短条目，改先改源） ============ -->
+      <section class="doc-section" id="dsh">
+        <h2><span data-lang-en>12 · dsh integration</span><span data-lang-zh>12 · dsh 集成</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>Embed the dsh (DeepSeek Harness) Web UI over a loopback proxy, so its
+          console lives inside the workbench next to everything else. Version management for
+          dsh ships with it: upgrade, rollback, and a version changelog to read before you
+          move.</span>
+          <span data-lang-zh>经回环代理嵌入 dsh（DeepSeek Harness）的 Web UI，让它的控制台
+          与工作台其余一切同处一室。dsh 版本管理随附：升级、回退，以及升级前可读的
+          版本变更日志。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en><b>Where to find it:</b> the dsh icon in the activity bar opens the
+          embedded console; version management is its own subsection inside, current version
+          first.</span>
+          <span data-lang-zh><b>入口：</b>活动栏的 dsh 图标打开嵌入控制台；版本管理是其中的独立
+          子区，当前版本置顶。</span>
+        </p>
+      </section>
+
+      <!-- ============ Also in the box（源=README §Highlights (continued) + faq #security/#upgrading 联动节（矩阵 §2「归 faq 联动节」口径）；改先改源） ============ -->
+      <section class="doc-section" id="more">
+        <h2><span data-lang-en>Also in the box</span><span data-lang-zh>还有这些</span></h2>
+        <ul class="doc-list">
+          <li>
+            <span data-lang-en><b>Security foundation</b> — global lock with idle auto-lock, AES-256
+            encryption for all stored secrets, per-IP rate limiting, audit log with CSV export.
+            Lock and remote-access posture: <a href="faq.html#security">FAQ · Lock &amp; remote access</a>.</span>
+            <span data-lang-zh><b>安全底座</b>——全局锁加闲置自动上锁、AES-256 加密全部落盘敏感值、
+            按 IP 限流、审计日志可导出 CSV。锁与远程访问口径：
+            <a href="faq.html#security">常见问题 · 锁与远程访问</a>。</span>
+          </li>
+          <li>
+            <span data-lang-en><b>Self-update</b> — GitHub-release-based update checks with automatic
+            rollback; central instances can cache and forward binaries to child instances. Which
+            upgrade path is yours: <a href="faq.html#upgrading">FAQ · Upgrading</a>.</span>
+            <span data-lang-zh><b>自更新</b>——基于 GitHub Release 的更新检查加失败自动回滚；中心实例
+            可缓存并转发二进制给子实例。你该走哪条升级路：
+            <a href="faq.html#upgrading">常见问题 · 升级路径</a>。</span>
+          </li>
+          <li>
+            <span data-lang-en><b>Language &amp; themes</b> — English / 简体中文 UI, four built-in themes
+            (Dark / Light / One Dark / Dracula). One toggle each in settings; see the
+            <a href="../index.html">product home</a> for the visual tour.</span>
+            <span data-lang-zh><b>语言与主题</b>——英文 / 简体中文界面，四款内置主题（Dark / Light /
+            One Dark / Dracula），设置里各一处开关；视觉导览见
+            <a href="../index.html">官网首页</a>。</span>
+          </li>
+        </ul>
+        <p class="doc-next">
+          <span data-lang-en>Where to next: <a href="getting-started.html">Getting started</a> walks
+          the first ten minutes, and the <a href="faq.html">FAQ</a> covers ports, data directory,
+          upgrade paths and the usual error messages.</span>
+          <span data-lang-zh>接下来去哪：<a href="getting-started.html">快速上手</a>带你走完最初的
+          十分钟，<a href="faq.html">常见问题</a>覆盖端口、数据目录、升级路径与常见报错。</span>
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============ Footer（与 landing 同骨架，加返回官网链接） ============ -->
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <img src="../assets/logo/codecombo-icon-auto.svg" alt="" width="22" height="22">
+        <span>Codecombo</span>
+      </div>
+      <nav class="footer-nav" aria-label="Footer">
+        <a href="../index.html"><span data-lang-en>← Home</span><span data-lang-zh>← 返回官网</span></a>
+        <a href="getting-started.html"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a>
+        <a href="faq.html"><span data-lang-en>FAQ</span><span data-lang-zh>常见问题</span></a>
+        <a href="https://github.com/wtr20211202/codecombo" target="_blank" rel="noopener">
+          <span data-lang-en>GitHub</span><span data-lang-zh>GitHub</span>
+        </a>
+        <a href="https://github.com/wtr20211202/codecombo/issues" target="_blank" rel="noopener">
+          <span data-lang-en>Issues</span><span data-lang-zh>反馈</span>
+        </a>
+      </nav>
+      <p class="footer-note">
+        <span data-lang-en>Self-hosted, single binary, no database. Windows · Linux · macOS.</span>
+        <span data-lang-zh>自托管、单二进制、零数据库。Windows · Linux · macOS。</span>
+      </p>
+    </div>
+  </footer>
+
+  <script src="../assets/site.js"></script>
+</body>
+</html>
