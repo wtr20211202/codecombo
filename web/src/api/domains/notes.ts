@@ -17,6 +17,9 @@ export interface MultiNote {
   updatedAt: string
   deletedAt?: string
   deletedBy?: string
+  /** 标签（P-20261112-7 S1，≤8 个/1~32 rune/去重保序）；无标签省字段（服务端
+   *  omitempty 形态），读面统一归一为空数组 */
+  tags?: string[]
 }
 
 /** 默认篇 id（well-known，与服务端 store.DefaultNoteID 同源）：空库时面板合成的
@@ -31,6 +34,8 @@ export interface MultiNoteMeta {
   size: number
   deletedAt?: string
   deletedBy?: string
+  /** 标签（P-20261112-7 S1 清单携 tags——标签行补全候选与侧栏行数据源）；无标签省字段 */
+  tags?: string[]
 }
 
 /** 笔记库作用域键（与服务端 store.GlobalNotesScope 同值）：notes.updated 广播的
@@ -83,19 +88,38 @@ export interface NotesMigrationResult {
   full: boolean
 }
 
+/** 清单拉取参数（P-20261112-7 S3 侧栏标签过滤的拼装面）：trash=1 回收站视图、
+ *  tag 按标签服务端过滤（精确匹配，与 trash 可叠加）；都缺省 = 全量在册清单 */
+export interface NotesListParams {
+  trash?: boolean
+  tag?: string
+}
+
 /** 笔记库 API（/api/notes 族） */
 export const notesGlobalApi = {
-  /** 在册篇清单（updatedAt 降序）；trash=1 回收站视图 */
-  list: (trash?: boolean) =>
-    api.get<{ data: MultiNoteMeta[] }>('/notes', { params: trash ? { trash: 1 } : undefined }) as unknown as Promise<{ data?: MultiNoteMeta[] }>,
+  /** 在册篇清单（updatedAt 降序）；{ trash: true } 回收站视图、{ tag } 按标签
+   *  服务端过滤（侧栏标签过滤的拉取面，与 trash 参数可叠加）。trash 落到查询串
+   *  必须是 1（服务端 c.Query("trash") == "1" 字面比对——true 会序列化成
+   *  ?trash=true 而失配），故在此收口映射 */
+  list: (params?: NotesListParams) => {
+    const query: Record<string, string | number> = {}
+    if (params?.trash) query.trash = 1
+    if (params?.tag) query.tag = params.tag
+    return api.get<{ data: MultiNoteMeta[] }>('/notes', {
+      params: Object.keys(query).length > 0 ? query : undefined,
+    }) as unknown as Promise<{ data?: MultiNoteMeta[] }>
+  },
   /** 新建一篇（id 服务端生成）→ 201；满 100 篇 400 notes.global_limit */
   create: (body: { title?: string; content?: string }) =>
     api.post<{ data: MultiNote }>('/notes', body, { headers: originHeaders() }) as unknown as Promise<{ data: MultiNote }>,
   /** 读单篇 */
   get: (noteId: string) =>
     api.get<{ data: MultiNote }>(`/notes/${noteId}`) as unknown as Promise<{ data: MultiNote }>,
-  /** 保存（title 携带即重命名；baseUpdatedAt 携带即乐观校验） */
-  save: (noteId: string, body: { content: string; title?: string; baseUpdatedAt?: string }) =>
+  /** 保存（title 携带即重命名；baseUpdatedAt 携带即乐观校验；tags 携带即整体
+   *  替换、省略不动标签——服务端 *[]string 三态：undefined 序列化省字段=nil
+   *  不改动，显式 [] 清空，非空整体替换。标签行是全量编辑面，仅标签编辑挂起
+   *  时才携 tags——纯内容保存不带，防清掉他窗/他端打的标签） */
+  save: (noteId: string, body: { content: string; title?: string; tags?: string[]; baseUpdatedAt?: string }) =>
     api.put<{ data: MultiNote }>(`/notes/${noteId}`, body, { headers: originHeaders() }) as unknown as Promise<{ data: MultiNote }>,
   /** 软删进回收站（幂等） */
   remove: (noteId: string) =>

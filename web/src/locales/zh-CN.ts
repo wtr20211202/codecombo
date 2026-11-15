@@ -378,10 +378,14 @@ export default {
     clipHistoryPaste: '多剪贴板粘贴（从复制历史选一段插入）',
     // Markdown 模式循环（P-20261003-18）：md 三态切换键位（快捷键备忘单行）
     mdModeCycle: 'Markdown 模式循环（源码→预览→分屏，仅 .md 文件）',
-    // 笔记面板域（P-20261107-5）：notes 三键备忘单行（keymap 注册表动态行）
+    // 笔记面板域（P-20261107-5）：notes 键备忘单行（keymap 注册表动态行）
     notesSave: '保存当前笔记（未命名且有内容时顺带命名）',
     notesCreate: '新建笔记（未命名占位，命名后置）',
     notesRename: '重命名当前笔记',
+    // 笔记 tab 键盘循环（P-20261112-9-S2）：多篇横滚时的键盘切篇（Linux 桌面
+    // Ctrl+Alt+方向常被工作区切换抢占——帮助中心 shortcuts 词条注记改绑路径）
+    notesNextTab: '下一篇笔记（tab 条循环）',
+    notesPrevTab: '上一篇笔记（tab 条循环）',
     monitorRefresh: '刷新大屏数据（值班大屏页内）',
     // 作用域标签与筛选（P-20261003-99）：条目按生效条件打标（分组=功能域、徽标=生效域）
     scopeAll: '全部',
@@ -412,6 +416,8 @@ export default {
     mouseTreeDropEditor: '从文件树拖文件到编辑器区放开＝在该组打开',
     mouseMiddleCloseEditorTab: '中键点编辑器标签＝关闭（钉选标签不受影响）',
     mouseDblclickPinTab: '双击编辑器标签＝钉选/取消钉选',
+    // 笔记页签双击重命名（P-20261112-9-S2）：tab 条高频扫读面的重命名路径
+    mouseDblclickRenameNote: '双击笔记页签＝重命名该篇',
     mouseCrumbSiblings: '点面包屑目录段（非末段）＝弹出该目录同级列表，点选跳转',
     mouseMiddleCloseTermTab: '中键点终端标签＝关闭',
     mouseDropTermPath: '拖文件树文件进终端＝路径粘贴到输入行（不执行）',
@@ -2554,14 +2560,19 @@ export default {
       projectGone: '所属项目已删除，无法定位目标',
       targetGone: '分享目标已丢失，无法定位',
     },
-    // 「重新分享」（P-20261020-10）：过期/一次性已消费的 file 分享重建新周期
+    // 「重新分享」（P-20261020-10）：过期/一次性已消费的 file 分享重建新周期。
+    // P-20261114-3-S1 起走显式弹层（ShareReshareDialog）：模式默认沿用来源
+    // 链接但可改，批量行模式锁定 frozen（走 createBatch 按原选择集重建）
     reshare: {
       action: '重新分享',
       title: '重新分享',
       confirm: '将撤销「{name}」的旧链接并按原目标重建一条新分享。旧链接本已过期/失效；敏感文件扫描与确认流程照常执行。',
+      modeHintFrozen: '模式沿用来源链接：定格快照',
+      modeHintLive: '模式沿用来源链接：实时视图',
+      batchModeNote: '批量分享仅支持定格快照、不可改实时（服务端约束）：重发按原选择集重建同一条链；要调整选择集，请用「分享选中」新建批量分享',
+      passNote: '口令仅以哈希存储、无法回读——输入即设置口令门，留空 = 新链接不设口令',
+      viewOnceDroppedNote: '定格快照与一次性查看互斥：本次重发不携带一次性查看',
       passphraseLabel: '访问口令',
-      passphrasePlaceholder: '留空 = 重建为无口令',
-      passphraseHint: '原分享设有访问口令。口令只以哈希存储、无法回读，请重新输入以沿用保护；留空则新链接不再需要口令。',
       passphraseTooLong: '访问口令不能超过 64 字节',
       unavailable: '仅过期/已消费且目标健康的文件分享可重新分享',
       failed: '重新分享失败，请稍后重试',
@@ -2692,6 +2703,9 @@ export default {
       estimating: '正在估算合计体积…',
       overLimit: '合计体积超过冻结上限 {max}，创建会被拒绝；请拆分选择集后重试',
       frozenDesc: '多文件分享使用冻结快照：创建时把所有选中路径定格进同一条链，之后的项目改动不影响访客所见',
+      // 服务端约束（P-20261114-3-S1）：handlers.go paths 非空且非 frozen → 400
+      // 「paths requires frozen mode」——批量区块把这句就地披露，替代撞 400 才知
+      frozenOnlyNote: '服务端约束：批量多路径仅支持定格快照，不可改为实时视图',
       typeBadge: '批量 {n} 项',
       pathSummary: '{n} 项（批量冻结）',
       resultDesc: '访客可通过短链查看这 {n} 项内容的定格副本——逐项预览/下载，也可整包下载，默认 30 天后自动过期，可随时撤销',
@@ -2713,6 +2727,15 @@ export default {
       resultDescLive: '访客可通过短链只读观看该终端的实时输出（未过滤：原样输出，不遮蔽敏感值），默认 30 分钟后自动过期，可随时撤销',
       resultDescFrozen: '访客可通过短链查看该终端在创建时刻的输出定格快照（未过滤：原样输出，不遮蔽敏感值，内容不随后续输出更新），24 小时内强制失效，可随时撤销',
       ttlCapNote: '未过滤分享的有效期上限为 24 小时：更长的档位（含永久）保存后会收敛到 24 小时',
+    },
+    // 快照陈旧（P-20261114-3-S2）：frozen 分享源根相对创建基准发生了变化——
+    // 访客看到的仍是创建时版本。提示性非阻断；处置主路 = 原地刷新（保 token
+    // 换内容，P-20261005-177），重发换新链为辅（文案对齐刷新语义）
+    stale: {
+      typeBadge: '源已更新',
+      badgeTip: '源内容在此快照创建后发生了变化（{time}认定）——访客看到的仍是创建时版本。建议「刷新快照」：链接保持不变、访客即见最新内容；「重新分享」会换一条新链接，仅在需要换链时使用',
+      refreshQuickTip: '源已更新——刷新快照：链接不变，访客即见最新内容',
+      reshareNote: '来源快照已陈旧：源内容在创建后发生了变化。若要保持本链接不变并跟进最新内容，建议改用「刷新快照」（行内快捷钮或「更多」菜单）；继续重发将撤销旧链接并按当前源重建一条新链接',
     },
     // 终端输出分享选项弹层（P-20261106-9）：直播 / 输出快照创建前的遮蔽 + 水印选择
     termOptions: {
@@ -4516,7 +4539,7 @@ export default {
     },
   },
   home: {
-    subtitle: '轻量级 Coding 平台',
+    subtitle: '一站式开发工作台',
     aboutVersion: '关于与版本',
     addProject: '添加项目',
     noProjects: '还没有添加任何项目',
@@ -4955,7 +4978,8 @@ export default {
       purge: '彻底删除（不可恢复）',
       purgeConfirm: '再点一次确认彻底删除',
       purgeFailed: '彻底删除失败',
-      conflictDetected: '笔记已被外部修改（agent 或其他设备）',
+      // S2 标签裁决链：文案明示「载入服务端版本」会一并放弃未落盘的本地标签编辑
+      conflictDetected: '笔记已被外部修改（agent 或其他设备）；「载入服务端版本」将一并放弃未保存的标签编辑',
       conflictOverwrite: '用我的覆盖',
       conflictLoad: '载入服务端版本',
       conflictSaveAs: '另存为新篇',
@@ -4964,6 +4988,19 @@ export default {
       // P-20261108-3 单库化退役）
       saved: '已保存',
       saveNameTitle: '为笔记命名',
+      // tab 条/侧栏列表空白区双击新建（P-20261112-8）：两处容器空白面的悬停提示
+      dblclickCreate: '双击新建',
+      // 侧栏宽度拖拽把手（P-20261112-9 S1，SidebarResizer 复用）
+      sidebarResizeTip: '拖拽调整笔记列表宽度',
+      // 标签行（P-20261112-7 S2）：chips 增删 + 尾部「+」内联输入（自动补全候选=全库标签）
+      tagsAdd: '添加标签',
+      tagsRemove: '移除标签',
+      tagsInputPlaceholder: '输入标签，回车确认…',
+      tagsLimit: '每篇最多 8 个标签',
+      // 侧栏标签过滤（P-20261112-7 S3）：徽记/chip 点击过滤 + 过滤态胶囊
+      tagFilterAria: '按标签「{tag}」过滤清单',
+      tagFilterRemove: '移除标签过滤，恢复全量清单',
+      tagFilterEmpty: '没有带该标签的笔记',
     },
     // 「沉淀到笔记」次级入口（P-20261003-292）：任务终态结论代写进人机共享笔记
     deposit: {
@@ -5710,6 +5747,10 @@ export default {
     checkFailedHint: '检查更新失败：{reason}',
     companionFetchFailedHint: '伴随校验资产（.sha256/.sig）未取到，此刻更新将被拒——点击「立即更新」会先重新拉取，仍失败请检查网络后重试',
     companionFetchFailedReason: '原因：{reason}',
+    // npm 安装形态主动提示（P-20261113-4-S1）：面板把「立即更新」替换为本提示
+    // +命令一键复制（UpdateNpmManagedHint）。口径沿 P-20261113-2 定案：0.x 裸命令
+    // 即最新版（latest 跟随），尝鲜走 @next 不在本提示展开
+    npmManagedHint: '本实例经 npm 安装——更新请走包管理器，应用内自更新不适用：',
     restartApp: '重启应用',
     restartConfirm: '确认重启本机 Codecombo 实例？服务会短暂离线（数秒），页面将自动等待恢复。',
     restartStarted: '重启指令已发出，等待服务恢复…',
@@ -7205,10 +7246,12 @@ export default {
       editorSave: '保存当前文件（编辑器）',
       editorBookmarkToggle: '切换书签（光标行）',
       editorInlineEdit: '选区内联 AI 编辑（活跃会话）',
-      // 笔记面板域（P-20261107-5）：保存/新建/重命名（useNotesKeyboard 焦点域消费）
+      // 笔记面板域（P-20261107-5）：保存/新建/重命名/tab 循环（useNotesKeyboard 焦点域消费）
       notesSave: '保存当前笔记（未命名时命名）',
       notesCreate: '新建笔记',
       notesRename: '重命名当前笔记',
+      notesNextTab: '下一篇笔记（tab 循环）',
+      notesPrevTab: '上一篇笔记（tab 循环）',
     },
   },
   // 界面缩放（P-20261002-2）：appearance.zoom.* 前缀——应用内 zoom 档位（对标 VS Code window.zoomLevel）

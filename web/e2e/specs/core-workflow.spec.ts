@@ -64,7 +64,7 @@ test.describe('核心工作流', () => {
     // 标题区域（exact：项目卡远端 URL 现含 codecombo.git——品牌切换 4adaf9da 后
     // 仓库 origin 更名，getByText 子串匹配会双命中 strict violation）
     await expect(page.getByText('Codecombo', { exact: true })).toBeVisible()
-    await expect(page.getByText('轻量级 Coding 平台')).toBeVisible()
+    await expect(page.getByText('一站式开发工作台', { exact: true })).toBeVisible()
 
     // 操作按钮
     await expect(page.getByRole('button', { name: '添加项目' })).toBeVisible()

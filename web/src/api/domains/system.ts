@@ -864,6 +864,10 @@ export interface UpdateStatusPayload {
   // 断点续传起点（P-20261110-1-S4）：本次下载尝试实际从 .part 续传的字节数，
   // 全量下载为 0 且服务端 omitempty 省略——可选字段，旧前端忽略未知字段
   resumedBytes?: number
+  // npm 安装形态旗标（P-20261113-4-S1，与服务端 model.UpdateStatusResponse 对齐）：
+  // npm 装法应用内自更新必被 409 拒。面板只消费 check 响应，此字段为 agent 经
+  // 状态端点感知安装形态留口；旧服务端不携带（omitempty）——可选字段
+  npmManaged?: boolean
 }
 
 // 更新链出站档位快照（GET /updates/proxy-status，P-20261110-1 S6，与服务端

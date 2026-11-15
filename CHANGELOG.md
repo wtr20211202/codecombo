@@ -9,6 +9,67 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.8] - 2026-11-15
+
+### Added
+
+- **Notes gain a tag system** — tag a note from the editor (chip row with
+  autocomplete, up to 8 tags, merged into the same debounced save as the
+  content), filter the library by tag server-side (AND-ed with the
+  sidebar search), and see inline tag badges in the sidebar list.
+- **Workspace panels remember state per scene** — the home page and
+  project pages now keep separate memories for the notes/terminal/share/
+  dashboard panels: each scene restores its own panel layout on entry
+  (before the host mounts, so no flicker), and opening a workbench on the
+  home page no longer implies the same panel state inside a project.
+- **The npm install shape is recognized in the update panel** — update
+  check/status responses carry an `npmManaged` flag; the version panel
+  replaces the update button with an npm guidance block and a one-click
+  copy of the install command; the getting-started page notes that the
+  in-app updater steps aside for this install shape.
+- **One-line installers hardened on macOS and Windows** — the one-liner
+  now downloads the script to a temp file and runs it (instead of piping
+  straight into `sh`/`iex`), with an end-of-script sentinel: a truncated
+  or proxy-mangled download refuses to execute and points at the npm
+  channel instead. macOS `sh` misreport fixes (POSIX-braced variables),
+  TLS pinned for old .NET on Windows, and two new content gates keep the
+  scripts ASCII-clean and sentinel-synced.
+- **Site documentation pages** — getting-started and FAQ pages
+  (zero-framework, bilingual, inlined into the site) with two-way
+  navigation from the landing page.
+
+### Changed
+
+- **`npm i -g codecombo` tracks the newest release again** — the release
+  workflow moves the `latest` dist-tag on every 0.x publish (it had been
+  frozen at beta.2); README and site command surfaces updated for the
+  transition.
+- **Unified positioning strings** — the CLI `-h` header, systemd unit
+  descriptions, Windows service name and the home subtitle now share one
+  wording (self-hosted single-binary workbench).
+- **README restructured** — a ten-minute "First steps" loop, an expanded
+  what's-inside table, slimmer module highlights, and a two-entry Docs
+  section (site user docs + in-repo architecture docs).
+- **Release pages use explicit anchor ids** for the bilingual sections.
+- **Notes tabs polish** — double-click empty tab-strip/sidebar space to
+  create a note, double-click a tab to rename, keyboard cycling across
+  tabs; the notes sidebar is width-adjustable (180–400 px).
+
+### Fixed
+
+- **Share manager** — the stale-snapshot badge now has a real lifecycle
+  (lazy mtime comparison + bus subscription) with quick refresh; batch
+  freeze carries the server-side constraint wording; the re-share dialog
+  shows an explicit mode guide (batch rows disallow switching modes).
+- **Editor tabs** — drag cursor semantics settled: no grab cursor over
+  tabs, and the close button no longer starts a drag.
+- **Notes survive home round-trips** — going home and back no longer
+  force-closes the notes workbench (an explicit Esc still closes it, and
+  that choice is remembered).
+- **UI state hygiene** — two dead persistence keys retired (they were
+  never wired); panel-state restore semantics are now pinned by a
+  code-level registry, a lint gate and an e2e matrix.
+
 ## [0.0.1-beta.7] - 2026-11-12
 
 ### Added
@@ -370,7 +431,8 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.7...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.8...HEAD
+[0.0.1-beta.8]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.8
 [0.0.1-beta.7]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.7
 [0.0.1-beta.6]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.6
 [0.0.1-beta.5]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.5

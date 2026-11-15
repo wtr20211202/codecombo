@@ -9,13 +9,18 @@
 // - home：近全屏 overlay（z 900，与远程控制台/agent docked overlay 同层级交叉
 //   关闭）——四周留白居中卡片，「美观合理即可不机械铺满」（访客终端页同类反馈
 //   既有口径）；Esc 关闭（Naive 模态/抽屉在场时让位，promptDialog 命名框先关）
-// 开态 = usePanelLayout.showNotesView 模块级单例，不落 uiState（showDashboard
-// 先例：纯查看面，刷新回工作形态——首页刷新不自动展开天然成立）。
+// 开态 = usePanelLayout.showNotesView 模块级单例，落 uiState notesView 分场景槽
+// （P-20261112-6-S1 写作现场定案推翻 P-20261108-2「不落 uiState」；P-20261114-4-S2
+// 分场景槽：project 场景落 open、home 场景落 homeOpen——工作面归属打开它的场景，
+// 推翻 P-20261114-1「到达首页不清开态」口径；本宿主 onMounted 调
+// restoreNotesViewOnce 恢复，once memo 按发起场景分桶防重复，每场景每 load 首进
+// 读该场景槽一次；路由往返由 per-scene 快照恢复〔P-20261114-4-S1〕，本宿主
+// everOpened immediate 重挂即如实呈现）。
 // 懒挂载保活：首开才挂载面板（挂载即取数），之后 v-show 切换——编辑现场与防抖
 // 挂起写不因开合丢失（宿主卸载时面板 onBeforeUnmount 统一 flushAll）
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { safeAsync } from '../../utils/async-component'
-import { usePanelLayout } from '../../composables/usePanelLayout'
+import { usePanelLayout, restoreNotesViewOnce } from '../../composables/usePanelLayout'
 import { useI18n } from '../../composables/useI18n'
 import { hasBlockingOverlay } from '../../utils/overlayGuard'
 
@@ -42,7 +47,13 @@ function onKeyDown(e: KeyboardEvent): void {
   if (hasBlockingOverlay()) return
   closeNotesView()
 }
-onMounted(() => document.addEventListener('keydown', onKeyDown))
+onMounted(() => {
+  document.addEventListener('keydown', onKeyDown)
+  // 刷新后恢复上次的笔记开态（P-20261112-6-S1）：首页/项目页两宿主各调一次，
+  // once 防重复；dsh 恢复（宿主 onMounted 的 restoreDshConsoleOnce）先等本恢复
+  // 落地再执行——「notes 先、dsh 后」定序收口在 usePanelLayout，不依赖挂载次序
+  void restoreNotesViewOnce()
+})
 onBeforeUnmount(() => document.removeEventListener('keydown', onKeyDown))
 </script>
 

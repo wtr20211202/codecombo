@@ -1,7 +1,7 @@
 # install.ps1 - Codecombo one-line installer (Windows).
 #
 # One-line form (paste this to your AI assistant or run directly):
-#   irm https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1 | iex
+#   $p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue
 #
 # Behavior: detect architecture -> pick version (latest stable; newest rc;
 # newest beta when no rc/stable) -> download from GitHub Releases -> verify
@@ -24,8 +24,9 @@
 #           --data-dir in the service command line / printed manual-start
 #           command - the installer still never creates or writes it)
 # Set them before the one-liner ($env: values stay set for the rest of that
-# PowerShell session), e.g.
-#   $env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))
+# PowerShell session and are inherited by the child process the one-liner
+# spawns), e.g.
+#   $env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; $p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue
 #
 # Side-by-side instances: the service name is fixed (Codecombo) - one
 # installer-managed service per machine. With that service already present,
@@ -35,10 +36,14 @@
 # carries these settings; `start` runs the app as a background daemon),
 # with its own CODECOMBO_PREFIX.
 #
-# NOTE: keep this file ASCII-only, no BOM. It is consumed via `irm | iex`,
-# where Windows PowerShell 5.1 decodes the payload with console encoding and
-# splits it for execution - non-ASCII comments/output break parsing there
-# (real incident: Chinese comments + BOM caused CommandNotFound at line 1).
+# NOTE: keep this file ASCII-only, no BOM. It is distributed as a file: the
+# documented one-liner saves it to a temp file and runs `powershell -File`,
+# and Windows PowerShell 5.1 READS IT BACK FROM DISK when parsing - a BOM-less
+# file with non-ASCII text is decoded as ANSI there (zh-CN: CP936), and
+# multi-byte comment tails have swallowed the following code line with zero
+# parse errors (real incident: the --data-dir assignment inside if ($isAdmin)
+# silently vanished). Gate: scripts/check-install-ps.sh asserts ASCII-only,
+# no BOM, and the trailing sentinel on the last line.
 $ErrorActionPreference = 'Stop'
 
 $Repo = 'wtr20211202/codecombo'
@@ -71,13 +76,47 @@ Create a normal user account and run the installer from that user's session.
 "@
 }
 
+# ---------- entry integrity self-check (P-20261113-3-S3, mirrors install.sh) ----------
+# Before any network or install action. The documented one-liner downloads
+# this script to a GUID-named temp file and runs it via `powershell -File`,
+# so the file tail can be read back and the trailing sentinel comment
+# verified: a download truncated by a network drop or rewritten by a proxy
+# fails here instead of executing attacker-controlled content (prompt =
+# reject, fail-closed). When the payload arrives as a string instead of a
+# file (iex / irm | iex pipeline / pasted lines), $PSCommandPath is empty and
+# the tail cannot be read back - refuse with the disk-based one-liner, the
+# same semantics as install.sh. PS 5.1 reads the BOM-less file as ANSI; the
+# file is ASCII-only (gate: scripts/check-install-ps.sh), so ANSI and UTF-8
+# decoding agree on every byte including the sentinel.
+# Keep this whole block before the preflight below: it must run with zero
+# network side effects so a rejected run leaves the machine untouched.
+$InstallSentinel = '__CODECOMBO_INSTALL_SENTINEL__'
+$DiskOneLiner = @'
+$p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue
+'@
+if ($PSCommandPath) {
+  # Tail window of 5 mirrors install.sh: tolerates a few appended lines after
+  # the sentinel, while any truncation drops the last line and fails the check
+  # (an unreadable file yields an empty tail - also rejected).
+  $tailText = (Get-Content -LiteralPath $PSCommandPath -Tail 5 -ErrorAction SilentlyContinue) -join "`n"
+  if (-not $tailText.Contains($InstallSentinel)) {
+    throw 'Install script download is incomplete (network interrupted or rewritten by a proxy) - the trailing sentinel comment is missing. Retry the one-line install, or use the npm channel: npm i -g codecombo@next'
+  }
+} else {
+  Write-Host 'This script was executed from a string (iex / irm | iex pipeline) - the file tail cannot be read back for the sentinel check, so execution is refused.'
+  Write-Host 'Use the disk-based one-line install instead (downloads to a temp file, verifies the sentinel, then runs it):'
+  Write-Host "  $DiskOneLiner"
+  throw 'Execution refused: integrity cannot be verified for string-form (iex) execution - use the disk-based one-line install printed above.'
+}
+
 # ---------- preflight: admin + existing service state (before any download) ----------
-# Admin detection hardened: ::Current can return null in restricted contexts
-# and this script may be executed line-by-line (irm | iex array semantics on
-# PS 5.1) - any null/exception degrades to the non-admin branch (manual-start
+# Admin detection hardened: ::Current can return null in restricted contexts -
+# any null/exception degrades to the non-admin branch (manual-start
 # instructions) instead of crashing after a successful install. Probed up
 # front so a locked running service fails fast with an actionable message
-# instead of after a ~50 MB download.
+# instead of after a ~50 MB download. (The line-by-line `irm | iex array`
+# execution this hardening originally covered is now refused by the entry
+# sentinel check above; kept as defense in depth.)
 $isAdmin = $false
 try {
   $wid = [Security.Principal.WindowsIdentity]::Current
@@ -272,7 +311,7 @@ if ($isAdmin) {
     sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
   } else {
     Write-Host "==> Registering Windows service Codecombo (port $Port, host $BindHost, auto-restart on failure)"
-    sc.exe create Codecombo binPath= $svcBin start= auto DisplayName= 'Codecombo dev workbench' | Out-Null
+    sc.exe create Codecombo binPath= $svcBin start= auto DisplayName= 'Codecombo - self-hosted single-binary workbench (Git, terminals, AI agents, remote machines)' | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "    sc create failed (exit $LASTEXITCODE)" }
     sc.exe failure Codecombo reset= 86400 actions= restart/5000 | Out-Null
   }
@@ -312,3 +351,8 @@ if ($isAdmin) {
 }
 Write-Host "==> Open http://localhost:$Port (set your lock password on first start)"
 Write-Host '==> Updates: in-app "check update" (GitHub releases, automatic rollback)'
+# Integrity sentinel, same string as install.sh (kept in sync by the
+# check-install-ps.sh gate). The entry self-check reads the file tail back to
+# decide whether the script arrived complete - never append anything after
+# this line.
+# __CODECOMBO_INSTALL_SENTINEL__

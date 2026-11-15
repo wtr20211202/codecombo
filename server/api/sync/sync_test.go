@@ -743,7 +743,7 @@ func TestManifestBuildsUnits(t *testing.T) {
 	writeTree(t, src, map[string]string{"main.go": "package main"})
 	seedProject(t, "p1", "alpha", src)
 	// 笔记库有内容也不产出笔记单元（P-20261108-3：笔记不随实例同步）
-	if _, err := store.Get().MultiNotes.Create(store.GlobalNotesScope, "随手记", "note"); err != nil {
+	if _, err := store.Get().MultiNotes.Create(store.GlobalNotesScope, "随手记", "note", nil); err != nil {
 		t.Fatal(err)
 	}
 	m := buildLocalManifest()

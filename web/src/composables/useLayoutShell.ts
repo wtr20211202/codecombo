@@ -40,7 +40,7 @@ import { useInstanceStore } from '../stores/instance'
 import { usePostmortemStore } from '../stores/postmortem'
 import { useGitFailHintStore, isGitFailHintFresh } from '../stores/gitFailHint'
 import { useThemeFont } from './useThemeFont'
-import { usePanelLayout, restoreDshConsoleOnce } from './usePanelLayout'
+import { usePanelLayout, restoreShareManagerOnce } from './usePanelLayout'
 import { useAgentTerminal } from './useAgentTerminal'
 import { useAgentFix } from './useAgentFix'
 import { useCronRetry } from './useCronRetry'
@@ -681,8 +681,10 @@ export function useLayoutShell() {
     getDashboardLanding: () => uiStateStore.getDashboardLanding(),
     openDashboardLanding: () => {
       const layout = usePanelLayout()
+      // showNotesView 入列（P-20261112-6-S1）：笔记开态恢复后也是「主区视图恢复
+      // 在场」——落点不得把它顶掉（openDashboard 互斥会收笔记）
       if (layout.showRemoteConsole.value || layout.showShareManager.value
-        || layout.showDshConsole.value || hasPendingFileDeepLink()) return
+        || layout.showDshConsole.value || layout.showNotesView.value || hasPendingFileDeepLink()) return
       layout.openDashboard()
     },
     fetchProjects: () => projectStore.fetchProjects(),
@@ -692,17 +694,13 @@ export function useLayoutShell() {
     openFileByPath,
     openFilesCount: () => openFiles.value.length,
     setActiveFileIndex: (i: number) => { activeFileIndex.value = i },
-    revealExpandedDirs: (dirs: string[]) => {
-      for (const dir of dirs) sidePanelRef.value?.fileTreeRef?.expandedDirs.add(dir)
-    },
+    // revealExpandedDirs/restoreTerminalTab 桥已随 P-20261114-2 审计退役（树展开
+    // /终端 tab 真源在 localStorage 各自键控面，uiState 侧恢复段恒收空值——
+    // FileTreeView/TerminalView 挂载自恢复的时序总在其后，见 useLayoutBootstrap）
     restoreGitPanel: (collapsed, branch) => {
       const gp = bottomPanelRef.value?.gitPanelRef as any
       if (gp?.collapsedSections) gp.collapsedSections.value = collapsed
       if (gp?.selectedBranch && branch) gp.selectedBranch.value = branch
-    },
-    restoreTerminalTab: (tabId) => {
-      const tv = bottomPanelRef.value?.terminalRef as any
-      if (tv?.activeTabId) tv.activeTabId.value = tabId
     },
   })
   bootstrapApi.bindLockWatch(
@@ -935,18 +933,21 @@ export function useLayoutShell() {
     )
 
     // 文件深链消费（P-20261002-49）：必须在 bootstrap 之后——uiState 恢复的
-    // setCurrentProject 会连带清掉更早打开的深链标签；且排在 dsh 控制台恢复
-    // 之后等其落地——深链意图是「看文件」，showEditorMain 会关掉刚恢复的 dsh
-    // 控制台（主区互斥最后落位者胜），消费不能被恢复流程再翻回别的视图。
+    // setCurrentProject 会连带清掉更早打开的深链标签；且排在主区视图族恢复之后
+    // 等其落地——深链意图是「看文件」，showEditorMain 会关掉刚恢复的 dsh 控制台/
+    // 分享管理视图（主区互斥最后落位者胜），消费不能被恢复流程再翻回别的视图。
     // 回放深链（P-20261003-154）同款时序接力在其后：先切归属项目再开弹层，
     // 与文件深链互斥携带（同一链接只带 file= 或 session=），先后无耦合
-    void restoreDshConsoleOnce()
+    void restoreShareManagerOnce()
       .then(() => flushFileDeepLink())
       .then(() => flushSessionReplayDeepLink())
 
-    // dsh 控制台开关恢复（uiState dshConsole 命名空间）：在 bootstrap 的
-    // remoteConsole 恢复完成之后执行，主区互斥语义 dsh 后到者赢
-    // （文件深链消费经上方 then 链在其后执行）
+    // 主区视图族开态恢复（uiState notesView/dshConsole/shareManager 命名空间）：
+    // 在 bootstrap 的 remoteConsole 恢复完成之后执行，主区互斥语义「后落位者赢」；
+    // 定序收口在 usePanelLayout——notes 先（P-20261112-6-S1）、dsh 次、share 后
+    // （P-20261112-6-S3，restoreShareManagerOnce 内部链 restoreDshConsoleOnce →
+    // restoreNotesViewOnce）——本调用加入同一 memoized promise，深链 .then
+    // 接力仍保证在分享管理视图落地之后（文件深链消费经上方 then 链在其后执行）
 
     // 刷新变更状态供状态栏使用
     if (projectStore.currentProjectId) {

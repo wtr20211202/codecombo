@@ -28,7 +28,7 @@ func TestMultiNotes_CreateGetUpdate(t *testing.T) {
 		t.Fatalf("expected ErrNotFound for absent note, got %v", err)
 	}
 
-	n, err := r.Create("p1", "交接说明", "# 内容 v1")
+	n, err := r.Create("p1", "交接说明", "# 内容 v1", nil)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestMultiNotes_CreateGetUpdate(t *testing.T) {
 	}
 
 	newTitle := "改名后的标题"
-	up, err := r.Update("p1", n.ID, &newTitle, "v2", time.Time{})
+	up, err := r.Update("p1", n.ID, &newTitle, "v2", time.Time{}, nil)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestMultiNotes_CreateGetUpdate(t *testing.T) {
 		t.Errorf("updated note mismatch: %+v", up)
 	}
 	// title nil = 不改标题（重命名折叠进 PUT 的可选字段语义）
-	up2, err := r.Update("p1", n.ID, nil, "v3", time.Time{})
+	up2, err := r.Update("p1", n.ID, nil, "v3", time.Time{}, nil)
 	if err != nil {
 		t.Fatalf("Update(nil title): %v", err)
 	}
@@ -71,16 +71,16 @@ func TestMultiNotes_CreateGetUpdate(t *testing.T) {
 func TestMultiNotes_BaseUpdatedAtConflict(t *testing.T) {
 	r := newMultiNotesTestStore(t)
 
-	n, err := r.Create("p1", "", "v1")
+	n, err := r.Create("p1", "", "v1", nil)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	// 用陈旧基准更新（另一写者已在其间写入 v2）
-	if _, err := r.Update("p1", n.ID, nil, "v2-external", time.Time{}); err != nil {
+	if _, err := r.Update("p1", n.ID, nil, "v2-external", time.Time{}, nil); err != nil {
 		t.Fatalf("external update: %v", err)
 	}
-	_, err = r.Update("p1", n.ID, nil, "v3-stale", n.UpdatedAt)
+	_, err = r.Update("p1", n.ID, nil, "v3-stale", n.UpdatedAt, nil)
 	var nce *store.NotesConflictError
 	if !errors.As(err, &nce) || !errors.Is(err, store.ErrNotesConflict) {
 		t.Fatalf("expected ErrNotesConflict (carried), got %v", err)
@@ -92,11 +92,11 @@ func TestMultiNotes_BaseUpdatedAtConflict(t *testing.T) {
 
 	// 基准吻合：写入成功
 	fresh, _ := r.Get("p1", n.ID)
-	if _, err := r.Update("p1", n.ID, nil, "v3-ok", fresh.UpdatedAt); err != nil {
+	if _, err := r.Update("p1", n.ID, nil, "v3-ok", fresh.UpdatedAt, nil); err != nil {
 		t.Errorf("expected matching base to pass, got %v", err)
 	}
 	// 零基准 = last-writer-wins（既有语义不破坏）
-	if _, err := r.Update("p1", n.ID, nil, "v4", time.Time{}); err != nil {
+	if _, err := r.Update("p1", n.ID, nil, "v4", time.Time{}, nil); err != nil {
 		t.Errorf("expected zero baseUpdatedAt (LWW) to pass, got %v", err)
 	}
 }
@@ -106,8 +106,8 @@ func TestMultiNotes_BaseUpdatedAtConflict(t *testing.T) {
 func TestMultiNotes_TrashLifecycle(t *testing.T) {
 	r := newMultiNotesTestStore(t)
 
-	a, _ := r.Create("p1", "A", "content a")
-	b, _ := r.Create("p1", "B", "content b")
+	a, _ := r.Create("p1", "A", "content a", nil)
+	b, _ := r.Create("p1", "B", "content b", nil)
 
 	if err := r.SoftDelete("p1", a.ID, "human"); err != nil {
 		t.Fatalf("SoftDelete: %v", err)
@@ -171,27 +171,27 @@ func TestMultiNotes_TrashLifecycle(t *testing.T) {
 func TestMultiNotes_Limits(t *testing.T) {
 	r := newMultiNotesTestStore(t)
 
-	if _, err := r.Create("p1", "", strings.Repeat("a", store.ProjNotesMaxBytes)); err != nil {
+	if _, err := r.Create("p1", "", strings.Repeat("a", store.ProjNotesMaxBytes), nil); err != nil {
 		t.Errorf("exact 256KB expected accepted, got %v", err)
 	}
-	if _, err := r.Create("p1", "", strings.Repeat("a", store.ProjNotesMaxBytes+1)); err != store.ErrNotesTooLarge {
+	if _, err := r.Create("p1", "", strings.Repeat("a", store.ProjNotesMaxBytes+1), nil); err != store.ErrNotesTooLarge {
 		t.Errorf("expected ErrNotesTooLarge, got %v", err)
 	}
-	if _, err := r.Create("p1", strings.Repeat("标", 67)+"x", ""); err != store.ErrNotesTitleTooLong { // 67*3+1=202B
+	if _, err := r.Create("p1", strings.Repeat("标", 67)+"x", "", nil); err != store.ErrNotesTitleTooLong { // 67*3+1=202B
 		t.Errorf("expected ErrNotesTitleTooLong, got %v", err)
 	}
-	if _, err := r.Create("p1", strings.Repeat("标", 66)+"xy", ""); err != nil { // 66*3+2=200B 恰好
+	if _, err := r.Create("p1", strings.Repeat("标", 66)+"xy", "", nil); err != nil { // 66*3+2=200B 恰好
 		t.Errorf("exact 200B title expected accepted, got %v", err)
 	}
 
 	// 篇数上限（含软删占用额度）：独立仓储灌满全局库
 	first := newMultiNotesTestStore(t)
 	for i := 0; i < store.NotesMaxGlobal; i++ {
-		if _, err := first.Create(store.GlobalNotesScope, "", "c"); err != nil {
+		if _, err := first.Create(store.GlobalNotesScope, "", "c", nil); err != nil {
 			t.Fatalf("Create #%d: %v", i, err)
 		}
 	}
-	extra, err := first.Create(store.GlobalNotesScope, "", "overflow")
+	extra, err := first.Create(store.GlobalNotesScope, "", "overflow", nil)
 	if err != store.ErrNotesGlobalLimitReached {
 		t.Errorf("expected ErrNotesGlobalLimitReached at %d notes, got %v", store.NotesMaxGlobal, err)
 	}
@@ -199,7 +199,7 @@ func TestMultiNotes_Limits(t *testing.T) {
 	// 软删不释放额度（硬清才释放）
 	notes, _ := first.List(store.GlobalNotesScope)
 	_ = first.SoftDelete(store.GlobalNotesScope, notes[0].ID, "human")
-	if _, err := first.Create(store.GlobalNotesScope, "", "still capped"); err != store.ErrNotesGlobalLimitReached {
+	if _, err := first.Create(store.GlobalNotesScope, "", "still capped", nil); err != store.ErrNotesGlobalLimitReached {
 		t.Errorf("soft-deleted note should still consume quota, got %v", err)
 	}
 }
@@ -286,7 +286,7 @@ func TestMultiNotes_ConcurrentCreate(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := r.Create(store.GlobalNotesScope, "", "concurrent")
+			_, err := r.Create(store.GlobalNotesScope, "", "concurrent", nil)
 			mu.Lock()
 			defer mu.Unlock()
 			switch err {
@@ -305,3 +305,144 @@ func TestMultiNotes_ConcurrentCreate(t *testing.T) {
 			store.NotesMaxGlobal, workers-store.NotesMaxGlobal, okCount, limitErr)
 	}
 }
+
+// TestMultiNotes_TagsNormalize 标签归一化（P-20261112-7 S1）：trim/空串丢弃/
+// 去重保序（首现位置）/超 32 rune 丢弃/超 8 个截断保前 8——非法 tag 丢弃不
+// 报错（便签语义坏数据不阻断；写路径与解码共用同一归一化）
+func TestMultiNotes_TagsNormalize(t *testing.T) {
+	r := newMultiNotesTestStore(t)
+
+	n, err := r.Create("p1", "标签篇", "c", []string{"  生涯  ", "", "项目A", "生涯", "项目A"})
+	if err != nil {
+		t.Fatalf("Create with tags: %v", err)
+	}
+	if len(n.Tags) != 2 || n.Tags[0] != "生涯" || n.Tags[1] != "项目A" {
+		t.Errorf("expected trimmed/deduped order-kept tags [生涯 项目A], got %v", n.Tags)
+	}
+
+	// 超 32 rune 的 tag 丢弃；空串全丢 = 无标签（nil，omitempty 落盘省字段）
+	long := strings.Repeat("标", 33)
+	n2, err := r.Create("p1", "超限篇", "c", []string{long, "长靴", strings.Repeat("x", 32)})
+	if err != nil {
+		t.Fatalf("Create over-limit tag: %v", err)
+	}
+	if len(n2.Tags) != 2 || n2.Tags[0] != "长靴" || len([]rune(n2.Tags[1])) != 32 {
+		t.Errorf("expected over-rune tag dropped (32-rune kept), got %v", n2.Tags)
+	}
+
+	// 超 8 个截断保前 8（保序）
+	n3, err := r.Create("p1", "刷满篇", "c", []string{"t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10"})
+	if err != nil {
+		t.Fatalf("Create 10 tags: %v", err)
+	}
+	if len(n3.Tags) != store.NotesMaxTags || n3.Tags[0] != "t1" || n3.Tags[7] != "t8" {
+		t.Errorf("expected cap at %d keeping first 8 in order, got %v", store.NotesMaxTags, n3.Tags)
+	}
+
+	// 只给空白/空串 = 无标签
+	n4, err := r.Create("p1", "空白篇", "c", []string{"  ", ""})
+	if err != nil || n4.Tags != nil {
+		t.Errorf("expected blank-only tags normalized to nil, got %v err=%v", n4.Tags, err)
+	}
+}
+
+// TestMultiNotes_TagsUpdateSemantics PUT 标签三态（指针可选，与 title *string
+// 同构）：携带即整体替换（标签行是全量编辑面）/显式 [] 清空/nil 不改动——
+// nil=不改动使旧前端/纯改名 PUT 不清空他窗标签
+func TestMultiNotes_TagsUpdateSemantics(t *testing.T) {
+	r := newMultiNotesTestStore(t)
+
+	n, err := r.Create("p1", "标签篇", "v1", []string{"旧标签"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// 携带即整体替换（并归一化：trim/去重）
+	newTags := []string{" 新标签 ", "新标签", "另一枚"}
+	up, err := r.Update("p1", n.ID, nil, "v2", time.Time{}, &newTags)
+	if err != nil {
+		t.Fatalf("Update with tags: %v", err)
+	}
+	if len(up.Tags) != 2 || up.Tags[0] != "新标签" || up.Tags[1] != "另一枚" {
+		t.Errorf("expected whole-replace normalized tags, got %v", up.Tags)
+	}
+
+	// nil = 不改动（旧前端/纯改名 PUT 不清空他窗标签）
+	up2, err := r.Update("p1", n.ID, nil, "v3", time.Time{}, nil)
+	if err != nil {
+		t.Fatalf("Update without tags: %v", err)
+	}
+	if len(up2.Tags) != 2 || up2.Tags[0] != "新标签" {
+		t.Errorf("nil tags must keep existing tags, got %v", up2.Tags)
+	}
+
+	// 显式 [] = 清空
+	empty := []string{}
+	up3, err := r.Update("p1", n.ID, nil, "v4", time.Time{}, &empty)
+	if err != nil {
+		t.Fatalf("Update with empty tags: %v", err)
+	}
+	if up3.Tags != nil {
+		t.Errorf("explicit empty slice must clear tags, got %v", up3.Tags)
+	}
+
+	// 默认篇 upsert 同语义：首写携 tags 落真身（PUT /api/notes/default 带标签）
+	tags := []string{"项目A"}
+	d, err := r.UpsertDefault(store.GlobalNotesScope, "默认正文", nil, &tags)
+	if err != nil {
+		t.Fatalf("UpsertDefault with tags: %v", err)
+	}
+	if len(d.Tags) != 1 || d.Tags[0] != "项目A" {
+		t.Errorf("default upsert should carry tags, got %v", d.Tags)
+	}
+	// 已落真身再 upsert：nil 不改动
+	if _, err := r.UpsertDefault(store.GlobalNotesScope, "默认正文 v2", nil, nil); err != nil {
+		t.Fatalf("UpsertDefault without tags: %v", err)
+	}
+	if got, _ := r.Get(store.GlobalNotesScope, store.DefaultNoteID); len(got.Tags) != 1 || got.Tags[0] != "项目A" {
+		t.Errorf("nil tags upsert must keep tags, got %v", got.Tags)
+	}
+}
+
+// TestMultiNotes_TagsDecodeFaultTolerance 解码容错（便签语义坏数据不阻断）：
+// 落盘文档 tags 形态坏（超限项/空白项/元素混入非字符串）读取时只弃非法项，
+// 篇不消失、其余字段保全——filestore 直写原始文档后经仓储读出验证
+func TestMultiNotes_TagsDecodeFaultTolerance(t *testing.T) {
+	doc := filestore.New(filepath.Join(t.TempDir(), "data"))
+	r := store.NewMultiNotesRepo(doc)
+
+	n, err := r.Create("p1", "带标签篇", "body", []string{"好标签"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	key := "p1-" + n.ID
+
+	// 形态①：元素混入非字符串（手改坏数据）——只弃坏项不弃整篇
+	if err := doc.Update("notesmulti", key, []byte(`{"id":"`+n.ID+`","title":"带标签篇","content":"body","tags":["ok",42,"好标签"]} `)); err != nil {
+		t.Fatalf("seed corrupt tags: %v", err)
+	}
+	got, err := r.Get("p1", n.ID)
+	if err != nil {
+		t.Fatalf("mixed-type tags must not kill the note, got %v", err)
+	}
+	if got.Title != "带标签篇" || len(got.Tags) != 2 || got.Tags[0] != "ok" || got.Tags[1] != "好标签" {
+		t.Errorf("expected string elements kept (normalized), got %+v", got)
+	}
+
+	// 形态②：tags 整体不是数组（手改坏数据）——当无标签，篇仍可读
+	if err := doc.Update("notesmulti", key, []byte(`{"id":"`+n.ID+`","title":"带标签篇","content":"body","tags":"oops"}`)); err != nil {
+		t.Fatalf("seed non-array tags: %v", err)
+	}
+	if got, err = r.Get("p1", n.ID); err != nil || got.Content != "body" || got.Tags != nil {
+		t.Errorf("non-array tags must degrade to nil tags, got %+v err=%v", got, err)
+	}
+
+	// 形态③：整篇非法 JSON —— 维持原语义（ErrNotFound，filestore 损坏隔离承接）
+	if err := doc.Update("notesmulti", key, []byte(`{not-json`)); err != nil {
+		t.Fatalf("seed broken doc: %v", err)
+	}
+	if _, err := r.Get("p1", n.ID); err != store.ErrNotFound {
+		t.Errorf("broken JSON should stay ErrNotFound, got %v", err)
+	}
+}
+

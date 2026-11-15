@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FAQ — Codecombo Docs</title>
+  <!--
+    Codecombo 文档模块（P-20261112-10-S1，guide/ 分页族首期两页之二）。
+    零框架纯 HTML，样式复用/扩展 site/assets/site.css，交互复用 assets/site.js
+    （语言切换/一键复制同链路；平台探测下载仅 landing 有，本页无 #dl-primary
+    即自动跳过）。折叠问答用原生 details/summary，无 JS 可开（与 landing
+    「全部平台」下拉同款哲学）。
+
+    「同 PR 双语同改」纪律（本页族成文）：全部文案 <span data-lang-en> /
+    <span data-lang-zh> 双份内联，任何文案改动必须在同一个 PR 内同时改两种
+    语言的同一处——发现单语改动即视为半成品，不许合入。侧边导航/顶栏是分页族
+    共享骨架的静态复制（零框架无 partial 机制）：改导航结构须 guide/ 全部页面
+    同 PR 同改。
+
+    素材纪律：本页只重组既有结论、零新事实源——各条「源=」逐块标注
+    （install.sh 输出 / README §Upgrading / docs/deploy-linux.md §5 §6 §7 §8
+    §10 / server 端实锚文件），改先改源；素材源与上游冲突时以上游为准并回填
+    本页。
+
+    截图路径基准：本页无截图（纯文本问答）。img 改写约定见
+    getting-started.html 页头注记（发布链适配步收口）。
+    SEO：本页独立 title/meta/og（分页族每页独立成卡）；hreflang 指向 ?lang
+    查询变体（与 landing 同机制）。
+  -->
+  <meta name="description" content="Codecombo FAQ: port conflicts, data directory, backups and where layout/panel state lives (what follows you across browsers or devices), which upgrade path is yours, lock and remote-access security posture, and the common errors (203/EXEC, Text file busy, share-link 404).">
+  <link rel="alternate" hreflang="en" href="faq.html">
+  <link rel="alternate" hreflang="zh-CN" href="faq.html?lang=zh-CN">
+  <link rel="icon" type="image/svg+xml" href="../assets/logo/codecombo-icon-auto.svg">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="FAQ — Codecombo Docs">
+  <meta property="og:description" content="Ports, data directory and backups, where layout &amp; panel state lives, upgrade paths, lock &amp; remote-access security, and common errors — short answers with the exact commands.">
+  <meta property="og:image" content="../assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#0d1117">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+  <!-- ============ Header（分页族共享骨架，guide/ 各页同构） ============ -->
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="../index.html" aria-label="Codecombo home">
+        <img class="brand-icon" src="../assets/logo/codecombo-icon-auto.svg" alt="" width="30" height="30">
+        <span class="brand-name">Codecombo</span><span class="beta-chip">Beta</span>
+      </a>
+      <nav class="header-nav" aria-label="Site">
+        <a href="getting-started.html"><span data-lang-en>Docs</span><span data-lang-zh>文档</span></a>
+        <span class="lang-toggle" role="group" aria-label="Language">
+          <button type="button" class="lang-btn" data-lang-set="en" aria-pressed="true">EN</button>
+          <button type="button" class="lang-btn" data-lang-set="zh" aria-pressed="false">中文</button>
+        </span>
+        <a class="gh-link" href="https://github.com/wtr20211202/codecombo" target="_blank" rel="noopener">
+          <svg class="gh-mark" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="wrap guide-layout">
+    <!-- ============ Sidebar（分页族共享骨架：改导航 guide/ 全页同 PR 同改） ============ -->
+    <aside class="guide-side">
+      <p class="side-head"><span data-lang-en>Documentation</span><span data-lang-zh>文档</span></p>
+      <nav aria-label="Docs">
+        <a href="getting-started.html"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a>
+        <a href="faq.html" aria-current="page"><span data-lang-en>FAQ</span><span data-lang-zh>常见问题</span></a>
+      </nav>
+      <p class="side-head"><span data-lang-en>On this page</span><span data-lang-zh>本页目录</span></p>
+      <nav aria-label="Sections">
+        <a href="#ports"><span data-lang-en>Ports &amp; access</span><span data-lang-zh>端口与访问</span></a>
+        <a href="#data"><span data-lang-en>Data &amp; backups</span><span data-lang-zh>数据与备份</span></a>
+        <a href="#upgrading"><span data-lang-en>Upgrading</span><span data-lang-zh>升级路径</span></a>
+        <a href="#security"><span data-lang-en>Lock &amp; remote access</span><span data-lang-zh>锁与远程访问</span></a>
+        <a href="#errors"><span data-lang-en>Common errors</span><span data-lang-zh>常见报错</span></a>
+      </nav>
+      <p class="side-head"><span data-lang-en>Elsewhere</span><span data-lang-zh>更多去处</span></p>
+      <nav aria-label="Resources">
+        <a href="../index.html"><span data-lang-en>← Product home</span><span data-lang-zh>← 返回官网</span></a>
+        <a href="getting-started.html"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a>
+        <a href="https://github.com/wtr20211202/codecombo/blob/main/docs/deploy-linux.md" target="_blank" rel="noopener"><span data-lang-en>Linux deploy guide</span><span data-lang-zh>Linux 部署指南</span></a>
+      </nav>
+    </aside>
+
+    <main class="guide-main">
+      <!-- ============ Page hero ============ -->
+      <div class="doc-hero">
+        <h1><span data-lang-en>FAQ</span><span data-lang-zh>常见问题</span></h1>
+        <p class="doc-lede">
+          <span data-lang-en>Short answers first, the exact command right below. Every entry is
+          reorganized from the existing docs and code anchors — change those first, then this page.</span>
+          <span data-lang-zh>先给短答案，下面紧跟可复制的命令。每条均重组自既有文档与源码实锚，
+          改先改源。</span>
+        </p>
+      </div>
+
+      <!-- ============ 端口与访问（源=server/bindhint/* + main.go stop 提示 + docs/deploy-linux.md §8 + README §Access from other devices，改先改源） ============ -->
+      <section class="doc-section" id="ports">
+        <h2><span data-lang-en>Ports &amp; access</span><span data-lang-zh>端口与访问</span></h2>
+        <details class="faq-item">
+          <summary><span data-lang-en>Port 9999 is taken — or the service won't bind</span><span data-lang-zh>端口 9999 被占——或者服务起不来绑定失败</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>Find the holder, free the port or pick another one:</span>
+              <span data-lang-zh>先找占用方，然后腾出端口或换一个：</span>
+            </p>
+            <div class="cmd-lines">
+              <div class="cmd-row">
+                <code class="cmd-text">netstat -ano | findstr :9999</code><span class="qs-cmt"># Windows — find the holder PID</span>
+                <button class="copy-btn" type="button" data-copy="netstat -ano | findstr :9999" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+              <div class="cmd-row">
+                <code class="cmd-text">lsof -i:9999</code><span class="qs-cmt"># macOS / Linux（或 ss -tlnp sport = :9999）</span>
+                <button class="copy-btn" type="button" data-copy="lsof -i:9999" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+            </div>
+            <p>
+              <span data-lang-en>The holder may be another Codecombo instance — <code>codecombo stop -p 9999</code>
+              stops it precisely. On Windows, a bind refusal can also mean a reserved port range
+              (<code>netsh interface ipv4 show excludedportrange protocol=tcp</code>). Pick another
+              port with <code>CODECOMBO_PORT</code> at install time or <code>server.httpPort</code> in
+              <code>config.json</code> afterwards — startup logs print an actionable hint on every
+              bind failure.</span>
+              <span data-lang-zh>占用方可能就是另一套 Codecombo 实例——<code>codecombo stop -p 9999</code>
+              可精确停掉它。Windows 上绑定被拒还可能是保留端口段
+              （<code>netsh interface ipv4 show excludedportrange protocol=tcp</code>）。安装时用
+              <code>CODECOMBO_PORT</code>、装好后改 <code>config.json</code> 的 <code>server.httpPort</code>
+              换端口——每次绑定失败，启动日志都会给出可行动的定位提示。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>Why are there extra ports next to the main one?</span><span data-lang-zh>主端口旁边怎么还有几个端口？</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>Three auxiliary ports sit next to the main one, each re-pointable in
+              <code>config.json</code> (<code>server.loopbackPort</code> / <code>sharePort</code> /
+              <code>httpPort</code>):</span>
+              <span data-lang-zh>主端口旁固定有三个辅助端口，均可在 <code>config.json</code> 改道
+              （<code>server.loopbackPort</code> / <code>sharePort</code> / <code>httpPort</code>）：</span>
+            </p>
+            <ul class="doc-list">
+              <li>
+                <span data-lang-en><b>main+1 loopback helper</b> — local auxiliary channel (TLS deployments
+                reach the plaintext API here on localhost).</span>
+                <span data-lang-zh><b>主+1 回环辅助口</b>——本机辅助通道（TLS 部署时本机明文 API 走这里）。</span>
+              </li>
+              <li>
+                <span data-lang-en><b>main+2 share sub-service</b> — serves share links when they point at
+                the share port directly.</span>
+                <span data-lang-zh><b>主+2 分享子服务</b>——分享链接直指分享口时由它服务。</span>
+              </li>
+              <li>
+                <span data-lang-en><b>main+3 plaintext companion</b> — exists only while TLS is on, for
+                networks where TLS-inspection appliances slow https to a crawl. It carries credentials
+                in cleartext — trusted LANs only; set <code>httpPort: 0</code> to turn it off.</span>
+                <span data-lang-zh><b>主+3 明文伴随口</b>——仅在 TLS 开启时存在，供深度检测网络里
+                https 被拖慢的场景。该端口凭据明文传输——仅限受信任内网；配 <code>httpPort: 0</code>
+                可显式关闭。</span>
+              </li>
+            </ul>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>How do I open it to my phone or another machine?</span><span data-lang-zh>怎么让手机或其他机器访问？</span></summary>
+          <div class="faq-body">
+            <div class="cmd-lines">
+              <div class="cmd-row">
+                <code class="cmd-text">codecombo start -H 0.0.0.0</code><span class="qs-cmt" data-lang-en># bind all interfaces (default is 127.0.0.1 only)</span><span class="qs-cmt" data-lang-zh># 绑定所有网卡（默认只绑 127.0.0.1）</span>
+                <button class="copy-btn" type="button" data-copy="codecombo start -H 0.0.0.0" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+            </div>
+            <p>
+              <span data-lang-en>Then open <code>http://&lt;machine-ip&gt;:9999</code> from the other device.
+              The lock password (first-start setup) is the gate — bind to <code>0.0.0.0</code> only on
+              networks you trust. For access from anywhere, the product ships an SSH reverse-tunnel
+              mode through your own VPS — see the deployment docs.</span>
+              <span data-lang-zh>然后在其他设备打开 <code>http://&lt;机器IP&gt;:9999</code>。
+              锁密码（首启设置）就是门——只在受信任的网络里绑 <code>0.0.0.0</code>。
+              任意网络随时访问可用自带 VPS 中继的 SSH 反向隧道模式——见部署文档。</span>
+            </p>
+          </div>
+        </details>
+      </section>
+
+      <!-- ============ 数据与备份（源=CLAUDE.md 数据目录迁移纪律 + docs/deploy-linux.md §5 §5.4 §6b §7 + web/src/persistence/uiStateLanes.json 注册表与 docs/PERSISTENCE_LANES.md「UI 状态保持矩阵」（布局保持条目），改先改源） ============ -->
+      <section class="doc-section" id="data">
+        <h2><span data-lang-en>Data &amp; backups</span><span data-lang-zh>数据与备份</span></h2>
+        <details class="faq-item">
+          <summary><span data-lang-en>Where does Codecombo keep its data?</span><span data-lang-zh>Codecombo 的数据存在哪里？</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>One data directory, default <code>~/.codecombo</code> — configuration,
+              projects registry, keys, logs, everything. Installs that predate the rename
+              (<code>~/.simple-coding</code>) are migrated automatically on first start of a new
+              version — no manual move, don't pre-rename it yourself.</span>
+              <span data-lang-zh>单一数据目录，默认 <code>~/.codecombo</code>——配置、项目注册表、
+              密钥、日志都在里面。旧目录名（<code>~/.simple-coding</code>）的存量安装会在新版首次
+              启动时自动迁移——无需手动搬，也不要自己提前改名。</span>
+            </p>
+            <p>
+              <span data-lang-en>Custom location: pass <code>CODECOMBO_DATA_DIR</code> at install time
+              (or <code>--data-dir</code> on manual starts). Re-running the installer must pass the
+              <b>same value</b> back — omitting it rewrites the service unit without the variable, and
+              the next restart reads the default directory instead (your data stays where it was; the
+              instance just isn't looking at it).</span>
+              <span data-lang-zh>自定义位置：安装时传 <code>CODECOMBO_DATA_DIR</code>（手动启动用
+              <code>--data-dir</code>）。重跑安装脚本必须把<b>同一个值</b>带回——漏带会重写出不含该
+              变量的服务单元，下次重启读到的是默认目录（数据仍在原地，只是实例不再读它）。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>Where are layout and panel states kept? Do they survive a new browser or a new device?</span><span data-lang-zh>布局和面板状态存在哪里？换浏览器/换设备会保留吗？</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>Most of it lives <b>server-side, tied to the instance</b>, inside the
+              data directory: panel sizes and open/closed state, open editor tabs, which main view was
+              last up (notes / dsh console / share manager / remote console), pinned tree folders, rail
+              order. Open the same instance from a <b>different browser</b> and it all comes back — the
+              record belongs to the instance, not to your browser profile. Multiple instances (several
+              installs on one machine, remote instances) each keep their own record.</span>
+              <span data-lang-zh>绝大多数布局与面板状态<b>按实例存服务端</b>数据目录：面板尺寸与开合、
+              编辑器打开的标签、上次的主区视图（笔记 / dsh 控制台 / 分享管理 / 远程控制台）、文件树
+              钉选、活动栏顺序。换一个<b>浏览器</b>打开同一实例照样恢复——记录属于实例，不属于浏览器
+              profile。多实例（一台机器装多套、远程实例）各有独立记录，互不串扰。</span>
+            </p>
+            <p>
+              <span data-lang-en>Changing devices carries it along the same way backups do: the records
+              sit in the data directory, so copying/moving that directory moves them (see the entries
+              above).</span>
+              <span data-lang-zh>换设备时这部分随数据目录走：记录就存放在数据目录里，整目录拷走/迁移
+              即一并带走（见上两条）。</span>
+            </p>
+            <p>
+              <span data-lang-en>A few items are deliberately <b>browser-local</b> (localStorage): the
+              resizable inner sidebar widths of the terminal-session / remote / notes managers, floating
+              terminal geometry, dismissed one-time hints, form drafts. Those do <b>not</b> follow you to
+              another browser or device — each browser keeps its own copy.</span>
+              <span data-lang-zh>少数项刻意存<b>浏览器本地</b>（localStorage）：终端会话管理 / 远程管理 /
+              笔记管理页的内嵌侧栏宽、终端悬浮窗几何、一次性提示已阅、表单草稿。这些<b>不</b>跨浏览器、
+              不跨设备跟随——每个浏览器各存一份。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>How do I back it up?</span><span data-lang-zh>怎么备份？</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>Stop the service, copy the whole data directory, start it again —
+              that's the whole recipe.</span>
+              <span data-lang-zh>停服务 → 整目录拷走 → 再启动——全部步骤就这些。</span>
+            </p>
+            <p>
+              <span data-lang-en>One thing to know: SSH keys and API tokens are AES-256-GCM encrypted
+              at rest, but the master key sits in the same directory by design (portability) — anyone
+              holding the directory holds the secrets. Treat backups like your <code>~/.ssh</code>
+              folder: this encryption defends against single-file leakage, not a local attacker.</span>
+              <span data-lang-zh>一点须知：SSH 私钥与 API 令牌落盘为 AES-256-GCM 加密，但主密钥按
+              可移植性设计就放在同一目录——拿到目录即拿到密钥。备份请按 <code>~/.ssh</code> 的待遇
+              保管：这层加密防的是单文件泄露，防不了本机攻击者。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>Startup logs <code>DATA DIR NOT WRITABLE</code> — or password setup fails with permission denied</span><span data-lang-zh>启动日志出现 <code>DATA DIR NOT WRITABLE</code>——或设密报 permission denied</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>The data directory isn't writable by the service — ownership, sandbox
+              or SELinux. First check ownership; on SELinux systems (RHEL family) a systemd service
+              domain cannot write home directories even with correct owners — the deployment guide
+              has two equivalent fixes (a minimal audit2allow whitelist, or moving the data directory
+              to <code>/var/lib/codecombo</code>).</span>
+              <span data-lang-zh>服务写不了数据目录——属主、沙箱或 SELinux。先查属主；SELinux 系统
+              （RHEL 系）的服务域即使属主全对也写不了家目录——部署指南给了两个等价解法
+              （audit2allow 最小白名单，或把数据目录挪到 <code>/var/lib/codecombo</code>）。</span>
+            </p>
+            <p>
+              <span data-lang-en>Remote deployments handle this automatically (the SELinux whitelist
+              module is installed for you when denials are detected).</span>
+              <span data-lang-zh>远程部署会自动处理（检测到拒绝记录时自动生成并安装 SELinux 白名单
+              模块）。</span>
+            </p>
+          </div>
+        </details>
+      </section>
+
+      <!-- ============ 升级路径判别表（源=README §Upgrading 判别表与各路径注记 + docs/deploy-linux.md §6，改先改源） ============ -->
+      <section class="doc-section" id="upgrading">
+        <h2><span data-lang-en>Upgrading: which path is mine?</span><span data-lang-zh>升级：我该走哪条路？</span></h2>
+        <p class="doc-p">
+          <span data-lang-en><b>The install method decides the update method.</b> Identify your install
+          first — <code>systemctl cat codecombo</code> and read the binary path in
+          <code>ExecStart</code> (no unit, e.g. a manually started instance: <code>ps -ef | grep codecombo</code>
+          shows the running path).</span>
+          <span data-lang-zh><b>装法决定更法。</b>先判别安装方式——<code>systemctl cat codecombo</code>
+          看 <code>ExecStart</code> 里的二进制路径（没有 unit 的形态，如手动启动的实例：
+          <code>ps -ef | grep codecombo</code> 看运行中的路径）。</span>
+        </p>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th><span data-lang-en>Check</span><span data-lang-zh>判别</span></th>
+              <th><span data-lang-en>Installed by</span><span data-lang-zh>装法</span></th>
+              <th><span data-lang-en>How to upgrade</span><span data-lang-zh>升级路径</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ExecStart</code> → <code>~/.local/bin/codecombo</code></td>
+              <td><span data-lang-en>the install script</span><span data-lang-zh>安装脚本</span></td>
+              <td><span data-lang-en>in-app update (preferred) · re-run the script</span><span data-lang-zh>应用内自更新（首选）· 重跑安装脚本</span></td>
+            </tr>
+            <tr>
+              <td><code>sc.exe query Codecombo</code> <span data-lang-en>lists the service</span><span data-lang-zh>列得出服务</span></td>
+              <td><span data-lang-en>Windows install script (install.ps1)</span><span data-lang-zh>Windows 安装脚本（install.ps1）</span></td>
+              <td><span data-lang-en>in-app update (preferred) · re-run install.ps1 — it stops the running service itself</span><span data-lang-zh>应用内自更新（首选）· 重跑 install.ps1——安装器自己会先停服务</span></td>
+            </tr>
+            <tr>
+              <td><code>ExecStart</code> → <code>~/.codecombo/bin/codecombo</code></td>
+              <td><span data-lang-en>remote deploy from a central instance</span><span data-lang-zh>中心实例远程部署</span></td>
+              <td><span data-lang-en>in-app update · re-deploy remotely · manual replacement — <b>never</b> re-run the script</span><span data-lang-zh>应用内自更新 · 中心实例重新远程部署 · 手工换包——<b>禁止</b>重跑安装脚本</span></td>
+            </tr>
+            <tr>
+              <td><code>ExecStart</code> → <code>/opt/codecombo/bin/codecombo</code></td>
+              <td><span data-lang-en>manual <code>/opt</code> layout</span><span data-lang-zh>手工 <code>/opt</code> 布局</span></td>
+              <td><span data-lang-en>in-app update · manual replacement</span><span data-lang-zh>应用内自更新 · 手工换包</span></td>
+            </tr>
+            <tr>
+              <td><code>npm ls -g codecombo</code> <span data-lang-en>lists it</span><span data-lang-zh>有结果</span></td>
+              <td>npm</td>
+              <td><code>npm i -g codecombo@next</code> <span data-lang-en>(always the newest build; the in-app updater steps aside)</span><span data-lang-zh>（恒为最新版；应用内更新自动让位）</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <details class="faq-item">
+          <summary><span data-lang-en>“Check Update” says there is nothing new</span><span data-lang-zh>「检查更新」说没有新版本</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>Two known shapes: during the beta phase the GitHub stable channel is
+              empty — turn on <b>Follow pre-releases</b> in the version panel (Settings → About)
+              before checking. And versions older than <code>v0.0.1-beta.3</code> have a check-chain
+              defect and can't see new releases in-app — upgrade once via the script or a manual
+              replacement first, after that in-app checking works.</span>
+              <span data-lang-zh>两种已知形态：beta 期 GitHub 正式通道恒为空——先在版本面板
+              （设置 → 关于）打开<b>「跟进预发布版本」</b>再检查；<code>v0.0.1-beta.3</code> 之前的
+              版本检查链有缺陷、应用内看不到新版本——先走脚本或手工换包升一次，之后应用内检查
+              即可用。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>Why must remote-deployed instances never re-run the install script?</span><span data-lang-zh>为什么远程部署装的实例禁止重跑安装脚本？</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>The script's templated unit overwrites the deployer's unit: it drops
+              the extra <code>Environment=PATH</code> (agent CLIs installed in the service user's
+              environment then report “not found”), <code>WorkingDirectory</code> and
+              <code>NoNewPrivileges</code>, and reverts the bind address to <code>127.0.0.1</code> —
+              remote access dies at the next restart. The binary also ends up installed twice. That
+              layout upgrades in-app, or via a fresh remote deploy, or by the manual replacement
+              recipe (unit untouched).</span>
+              <span data-lang-zh>脚本模板会覆写部署器写的 unit：丢掉多下发的
+              <code>Environment=PATH</code>（服务用户环境里装的智能体 CLI 随即 not found）、
+              <code>WorkingDirectory</code> 与 <code>NoNewPrivileges</code>，绑定地址缩回
+              <code>127.0.0.1</code>——下一次重启远程访问即断；二进制还会并存两份。该布局的升级走
+              应用内自更新、或中心实例重新远程部署、或 unit 原样不动的手工换包配方。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>The update finished but the service didn't come back</span><span data-lang-zh>更新完成后服务没自己回来</span></summary>
+          <div class="faq-body">
+            <div class="cmd-lines">
+              <div class="cmd-row">
+                <code class="cmd-text">sudo systemctl restart codecombo</code><span class="qs-cmt" data-lang-en># script-installed (systemd) instances: finish the rollout</span><span class="qs-cmt" data-lang-zh># 脚本装（systemd 托管）实例：收尾拉起</span>
+                <button class="copy-btn" type="button" data-copy="sudo systemctl restart codecombo" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+            </div>
+            <p>
+              <span data-lang-en>Current install.sh registers a polkit rule so the app can restart its
+              own service; instances installed by older scripts never got that rule and get refused —
+              re-running the install script once installs it (idempotent). macOS re-runs take effect
+              immediately; on Windows re-run install.ps1 from an elevated PowerShell with the same
+              <code>$env:CODECOMBO_*</code> values as the original install.</span>
+              <span data-lang-zh>现行 install.sh 会同装 polkit 放行规则让应用能自重启服务；早期脚本
+              装的实例没赶上这条规则、自重启被拒——重跑一次安装脚本即补装（幂等）。macOS 重跑立即
+              生效；Windows 在管理员 PowerShell 里按原安装的 <code>$env:CODECOMBO_*</code> 值重跑
+              install.ps1。</span>
+            </p>
+          </div>
+        </details>
+      </section>
+
+      <!-- ============ 锁与远程访问安全口径（源=server/api/system/lock.go（首启设密回环限制/限流）+ README §Access from other devices + docs/deploy-linux.md §4 §4.1 §5.4，改先改源） ============ -->
+      <section class="doc-section" id="security">
+        <h2><span data-lang-en>Lock &amp; remote access</span><span data-lang-zh>锁与远程访问</span></h2>
+        <details class="faq-item">
+          <summary><span data-lang-en>What actually protects the workbench?</span><span data-lang-zh>工作台到底靠什么保护？</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>The lock password set on first start gates the whole UI, API and
+              terminal surface — one gate, not per-feature passwords. Auto-lock (idle timeout) and
+              session-token TTL are configurable in Settings → Security; security-relevant events
+              (LAN password setup, unlocks, high-risk approvals) land in the audit log. By default
+              the server binds <code>127.0.0.1</code> only — opening it to the network is an explicit
+              act (<code>-H 0.0.0.0</code>), and TLS is on by default when you do.</span>
+              <span data-lang-zh>首启设置的锁密码把 UI、API 与终端面整体关在门后——一道门，而非
+              每个功能各设一密。自动锁定（空闲超时）与会话令牌 TTL 在 设置 → 安全 里可配；
+              安全相关事件（局域网设密、解锁、高危审批）落审计日志。服务默认只绑
+              <code>127.0.0.1</code>——对网络开放是显式动作（<code>-H 0.0.0.0</code>），开放时
+              TLS 默认开启。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>Password setup answers 403 “only allowed from localhost”</span><span data-lang-zh>设密返回 403「only allowed from localhost」</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>By design: first-time setup is a credential-claiming operation, so a
+              server bound to <code>127.0.0.1</code> only accepts it from the machine itself — this
+              prevents someone else on the LAN from claiming the password before you. Headless
+              deployment without a local browser? Restart bound to all interfaces
+              (<code>-H 0.0.0.0</code>) and the setup can be completed from another machine — the
+              action is audited.</span>
+              <span data-lang-zh>这是设计如此：首次设密属于凭证占位操作，服务绑 <code>127.0.0.1</code>
+              时只接受本机来源——防止局域网里别人抢在你之前占住密码。无头部署没有本机浏览器？
+              以通配地址重启（<code>-H 0.0.0.0</code>）即可从另一台机器完成设密——该操作会入
+              审计日志。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>Unlock or setup answers 429</span><span data-lang-zh>解锁或设密返回 429</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>Same-IP rate limiting on the credential endpoints — wait 60 seconds
+              and retry.</span>
+              <span data-lang-zh>凭证端点的同 IP 限流——等 60 秒再试。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>The browser warns about the TLS certificate on first visit</span><span data-lang-zh>首次访问浏览器提示 TLS 证书警告</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>TLS is on by default with a self-signed certificate — trust it once
+              per client, or install a CA-signed certificate in Settings → Security → TLS (the docs
+              cover both per platform). Reverse-proxying through a VPS? Mind the trust boundary:
+              whoever terminates TLS sees the plaintext.</span>
+              <span data-lang-zh>TLS 默认开启、配的是自签证书——每个客户端信任一次即可，或在
+              设置 → 安全 → TLS 里装入 CA 签发证书（文档按平台各有步骤）。经 VPS 反代？注意信任
+              边界：终结 TLS 的一方看得到明文。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>Forgot the lock password</span><span data-lang-zh>忘记锁密码</span></summary>
+          <div class="faq-body">
+            <div class="cmd-lines">
+              <div class="cmd-row">
+                <code class="cmd-text">codecombo reset-lock</code><span class="qs-cmt" data-lang-en># local CLI — resets the lock config; data untouched</span><span data-lang-zh># 本机 CLI——重置锁配置；数据不受影响</span>
+                <button class="copy-btn" type="button" data-copy="codecombo reset-lock" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+            </div>
+            <p>
+              <span data-lang-en>Runs on the machine itself (it must — that's the point: remote
+              callers can't reset a lock they can't touch).</span>
+              <span data-lang-zh>只能在机器本机执行（必须如此——远程来的调用方本就不该能重置自己
+              碰不到的锁）。</span>
+            </p>
+          </div>
+        </details>
+      </section>
+
+      <!-- ============ 常见报错（源=docs/deploy-linux.md §7（203/EXEC 三态 :540）§6c（Text file busy/资产拿错）§10（分享 404）§6b（agent not found），改先改源） ============ -->
+      <section class="doc-section" id="errors">
+        <h2><span data-lang-en>Common errors</span><span data-lang-zh>常见报错</span></h2>
+        <details class="faq-item">
+          <summary><code>systemctl status</code>: <code>status=203/EXEC</code>, <span data-lang-en>the service keeps failing to restart</span><span data-lang-zh>服务反复重启失败</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>systemd cannot execute the binary at <code>ExecStart</code>. Read the
+              actual reason first: <code>journalctl -u codecombo -n 30 --no-pager</code> → the line
+              “Failed to execute”, then match one of three states:</span>
+              <span data-lang-zh>systemd 执行不了 <code>ExecStart</code> 指向的二进制。先看具体原因：
+              <code>journalctl -u codecombo -n 30 --no-pager</code> → 找 “Failed to execute” 行，
+              按三态对号：</span>
+            </p>
+            <table class="doc-table">
+              <thead>
+                <tr>
+                  <th><span data-lang-en>Error after “Failed to execute”</span><span data-lang-zh>报错</span></th>
+                  <th><span data-lang-en>Meaning &amp; fix</span><span data-lang-zh>含义与处置</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>Permission denied</code></td>
+                  <td>
+                    <span data-lang-en>Missing exec bit (<code>chmod 0755 &lt;bin&gt;</code>), an SELinux
+                    label on a fresh file (<code>restorecon -v &lt;bin&gt;</code>), or the binary sits
+                    on a <code>noexec</code> mount.</span>
+                    <span data-lang-zh>缺执行位（<code>chmod 0755 &lt;bin&gt;</code>）、新文件 SELinux
+                    标签不对（<code>restorecon -v &lt;bin&gt;</code>），或二进制在 <code>noexec</code>
+                    挂载点上。</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>Exec format error</code></td>
+                  <td>
+                    <span data-lang-en>Wrong architecture or an incomplete file — wrong asset picked or
+                    a truncated download. Verify size (~50 MB) and SHA256 against
+                    <code>SHA256SUMS.txt</code>.</span>
+                    <span data-lang-zh>架构不符或文件不完整——拿错资产或下载中断。按
+                    <code>SHA256SUMS.txt</code> 核对体积（约 50MB）与 SHA256。</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>No such file or directory</code></td>
+                  <td>
+                    <span data-lang-en>The <code>ExecStart</code> path is wrong — compare
+                    <code>systemctl cat codecombo</code> with <code>ls -l</code>. The release binaries
+                    are statically linked, so a missing library would not produce this — suspect the
+                    path first.</span>
+                    <span data-lang-zh><code>ExecStart</code> 路径不对——拿 <code>systemctl cat codecombo</code>
+                    对照 <code>ls -l</code>。发布二进制是静态链接，缺动态库不会报这个错——优先怀疑
+                    路径。</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><code>Text file busy</code><span data-lang-en> when replacing the binary</span><span data-lang-zh>：换二进制时报这个错</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>The service is still running and you overwrote the executable in
+              place (<code>cp</code>/<code>dd</code> do that). Stop the service first
+              (<code>systemctl stop codecombo</code>, or <code>codecombo stop</code> for manually
+              started instances). Renaming with <code>mv</code> doesn't trigger this — the in-app
+              updater and the manual recipe both swap via rename for exactly this reason.</span>
+              <span data-lang-zh>服务还在跑、而你在原地覆写了可执行文件（<code>cp</code>/<code>dd</code>
+              就是这种）。先停服务（<code>systemctl stop codecombo</code>，手动启动的实例用
+              <code>codecombo stop</code>）。<code>mv</code> 改名不会触发——应用内自更新与手工换包
+              配方都用 rename 正是为此。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>A share link opens 404</span><span data-lang-zh>分享链接打开是 404</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>Default share links ride the main app origin
+              (<code>/s/&lt;token&gt;</code>) — whatever entry the link uses must forward
+              <code>/s/*</code> (plus the three vendored visitor assets). A reverse proxy that only
+              forwards the main port's static pages is not enough; forward the whole main port
+              (SSE live terminals need buffering off). Links pinned to a dedicated share domain must
+              reach the share sub-service port.</span>
+              <span data-lang-zh>默认分享链接走主应用 origin（<code>/s/&lt;token&gt;</code>）——链接
+              从哪个入口进，该入口就必须转发 <code>/s/*</code>（外加三个访客静态资产）。只转发主
+              端口静态页的反代不够；要完整转发主端口（SSE 终端直播需关缓冲）。指到专用分享域名的
+              链接则必须能到达分享子服务端口。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>Agent CLIs (claude etc.) suddenly “not found” inside the service</span><span data-lang-zh>智能体 CLI（claude 等）在服务里突然 not found</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>Typical on remote-deploy layouts after someone re-ran the install
+              script: the templated unit overwrote the deployer's <code>Environment=PATH</code>, so
+              user-level agent installs are no longer on the service's PATH. Restore the unit
+              (re-deploy from the central instance) or re-add the PATH line — see the upgrade table
+              above for the no-script rule.</span>
+              <span data-lang-zh>典型场景：远程部署布局被人重跑了安装脚本——模板 unit 覆写掉了部署器
+              下发的 <code>Environment=PATH</code>，服务 PATH 里不再有用户级安装的智能体。恢复 unit
+              （从中心实例重新远程部署）或补回 PATH 行——禁跑脚本的规矩见上方升级判别表。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>The downloaded “binary” is only tens of bytes</span><span data-lang-zh>下载下来的「二进制」只有几十字节</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>You grabbed a <code>.sha256</code>/<code>.sig</code> sidecar instead
+              of the binary — the most common wrong-asset pick on the Releases page. Binaries are
+              ~50 MB; re-download and verify with <code>sha256sum -c --ignore-missing SHA256SUMS.txt</code>
+              (must print <code>OK</code>).</span>
+              <span data-lang-zh>拿到的是 <code>.sha256</code>/<code>.sig</code> 伴随小文件而非二进制
+              ——Releases 页上最高发的「资产拿错」。二进制约 50MB；重新下载并用
+              <code>sha256sum -c --ignore-missing SHA256SUMS.txt</code> 校验（须见 <code>OK</code>）。</span>
+            </p>
+          </div>
+        </details>
+        <p class="doc-next">
+          <span data-lang-en>Deeper deployment and troubleshooting recipes live in the repo docs:
+          <a href="https://github.com/wtr20211202/codecombo/blob/main/docs/deploy-linux.md" target="_blank" rel="noopener">Linux deployment guide</a>
+          · <a href="https://github.com/wtr20211202/codecombo/blob/main/README.md" target="_blank" rel="noopener">README</a>.</span>
+          <span data-lang-zh>更深入的部署与排障配方在仓库文档里：
+          <a href="https://github.com/wtr20211202/codecombo/blob/main/docs/deploy-linux.md" target="_blank" rel="noopener">Linux 部署指南</a>
+          · <a href="https://github.com/wtr20211202/codecombo/blob/main/README.md" target="_blank" rel="noopener">README</a>。</span>
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============ Footer（与 landing 同骨架，加返回官网链接） ============ -->
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <img src="../assets/logo/codecombo-icon-auto.svg" alt="" width="22" height="22">
+        <span>Codecombo</span>
+      </div>
+      <nav class="footer-nav" aria-label="Footer">
+        <a href="../index.html"><span data-lang-en>← Home</span><span data-lang-zh>← 返回官网</span></a>
+        <a href="getting-started.html"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a>
+        <a href="https://github.com/wtr20211202/codecombo" target="_blank" rel="noopener">
+          <span data-lang-en>GitHub</span><span data-lang-zh>GitHub</span>
+        </a>
+        <a href="https://github.com/wtr20211202/codecombo/issues" target="_blank" rel="noopener">
+          <span data-lang-en>Issues</span><span data-lang-zh>反馈</span>
+        </a>
+      </nav>
+      <p class="footer-note">
+        <span data-lang-en>Self-hosted, single binary, no database. Windows · Linux · macOS.</span>
+        <span data-lang-zh>自托管、单二进制、零数据库。Windows · Linux · macOS。</span>
+      </p>
+    </div>
+  </footer>
+
+  <script src="../assets/site.js"></script>
+</body>
+</html>

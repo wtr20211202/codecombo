@@ -37,6 +37,16 @@ describe('mergeNoteLists（侧栏清单 diff 守卫）', () => {
     expect(mergeNoteLists([a], [meta('a', { deletedBy: 'someone' })])[0]?.deletedBy).toBe('someone')
   })
 
+  it('tags 逐位比对（P-20261112-7 S3 侧栏徽记数据源）：外部仅改标签（title/time/size 同）→ 换新对象不复用旧身份', () => {
+    const a = meta('a', { tags: ['x'] })
+    // 同 tags → 身份复用（keyed 行零 DOM 写入语义对标签面同样成立）
+    expect(mergeNoteLists([a], [meta('a', { tags: ['x'] })])[0]).toBe(a)
+    // 无标签 ↔ 带标签 / 仅顺序不同（标签数组有序——编辑面保序语义）都算变更
+    expect(mergeNoteLists([a], [meta('a')])[0]).not.toBe(a)
+    expect(mergeNoteLists([meta('b')], [meta('b', { tags: [] })])[0]?.tags).toEqual([])
+    expect(mergeNoteLists([a], [meta('a', { tags: ['y', 'x'] })])[0]).not.toBe(a)
+  })
+
   it('空边界：prev 空 = 全新直通；next 空 = 全部落出', () => {
     expect(mergeNoteLists([], [meta('a')])).toEqual([meta('a')])
     expect(mergeNoteLists([meta('a')], [])).toEqual([])

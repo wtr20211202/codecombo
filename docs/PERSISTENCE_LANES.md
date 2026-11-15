@@ -17,6 +17,7 @@
 - [特例清单（不属于任何车道）](#特例清单不属于任何车道)
 - [判定流程](#判定流程)
 - [现状归类基线（2026-10）](#现状归类基线2026-10)
+- [UI 状态保持矩阵（P-20261114-2-S2）](#ui-状态保持矩阵p-20261114-2-s2)
 - [Code Review 检查清单](#code-review-检查清单)
 - [何时换 SQLite（触发条件）](#何时换-sqlite触发条件)
 - [已知历史债务](#已知历史债务)
@@ -189,6 +190,101 @@ credential-helper 配置注入、tmux.conf / shellint 脚本、agent 技能安�
 
 ---
 
+## UI 状态保持矩阵（P-20261114-2-S2）
+
+> **范围边界声明（首轮修订⑤）**：本矩阵主面 = 前端 UI「保持语义」状态三项族——① uiState 命名空间（collect 收集轨 + saveXxx→patchNamespaces 专用读写器轨 + 退役档）、② localStorage/sessionStorage `sc.*` 键控面、③ usePanelLayout 内存态（临时档）。非 `sc.*` 前缀的同通道键（theme-settings / font-settings / terminal-theme-follow / notify-dnd / notify-dnd-manual / notify-sound / notify-simple / notify-scroll-read / ctx-warn-pct / ui-zoom-settings / graph-lane-settings / file-nesting-settings / editor-recent-files / home-recent-projects / clone-prefs / clone-url-history / runbook-params-history / locale（LOCALE_STORAGE_KEY）/ opsAtomPrefs ATOM_STORAGE_KEYS / theme early-init / updateCheck 版本记忆 / useSearchHistory / useSearchScope 等）为**存量族**：早于 `sc.*` 命名约定或独立约定，**不强制收编**（S1 审计 docs/ui-state-audit-20261114.md 三.3 边界定案维持）——新增同通道键应按 `sc.*` 约定命名并走登记纪律。
+
+> **登记与门禁**：登记号 = `web/src/persistence/uiStateLanes.json` 的 rows[].id，本矩阵三表与注册表**逐行逐格对应**（一致性单测 `web/src/__tests__/persistence/uiStateLanes.test.ts` 钉住：文档行=注册表行，单元格不一致即红）——改动先改注册表再同步本表对应行，`check:uistate-lanes` 门禁（挂 npm run check/check:fast 尾链）与单测双红强制同步。存量 `sc.*` 生产键（S2 门禁机械实勘 **48 逻辑键 / 47 豁免条目**——S1 审计口径「44 生产键」为引号字面量行去重统计，模板串/拼接前缀族的归并方式不同，门禁以提取面为准）逐条注缘由入注册表 legacyScKeys 豁免基线（键面已删报红强制修剪）；新键一律登记 rows[].keys（exact 或尾随 * 前缀形态，动态拼接族 `sc.agentQueue.draft.<sessionId>` 等按前缀登记）。
+
+> **多标签列注记（首轮修订④）**：同实例多标签页并存时，uiState 两轨以键级补丁（相对基底的脏键 diff，本页未动键零外发）+ 命名空间浅合并 + 即时写乐观推进落位——**后写赢**（最后落位者胜，关页 forceSave 走 keepalive 补丁同样只发本页变更键，A 页 boot 旧值不整包覆盖 B 页新值，P-20261002-8 核心语义）；localStorage 同设备多标签共享、同为此语义；sessionStorage 例外（标签页隔离）。
+
+> **换机器列注记（首轮修订④）**：uiState 落服务端数据目录 `~/.codecombo/data/uistate/`（kind=uiState，实例键控）——数据目录整体迁移/同步/换机部署时**跟随**；localStorage/sessionStorage 是浏览器设备本地存储，**不随数据目录**（换浏览器/换机器即失，与 uiState 车道形成按实例/按设备两档）。
+
+> **三轨选轨判据**：何时 collect 面 / 何时专用读写器 / 何时 localStorage / 临时态不登记——成文见 CLAUDE.md 前端纪律节「UI 状态保持三轨选轨与登记」。
+
+### ① uiState 命名空间（collect 收集轨 + 专用读写器轨 + 退役档）
+
+| 登记号 | 状态项 | 车道 | 刷新 | 路由往返 | 多标签 | 换浏览器 | 换机器 | 清除语义 | 备注 |
+|---|---|---|---|---|---|---|---|---|---|
+| `editor.openFiles` | editor.openFiles / activeIndex / splitOpen / splitFiles / splitActiveFile / splitDirection | collect | ✓ restoreLayoutState（projectRestored 守卫） | ✓ 保持（boot 恢复） | 后写赢（键级补丁+脏键 diff，未动键零写） | ✓（实例记录不依赖设备） | 跟随数据目录（uiState kind 实例键） | 项目切换静默清空（openfiles/core.ts:124，语义对齐页面刷新） | untitled 草稿/diff/预览签不入持久化清单；分屏组清单 SPLIT_FILES_MAX=20 截旧（useLayoutState 收口） |
+| `fileTree.expandedDirs` | fileTree.expandedDirs / selectedFile（uiState 字段面） | retired | ✗（已退役：bootstrap 恢复段 S1 删除，字段无恢复端） | ✗（真源见 ls.fileTree.expanded 行） | ✗（恒空退役，不写不读） | ✗ | ✗（字段面；真源为设备本地） | 无（字段无写端；真源清除见 ls.fileTree.expanded 行） | 恒空僵尸→S1 退役（collect 面收窄+恢复桥删除，考古实证 extra 自 init commit 从未接线）；字段保留旧记录读取兼容，真源=ls.fileTree.expanded 行 |
+| `fileTree.pinnedDirs` | fileTree.pinnedDirs（常用目录钉选，projectId→有序路径表） | writer | ✓ FileTreeView 挂载（getFileTreePinnedDirs） | ✓ 保持 | 后写赢（键级补丁；expandedDirs/selectedFile 由注册表从基底回填不丢） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 用户取消钉选；布局重置不清（P-74/P-97 定案：钉选是策展数据非布局） | — |
+| `layout.main` | layout.sidePanelWidth / bottomPanelHeight / showSidePanel / showBottomPanel / sideView / bottomTab / commitLocation | collect | ✓ restoreLayoutOnly（pending 意图优先） | ✓ 保持 | 后写赢（键级补丁+脏键 diff，他页修改不被关页回滚） | ✓（按实例、跨浏览器——P-20261114-2-S1 车道归类核实） | 跟随数据目录（uiState kind 实例键） | useLayoutReset 一键重置（写回 LAYOUT_DEFAULTS，经 patchNamespaces 走 writer 面） | commitLocation 恒归一 sidebar（底部提交 tab 退役定案）；与面板内嵌侧栏宽（ls.panelSidebarWidth）形成按实例/按设备两档 |
+| `layout.maximized` | layout.bottomPanelMaximized / bottomPanelEditorMaximized | collect | ✓ restoreLayoutOnly（最大化族落盘两档） | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 面板隐藏 watch 清（usePanelLayout）/布局重置 | 与四个临时最大化档（mem.terminalMaximized 等）相对：仅此两档落盘，升格评审定案核实一致 |
+| `terminal.activeTabId` | terminal.activeTabId（uiState 字段面） | retired | ✗（已退役：bootstrap 恢复段 S1 删除，字段无恢复端） | ✗（真源见 ls.term.activeTabMap 行） | ✗（恒空退役，不写不读） | ✗ | ✗（字段面；真源为设备本地） | 无（字段无写端；真源清除见 ls.term.activeTabMap 行） | 恒空僵尸→S1 退役（同 fileTree.expandedDirs 考古定案）；字段保留旧记录读取兼容，真源=ls.term.activeTabMap 行 |
+| `gitPanel.collapsedSections` | gitPanel.collapsedSections（Git 面板分区折叠） | collect | ✗（现状不保持：漏收集——extra 自 init commit 从未接线恒空；恢复桥又被 BottomPanel v-else-if 挂载饿死） | ✗（同刷新） | 后写赢（键级补丁；现状恒空不产生实际写） | ✗（现状恒空） | ✗（现状恒空） | —（无写端） | S2 裁决：升格独立提案（修复需收集端接线+恢复时序三件套：pending 消费或挂载自恢复），本步不修——见 docs/ui-state-audit-20261114.md 七节 #1 |
+| `gitPanel.selectedBranch` | gitPanel.selectedBranch（Git 面板选中分支） | collect | ✗（恒空有意——分支跟随 git 事实派生，恢复陈旧分支名与实际分支冲突有害） | ✗（同刷新） | 后写赢（恒空不产生实际写） | ✗（不持久化） | ✗（不持久化） | —（无写端；恢复桥 if (branch) 守卫空值跳过） | S1 定案维持不恢复（假设①在案） |
+| `remoteConsole` | remoteConsole.tabs / groups / open / sidebarCollapsed | writer | ✓ restoreLayoutOnly（open+tabs>0 才恢复）+ RemoteConsoleView boot | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 视图关闭即写（watch 链） | showRemoteConsole 内存态即 remoteConsole.open（usePanelLayout）；open 唯一读端=项目页 bootstrap 恢复守卫（首页 boot 不恢复远程视图），槽天然 project 槽——首页 overlay 内嵌实例 persistState 不落 open 子键（P-20261114-4-S2 remote 槽随件评估，缺子键由注册表从基底回填） |
+| `agentTerminal` | agentTerminal.groups / sidebarCollapsed / collapsedProjects / collapsedGroups / projectOrder / projectSessionOrder / lastViewedSessionId | writer | ✓ 管理页 boot getAgentTerminalState（形状防御在读取器） | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 用户操作；会话消亡剪枝 | 浮窗几何/悬浮球/开态等设备本地面见 ls.agentTerminal.* 行——uiState 的 agentTerminal 是读改写链，旁路写会互相覆盖故走 localStorage（S1 车道定案） |
+| `dshConsole.open` | dshConsole.open / homeOpen（dsh 控制台视图可见性，P-20261114-4-S2 分场景槽：open=project 槽、homeOpen=home 槽） | writer | ✓ restoreDshConsoleOnce（notes 先 dsh 后显式定序；按所在场景读槽——home 读 homeOpen、project 读 open） | ✓ 保持（互斥语义：开启按互斥族清他视图；路由往返走 per-scene 内存快照，P-20261114-4-S1） | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 互斥族/关闭钮（persistDshConsoleOpen watch 覆盖浮层直写与互斥隐式关闭全部路径，落当前场景槽） | dshMaximized 临时不持久化（见 mem.dshMaximized 行）；旧单槽值原位即 project 槽，向后兼容零迁移（旧前端读新档忽略未知子字段零影响） |
+| `shareManager.open` | shareManager.open（文件分享管理视图可见性） | writer | ✓ restoreShareManagerOnce（notes→dsh→share 定序，异常双真存档后到者胜） | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 互斥族/toggle | P-20261112-6-S3 族内缺口补齐（dshConsole 同族口径） |
+| `notesView` | notesView.open / homeOpen / activeId / sidebarOpen / mode（P-20261114-4-S2 分场景槽：open=project 槽、homeOpen=home 槽；activeId/sidebarOpen/mode 面板内容/呈现态不分槽） | writer | ✓ restoreNotesViewOnce（按所在场景读槽）+ NotesPanel presentation/activeId（loadList 保底选篇两段式） | ✓ 保持（P-20261114-4-S2 场景归属：home 槽/project 槽各自恢复互不越界，路由往返走 per-scene 内存快照 P-20261114-4-S1） | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 互斥族/关闭钮/首页 Esc（persistNotesViewOpen watch 覆盖全部路径，落当前场景槽） | sidebarOpen 恢复仅桌宽生效（窄屏默认收起出厂口径，消费端守卫）；mode 无宽条件；旧单槽值原位即 project 槽，向后兼容零迁移（旧前端读新档忽略未知子字段零影响） |
+| `dashboard.landing` | dashboard.landing（进入项目默认落仪表盘偏好） | writer | ✓ bootstrap（仅显式进入+偏好开，useLayoutBootstrap） | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 设置切换 | 视图显隐 showDashboard 不落盘（纯查看面定案，见 mem.showDashboard 行） |
+| `taskRunner.recent` | taskRunner.recent（任务面板运行历史，至多 5 条） | writer | ✓ 面板挂载 getTaskRunnerRecent（旧版 source::cwd::name 键静默丢弃） | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 上限 5 条 FIFO | — |
+| `snapshots` | snapshots（工作现场存档点，projectId→命名快照列表，整表 Record） | writer | ✓ useWorkspaceSnapshot 弹层/快捷键恢复链 | ✓ 保持 | 后写赢（键级补丁；整表 Record「缺子键=有意删除」） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 用户删除快照；恢复前自动档滚动槽 | 整表 Record 命名空间不在 NESTED_UISTATE_SUBFIELDS 回填面（写端恒发完整表） |
+| `bookmarks` | bookmarks（编辑器书签锚，projectId→文件→记录表，整表 Record） | writer | ✓ useEditorBookmarks 挂载恢复 | ✓ 保持 | 后写赢（键级补丁；整表 Record） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 用户删锚；上限在写入方收口（每项目 ≤100 行防膨胀） | — |
+| `diffComments` | diffComments（diff 审阅留言，projectId→文件→行级留言，整表 Record） | writer | ✓ useDiffComments 挂载恢复 | ✓ 保持 | 后写赢（键级补丁；整表 Record） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 用户删留言；每项目 ≤100 条写入方收口 | — |
+| `editorPrefs.mdMode` | editorPrefs.mdMode（Markdown 三态显示模式偏好） | writer | ✓ 打开 .md 恢复 | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | —（无显式清除点） | 独立命名空间而非塞进 editor——collect 整体重建 editor 键会静默抹掉未收录字段（fileTree.pinnedDirs 同款教训在案） |
+| `agentTaskTemplates.items` | agentTaskTemplates.items（智能体任务模板定制表） | writer | ✓ useAgentTaskTemplates 消费（null=出厂预置） | ✓ 保持 | 后写赢（低频管理面） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 管理面增删改 | 特例：GET+merge+PUT 整更新（saveAgentTaskTemplates 非 patchNamespaces——手动合并基底防 beforeunload 抹回），无 writerNs 字段，写函数由一致性单测 writerFn 钉住 |
+| `layoutLock.locked` | layoutLock.locked（布局锁定防误拖开关） | writer | ✓ restoreFromState（restoreLayoutOnly 内，早退前） | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | toggle | 独立命名空间——collect 整体重建 layout 键会抹掉未收录字段；layout 重置不波及。无专用读函数（恢复走 bootstrap 已拉取快照） |
+| `railOrder.railTop` | railOrder.railTop（活动栏面板手动序） | writer | ✓ restoreRailTopOrder（restoreLayoutOnly 内） | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 拖拽重排 | 顺序是用户策展的个性化偏好（agentTerminal.projectOrder 同哲学）；形状防御在 panels/registry。无专用读函数（恢复走 bootstrap） |
+| `monitorBoard` | monitorBoard.cardOrder / hiddenCards（值班大屏卡片类目布局） | writer | ✓ monitor 页 boot getMonitorBoardLayout | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 用户操作 | 已知类目 id 收敛在 utils/monitorBoardLayout（读取器只做数组清洗） |
+| `notificationCenter.lastSeenAt` | notificationCenter.lastSeenAt（通知中心未读分界线） | writer | ✓ 面板打开读 | ✓ 保持（跨刷新/跨标签延续） | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | —（面板关闭即写，无清除点） | — |
+| `sync` | sync.direction / peers / projects / contexts（同步中心配置记忆） | writer | ✓ 面板打开 getSyncPrefs（一键重跑） | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | —（执行成功即写，无清除点） | — |
+| `conflictAgent.template` | conflictAgent.template（冲突 agent 派单模板记忆） | writer | ✓ 弹层发起读（空串=无记忆回 i18n 派生默认） | ✓ 保持 | 后写赢（键级补丁） | ✓（实例记录） | 跟随数据目录（uiState kind 实例键） | 恢复默认链写空串清记忆（空模板发起是临时态而非偏好措辞，不记忆） | — |
+
+### ② localStorage / sessionStorage 键控面
+
+| 登记号 | 状态项 | 车道 | 刷新 | 路由往返 | 多标签 | 换浏览器 | 换机器 | 清除语义 | 备注 |
+|---|---|---|---|---|---|---|---|---|---|
+| `ls.fileTree.expanded` | sc.fileTree.expanded.<projectId>（树展开按项目真源，动态前缀族） | localStorage | ✓ FileTreeView 挂载自恢复；快照采集/应用读写（useWorkspaceSnapshot/useLayoutShell） | ✓ 保持（各消费域挂载自恢复） | 同设备共享（后写赢） | ✗（设备本地） | ✗（不随数据目录，设备本地） | useLayoutReset 重置清（清键对账） | uiState 的 fileTree.expandedDirs 退役后为唯一真源（FileTreeView watch 回写） |
+| `ls.fileTree.filters` | sc.fileTree.showHidden / hideIgnored（树过滤开关，模板形态 sc.fileTree.<toggle>） | localStorage | ✓ readFilterPref（FileTreeView 内读取） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（无清除点） | 裸读点在案豁免（渐进迁移不强制，健壮性红线在案） |
+| `ls.term.activeTabMap` | sc.term.activeTabMap（终端激活 tab 按项目映射） | localStorage | ✓ TerminalView 项目切换 recall + useTerminalReconnect | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 已关闭会话残留无害（恢复方校验，在案注释） | — |
+| `ls.terminalSessions` | sc.terminalSessions.sortMode / groupMode / pinnedIds / runtimeFilter（终端会话显示偏好 4 键） | localStorage | ✓ store setup 一次读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | pinnedIds 消亡剪枝（防集合无界） | — |
+| `ls.terminal.closeNoConfirm` | sc.terminal.closeNoConfirm（关 tab 免确认，项目终端+远程控制台共用） | localStorage | ✓ useTerminalTabs / useRemoteConsoleTabs 读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 恢复确认时 removeItem | — |
+| `ls.terminal.clipboardPrefs` | sc.terminal.copyOnSelect / stripTrailingNewline / pasteNoMultilineWarn（终端剪贴板偏好 3 键） | localStorage | ✓ 同文件模块级初始化读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | copyOnSelect 开=清键（回归默认语义） | — |
+| `ls.terminal.mouseModeHint` | sc.terminal.mouseModeHintDismissed（鼠标模式一次性提示） | localStorage | ✓ 模块读（terminalMouseModeHint） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 「重置提示」可清 | — |
+| `ls.tmuxScrollTip` | sc.tmuxScrollTipShown（tmux 翻页一次性提示） | localStorage | ✓ TerminalView 读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（一次性提示无清除点） | — |
+| `ls.terminalFloat.geometry` | sc.terminalFloat.geometry（终端悬浮窗几何） | localStorage | ✓ useTerminalFloat 同文件读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（无清除点） | — |
+| `ls.agentTerminal.openState` | sc.agentTerminal.openState / expandedMode（agent 终端开态/形态） | localStorage | ✓ 模块加载 loadPendingOpenState→consumePendingOpenState 首宿主消费 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 测试复位清 | uiState 的 agentTerminal 命名空间是读改写链，旁路写会互相覆盖故走 localStorage（S1 车道定案） |
+| `ls.agentTerminal.floatGeometry` | sc.agentTerminal.pos / size（agent 悬浮窗几何） | localStorage | ✓ useAgentTerminalFloat 同文件读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（无清除点） | — |
+| `ls.agentTerminal.ball` | sc.agentTerminal.ballPos / ballStyle（悬浮球位置/样式） | localStorage | ✓ AgentTerminalMini 组件读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（无清除点） | — |
+| `ls.agentTerminal.lastRuntime` | sc.agentTerminal.lastRuntime（上次选择的 agent runtime） | localStorage | ✓ 对话框回填 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（无清除点） | 设备本地偏好（uiState 读改写链旁路写会互相覆盖，注释在案） |
+| `ls.agentTerminal.sidebarWidth` | sc.agentTerminal.sidebarWidth（agent 管理页侧栏宽） | localStorage | ✓ 宿主挂载 load（useSidebarWidth 泛化实现） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 双击复位 | 面板内嵌侧栏宽=localStorage 客户端偏好车道（与主侧栏 layout.sidePanelWidth 按实例形成两档） |
+| `ls.panelSidebarWidth` | sc.remoteConsole.sidebarWidth / sc.notes.sidebarWidth（远程/笔记面板内嵌侧栏宽） | localStorage | ✓ 宿主挂载 load（useSidebarWidth 泛化实现） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 双击复位 | 键约定 sc.<panel>.sidebarWidth（P-20261111-7 / P-20261112-9 接入在案） |
+| `ls.editor.splitWidth` | sc.editor.splitWidth（分屏主组占比，两方向共用比例） | localStorage | ✓ readSplitWidth | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 双击复位对半 | — |
+| `ls.settings.lastTab` | sc.settings.lastTab（设置上次分区） | localStorage | ✓ recallLastTab（分区表校验回落 general） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（无清除点） | — |
+| `ls.previewPorts` | sc.previewPorts（预览最近端口） | localStorage | ✓ PreviewPanel 读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 上限截断 | — |
+| `ls.palette` | sc.palette.commandUsage / recentCommands（legacy） / fileUsage（命令面板使用计数 3 键） | localStorage | ✓ paletteUsage 读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | legacy 键收编后 removeItem（迁移清理） | — |
+| `ls.snippet.paramValues` | sc.snippet.paramValues（片段参数历史） | localStorage | ✓ snippetParamHistory 读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 上限环形 | — |
+| `ls.keymapOverrides` | sc.keymapOverrides（快捷键覆盖） | localStorage | ✓ 启动读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 恢复默认清 | 导出键供 settingsTransfer |
+| `ls.newSession.draft` | sc.newSession.draft（新会话表单草稿） | localStorage | ✓ 读（恢复提示条） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 成功提交/丢弃清（useNewSessionPromptState） | — |
+| `ls.agentQueue.draft` | sc.agentQueue.draft.<sessionId>（排队指令草稿，动态前缀族，sessionStorage） | localStorage | ✓ sessionStorage 刷新存活；挂载/切行回填 | ✓ 保持（标签页存活期内） | ✗（sessionStorage 标签页隔离） | ✗（会话级存储） | ✗（会话级存储） | 关标签页即清/提交清（useDraftGuard——会话级生命周期与防丢语义对齐） | sessionStorage 通道（非 localStorage），sc.* 命名约定同族；车道注释在案 |
+| `ls.draftSavedBeacon` | sc.draft-saved（草稿落库信标，跨标签页 storage 事件） | localStorage | ✗（纯信标非状态真源——settingsSync 按键分发表忽略本键） | ✗（同刷新） | 跨标签 storage 事件分发（信标语义，savedAt 保新值触发） | ✗（设备本地） | ✗（设备本地） | 覆盖式（draftDb 每次写覆盖） | 单键 JSON 载荷防 path 冒号编码歧义（注释在案） |
+| `ls.unlockToken` | sc.unlockToken（解锁令牌） | localStorage | ✓ 启动读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 登出/上锁 removeItem（lock.ts） | — |
+| `ls.lockShortcut` | sc.lockShortcut（锁屏快捷键） | localStorage | ✓ 启动读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 恢复默认清 | — |
+| `ls.httpWarningDismissed` | sc.httpWarningDismissed（http 警示一次性关闭） | localStorage | ✓ useHttpWarning 读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（一次性关闭无清除点） | — |
+| `ls.localeSuggestDismissed` | sc.localeSuggestDismissed（语言建议一次性关闭） | localStorage | ✓ useLocaleSuggest 读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（一次性关闭无清除点） | — |
+| `ls.approvalGuideDismissed` | sc.approvalGuideDismissed（审批指南一次性关闭） | localStorage | ✓ useApprovalGuide 读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（一次性关闭无清除点） | — |
+| `ls.approvalRuleSuggestShown` | sc.approvalRuleSuggestShown（审批建议节流，单键 JSON map） | localStorage | ✓ 读回判定（approvalPattern） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（无清除点） | 单键而非 per-pattern：safeStorage 无键枚举面（注释在案） |
+| `ls.gitignoreSuggest.dismissed` | sc.gitignoreSuggest.dismissed.<projectId>（gitignore 建议按项目一次性关闭，动态前缀族） | localStorage | ✓ GitPanel 读 | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（一次性关闭无清除点） | — |
+| `ls.rfm` | sc.rfm.cwd.<hostId> / sc.rfm.mem.<hostId>（远程文件浏览器目录/路径记忆，动态前缀族 2 键） | localStorage | ✓ useRemoteFileBrowser 读（cwd 裸读在案豁免） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（设备本地偏好口径，注释在案） | — |
+| `ls.morningBrief` | sc.morningBrief.<yyyy-MM-dd>（晨报当日已阅，动态前缀族） | localStorage | ✓ 同日读 | ✓ 保持（当日） | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 按日轮换自然失效（零清理负担，注释在案） | — |
+| `ls.clipRelay.device` | sc.clip-relay.device（剪贴板中继设备 id） | localStorage | ✓ clipRelay 读 | ✓ 保持 | 同设备共享 | ✗（设备本地） | ✗（设备本地） | —（设备标识，非 UI 偏好） | — |
+| `ls.debug.terminalClipboard` | sc.debug.terminalClipboard（终端剪贴板调试开关） | localStorage | ✓ 模块加载读 | ✓ 保持 | 同设备共享 | ✗（设备本地） | ✗（设备本地） | 手动清（调试后门，注释在案） | — |
+
+### ③ 临时态（定案不持久化）
+
+| 登记号 | 状态项 | 车道 | 刷新 | 路由往返 | 多标签 | 换浏览器 | 换机器 | 清除语义 | 备注 |
+|---|---|---|---|---|---|---|---|---|---|
+| `mem.terminalMaximized` | terminalMaximized（终端临时最大化） | temporary | ✗（定案不持久化，LAYOUT_DEFAULTS 有出厂键但临时档刷新回常态） | ✗（面板隐藏/互斥/重置/Esc 退栈） | 各页独立（不落盘） | ✗ | ✗ | 面板隐藏/互斥/重置/Esc | 升格评审定案维持临时档（usePanelLayout 注释在案） |
+| `mem.editorGroupMaximized` | editorGroupMaximized（编辑器组临时全宽，P-20261004-64） | temporary | ✗（uiState 无键，刷新从常态开始） | ✗（兄弟组 v-show 保活，路由往返按互斥语义退出） | 各页独立（不落盘） | ✗ | ✗ | 再双击/Esc/关分屏清组最大化（EditorArea watch） | 临时聚焦态定案维持（usePanelLayout 注释在案） |
+| `mem.terminalPaneMaximized` | terminalPaneMaximized（终端 pane 临时全幅，P-20261004-64） | temporary | ✗（uiState 无键，刷新从常态开始） | ✗（同编辑器组临时态） | 各页独立（不落盘） | ✗ | ✗ | 再双击/Esc/恢复后 fit 自愈链重触发 | 仅 split 双 pane 可进入；xterm 实例与 WS 会话不断 |
+| `mem.dshMaximized` | dshMaximized（dsh 控制台临时最大化） | temporary | ✗（uiState 无键，刷新从常态开始） | ✗（关闭控制台即还原） | 各页独立（不落盘） | ✗ | ✗ | 关闭控制台即还原（usePanelLayout） | 与编辑器组/终端 pane 最大化同口径（P-20261004-64） |
+| `mem.showDashboard` | showDashboard（项目仪表盘视图显隐） | temporary | ✗（显隐不落盘——纯查看面定案 P-20261005-224，刷新回上次工作形态） | ✗（互斥族） | 各页独立（不落盘） | ✗ | ✗ | 互斥族/显式退出 | 落盘偏好只有 dashboard.landing（见 dashboard.landing 行） |
+| `mem.pendingIntents` | pendingSideFilesOpen / pendingBottomTab / pendingSideView（跨页一次性跳转意图） | temporary | ✗（不持久化） | ✓（跨路由存活——bootstrap 布局恢复时消费一次并保证侧栏可见） | 各页独立（模块级单例） | ✗ | ✗ | 消费即清（consume 语义） | — |
+| `mem.agentProjectDockedMem` | agentTerminal.projectDockedMem（项目级 docked 记忆，会话内） | temporary | ✗（不持久化） | ✗（项目切换即清） | 各页独立（会话性记忆） | ✗ | ✗ | 项目切换 | 会话性记忆定案维持 |
+
 ## Code Review 检查清单
 
 涉及落盘数据的 PR，reviewer 逐项过：
@@ -201,6 +297,9 @@ credential-helper 配置注入、tmux.conf / shellint 脚本、agent 技能安�
 - [ ] 读路径（List/Get/校验）无写盘副作用（filestore 损坏文档隔离除外——见上方
       「禁止」节例外注记；repo/handler 层读路径仍一律禁止）
 - [ ] 密钥/敏感字段走 `config.EncryptToken` 体系（见 CLAUDE.md「敏感数据加密存储」）
+- [ ] 涉前端 UI 状态保持项：已在 `web/src/persistence/uiStateLanes.json` 登记一行并
+      同步「UI 状态保持矩阵」对应行（过三轨选轨判据；`check:uistate-lanes` 门禁 +
+      uiStateLanes.test.ts 一致性单测双守）
 
 ---
 

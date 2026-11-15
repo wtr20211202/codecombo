@@ -13,10 +13,10 @@ vi.mock('vue-i18n', async (importOriginal) =>
 
 // 笔记库 API（P-20261108-3 单库化：唯一 /api/notes 族——项目族 notesMultiApi 已退役）
 const { listMock, getMock, createMock, saveMock, removeMock, restoreMock, purgeMock, originState } = vi.hoisted(() => ({
-  listMock: vi.fn<(trash?: boolean) => Promise<{ data?: Array<{ id: string; title: string; updatedAt: string; size: number; deletedAt?: string; deletedBy?: string }> }>>(),
-  getMock: vi.fn<(noteId: string) => Promise<{ data: { id: string; title: string; content: string; createdAt: string; updatedAt: string } }>>(),
-  createMock: vi.fn<(body: { title?: string; content?: string }) => Promise<{ data: { id: string; title: string; content: string; createdAt: string; updatedAt: string } }>>(),
-  saveMock: vi.fn<(noteId: string, body: { content: string; title?: string; baseUpdatedAt?: string }) => Promise<{ data: { id: string; title: string; content: string; updatedAt: string; size: number } }>>(),
+  listMock: vi.fn<(params?: { trash?: boolean; tag?: string }) => Promise<{ data?: Array<{ id: string; title: string; updatedAt: string; size: number; tags?: string[]; deletedAt?: string; deletedBy?: string }> }>>(),
+  getMock: vi.fn<(noteId: string) => Promise<{ data: { id: string; title: string; content: string; createdAt: string; updatedAt: string; tags?: string[] } }>>(),
+  createMock: vi.fn<(body: { title?: string; content?: string; tags?: string[] }) => Promise<{ data: { id: string; title: string; content: string; createdAt: string; updatedAt: string; tags?: string[] } }>>(),
+  saveMock: vi.fn<(noteId: string, body: { content: string; title?: string; tags?: string[]; baseUpdatedAt?: string }) => Promise<{ data: { id: string; title: string; content: string; updatedAt: string; size: number; tags?: string[] } }>>(),
   removeMock: vi.fn<(noteId: string) => Promise<{ message: string }>>(),
   restoreMock: vi.fn<(noteId: string) => Promise<{ message: string }>>(),
   purgeMock: vi.fn<(noteId: string) => Promise<{ message: string }>>(),
@@ -73,11 +73,15 @@ beforeEach(() => {
   setActivePinia(createPinia())
   originState.nonce = 'win-a' // 回声抑制对位锚：每用例重置本窗 nonce
   // 服务端清单序 = updatedAt 降序（store repo List 排序），mock 按服务端契约给序
-  listMock.mockResolvedValue({ data: [meta('n2', 'B', '2026-11-07T10:00:00Z'), meta('n1', 'A', '2026-11-07T09:00:00Z')] })
+  // （清单条目携 tags——S1 起元数据面回显标签，无标签省字段）
+  listMock.mockResolvedValue({ data: [
+    { ...meta('n2', 'B', '2026-11-07T10:00:00Z'), tags: ['交接'] },
+    meta('n1', 'A', '2026-11-07T09:00:00Z'),
+  ] })
   getMock.mockImplementation((noteId: string) =>
-    Promise.resolve({ data: full(noteId, noteId === 'n1' ? 'A' : 'B', `content of ${noteId}`) }))
-  saveMock.mockImplementation((noteId: string, body: { content: string }) =>
-    Promise.resolve({ data: { id: noteId, title: '', content: body.content, updatedAt: '2026-11-07T11:00:00Z', size: body.content.length } }))
+    Promise.resolve({ data: { ...full(noteId, noteId === 'n1' ? 'A' : 'B', `content of ${noteId}`), tags: noteId === 'n2' ? ['交接'] : [] } }))
+  saveMock.mockImplementation((noteId: string, body: { content: string; tags?: string[] }) =>
+    Promise.resolve({ data: { id: noteId, title: '', content: body.content, updatedAt: '2026-11-07T11:00:00Z', size: body.content.length, ...(body.tags?.length ? { tags: body.tags } : {}) } }))
   createMock.mockResolvedValue({ data: full('n-new', '', '') })
   removeMock.mockResolvedValue({ message: 'ok' })
   restoreMock.mockResolvedValue({ message: 'ok' })
@@ -90,7 +94,7 @@ describe('useNotesMulti', () => {
     expect(notes.notes.value.map(n => n.id)).toEqual(['n2', 'n1'])
     expect(notes.activeId.value).toBe('n2')
     expect(notes.activeContent.value).toBe('content of n2')
-    expect(listMock).toHaveBeenCalledWith()
+    expect(listMock).toHaveBeenCalledWith(undefined) // 无过滤 = 无参数全量清单
   })
 
   it('edit 走 800ms 防抖保存且恒带 baseUpdatedAt（覆盖保护三件套①）', async () => {
@@ -361,8 +365,12 @@ describe('useNotesMulti', () => {
     const notes = await setup()
     const firstRow = notes.notes.value[0]
     // 清单在途期间 loading 恒 false（loading 态会把 body 换成 NSpin——编辑器/侧栏全量重挂）
+    // 刷新响应 = 未变更条目（含 tags 同真值——S3 起清单比对含标签面）
     listMock.mockImplementationOnce(() =>
-      new Promise(res => setTimeout(() => res({ data: [meta('n2', 'B', '2026-11-07T10:00:00Z'), meta('n1', 'A', '2026-11-07T09:00:00Z')] }), 500)))
+      new Promise(res => setTimeout(() => res({ data: [
+        { ...meta('n2', 'B', '2026-11-07T10:00:00Z'), tags: ['交接'] },
+        meta('n1', 'A', '2026-11-07T09:00:00Z'),
+      ] }), 500)))
     const pending = notes.onExternalUpdate({ projectId: '_global' })
     expect(notes.loading.value).toBe(false)
     await vi.advanceTimersByTimeAsync(500)
@@ -447,5 +455,241 @@ describe('useNotesMulti', () => {
 
   it('notesSaveUrl 单库端点形态（beforeunload keepalive 直发）', () => {
     expect(notesSaveUrl('abc')).toBe('/api/notes/abc')
+  })
+
+  // ── 标签编辑链（P-20261112-7 S2）──
+
+  it('editTags 防抖链：与内容编辑同窗合并一次 PUT 携 content+tags（整体替换）', async () => {
+    const notes = await setup()
+    expect(notes.activeTags.value).toEqual(['交接']) // GET 单篇带入的编辑面标签
+    notes.edit('n2', 'draft v2')
+    notes.editTags('n2', ['交接', 'proj-b'])
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(saveMock).toHaveBeenCalledTimes(1) // 同窗合并
+    expect(saveMock).toHaveBeenCalledWith('n2', {
+      content: 'draft v2',
+      tags: ['交接', 'proj-b'],
+      baseUpdatedAt: NOW,
+    })
+    expect(notes.tagsDirty['n2']).toBe(false) // 保存成功已清挂起
+    expect(notes.activeTags.value).toEqual(['交接', 'proj-b']) // 响应真值回写
+  })
+
+  it('纯内容保存不带 tags（nil 保全他窗标签——手册约定「纯改正文不要带 tags」）', async () => {
+    const notes = await setup()
+    notes.edit('n2', 'content only')
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(saveMock).toHaveBeenCalledWith('n2', { content: 'content only', baseUpdatedAt: NOW })
+    expect(saveMock.mock.calls[0]?.[1]).not.toHaveProperty('tags')
+  })
+
+  it('editTags 归一化与无变化短路：trim/去重/空串丢弃；相同数组不产生 PUT', async () => {
+    const notes = await setup()
+    notes.editTags('n2', [' 新标签 ', '新标签', ''])
+    expect(notes.activeTags.value).toEqual(['新标签'])
+    expect(saveMock).not.toHaveBeenCalled()
+    notes.editTags('n2', ['新标签']) // 与编辑面现值相同：短路
+    expect(notes.saveStates['n2']).toBe('dirty') // 前一轮的 dirty 仍在
+    const calls = saveMock.mock.calls.length
+    notes.editTags('n2', ['新标签'])
+    expect(saveMock.mock.calls.length).toBe(calls)
+  })
+
+  it('editTags 超上限截断（前端第一道兜底，服务端 normalizeNoteTags 同语义）', async () => {
+    const notes = await setup()
+    notes.editTags('n2', ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9', ' t1 '])
+    expect(notes.activeTags.value).toEqual(['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8'])
+    expect(notes.allTags.value).toContain('交接')
+  })
+
+  it('保存期 editTags（在途竞态）：本请求未携 tags 的成功响应不清挂起编辑，下一轮防抖携 tags 落盘', async () => {
+    const notes = await setup()
+    let resolveSave!: (v: { data: { id: string; title: string; content: string; updatedAt: string; size: number; tags?: string[] } }) => void
+    saveMock.mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve }))
+    notes.edit('n2', 'in-flight content')
+    const inflight = notes.flushSave('n2') // 请求在途（不 await——响应由下文放行）
+    notes.editTags('n2', ['late-tag']) // 保存期间加标签
+    resolveSave({ data: { id: 'n2', title: '', content: 'in-flight content', updatedAt: '2026-11-07T12:00:00Z', size: 15 } })
+    await inflight
+    await flushPromises()
+    expect(notes.tagsDirty['n2']).toBe(true) // 挂起编辑不被无 tags 响应冲掉
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(saveMock).toHaveBeenLastCalledWith('n2', expect.objectContaining({ tags: ['late-tag'] }))
+  })
+
+  it('冲突挂起期间 editTags：挂起编辑保留，动作①用我的覆盖携 content+tags 一并写回（评审修订点）', async () => {
+    const notes = await setup()
+    saveMock.mockRejectedValueOnce({
+      response: { status: 409, data: { code: 'notes.conflict', currentContent: 'srv', currentUpdatedAt: NOW, currentTags: ['srv-tag'] } },
+    })
+    notes.edit('n2', 'mine')
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(notes.conflict.value).toEqual({
+      noteId: 'n2',
+      currentContent: 'srv',
+      currentUpdatedAt: NOW,
+      currentTags: ['srv-tag'],
+    })
+    notes.editTags('n2', ['mine-tag']) // 409 挂起期间的标签编辑（未落盘）
+    saveMock.mockResolvedValueOnce({ data: { id: 'n2', title: '', content: 'mine', updatedAt: '2026-11-07T12:00:00Z', size: 4, tags: ['mine-tag'] } })
+    await notes.resolveConflictOverwrite()
+    expect(saveMock).toHaveBeenLastCalledWith('n2', { content: 'mine', tags: ['mine-tag'] })
+    expect(notes.conflict.value).toBeNull()
+    expect(notes.tagsDirty['n2']).toBe(false)
+  })
+
+  it('冲突动作②载入服务端版本：本地标签编辑一并放弃，编辑面回落 409 快照 currentTags（评审修订点）', async () => {
+    const notes = await setup()
+    saveMock.mockRejectedValueOnce({
+      response: { status: 409, data: { code: 'notes.conflict', currentContent: 'srv', currentUpdatedAt: NOW, currentTags: ['srv-tag'] } },
+    })
+    notes.edit('n2', 'mine')
+    notes.editTags('n2', ['mine-tag', 'another'])
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    notes.resolveConflictLoadServer()
+    expect(notes.activeContent.value).toBe('srv')
+    expect(notes.activeTags.value).toEqual(['srv-tag'])
+    expect(notes.tagsDirty['n2']).toBe(false)
+    expect(notes.saveStates['n2']).toBe('idle')
+  })
+
+  it('冲突动作②载荷缺 currentTags（旧服务端形态）：回退清单 meta.tags 兜底', async () => {
+    const notes = await setup()
+    saveMock.mockRejectedValueOnce({
+      response: { status: 409, data: { code: 'notes.conflict', currentContent: 'srv', currentUpdatedAt: NOW } },
+    })
+    notes.edit('n2', 'mine')
+    notes.editTags('n2', ['mine-tag'])
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    notes.resolveConflictLoadServer()
+    expect(notes.activeTags.value).toEqual(['交接']) // 清单 meta.tags
+  })
+
+  it('冲突动作③另存为新篇：本地标签随篇带去新篇（与内容合并一次 PUT），原篇标签回落服务端', async () => {
+    const notes = await setup()
+    saveMock.mockRejectedValueOnce({
+      response: { status: 409, data: { code: 'notes.conflict', currentContent: 'srv', currentUpdatedAt: NOW, currentTags: ['srv-tag'] } },
+    })
+    notes.edit('n2', 'mine')
+    notes.editTags('n2', ['mine-tag'])
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    await notes.resolveConflictSaveAsNew()
+    await flushPromises()
+    expect(saveMock).toHaveBeenCalledWith('n-new', expect.objectContaining({ content: 'mine', tags: ['mine-tag'] }))
+    expect(notes.contents['n2']).toBe('srv')
+    expect(notes.tags['n2']).toEqual(['srv-tag']) // 原篇标签回落 409 快照
+    expect(notes.activeTags.value).toEqual(['mine-tag']) // 活跃篇已切到新篇（createNote 语义）
+    expect(notes.conflict.value).toBeNull()
+  })
+
+  it('renameNote 不带 tags（nil 保全——重命名 PUT 不清空他窗标签）', async () => {
+    const notes = await setup()
+    await notes.renameNote('n2', 'renamed')
+    expect(saveMock).toHaveBeenCalledWith('n2', {
+      content: 'content of n2',
+      title: 'renamed',
+      baseUpdatedAt: NOW,
+    })
+    expect(saveMock.mock.calls[0]?.[1]).not.toHaveProperty('tags')
+  })
+
+  it('裁决与挂起重试并发：409 挂起期间 editTags 排出的防抖重试 PUT，迟到 409 不重挂已完成的裁决（bumpSaveToken 乱序丢弃）', async () => {
+    const notes = await setup()
+    saveMock.mockRejectedValueOnce({
+      response: { status: 409, data: { code: 'notes.conflict', currentContent: 'srv', currentUpdatedAt: NOW } },
+    })
+    notes.edit('n2', 'mine')
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(notes.conflict.value).not.toBeNull()
+
+    // 挂起期间加标签 → 防抖重试 PUT 排出（响应延迟到裁决之后才 reject——真实迟到形态）
+    let rejectRetry!: (e: unknown) => void
+    saveMock.mockImplementationOnce(() => new Promise((_res, rej) => { rejectRetry = rej }))
+    notes.editTags('n2', ['mine-tag'])
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS) // 重试 PUT 发出（在途未响应）
+
+    // 裁决「用我的覆盖」：递增令牌 → 在途重试响应过期
+    saveMock.mockResolvedValueOnce({ data: { id: 'n2', title: '', content: 'mine', updatedAt: '2026-11-07T12:00:00Z', size: 4, tags: ['mine-tag'] } })
+    await notes.resolveConflictOverwrite()
+    expect(notes.conflict.value).toBeNull()
+
+    // 迟到的 409 响应抵达：乱序守卫丢弃，不重挂冲突条不打断已完成的裁决
+    rejectRetry({ response: { status: 409, data: { code: 'notes.conflict', currentContent: 'srv2', currentUpdatedAt: NOW } } })
+    await flushPromises()
+    expect(notes.conflict.value).toBeNull()
+    expect(notes.saveStates['n2']).toBe('idle')
+    expect(notes.activeTags.value).toEqual(['mine-tag'])
+    expect(notes.tagsDirty['n2']).toBe(false)
+  })
+
+  it('外部换装同步标签真值：外部仅改标签（内容同）零触碰内容但 tags 更新；异内容换装同批携带', async () => {
+    const notes = await setup()
+    getMock.mockResolvedValueOnce({ data: { ...full('n2', 'B', 'content of n2', '2026-11-07T12:00:00Z'), tags: ['new-tag'] } })
+    const swap = await notes.onExternalUpdate({ projectId: '_global', noteId: 'n2' })
+    expect(swap).toBeNull() // 同内容零触碰
+    expect(notes.activeContent.value).toBe('content of n2')
+    expect(notes.activeTags.value).toEqual(['new-tag'])
+    expect(notes.bases['n2']).toBe('2026-11-07T12:00:00Z') // 基准保鲜
+
+    getMock.mockResolvedValueOnce({ data: { ...full('n2', 'B', 'server v2', '2026-11-07T13:00:00Z'), tags: ['fresh-tag'] } })
+    const swap2 = await notes.onExternalUpdate({ projectId: '_global', noteId: 'n2' })
+    expect(swap2).not.toBeNull()
+    expect(notes.activeContent.value).toBe('server v2')
+    expect(notes.activeTags.value).toEqual(['fresh-tag'])
+  })
+
+  // ── 侧栏标签过滤（P-20261112-7 S3）──
+
+  it('setTagFilter 清单拉取携 ?tag=（服务端过滤真值），notes 即过滤子集；同值/trim 后同值幂等不重拉', async () => {
+    const notes = await setup()
+    // 服务端 ?tag= 过滤语义：只回匹配篇——mock 给过滤子集（前端不做二次过滤）
+    listMock.mockResolvedValueOnce({ data: [{ ...meta('n2', 'B', '2026-11-07T10:00:00Z'), tags: ['交接'] }] })
+    await notes.setTagFilter('交接')
+    expect(listMock).toHaveBeenLastCalledWith({ tag: '交接' })
+    expect(notes.tagFilter.value).toBe('交接')
+    expect(notes.notes.value.map(n => n.id)).toEqual(['n2']) // tab 条/侧栏同源收窄
+
+    const calls = listMock.mock.calls.length
+    await notes.setTagFilter('交接')
+    await notes.setTagFilter(' 交接 ')
+    expect(listMock.mock.calls.length).toBe(calls) // 幂等：不产生无谓重拉
+  })
+
+  it('clearTagFilter 恢复全量清单（拉取不带 tag）；loadTrash 恒 { trash: true }——过滤与回收站段互不干扰口径', async () => {
+    const notes = await setup()
+    await notes.setTagFilter('交接')
+    expect(listMock).toHaveBeenLastCalledWith({ tag: '交接' })
+    listMock.mockResolvedValueOnce({ data: [meta('n2', 'B', '2026-11-07T10:00:00Z'), meta('n1', 'A', '2026-11-07T09:00:00Z')] })
+    await notes.clearTagFilter()
+    expect(listMock).toHaveBeenLastCalledWith(undefined)
+    expect(notes.tagFilter.value).toBe('')
+    expect(notes.notes.value.map(n => n.id)).toEqual(['n2', 'n1'])
+    await notes.clearTagFilter() // 无过滤时幂等零动作
+    listMock.mockResolvedValueOnce({ data: [] })
+    await notes.loadTrash()
+    expect(listMock).toHaveBeenLastCalledWith({ trash: true }) // 回收站段不携 tag
+  })
+
+  it('保存携 tags 时清单 meta.tags 同步（S3 侧栏徽记数据源新鲜度）；tags 清空响应省字段 → 清单摘除', async () => {
+    const notes = await setup()
+    notes.editTags('n1', ['fresh'])
+    expect(notes.notes.value.find(n => n.id === 'n1')?.tags).toBeUndefined() // 清单未动（徽记等落盘真值）
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(notes.notes.value.find(n => n.id === 'n1')?.tags).toEqual(['fresh'])
+
+    notes.editTags('n2', []) // 清空：PUT tags:[] → 服务端归 nil → 响应省 tags 字段
+    await vi.advanceTimersByTimeAsync(NOTES_SAVE_DEBOUNCE_MS)
+    await flushPromises()
+    expect(notes.notes.value.find(n => n.id === 'n2')?.tags).toBeUndefined()
   })
 })

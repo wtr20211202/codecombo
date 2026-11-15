@@ -36,7 +36,7 @@ describe('uiStateStore', () => {
 
   it('getInstanceState 返回当前实例状态', async () => {
     vi.mocked(uiStateApi.get).mockResolvedValue({
-      data: { local: { projectId: 'p1', editor: { openFiles: ['a.ts'], activeIndex: 0, scrollPositions: {} } } },
+      data: { local: { projectId: 'p1', editor: { openFiles: ['a.ts'], activeIndex: 0 } } },
     })
     const store = useUIStateStore()
     const state = await store.getInstanceState()
@@ -54,7 +54,7 @@ describe('uiStateStore', () => {
       await store.loadState()
       await store.saveCurrentState({
         projectId: 'p1',
-        editor: { openFiles: ['a.ts'], activeIndex: 0, scrollPositions: {} },
+        editor: { openFiles: ['a.ts'], activeIndex: 0 },
       })
       // 防抖定时器不会立即触发 patch
       expect(uiStateApi.get).toHaveBeenCalledTimes(1) // 只来自 loadState
@@ -77,7 +77,7 @@ describe('uiStateStore', () => {
           projectId: 'p1',
           layout: { sidePanelWidth: 460, bottomPanelHeight: 520, showSidePanel: false, showBottomPanel: true, sideView: 'changes', bottomTab: 'git' },
           fileTree: { expandedDirs: ['a', 'a/b'], selectedFile: 'x.ts' },
-          editor: { openFiles: ['keep.ts'], activeIndex: 0, scrollPositions: {} },
+          editor: { openFiles: ['keep.ts'], activeIndex: 0 },
           agentTerminal: { groups: [{ id: 'g1', name: 'n', sessionIds: ['s1'] }] },
         },
         remote1: { projectId: 'p2' },

@@ -1,5 +1,5 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
-import { DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, projectCardByName, rightClickTreeBackground } from '../../tests/helpers'
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, projectCardByName, rightClickTreeBackground, closeShareManagerAndClearState } from '../../tests/helpers'
 
 /**
  * 分享有效期 E2E（P-20261003-29 opt-in TTL + P-20261020-5 创建即选/默认档/管理器改期）：
@@ -73,6 +73,16 @@ async function listHasToken(request: APIRequestContext, headers: Record<string, 
 test.beforeEach(async ({ request }) => {
   await cleanupShares(request)
   await setShareDefaultTtl(request, 'permanent')
+})
+
+// 分享管理开态残留清场（P-20261112-6-S3 同款纪律，P-20261114-3-S2 复核补齐）：
+// 本 spec 两个 UI 用例以「结果卡 → 管理全部分享」开管理视图在屏结束，开态即时
+// 写落 uiState 后会在后续用例/后续 spec 的新页面恢复出管理视图——恢复态下
+// 结果卡的「管理全部分享」走 toggleShareManager 翻转语义把已开的管理器**关掉**
+//（主区回落仪表盘，「（项目根）」行定位超时）。与 share 域其余 spec 统一：
+// 先卸载 SPA 防 unload 路径回写，再 API 只清 shareManager 命名空间
+test.afterEach(async ({ page, request }) => {
+  await closeShareManagerAndClearState(page, request, BASE)
 })
 
 test('TTL API：1 天期 → 幂等保留 → 恢复永久 → 模拟到期访客 410 文案 → 记录被清', async ({ request }) => {

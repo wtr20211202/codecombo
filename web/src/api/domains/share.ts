@@ -91,6 +91,11 @@ export interface ShareInfo {
   /** 可写分享「访客输入中」（P-20261106-8，服务端 shareSvc 投影）：visitors>0
    *  即有访客上行连接在场（15s 轮询兜底；sc-ops:share.wtyping 是即时对账路） */
   wtyping?: ShareWritableTyping
+  /** 快照陈旧认定时点（P-20261114-3-S2，服务端 staleHub 投影，frozen file 专有）：
+   *  源根相对创建基准发生了变化——访客看到的仍是创建时版本。缺省 = 未认定
+   *  陈旧（live/无基准/判定不出一律缺省；提示性非阻断）。处置主路 = 「刷新
+   *  快照」（保 token 换内容，P-20261005-177），重发换新链为辅 */
+  staleAt?: string
 }
 
 /** TermShareOptions 终端输出分享创建选项（P-20261106-9：直播/输出快照共用）。

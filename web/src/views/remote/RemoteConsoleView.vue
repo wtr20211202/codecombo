@@ -8,7 +8,7 @@ import { useLockStore } from '../../stores/lock'
 import { useRemoteHostStore } from '../../stores/remoteHost'
 import { useRemoteOpsStore } from '../../stores/remoteOps'
 import { useUIStateStore } from '../../stores/uiState'
-import { usePanelLayout } from '../../composables/usePanelLayout'
+import { usePanelLayout, isUiSceneSwapInFlight, currentUiScene } from '../../composables/usePanelLayout'
 import { useTerminalContextMenu } from '../../composables/useTerminalContextMenu'
 import { useSnippetShare } from '../../composables/useSnippetShare'
 import { useClipRelay } from '../../composables/useClipRelay'
@@ -158,16 +158,30 @@ onBeforeUnmount(() => {
 let restoreDone = false
 function persistState() {
   if (!restoreDone) return
+  // 场景 swap 恢复写入不落盘（P-20261114-4-S1 suppress 门禁）：showRemoteConsole
+  // 是 usePanelLayout 共享 ref，场景切换（如项目开远程→回首页）恢复写入会经本
+  // watch 把进入场景的恢复值回声进持久化槽——门禁在位期间静默（usePanelLayout
+  // 三条 persist watch 同款门禁；flush:'sync' 才能被门禁同步看见，异步回调晚于
+  // 门禁解除）。tabs/groups/侧栏折叠在本视图内自持，swap 不写它们，照常即时写
+  if (isUiSceneSwapInFlight()) return
+  // open 子键按场景落盘（P-20261114-4-S2 remote 槽随件评估）：remoteConsole.open
+  // 唯一读端是项目页 bootstrap 的 open+tabs>0 恢复守卫（首页 boot 不恢复远程
+  // 视图），槽天然 project 槽——首页 overlay 的内嵌实例（本组件 standalone 形态）
+  // 开合回声会把项目场景未动的开态腐蚀进槽（跨场景越界），home 场景不落 open
+  // 子键（缺子键由注册表 backfillNestedSubfields 从基底回填，project 槽零影响）。
+  // tabs/groups/侧栏折叠场景无关（会话清单全局共用），照常落盘
+  const scene = currentUiScene()
   void uiStateStore.saveRemoteConsoleState(
     tabs.value.map(tb => ({ hostId: tb.hostId, sessionId: tb.sessionId, title: tb.title, tmuxName: tb.tmuxName })),
     groups.value.map(g => ({ id: g.id, name: g.name, hostIds: [...g.hostIds] })),
     showRemoteConsole.value,
     sidebarCollapsed.value,
+    scene !== 'home',
   )
 }
 watch(tabs, persistState, { deep: true })
 watch(groups, persistState, { deep: true })
-watch(showRemoteConsole, persistState)
+watch(showRemoteConsole, persistState, { flush: 'sync' })
 watch(sidebarCollapsed, persistState)
 
 // ============== tab 拖拽重排序 ==============

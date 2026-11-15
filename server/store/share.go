@@ -320,6 +320,20 @@ type Share struct {
 	// 不变量对本类快照显式失效，短 TTL 是替代收敛防线。旧文档无此字段 → 零值
 	// = 过滤开，零迁移
 	Unfiltered bool `json:"unfiltered,omitempty"`
+	// SourceMtimes 源根基准 mtime 快照（P-20261114-3-S2 快照陈旧徽标，frozen
+	// file 形态专有）：创建/原地刷新时对分享根（单路径 = Path，含项目根空串；
+	// 批量 = Paths 逐项）做有界 mtime 基准采样（share.CaptureSourceMtimes——
+	// 子树 max mtime 聚合 + 条目上限护栏），管理面列表惰性对比源根当前聚合
+	// vs 基准，源变即投影 staleAt（「源已更新——快照为创建时版本」徽标）。
+	// 键 = 分享根项目相对路径（CanonicalSharePaths 规范形），值 = 该子树全体
+	// 条目 mtime 的最大值（UnixNano；任何新增/改写/删除都会把某条目或其父
+	// 目录 mtime 顶到更新值，max 不等即判定变更）。nil = 未采样（超限大树/
+	// 采样失败/存量记录零迁移）——对比跳过、不置位不误报；live 形态创建面
+	// 清零（活视图随源漂移，无「陈旧」语义）。幂等重建保留既有基准（副本
+	// 未换内容，基准不得被重复分享悄悄复位——与 PassphraseHash「请求带新值
+	// 覆写、不带保持既有」同款合并语义：原地刷新显式携带新采样即复位）。
+	// 旧文档无此字段 → 零值 nil = 无基准不追踪，零迁移
+	SourceMtimes map[string]int64 `json:"sourceMtimes,omitempty"`
 }
 
 // RetiredToken 一条退役短链的台账条目（P-20261008-2）：Rotate 换链时把被
@@ -1077,6 +1091,12 @@ func (r *shareRepo) createFile(s Share) (*Share, error) {
 			// 退役台账同属记录（P-20261008-2）：幂等重建不清零——外泄观测
 			// 面不得因分享者再点一次分享而丢失
 			s.RetiredTokens = old.RetiredTokens
+			// 源根基准同属记录（P-20261114-3-S2）：幂等重建不覆写——副本未换
+			// 内容，基准被重复分享悄悄复位会让陈旧徽标假消失（「假新鲜」）；
+			// 调用方显式携带新采样（原地刷新）才覆写
+			if len(s.SourceMtimes) == 0 {
+				s.SourceMtimes = old.SourceMtimes
+			}
 			if s.PassphraseHash == "" {
 				s.PassphraseHash = old.PassphraseHash
 			}
@@ -1106,6 +1126,10 @@ func (r *shareRepo) createFile(s Share) (*Share, error) {
 		// 冻结快照是「定格留证」语义，与「看一眼即焚」相斥（P-20261006-27：
 		// 创建面已拒绝组合，store 兜底清——frozen 记录永不携带一次性标志）
 		s.ViewOnce, s.ViewedAt = false, time.Time{}
+	} else {
+		// 源根基准是 frozen 专有（P-20261114-3-S2）：live 活视图内容实时读源、
+		// 无「快照陈旧」语义，兜底清防未来调用方误置让记录挂着无处消费的字段
+		s.SourceMtimes = nil
 	}
 	s.Path = strings.Trim(strings.ReplaceAll(s.Path, "\\", "/"), "/")
 	for _, seg := range strings.Split(s.Path, "/") {
@@ -1131,6 +1155,11 @@ func (r *shareRepo) createFile(s Share) (*Share, error) {
 		// 退役台账同属记录（P-20261008-2）：幂等重建不清零——「退役访问 N 次」
 		// 徽标与外泄告警的观测面不得因分享者再点一次分享而丢失
 		s.RetiredTokens = old.RetiredTokens
+		// 源根基准同属记录（P-20261114-3-S2）：幂等重建不覆写（副本未换内容，
+		// 基准复位 = 陈旧徽标假消失）；调用方显式携带新采样（原地刷新）才覆写
+		if len(s.SourceMtimes) == 0 {
+			s.SourceMtimes = old.SourceMtimes
+		}
 		// 口令门同属记录：幂等重建不带 passphrase 时保持既有口令（重复分享
 		// 不得暗中拆掉已设的门）；请求显式带了新哈希 = 分享者主动改口令，
 		// 覆写生效（访客门会话 cookie 绑定哈希，改口令即全体重验）

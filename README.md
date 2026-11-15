@@ -48,13 +48,28 @@ command you can paste to your AI assistant:
 
 ```bash
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh
+p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && sh "$p"; rm -f "$p"
 ```
 
 ```powershell
 # Windows PowerShell
-iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))
+$p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue
 ```
+
+The script form downloads to a `mktemp` temp file first and verifies its own
+integrity before installing (a trailing sentinel line detects truncated or
+proxy-rewritten downloads; the temp name also avoids fixed-name collision and
+symlink risks). `--retry 3` retries failed transfers on curl 7.12+ (macOS Big
+Sur 7.64 / Ubuntu 20.04 7.68 / Debian 11 7.74 / RHEL 8 7.61 all qualify); with
+curl ≥ 7.71 you can add `--retry-all-errors` yourself to also retry
+mid-transfer interruptions — it is not in the default command because older
+curl builds fail hard on unknown options. The Windows one-liner is the same
+shape: it saves the script to a GUID-named temp file and runs it with
+`powershell -NoProfile -ExecutionPolicy Bypass -File` (`Bypass` because script
+files are blocked by the default execution policy; the explicit TLS 1.2 pin
+keeps older .NET able to reach GitHub), then removes the file — the installer
+refuses to run when the trailing sentinel is missing (truncated download) or
+when it is executed from a string (`iex`) instead of a file.
 
 Then open **http://localhost:9999** and set your lock password on first start.
 Version selection is automatic: the latest stable release when one exists;
@@ -116,25 +131,26 @@ and you get the defaults below — the same behavior as before:
 | `CODECOMBO_PREFIX` | `~/.local/bin` (Windows: `%LOCALAPPDATA%\Programs\codecombo`) | Directory the binary is installed to |
 | `CODECOMBO_DATA_DIR` | `~/.codecombo` | Data directory (absolute path). Only handed to the service — `CC_DATA_DIR` in the systemd unit / launchd plist, `--data-dir` in the Windows service command line and in the printed manual start command; the installer still never creates or writes it |
 
-Where they go: on the `sh` side of the pipe (placed before `curl` they only
-reach curl, and the script falls back to the defaults); in PowerShell as
-`$env:` assignments before `iex` — they stay set for the rest of that
-PowerShell session.
+Where they go: prefixed to the final `sh "$p"` segment of the one-liner
+(placed before `curl` they only reach curl, and the script falls back to the
+defaults); in PowerShell as `$env:` assignments before the one-liner — they stay set
+for the rest of that PowerShell session and are inherited by the child process
+the one-liner spawns.
 
 ```bash
 # Second instance next to an existing one: own port, data dir and install dir
-curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test CODECOMBO_PREFIX=$HOME/.local/codecombo-test sh
+p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test CODECOMBO_PREFIX=$HOME/.local/codecombo-test sh "$p"; rm -f "$p"
 
 # LAN access (all interfaces) — trusted networks only, the lock password is the only gate
-curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=0.0.0.0 sh
+p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_HOST=0.0.0.0 sh "$p"; rm -f "$p"
 
 # Custom install directory
-curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PREFIX=$HOME/bin sh
+p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_PREFIX=$HOME/bin sh "$p"; rm -f "$p"
 ```
 
 ```powershell
 # Windows: second instance next to an existing one
-$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; $env:CODECOMBO_PREFIX="$env:LOCALAPPDATA\Programs\codecombo-test"; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))
+$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; $env:CODECOMBO_PREFIX="$env:LOCALAPPDATA\Programs\codecombo-test"; $p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue
 ```
 
 Before adding a second instance:
@@ -170,11 +186,14 @@ native binary for your platform (Windows / Linux / macOS, amd64 & arm64) via
 optional dependencies. No postinstall scripts. Prebuilt binaries are also on
 the [Releases](../../releases) page.
 
-Feeling adventurous? Pre-release versions (rc / beta) publish to the `next`
-channel: `npm i -g codecombo@next` — or pin any version explicitly, e.g.
-`npm i -g codecombo@0.2.0-rc1`. Stable `npm i -g codecombo` never moves.
-Updates for npm installs are owned by npm: the in-app updater stays off for
-this install shape — just re-run the install command to move to the latest.
+Until 1.0, `npm i -g codecombo` is always the newest build — every release
+(including rc / beta previews) moves `latest` too. Explicit pins work, e.g.
+`npm i -g codecombo@0.2.0-rc1`, and `@next` always tracks the newest
+pre-release. From 1.0 on, the stable and preview channels split: `latest`
+moves only with stable releases, and pre-release versions (rc / beta)
+publish to the `next` channel. Updates for npm installs are owned by npm: the
+in-app updater stays off for this install shape — just re-run the install
+command to move to the latest.
 
 ### Upgrading
 
@@ -211,17 +230,18 @@ keys — the lock password included — live there and survive the re-run
 as-is). Read your original `--host`/`--port` from `ExecStart` (installed
 with a custom data dir? also pass its `CC_DATA_DIR` from the unit's
 `Environment=` line back as `CODECOMBO_DATA_DIR` — re-run with the same
-value); the env vars must sit on the `sh` side of the pipe (placed before
-`curl` they only apply to curl, and the port/bind fall back to the
-9999/127.0.0.1 defaults):
+value); the env vars must prefix the final `sh "$p"` segment of the one-liner
+(placed before `curl` they only apply to curl, and the port/bind fall back
+to the 9999/127.0.0.1 defaults):
 
 ```bash
-sudo -v && curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=<original> CODECOMBO_PORT=<original> sh
+sudo -v && p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_HOST=<original> CODECOMBO_PORT=<original> sh "$p"; rm -f "$p"
 ```
 
-`sudo -v` first — under `curl | sh` the script cannot prompt for a password,
-so it proceeds only with cached credentials (without them it still swaps the
-binary but skips the service unit). The script swaps the binary via rename
+`sudo -v` first — the script probes elevation with `sudo -n`
+(non-interactive) and auto-registers the service only when credentials are
+cached (passwordless sudo also passes); without them it still swaps the
+binary but skips the service unit. The script swaps the binary via rename
 (a running service is fine) but keeps serving the old version until restart:
 when it reports a running instance, close with
 `sudo systemctl restart codecombo`. On macOS re-running takes effect
@@ -336,6 +356,47 @@ codecombo start --host 0.0.0.0        # or: -H 0.0.0.0 (flag beats config.json s
 Then open `http://<machine-ip>:9999` from the other device. The lock password
 (first-start setup) is the gate — bind to `0.0.0.0` only on networks you trust.
 
+## First steps
+
+The sections above install the app; this one gets you working. A ten-minute
+loop from a fresh instance to real work — every step below is an existing
+capability, covered in depth in [What's inside](#whats-inside) and
+[Highlights](#highlights).
+
+**1. Open the workbench, set the lock.** Open **http://localhost:9999** and
+set your lock password on first start — it is the gate for every visit, with
+idle auto-lock on top.
+
+**2. Add a project — or hand even that to an agent.** Add a local Git repo
+(or clone one) from the home screen. Or skip the step entirely — the
+shortcut this workbench is built for: open an **agent session** first (it
+needs no project — any directory will do, your home directory by default)
+and ask it in the chat to add your projects. Agents operate the workbench
+itself over the ops channel: adding a project (`POST /api/projects`) is in
+their rendered handbook (`GET /api/ops-manual`), and their session ships the
+`CC_LOCK_TOKEN` credential out of the box. Two ground rules apply: a project
+path must be a Git repository (the agent can `git init` or clone one first),
+and high-risk actions still come back to you as approval cards.
+
+**3. Give the agent its first task.** Type it into the session: run the
+tests, fix this bug, build that feature. Sessions auto-name themselves after
+their first task, and every session is a real PTY — refresh the page and
+replay the full scrollback, bookmark lines, search all output.
+
+**4. Judge the risky bits.** Agents don't get a blank check: when a high-risk
+command or a mass file replacement comes up, it returns as an approval card
+with a live terminal recording — watch what the agent did, then approve,
+deny, or edit per item.
+
+**5. Two things to try while it works.** Right-click any file → **Share**:
+a one-click link (TTL, password, view-once) that visitors open without an
+account. And open **Notes** — the notepad you share with your agents: ask
+the agent to deposit a handoff note there, and the next session picks up
+where this one left off.
+
+From here the [table below](#whats-inside) maps the rest of the toolbox;
+[Highlights](#highlights) goes one level deeper per tool.
+
 ## What's inside
 
 | Tool | What it does |
@@ -343,9 +404,13 @@ Then open `http://<machine-ip>:9999` from the other device. The lock password
 | **Git workbench** | Visual Git: hunk-level staging, three-way diffs, drag-and-drop interactive rebase, merge preview, conflict resolution, worktrees, submodules, LFS, GPG-signed commits, commit graph with cherry-pick / squash / extract |
 | **Web terminal** | Real PTYs (ConPTY / pty), optional tmux persistence with output replay across restarts, split panes, floating windows, image paste upload, bookmarks, command blocks |
 | **Remote machines** | SSH host management with encrypted credentials, remote terminals (incl. remote tmux), one-click remote deployment pipelines (bootstrap → runtime → systemd), live deploy logs, port forwarding |
-| **AI agent sessions** | claude / codex / dsh sessions per project — side-by-side runs, continuation chains, scheduled jobs, reusable runbooks, fleet execution; every session a real PTY with replayable scrollback |
+| **AI agent sessions** | claude / codex / dsh sessions per project — side-by-side runs, continuation chains, scheduled jobs, reusable runbooks, fleet execution; sessions auto-named after their first task, organized into custom groups, restored as they were after power loss or reboot; every session a real PTY with replayable scrollback |
 | **Agent ops channel** | Agents operate the workbench itself over a structured API: downloads, clipboard, open-at-line, preview links, ask & approval cards, cross-device notifications |
 | **Approval center** | High-risk commands and mass replacements return as approval cards with live terminal recording — approve / deny / edit per item; secrets redacted on the way out |
+| **Notes** | A human & agent shared notepad — one project-independent notes library; agents read and write the same library over the ops API, depositing handoff notes so the next session picks up where the last one left off |
+| **TODO list** | Code-comment TODO / FIXME / XXX / HACK markers aggregated into one board — the "IOU list" humans leave for the next round of agent work |
+| **Change stream** | Cross-project live timeline of file changes — the in-workbench entry to "what just changed anywhere", beyond the on-call dashboard card |
+| **Environment profile** | A read-only "environment résumé" per project: dev ports observed in terminals or reported by agents, visible output-sentinel rules, deploy target hosts — a newcomer (human or agent) stops guessing ports from terminal history |
 | **On-call dashboard** | One screen for instance health (memory / goroutines / git pressure), 52-week activity heatmap, live change stream, agent collaboration flow, stalled-session triage |
 | **Multi-instance sync** | Manage local & remote instances from one screen: switching with health overview, terminal/panel take-over, instance-to-instance sync, encrypted machine migration (`.scpkg`) |
 | **Sharing links** | One-click links for files / folders / snippets / live terminals — TTL, password, view-once, frozen snapshot; visitors need no account |
@@ -358,39 +423,39 @@ Details and screenshots per tool in [Highlights](#highlights).
 
 ## Highlights
 
+Each module below keeps a short summary + screenshot; the full walkthroughs
+live in the official docs — [Getting started](https://wtr20211202.github.io/codecombo/guide/getting-started.html) ·
+[FAQ](https://wtr20211202.github.io/codecombo/guide/faq.html) (in-repo sources: [site/guide/](site/guide/)).
+
 ### Agent ops channel
 
 The part no other terminal has: agents do not just run *inside* Codecombo —
-they can operate the workbench itself over a structured API. An agent can
-trigger a browser download for a report it just produced, copy a snippet to
-your clipboard, open a file at an exact line, focus a panel, publish a dev-server
-preview link, or surface structured questions (ask cards) and high-risk action
-requests (approval cards) back to you. Capabilities are registered in a single
-registry with a rendered handbook (`GET /api/ops-manual`) agents can read, and
-the same channel powers cross-device notifications.
+they can operate the workbench itself over a structured API, and structured
+questions (ask cards) or high-risk action requests (approval cards) come back
+to you. Capabilities are registered in a single registry with a rendered
+handbook (`GET /api/ops-manual`) agents can read; downloads, clipboard,
+open-at-line, preview links and cross-device notifications ride the same
+channel.
+
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/getting-started.html#agent-setup) · [in-repo source](site/guide/getting-started.html#agent-setup)
 
 ### AI agent sessions
 
 Run multiple AI agent sessions per project — side-by-side comparison of two
-agents on the same task, session continuation chains (hand work from one agent
-to the next), scheduled agent jobs, reusable runbooks, and fleet execution of a
-runbook across many sessions. Every session is a real PTY: attach, replay the
-full scrollback after a refresh, bookmark lines, and search across all output.
+agents on the same task, session continuation chains, scheduled agent jobs,
+reusable runbooks, and fleet execution. Every session is a real PTY: refresh
+the page and replay the full scrollback.
 
 ![Agent session running a real PTY](docs/img/agent-session.png)
 
-*Typical scenario: the server lost power or was rebooted mid-task. The terminal
-processes are gone, but the work is not — open Codecombo and tell any agent over
-the ops channel to "restore all my previous sessions": each project's sessions
-come back the way they were, with full output history replayable.*
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/getting-started.html#agent-setup) · [in-repo source](site/guide/getting-started.html#agent-setup)
 
 ### On-call dashboard
 
 A single screen for "what is my box doing right now": instance health (memory /
 goroutines / WebSocket clients / git process pressure), a 52-week activity
-heatmap, a cross-project live change stream, agent collaboration flow (who
-messaged whom, which handoff chain is running), stalled-session triage, and
-approval cards waiting for judgement.
+heatmap, a cross-project live change stream, agent collaboration flow,
+stalled-session triage, and approval cards waiting for judgement.
 
 ![On-call dashboard](docs/img/oncall-dashboard.png)
 
@@ -402,6 +467,8 @@ did, then approve, deny, or edit per item. Sensitive values (tokens, passwords,
 cloud keys) are redacted on the way out.
 
 ![Approval card for a high-risk git reset](docs/img/approval-card.png)
+
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/getting-started.html#agent-setup) · [in-repo source](site/guide/getting-started.html#agent-setup)
 
 ### Multi-instance sync
 
@@ -416,14 +483,12 @@ credentials, settings and project contexts).
 ### Sharing links
 
 Share a file, a folder, a text snippet, or a live terminal with visitors via
-one-click links — TTL, password, view-once (burn-after-reading) and
-frozen-snapshot are all one toggle away; visitors need no account.
+one-click links — TTL, password, view-once and frozen-snapshot are all one
+toggle away; visitors need no account.
 
 ![Share dialog](docs/img/share-dialog.png)
 
-*Typical scenario: a colleague needs the report you just generated. Right-click
-the file → Share → send the link. Done — no chat-tool file transfer, no shared
-drive, and you can revoke the link at any moment.*
+Details → [official docs](https://wtr20211202.github.io/codecombo/guide/getting-started.html#share-notes) · [in-repo source](site/guide/getting-started.html#share-notes)
 
 ### …and a complete Git workbench
 
@@ -443,9 +508,8 @@ and a commit graph you can cherry-pick / squash / extract from.
   optional tmux persistence with output replay across restarts, split panes,
   floating windows, image paste upload, bookmarks, command blocks.
 - **Remote machines** — SSH host management with encrypted credentials,
-  remote terminals (with remote tmux), one-click remote deployment pipelines
-  (user bootstrap → Node.js/agent runtime → systemd service), live deploy
-  logs, port forwarding.
+  remote terminals (with remote tmux), one-click remote deployment pipelines,
+  live deploy logs, port forwarding.
 - **Security foundation** — global lock (first-start password setup, idle
   auto-lock), AES-256 encryption for all stored secrets via a local master
   key, per-IP rate limiting, audit log with CSV export.
@@ -454,7 +518,9 @@ and a commit graph you can cherry-pick / squash / extract from.
   instances. Zero-config: the official repo is the built-in default source.
   Automatic checks run every 24h and notify on new versions — toggle in the
   version panel to opt out. Which upgrade path applies depends on how you
-  installed — see [Upgrading](#upgrading).
+  installed — see [Upgrading](#upgrading) and the upgrade-paths table in the
+  docs FAQ: [official docs](https://wtr20211202.github.io/codecombo/guide/faq.html#upgrading) ·
+  [in-repo source](site/guide/faq.html#upgrading).
 - **i18n & themes** — English / 简体中文 UI; four built-in themes
   (Dark / Light / One Dark / Dracula).
 
@@ -484,8 +550,16 @@ codecombo/
 
 ## Docs
 
-Architecture and design documents live in [`docs/`](docs) — currently in
-Chinese, English translation is on the roadmap:
+Two entry points, by audience:
+
+**User documentation — official site** (English & 简体中文), the same pages the
+Highlights above link into:
+
+- [Getting started](https://wtr20211202.github.io/codecombo/guide/getting-started.html) — install → set the lock → add a project (or let an agent do it) → restart recovery → share & notes · in-repo source: [site/guide/getting-started.html](site/guide/getting-started.html)
+- [FAQ](https://wtr20211202.github.io/codecombo/guide/faq.html) — ports & access, data & backups, which upgrade path is yours, lock & remote access, common errors (203/EXEC …) · in-repo source: [site/guide/faq.html](site/guide/faq.html)
+
+**Architecture & design documents — for contributors**, live in
+[`docs/`](docs) — currently in Chinese, English translation is on the roadmap:
 
 - [docs/AGENT_SESSIONS.md](docs/AGENT_SESSIONS.md) — agent sessions, approvals, orchestration primitives, and how the ops manual is injected per runtime (claude / codex auto-inject, dsh manual)
 - [docs/EXTENSION_POINTS.md](docs/EXTENSION_POINTS.md) — index of all extension points (kernel modules, deployers, platform adapters, frontend panels, ops events)

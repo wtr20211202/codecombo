@@ -114,6 +114,72 @@ describe('renderChangelog 锚点契约（heading id）', () => {
   })
 })
 
+describe('renderChangelog 显式 id 原生 HTML 标题（P-20261112-5 Release 页模板形态）', () => {
+  // release.yml「Extract release notes」装配的 body 自此版本起小节标题是
+  // 带 id 的原生 HTML（<h2 id="en">，非 markdown 双井——纯中文标题在
+  // GitHub Release 页 slug 为空无锚 id，切换行不跳，见 release.yml 注释块）。
+  // 本组钉住面板消费链对该形态的保留性：marked 对原生 HTML 块原样透传、
+  // DOMPurify 默认允许面含 id（en/zh 不与 document 属性撞名，SANITIZE_DOM
+  // 不剥）——净化配置无需为 id 放宽；面板按 id 原值解析，无 GitHub 的
+  // user-content- 前缀问题。
+  const htmlTemplate = [
+    '[English](#en) | [中文](#zh)',
+    '',
+    '<h2 id="en">English</h2>',
+    '',
+    '### Added',
+    '',
+    '- bold entry',
+    '',
+    '---',
+    '',
+    '<h2 id="zh">中文</h2>',
+    '',
+    '### 新增',
+    '',
+    '- 加粗 条目',
+  ].join('\n')
+
+  it('显式 id 原生 HTML 标题经渲染链存活：id 原值保留、无 user-content- 前缀', () => {
+    const root = dom(htmlTemplate)
+    const en = root.querySelector('h2[id="en"]')
+    const zh = root.querySelector('h2[id="zh"]')
+    expect(en?.textContent).toBe('English')
+    expect(zh?.textContent).toBe('中文')
+    // 面板跳转按 id 原值解析（changelogRender onChangelogClick 逐元素比对
+    // el.id），GitHub 消毒层的 user-content- 前缀只存在于发布页、不进面板
+    expect(root.querySelector('[id^="user-content-"]')).toBeNull()
+    // 标题未被降级成纯文本/被整块吞掉
+    expect(en?.tagName).toBe('H2')
+    expect(zh?.tagName).toBe('H2')
+  })
+
+  it('切换行渲染为 ASCII 锚链接：href 即 #en/#zh，无 percent 编码', () => {
+    const root = dom(htmlTemplate)
+    const hrefs = Array.from(root.querySelectorAll('a')).map(a => a.getAttribute('href'))
+    expect(hrefs).toEqual(['#en', '#zh'])
+  })
+
+  it('点击 #en/#zh 在面板容器内滚到显式 id 小节（跳转可达性钉住）', () => {
+    const scrollSpy = vi.fn()
+    Element.prototype.scrollIntoView = scrollSpy // jsdom 无实现
+    const container = document.createElement('div')
+    container.innerHTML = renderChangelog(htmlTemplate)
+    container.addEventListener('click', onChangelogClick as EventListener)
+    document.body.appendChild(container)
+    for (const [label, id] of [['English', 'en'], ['中文', 'zh']] as const) {
+      scrollSpy.mockClear()
+      const link = Array.from(container.querySelectorAll('a')).find(a => a.textContent === label)!
+      const ev = new MouseEvent('click', { bubbles: true, cancelable: true })
+      link.dispatchEvent(ev)
+      expect(ev.defaultPrevented, label).toBe(true) // hash 不进 SPA 地址栏
+      expect(scrollSpy).toHaveBeenCalledTimes(1)
+      expect(scrollSpy.mock.instances[0], label).toBe(container.querySelector(`[id="${id}"]`))
+    }
+    container.remove()
+  })
+})
+
 describe('changelogBrief 收起态摘要', () => {
   it('剥净 markdown 标记并压成单行', () => {
     expect(changelogBrief('### Added\n\n- **粗体** 条目\n- 第二条')).toBe('Added 粗体 条目 第二条')

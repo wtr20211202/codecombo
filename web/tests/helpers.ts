@@ -223,16 +223,80 @@ export async function closeDshConsoleAndClearState(page: Page, request: APIReque
   const token = ((await res.json()) as { token?: string }).token || ''
   const headers = { 'X-Lock-Token': token }
   const stateRes = await request.get(`${apiBase}/api/ui-state`, { headers })
-  const body = (await stateRes.json().catch(() => null)) as { data?: Record<string, { dshConsole?: unknown }> } | null
+  const body = (await stateRes.json().catch(() => null)) as { data?: Record<string, { dshConsole?: unknown; notesView?: unknown; shareManager?: unknown }> } | null
   const map = body?.data
   if (!map) return
-  const clear: Record<string, { dshConsole: null }> = {}
+  // notesView 一并清（P-20261112-6-S1：笔记开态落 uiState 后与 dshConsole 同为
+  // 「跨 spec/跨 run 残留会复活开态」的持久化键）；shareManager 随件（
+  // P-20261112-6-S3：分享管理视图开态同族落盘）——本 helper 是主区视图开态清场口
+  const clear: Record<string, { dshConsole: null; notesView: null; shareManager: null }> = {}
   for (const k of Object.keys(map)) {
-    if (map[k]?.dshConsole !== undefined) clear[k] = { dshConsole: null }
+    if (map[k]?.dshConsole !== undefined || map[k]?.notesView !== undefined || map[k]?.shareManager !== undefined) {
+      clear[k] = { dshConsole: null, notesView: null, shareManager: null }
+    }
   }
   if (Object.keys(clear).length > 0) {
     await request.put(`${apiBase}/api/ui-state`, { headers, data: clear })
   }
+}
+
+// 分享管理开态键清场（P-20261112-6-S3）：开态落 uiState shareManager.open（即时写）
+// 后，以管理视图在屏结束的用例会把开态残留给后续用例/后续 spec——新页面进项目
+// 即恢复出管理视图，rail 再点被 toggle 语义反转成关闭（closeDshConsoleAndClearState
+// 头注同款事故面）。供分享族 spec 的 afterEach 调用，机制与该 helper 一致：
+// about:blank 先卸载 SPA（unload 路径的 forceSave 回写先行落定），再 API 只清
+// shareManager 命名空间（服务端 Merge 顶层浅合并，null 读取端归一 = 清键）
+export async function closeShareManagerAndClearState(page: Page, request: APIRequestContext, apiBase: string): Promise<void> {
+  await page.goto('about:blank').catch(() => { /* 页面已销毁等场景 */ })
+  await page.waitForTimeout(300)
+  const res = await request.post(`${apiBase}/api/lock/unlock`, { data: { password: DEFAULT_PASSWORD } })
+  const token = ((await res.json()) as { token?: string }).token || ''
+  const headers = { 'X-Lock-Token': token }
+  const stateRes = await request.get(`${apiBase}/api/ui-state`, { headers })
+  const body = (await stateRes.json().catch(() => null)) as { data?: Record<string, { shareManager?: unknown }> } | null
+  const map = body?.data
+  if (!map) return
+  const clear: Record<string, { shareManager: null }> = {}
+  for (const k of Object.keys(map)) {
+    if (map[k]?.shareManager !== undefined) clear[k] = { shareManager: null }
+  }
+  if (Object.keys(clear).length > 0) {
+    await request.put(`${apiBase}/api/ui-state`, { headers, data: clear })
+  }
+}
+
+
+// 首页笔记 overlay 开态残留防御（P-20261112-6-S1 用例内轻量版）：notesView.open
+// 落 uiState 后，前序用例/前序 spec 打开过笔记时首页 boot 会原样恢复 overlay
+// （z 900 全页遮罩）——项目卡、home-notes 工具条等首页入口全部被 subtree
+// intercepts，用例在入口处级联超时。overlay 在场即经 notes-close 关掉并等
+// 隐藏，再继续用例自身的开笔记动作；服务端兜底清键走
+// closeDshConsoleAndClearState（notesView 一并清）或 spec afterAll 直写
+// { local: { notesView: null } }（notes-view.spec / notes-tags.spec /
+// notes-sidebar-resize.spec / notes-tag-filter.spec 四族共用此语义）
+export async function closeNotesOverlayIfOpen(page: Page): Promise<void> {
+  const overlay = page.locator('[data-testid="notes-home-overlay"]')
+  if (await overlay.isVisible().catch(() => false)) {
+    await overlay.locator('[data-testid="notes-close"]').click()
+    await expect(overlay).toBeHidden({ timeout: 4000 })
+  }
+}
+
+// spec afterAll 的 uiState notesView 开态键兜底归位（命名空间浅合并只清本键，
+// 其余命名空间不动——closeDshConsoleAndClearState 同款机制；用例异常中断留下
+// 的开态残留会跨 spec/跨 run 复活遮住首页入口）。自带解锁取 token
+export async function clearNotesViewUiState(apiBase: string): Promise<void> {
+  const unlock = await fetch(`${apiBase}/api/lock/unlock`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: DEFAULT_PASSWORD }),
+  }).catch(() => null)
+  if (!unlock?.ok) return // 解锁失败不升级（残留属 flake 风险非套件阻断面）
+  const token = ((await unlock.json()) as { token?: string }).token || ''
+  await fetch(`${apiBase}/api/ui-state`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Lock-Token': token },
+    body: JSON.stringify({ local: { notesView: null } }),
+  }).catch(() => { /* 尽力而为 */ })
 }
 
 // 二维码接力 / 分享地址选址夹具（P-20261019-10 / P-20261020-2）：e2e 实例固定

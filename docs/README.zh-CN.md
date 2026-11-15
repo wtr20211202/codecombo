@@ -38,13 +38,24 @@ Git 工作台、真实终端会话、AI 智能体、远程主机管理，全部�
 
 ```bash
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh
+p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && sh "$p"; rm -f "$p"
 ```
 
 ```powershell
 # Windows PowerShell
-iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))
+$p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue
 ```
+
+脚本形态先把下载落进 `mktemp` 临时文件，安装前对自身做完整性自检（尾部
+哨兵行，拦传输截断/代理改写的不完整下载；临时名也消除固定 /tmp 名的碰撞
+与符号链接面）。`--retry 3` 兼容底线 curl 7.12+（macOS Big Sur 7.64 /
+Ubuntu 20.04 7.68 / Debian 11 7.74 / RHEL 8 7.61 全可跑）；curl ≥ 7.71 可
+自行加 `--retry-all-errors` 获得传输中断重试——默认命令不带，老版本 curl
+遇未知选项直接硬失败。Windows 同款形态：脚本先落进 GUID 临时文件再以
+`powershell -NoProfile -ExecutionPolicy Bypass -File` 执行（`Bypass` 因脚本
+文件被默认执行策略拦截；显式 pin TLS 1.2 让老 .NET 也能连 GitHub），用后即
+删——安装器在尾部哨兵缺失（下载不完整）或被以字符串形态（`iex`）执行时
+直接拒绝运行。
 
 浏览器打开 **http://localhost:9999**，首启设置锁密码。版本全自动决策：
 有正式版装最新正式版；当前没有正式版时装最新 rc，没有 rc 才装最新 beta。
@@ -99,24 +110,24 @@ launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 | `CODECOMBO_PREFIX` | `~/.local/bin`（Windows：`%LOCALAPPDATA%\Programs\codecombo`） | 二进制安装目录 |
 | `CODECOMBO_DATA_DIR` | `~/.codecombo` | 数据目录（绝对路径）。只把路径交给服务——systemd unit / launchd plist 的 `CC_DATA_DIR`、Windows 服务命令行与打印的手动启动命令里的 `--data-dir`；安装器仍不创建、不写入它 |
 
-写在哪：放在管道 `sh` 一侧（写在 `curl` 前只对 curl 生效，脚本读不到、回落
-默认值）；PowerShell 里在 `iex` 之前用 `$env:` 赋值——它们在该 PowerShell
-会话内一直有效。
+写在哪：前缀在整条命令末段的 `sh "$p"` 上（写在 `curl` 前只对 curl 生效，
+脚本读不到、回落默认值）；PowerShell 里在落盘一行式之前用 `$env:` 赋值——
+它们在该 PowerShell 会话内一直有效，并由一行式拉起的子进程继承。
 
 ```bash
 # 与已有实例并存的第二套：独立端口、数据目录与安装目录
-curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test CODECOMBO_PREFIX=$HOME/.local/codecombo-test sh
+p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test CODECOMBO_PREFIX=$HOME/.local/codecombo-test sh "$p"; rm -f "$p"
 
 # 局域网访问（绑定全部网卡）——仅限可信网络，锁密码是唯一闸门
-curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=0.0.0.0 sh
+p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_HOST=0.0.0.0 sh "$p"; rm -f "$p"
 
 # 自定义安装目录
-curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PREFIX=$HOME/bin sh
+p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_PREFIX=$HOME/bin sh "$p"; rm -f "$p"
 ```
 
 ```powershell
 # Windows：与已有实例并存的第二套
-$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; $env:CODECOMBO_PREFIX="$env:LOCALAPPDATA\Programs\codecombo-test"; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))
+$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; $env:CODECOMBO_PREFIX="$env:LOCALAPPDATA\Programs\codecombo-test"; $p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue
 ```
 
 加装第二套实例前须知：
@@ -145,10 +156,11 @@ npm 包只是薄包装，npm 会按平台经 optionalDependencies 自动装上�
 （Windows / Linux / macOS，amd64 & arm64），零 postinstall 脚本。也可从
 [Releases](../../releases) 直接下载二进制。
 
-想尝鲜？预发布版本（rc / beta）走 `next` 通道：`npm i -g codecombo@next`——
-或显式指定任意版本（如 `npm i -g codecombo@0.2.0-rc1`）。稳定的
-`npm i -g codecombo` 不会被动到。npm 形态的更新归 npm 管：应用内自更新对
-npm 安装不生效——更新就是重跑安装命令。
+1.0 前，`npm i -g codecombo` 即最新版——每次发布（含 rc / beta 预览）都会
+前移 `latest`。也可显式钉任意版本（如 `npm i -g codecombo@0.2.0-rc1`），
+`@next` 恒指向最新预发布版。1.0 起稳定通道与预览通道分离：`latest` 只随
+正式版前移，预发布版本（rc / beta）走 `next` 通道。npm 形态的更新归 npm 管：
+应用内自更新对 npm 安装不生效——更新就是重跑安装命令。
 
 ### 升级
 
@@ -197,14 +209,14 @@ GitHub 拉取新版本、失败自动回滚。两个注意点：早于 v0.0.1-be
 二进制与服务注册，数据目录零触碰（数据/配置/密钥全在数据目录，锁密码
 也在其中，重跑后原样沿用）。原 `--host`/`--port` 读自 `ExecStart`
 （装时指定过数据目录的，再从 unit 的 `Environment=` 行取 `CC_DATA_DIR`
-原值、以 `CODECOMBO_DATA_DIR` 带回——带同值重跑即可），环境变量必须放在管道 `sh` 一侧（写在 `curl` 前只对 curl 生效，
+原值、以 `CODECOMBO_DATA_DIR` 带回——带同值重跑即可），环境变量必须前缀在末段 `sh "$p"` 上（写在 `curl` 前只对 curl 生效，
 端口/绑定回落默认 9999/127.0.0.1）：
 
 ```bash
-sudo -v && curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=<原值> CODECOMBO_PORT=<原值> sh
+sudo -v && p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_HOST=<原值> CODECOMBO_PORT=<原值> sh "$p"; rm -f "$p"
 ```
 
-先 `sudo -v`——`curl | sh` 形态下脚本无法交互输密码，只认已缓存的提权
+先 `sudo -v`——脚本以 `sudo -n` 非交互探测提权，只认已缓存/免密的
 凭据（没有时脚本仍会换好二进制、但跳过服务 unit 改写）。脚本经 rename
 换包（服务在跑也不冲突），旧进程要等重启才换成新版本：脚本提示「检测到
 正在运行的实例」时，`sudo systemctl restart codecombo` 收尾。macOS 重跑
@@ -300,6 +312,38 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 然后在其他设备打开 `http://<本机IP>:9999`。首启设置的锁密码就是访问闸门
 ——请只在可信网络下绑定 `0.0.0.0`。
 
+## 新手上路
+
+上面的章节管「装好」，这一节管「装好后干什么」——十分钟从空实例走到真实
+产出，每一步都是既有能力，细节见[工具箱一览](#工具箱一览)与
+[特色能力](#特色能力)。
+
+**1. 打开工作台，设好锁。** 浏览器打开 **http://localhost:9999**，首启设置
+锁密码——它是每次访问的闸门，另有闲置自锁兜底。
+
+**2. 添加项目——这件事也可以交给智能体。** 在主页添加本地 Git 仓库（或直接
+克隆一个）。也可以整步跳过——工作台为你准备的捷径：先开一个**智能体会话**
+（无需项目，任意目录皆可，缺省用户主目录），在聊天里直接让它把你的项目加
+进来。智能体经 ops 通道操作工作台本身：添加项目（`POST /api/projects`）就
+写在它的手册里（`GET /api/ops-manual`），会话环境开箱即带 `CC_LOCK_TOKEN`
+调用凭据。两条底线：项目路径必须是 Git 仓库（智能体可以先 `git init` 或
+克隆一个）；高危动作仍以审批卡回到你的手上。
+
+**3. 给智能体下第一件事。** 在会话里直接说：跑一遍测试、修这个 bug、写那个
+功能。会话按首条任务自动命名；每个会话都是真实 PTY——刷新页面即可完整回放
+输出，支持行级书签与全量检索。
+
+**4. 裁决高危动作。** 智能体没有空白支票：遇到高危命令或批量文件替换，一张
+审批卡带着终端实况录制回到工作台——先看它做了什么，再逐项放行、拒绝或
+改写。
+
+**5. 等它干活的间隙，顺手试两件事。** 任意文件右键 → **分享**：一键短链
+（TTL / 口令 / 阅后即焚），访客无需账号即可打开。再打开**笔记库**——你和
+智能体共享的记事本：让智能体把交接笔记沉淀进去，下一个会话接着上一棒干。
+
+到这里，下面的[工具箱一览](#工具箱一览)是其余能力的全图，
+[特色能力](#特色能力)逐项有更深的展开。
+
 ## 工具箱一览
 
 | 工具 | 能做什么 |
@@ -307,9 +351,13 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 | **Git 工作台** | 可视化 Git：hunk 级暂存、三路差异、拖拽交互变基、合并预演、冲突解决、worktree、子模块、LFS、GPG 签名提交、可 cherry-pick / squash / extract 的提交图 |
 | **Web 终端** | 真实 PTY（ConPTY / pty）、可选 tmux 持久会话（重启后输出回放）、分屏、浮动窗、粘贴图片直传、书签、命令块 |
 | **远程主机** | SSH 主机托管（凭据加密）、远程终端（含远端 tmux）、一键远程部署流水线（建用户 → 运行时 → systemd 服务）、部署日志实流、端口穿透 |
-| **AI 智能体会话** | claude / codex / dsh 多会话——双智能体同题对比、接续链、定时任务、可复用运行书、舰队执行；每个会话真实 PTY，输出全程可回放 |
+| **AI 智能体会话** | claude / codex / dsh 多会话——双智能体同题对比、接续链、定时任务、可复用运行书、舰队执行；会话按首条任务自动命名、可归入自定义分组、断电重启后按原状恢复；每个会话真实 PTY，输出全程可回放 |
 | **智能体操作通道** | 智能体经结构化 API 操作工作台本身：弹下载、写剪贴板、按行号开文件、预览链接、ask 卡与审批卡、跨设备通知 |
 | **审批中心** | 高危命令与批量替换以审批卡回流，附终端实况录制——逐项放行 / 拒绝 / 改写；敏感值出域前脱敏 |
+| **笔记库** | 人机共享 notepad——唯一项目无关笔记库；智能体经 ops 通道读写同一座库，沉淀交接篇，下一个会话接着上一棒干 |
+| **TODO 清单** | 代码注释 TODO / FIXME / XXX / HACK 标记聚合一屏——人类留给下一轮智能体工作的「赊账清单」 |
+| **变更流** | 跨项目文件变更实时时间线——值班大屏卡之外、工作台内「刚才哪里都改了什么」的入口 |
+| **环境画像** | 每项目一张只读「环境简历」：终端探测/智能体上报的 dev 端口、可见输出哨兵规则、部署目标主机——新人（人或智能体）接手免翻终端历史猜端口 |
 | **值班大屏** | 一屏看清实例健康（内存 / goroutine / git 压力）、52 周活动热图、实时变更流、智能体协作流、停滞会话分诊 |
 | **多实例同步** | 一屏管理本机与远程实例：健康总览切换、终端/面板接管、实例间同步、口令加密整机迁移（`.scpkg`） |
 | **访客分享** | 文件 / 目录 / 片段 / 实时终端一键短链——TTL、口令、阅后即焚、定格快照；访客零账号 |
@@ -322,32 +370,32 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 
 ## 特色能力
 
+以下每模块收敛为摘要+截图；完整走读在官网文档——[快速上手](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN) ·
+[常见问题](https://wtr20211202.github.io/codecombo/guide/faq.html?lang=zh-CN)（仓内源文件：[site/guide/](../site/guide/)）。
+
 ### 智能体操作通道
 
-别的终端没有的部分：智能体不只是「跑在」Codecombo 里——还能通过结构化 API
-**操作这台工作台本身**。智能体可以为自己刚产出的报告弹出浏览器下载框、把片段
-写入你的剪贴板、把某个文件打开到精确行号、聚焦面板、发布 dev server 预览链接、
-或者把结构化提问（ask 卡）与高危操作请求（审批卡）带回给你裁决。全部能力登记在
-单一注册表并渲染为智能体可读的手册（`GET /api/ops-manual`）。
+别的终端没有的部分：智能体不只是「跑在」Codecombo 里——还能经结构化 API
+**操作这台工作台本身**：把结构化提问（ask 卡）与高危操作请求（审批卡）带回
+给你裁决，弹下载、写剪贴板、按行号开文件、预览链接、跨设备通知走同一条通道。
+全部能力登记在单一注册表并渲染为智能体可读的手册（`GET /api/ops-manual`）。
+
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN#agent-setup) · [仓内源文件](../site/guide/getting-started.html#agent-setup)
 
 ### 智能体会话
 
-单项目并行多个智能体会话——双智能体同题对比实验、会话接续链（上一棒的产出
-直接交给下一棒）、定时智能体任务、可复用运行书、运行书的舰队执行（一个书按
-序跑 N 台会话）。每个会话都是真实 PTY：刷新页面后完整回放 scrollback、行级
-书签、全端输出检索。
+单项目并行多个智能体会话——双智能体同题对比、会话接续链、定时智能体任务、
+可复用运行书、舰队执行。每个会话都是真实 PTY：刷新页面后完整回放 scrollback。
 
 ![真实运行的智能体会话（PTY 带命令输出）](img/agent-session.png)
 
-*典型场景：服务器异常断电或重启后，终端进程没了，但工作不该丢——打开 Codecombo，
-经由智能体操作通道在任意智能体里一句「恢复我之前的所有会话」，各项目之前的会话
-按原状逐个恢复，输出历史完整可回放。*
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN#agent-setup) · [仓内源文件](../site/guide/getting-started.html#agent-setup)
 
 ### 值班大屏
 
 一块屏幕回答「我的机器现在怎么样」：实例健康（内存 / goroutine / WS 客户端
-/ git 进程压力）、52 周活动热力图、跨项目实时变更流、智能体协作流（谁给谁留
-言、接续链走到第几棒）、会话停滞分诊、待裁决审批卡。
+/ git 进程压力）、52 周活动热力图、跨项目实时变更流、智能体协作流、会话
+停滞分诊、待裁决审批卡。
 
 ![值班大屏](img/oncall-dashboard.png)
 
@@ -358,6 +406,8 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 域前统一脱敏。
 
 ![高危命令的审批卡](img/approval-card.png)
+
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN#agent-setup) · [仓内源文件](../site/guide/getting-started.html#agent-setup)
 
 ### 多实例同步
 
@@ -374,8 +424,7 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 
 ![分享弹层](img/share-dialog.png)
 
-*典型场景：同事要你刚生成的报告。文件右键 → 分享 → 发链接，完事——不经聊天工具
-传文件、不共享网盘，链接随时可撤销。*
+详情 → [官网文档](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN#share-notes) · [仓内源文件](../site/guide/getting-started.html#share-notes)
 
 ### 以及一个完整的 Git 工作台
 
@@ -392,13 +441,15 @@ hunk 级暂存与丢弃、三路差异、拖拽式交互变基、合并预演、
 - **Web 终端** —— 真实 PTY（Windows ConPTY / Unix creack/pty），可选 tmux
   持久会话（重启后恢复输出），分屏、浮动窗、粘贴图片直传、书签、命令块。
 - **远程主机** —— SSH 凭据加密托管、远程终端（含远端 tmux）、一键远程部署
-  流水线（建用户 → Node.js/运行时 → systemd 服务）、部署日志实流、端口穿透。
+  流水线、部署日志实流、端口穿透。
 - **安全底座** —— 全局锁（首启设密、闲置自锁）、全部敏感字段经本机
   master-key AES-256 加密落盘、IP 限流、审计日志与 CSV 导出。
 - **自更新** —— 基于 GitHub Release 的更新检查与失败自动回滚；中心实例可
   缓存转发二进制给子实例。零配置：官方仓库即内置默认更新源；自动检查每 24
   小时一轮，新版本可用时推送通知，版本面板可关闭。走哪条升级路径取决于安装
-  方式——见[升级](#升级)。
+  方式——见[升级](#升级)；升级判别表另见官网文档 FAQ：
+  [官网文档](https://wtr20211202.github.io/codecombo/guide/faq.html?lang=zh-CN#upgrading) ·
+  [仓内源文件](../site/guide/faq.html#upgrading)。
 - **双语与主题** —— 简体中文 / English 界面；Dark / Light / One Dark /
   Dracula 四主题。
 
@@ -428,6 +479,16 @@ codecombo/
 
 ## 文档索引
 
+两处入口，按读者划分：
+
+**官网用户文档**（中英双语），即上文特色能力逐项链接的同一组页面：
+
+- [快速上手](https://wtr20211202.github.io/codecombo/guide/getting-started.html?lang=zh-CN) —— 安装 → 首启设锁 → 添加项目（或让智能体代办）→ 重启不丢现场 → 分享与笔记 · 仓内源文件：[site/guide/getting-started.html](../site/guide/getting-started.html)
+- [常见问题](https://wtr20211202.github.io/codecombo/guide/faq.html?lang=zh-CN) —— 端口与访问、数据与备份、升级路径判别、锁与远程访问、常见报错（203/EXEC 等） · 仓内源文件：[site/guide/faq.html](../site/guide/faq.html)
+
+**内部架构文档**（贡献者向），位于 [`docs/`](./)——中文撰写，英文化在 Roadmap：
+
+- [智能体会话编排](AGENT_SESSIONS.md) —— 智能体会话、审批、编排原语与 ops 手册按运行时注入（claude / codex 自动注入、dsh 手动）
 - [扩展点索引](EXTENSION_POINTS.md) —— kernel 模块 / Deployer / 平台适配 /
   前端面板 / ops 事件 / filepolicy
 - [持久化三车道](PERSISTENCE_LANES.md)

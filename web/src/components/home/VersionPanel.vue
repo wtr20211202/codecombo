@@ -8,6 +8,7 @@ import { shouldShowToast } from '../../utils/toastDedupe'
 import { InformationCircleOutline, LogoGithub, CheckmarkCircleOutline } from '@vicons/ionicons5'
 import UpdateProgressBlock from './UpdateProgressBlock.vue'
 import UpdateCompanionWarning from './UpdateCompanionWarning.vue'
+import UpdateNpmManagedHint from './UpdateNpmManagedHint.vue'
 import { settingsApi, updateApi } from '../../api/client'
 import { copyText } from '../../utils/clipboard'
 import { renderChangelog, changelogBrief, onChangelogClick } from '../../utils/changelogRender'
@@ -73,6 +74,11 @@ interface UpdateCheckResult {
   // 「立即更新」保持可点（点击后端会 skipCache 重拉一次）
   companionFetchFailed?: boolean
   companionFetchError?: string
+  // npm 安装形态旗标（P-20261113-4-S1）：本二进制经 npm 分发安装，node_modules
+  // 归 npm 管、应用内自更新必被 409 拒——面板据此主动把「立即更新」替换为 npm
+  // 更新指引（此前只在点更新被拦下时才后知后觉）。缺失（旧服务端）回落 409
+  // 反应式映射兜底（api/http.ts KNOWN_ERROR_I18N，errmarkers 文本未动零同步面）
+  npmManaged?: boolean
 }
 
 const updateInfo = ref<UpdateCheckResult | null>(null)
@@ -484,15 +490,19 @@ onMounted(() => {
             @click.prevent="changelogExpanded = !changelogExpanded"
           >{{ changelogExpanded ? t('update.clCollapse') : t('update.clExpand') }}</a>
         </div>
-        <!-- 伴随校验资产未取到（P-20261109-9）：按钮保持可点（点后服务端受理前先
-             skipCache 重拉）；与「立即更新」同显隐——更新在途/本会话已更新成功时
-             隐藏（能被受理说明重拉已成功，留着即自相矛盾） -->
+        <!-- npm 安装形态（P-20261113-4-S1）：自更新必被 409 拒（node_modules 归
+             npm 管）——「立即更新」按钮区替换为 npm 更新指引+一键复制命令，主动
+             提示取代「点更新被拦下才后知后觉」；新版本徽标/更新内容照常渲染。
+             旧服务端不携旗标时按钮保留，409 反应式映射兜底（KNOWN_ERROR_I18N）。
+             伴随告警块让位（v-else-if）：npm 形态受理在 npm 闸先拒，伴随预检不再
+             是「此刻更新会被拒」的真实原因，且其文案引用的「立即更新」已不存在 -->
+        <UpdateNpmManagedHint v-if="updateInfo.npmManaged && canStartUpdate" />
         <UpdateCompanionWarning
-          v-if="updateInfo.companionFetchFailed && canStartUpdate"
+          v-else-if="updateInfo.companionFetchFailed && canStartUpdate"
           :reason="updateInfo.companionFetchError"
         />
         <button
-          v-if="canStartUpdate"
+          v-if="canStartUpdate && !updateInfo.npmManaged"
           class="panel-btn primary"
           data-testid="version-update-now"
           :disabled="applying"

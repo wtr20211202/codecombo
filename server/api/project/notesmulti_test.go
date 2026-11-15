@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -100,7 +101,7 @@ func TestNotesMulti_ConflictAndLWW(t *testing.T) {
 	n := createGlobalNote(t, r, "", "v1")
 	staleBase := n.UpdatedAt.Format(time.RFC3339Nano)
 
-	if w := putNote(r, "/api/notes/"+n.ID, `{"content":"v2"}`); w.Code != http.StatusOK {
+	if w := putNote(r, "/api/notes/"+n.ID, `{"content":"v2","tags":["proj-a"]}`); w.Code != http.StatusOK {
 		t.Fatalf("external save: expected 200, got %d", w.Code)
 	}
 	w := putNote(r, "/api/notes/"+n.ID, `{"content":"v3-stale","baseUpdatedAt":`+jsonStr(staleBase)+`}`)
@@ -110,6 +111,11 @@ func TestNotesMulti_ConflictAndLWW(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"code":"notes.conflict"`) ||
 		!strings.Contains(w.Body.String(), `"currentContent":"v2"`) {
 		t.Errorf("conflict payload missing code/currentContent: %s", w.Body.String())
+	}
+	// currentTags 随件（P-20261112-7 S2 冲突裁决链：载入服务端版本放弃本地标签
+	// 编辑后编辑面回落服务端真值——409 快照三字段自洽）
+	if !strings.Contains(w.Body.String(), `"currentTags":["proj-a"]`) {
+		t.Errorf("conflict payload missing currentTags: %s", w.Body.String())
 	}
 	// 不传基准 → last-writer-wins
 	if w := putNote(r, "/api/notes/"+n.ID, `{"content":"v3"}`); w.Code != http.StatusOK {
@@ -295,3 +301,145 @@ func TestNotesMulti_OriginEchoRoundTrip(t *testing.T) {
 			notesOriginMaxLen, len([]rune(got[0].Origin)), got[0].Origin)
 	}
 }
+
+// TestNotesMulti_TagsPutSemantics 标签 PUT 三态（P-20261112-7 S1）：携带即整体
+// 替换（标签行是全量编辑面）/显式 [] 清空/省略不动标签——nil=不改动使旧前端/
+// 纯改名 PUT 不清空他窗标签；创建携 tags → 201 响应即携
+func TestNotesMulti_TagsPutSemantics(t *testing.T) {
+	r := setupNotesGlobalTest(t)
+
+	w := postNote(r, "/api/notes", `{"title":"标签篇","content":"c","tags":[" 生涯 ","生涯","项目A"]}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create with tags: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		Data store.MultiNote `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("create body: %v", err)
+	}
+	if len(created.Data.Tags) != 2 || created.Data.Tags[0] != "生涯" || created.Data.Tags[1] != "项目A" {
+		t.Errorf("create should return normalized tags, got %v", created.Data.Tags)
+	}
+	id := created.Data.ID
+
+	// 携带即整体替换（含归一化）
+	if w = putNote(r, "/api/notes/"+id, `{"content":"c2","tags":["新标签","另一枚"]}`); w.Code != http.StatusOK {
+		t.Fatalf("put with tags: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	got, err := store.Get().MultiNotes.Get(store.GlobalNotesScope, id)
+	if err != nil || len(got.Tags) != 2 || got.Tags[0] != "新标签" {
+		t.Fatalf("tags whole-replace: %+v err=%v", got, err)
+	}
+
+	// 省略 tags（旧前端/纯改名 PUT 形态）→ 不动标签
+	if w = putNote(r, "/api/notes/"+id, `{"content":"c3","title":"改名不改标签"}`); w.Code != http.StatusOK {
+		t.Fatalf("put without tags: expected 200, got %d", w.Code)
+	}
+	if got, _ = store.Get().MultiNotes.Get(store.GlobalNotesScope, id); got.Title != "改名不改标签" || len(got.Tags) != 2 {
+		t.Errorf("PUT without tags must keep tags: %+v", got)
+	}
+
+	// 显式 [] → 清空（空串/空白项同样归一为清空）
+	if w = putNote(r, "/api/notes/"+id, `{"content":"c4","tags":[]}`); w.Code != http.StatusOK {
+		t.Fatalf("put empty tags: expected 200, got %d", w.Code)
+	}
+	if got, _ = store.Get().MultiNotes.Get(store.GlobalNotesScope, id); got.Tags != nil {
+		t.Errorf("explicit [] must clear tags, got %v", got.Tags)
+	}
+
+	// 默认篇 upsert 携 tags：首写落真身即带标签（「打开即可打字」契约的标签面）
+	if w = putNote(r, "/api/notes/"+store.DefaultNoteID, `{"content":"首写","tags":["项目A"]}`); w.Code != http.StatusOK {
+		t.Fatalf("default upsert with tags: expected 200, got %d", w.Code)
+	}
+	if got, _ = store.Get().MultiNotes.Get(store.GlobalNotesScope, store.DefaultNoteID); len(got.Tags) != 1 || got.Tags[0] != "项目A" {
+		t.Errorf("default upsert should carry tags, got %v", got.Tags)
+	}
+}
+
+// TestNotesMulti_TagsListFilter 清单按标签内存过滤（?tag= 精确匹配）：
+// 在册视图过滤、与 ?trash=1 可叠加（回收站清单同样按标签过滤）、无标签篇省
+// tags 字段（清单面轻量）
+func TestNotesMulti_TagsListFilter(t *testing.T) {
+	r := setupNotesGlobalTest(t)
+
+	tagged := createTaggedNote(t, r, "带标签", "c", "项目A")
+	other := createTaggedNote(t, r, "别标签", "c", "项目B")
+	createGlobalNote(t, r, "无标签", "c")
+
+	getJSON := func(path string) []map[string]any {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: expected 200, got %d: %s", path, w.Code, w.Body.String())
+		}
+		var body struct {
+			Data []map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("list body: %v", err)
+		}
+		return body.Data
+	}
+
+	// ?tag= 只留命中篇（精确匹配）
+	names := titlesOf(getJSON("/api/notes?tag=" + urlQueryEscape("项目A")))
+	if len(names) != 1 || names[0] != "带标签" {
+		t.Errorf("tag filter should keep only matched note, got %v", names)
+	}
+	// 无标签篇在无过滤清单里不携 tags 字段（omitempty 轻量）
+	for _, m := range getJSON("/api/notes") {
+		if m["title"] == "无标签" {
+			if _, has := m["tags"]; has {
+				t.Errorf("untagged note meta must omit tags field: %v", m)
+			}
+		}
+	}
+
+	// 回收站视图叠加 ?tag=：软删篇同样按标签过滤
+	if w := deleteNote(r, "/api/notes/"+tagged.ID); w.Code != http.StatusOK {
+		t.Fatalf("trash tagged note: expected 200, got %d", w.Code)
+	}
+	if w := deleteNote(r, "/api/notes/"+other.ID); w.Code != http.StatusOK {
+		t.Fatalf("trash other note: expected 200, got %d", w.Code)
+	}
+	trashNames := titlesOf(getJSON("/api/notes?trash=1&tag=" + urlQueryEscape("项目A")))
+	if len(trashNames) != 1 || trashNames[0] != "带标签" {
+		t.Errorf("trash view + tag filter must combine, got %v", trashNames)
+	}
+	allTrash := titlesOf(getJSON("/api/notes?trash=1"))
+	if len(allTrash) != 2 {
+		t.Errorf("trash view without tag shows both, got %v", allTrash)
+	}
+}
+
+// createTaggedNote 测试辅助：带单标签新建一篇
+func createTaggedNote(t *testing.T, r *gin.Engine, title, content, tag string) store.MultiNote {
+	t.Helper()
+	w := postNote(r, "/api/notes", `{"title":`+jsonStr(title)+`,"content":`+jsonStr(content)+`,"tags":[`+jsonStr(tag)+`]}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create tagged note: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Data store.MultiNote `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("create tagged note body: %v", err)
+	}
+	return body.Data
+}
+
+// titlesOf 清单条目取 title 列表
+func titlesOf(items []map[string]any) []string {
+	out := make([]string, 0, len(items))
+	for _, m := range items {
+		if s, ok := m["title"].(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// urlQueryEscape 测试辅助：查询参数转义
+func urlQueryEscape(s string) string { return url.QueryEscape(s) }

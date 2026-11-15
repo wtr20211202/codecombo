@@ -395,6 +395,11 @@ export default {
     notesSave: 'Save current note (names it when untitled with content)',
     notesCreate: 'New note (untitled placeholder, name later)',
     notesRename: 'Rename current note',
+    // Notes tab keyboard cycle (P-20261112-9-S2): keyboard tab switching for the
+    // overflowed strip (Linux desktops often grab Ctrl+Alt+arrows for workspace
+    // switching — see the help-center shortcuts entry for rebinding)
+    notesNextTab: 'Next note tab (wraps around)',
+    notesPrevTab: 'Previous note tab (wraps around)',
     monitorRefresh: 'Refresh dashboard data (on Duty Dashboard)',
     // Scope badges & filter (P-20261003-99): entries tagged by activation context (group = domain, badge = scope)
     scopeAll: 'All',
@@ -426,6 +431,8 @@ export default {
     mouseTreeDropEditor: 'Drag a file from the tree onto the editor area = open it in that group',
     mouseMiddleCloseEditorTab: 'Middle-click an editor tab = close (pinned tabs unaffected)',
     mouseDblclickPinTab: 'Double-click an editor tab = pin/unpin',
+    // Double-click a note tab to rename (P-20261112-9-S2): rename path on the high-traffic tab strip
+    mouseDblclickRenameNote: 'Double-click a note tab = rename that note',
     mouseCrumbSiblings: 'Click a breadcrumb directory segment = list its siblings, click one to jump',
     mouseMiddleCloseTermTab: 'Middle-click a terminal tab = close',
     mouseDropTermPath: 'Drag a tree file into the terminal = paste its path on the input line (not executed)',
@@ -2604,14 +2611,20 @@ export default {
       targetGone: 'The share target is gone — cannot locate it',
     },
     // "Share again" (P-20261020-10): rebuild an expired/consumed file share
-    // with a fresh lifecycle
+    // with a fresh lifecycle. Since P-20261114-3-S1 this runs through an
+    // explicit dialog (ShareReshareDialog): the mode defaults to the source
+    // link but is changeable; batch rows lock the mode to frozen (rebuilt via
+    // createBatch with the original path set)
     reshare: {
       action: 'Share again',
       title: 'Share again',
       confirm: 'This revokes the old link of "{name}" and creates a new share for the same target. The old link is already expired/dead; the sensitive-file scan and confirmation flow still apply.',
+      modeHintFrozen: 'Mode inherited from the source link: frozen snapshot',
+      modeHintLive: 'Mode inherited from the source link: live view',
+      batchModeNote: 'Batch shares support frozen snapshots only and cannot switch to live (server constraint): resharing rebuilds the same link from the original selection; to adjust the selection, create a new batch share',
+      passNote: 'Passphrases are stored only as hashes and cannot be read back — entering one sets a gate; leave empty for no passphrase on the new link',
+      viewOnceDroppedNote: 'Frozen snapshots conflict with view-once: this re-share drops the one-time flag',
       passphraseLabel: 'Passphrase',
-      passphrasePlaceholder: 'Leave empty to rebuild without a passphrase',
-      passphraseHint: 'The original share was passphrase-protected. Passphrases are stored only as hashes and cannot be read back — re-enter one to keep the protection; leave empty to drop it.',
       passphraseTooLong: 'Passphrase must not exceed 64 bytes',
       unavailable: 'Only expired/consumed file shares with a healthy target can be shared again',
       failed: 'Share again failed — try later',
@@ -2751,6 +2764,10 @@ export default {
       estimating: 'Estimating total size…',
       overLimit: 'Total size exceeds the frozen limit of {max}; creation will be rejected. Split the selection and retry.',
       frozenDesc: 'Multi-file shares use frozen snapshots: every selected path is snapshotted into one link at creation; later project changes never affect what guests see',
+      // Server constraint (P-20261114-3-S1): handlers.go rejects non-frozen
+      // batch requests with 400 "paths requires frozen mode" — the batch block
+      // discloses this up front instead of letting creation hit the 400
+      frozenOnlyNote: 'Server constraint: batch multi-path shares support frozen snapshots only — they cannot be switched to live',
       typeBadge: 'Batch {n}',
       pathSummary: '{n} items (batch frozen)',
       resultDesc: 'Guests can view the frozen copy of these {n} items — preview/download each one, or download the whole package. Expires automatically after 30 days and can be revoked anytime',
@@ -2774,6 +2791,16 @@ export default {
       resultDescLive: 'Visitors can watch this terminal’s live output read-only via the link (unfiltered: verbatim output, sensitive values are not masked). Expires after 30 minutes by default; revoke anytime',
       resultDescFrozen: 'Visitors can view a frozen snapshot of this terminal’s output at creation time via the link (unfiltered: verbatim output, sensitive values are not masked; content does not follow later output). Force-expires within 24 hours; revoke anytime',
       ttlCapNote: 'Unfiltered shares are capped at 24 hours: longer choices (including permanent) are clamped to 24 hours on save',
+    },
+    // Snapshot staleness (P-20261114-3-S2): the frozen share's source changed
+    // relative to its creation baseline — visitors still see the version from
+    // creation. Advisory, not blocking; primary remedy = in-place refresh
+    // (keep token, swap content, P-20261005-177), re-sharing (new link) second
+    stale: {
+      typeBadge: 'Source updated',
+      badgeTip: 'The source changed after this snapshot was created (detected {time}) — visitors still see the version from creation. Consider "Refresh snapshot": the link stays the same and visitors get the latest content; "Share again" issues a new link instead',
+      refreshQuickTip: 'Source updated — refresh the snapshot: same link, visitors get the latest content',
+      reshareNote: 'The source snapshot is stale: the source changed after creation. To keep this link and serve the latest content, use "Refresh snapshot" (the quick action or the "More" menu) instead; continuing will revoke the old link and rebuild a new one from the current source',
     },
     // Terminal output share options dialog (P-20261106-9): masking + watermark
     // chosen before creating a live view / output snapshot
@@ -4623,7 +4650,7 @@ export default {
     },
   },
   home: {
-    subtitle: 'Lightweight Coding Platform',
+    subtitle: 'Self-hosted all-in-one workbench',
     aboutVersion: 'About & version',
     addProject: 'Add Project',
     noProjects: 'No projects added yet',
@@ -5065,7 +5092,8 @@ export default {
       purge: 'Delete permanently (irreversible)',
       purgeConfirm: 'Click again to confirm permanent deletion',
       purgeFailed: 'Permanent deletion failed',
-      conflictDetected: 'The note was modified externally (agent or another device)',
+      // S2 tag ruling chain: state that "Load server version" also discards unsaved tag edits
+      conflictDetected: 'The note was modified externally (agent or another device); "Load server version" also discards unsaved tag edits',
       conflictOverwrite: 'Overwrite with mine',
       conflictLoad: 'Load server version',
       conflictSaveAs: 'Save as new note',
@@ -5074,6 +5102,20 @@ export default {
       // keys retired with the P-20261108-3 single library)
       saved: 'Saved',
       saveNameTitle: 'Name this note',
+      // Blank-area double-click on the tabs bar / sidebar list (P-20261112-8):
+      // hover hint for the two container blank surfaces
+      dblclickCreate: 'Double-click to create a new note',
+      // Sidebar width drag handle (P-20261112-9 S1, SidebarResizer reuse)
+      sidebarResizeTip: 'Drag to resize notes list width',
+      // Tag row (P-20261112-7 S2): chips add/remove + trailing "+" inline input
+      tagsAdd: 'Add tag',
+      tagsRemove: 'Remove tag',
+      tagsInputPlaceholder: 'Type a tag, Enter to confirm…',
+      tagsLimit: 'Up to 8 tags per note',
+      // Sidebar tag filter (P-20261112-7 S3): badge/chip click-to-filter + removable filter pill
+      tagFilterAria: 'Filter notes by tag "{tag}"',
+      tagFilterRemove: 'Remove tag filter, show all notes',
+      tagFilterEmpty: 'No notes with this tag',
     },
     // "Deposit to notes" secondary entry (P-20261003-292): terminal-state task
     // conclusions appended to the shared project notes on the human's behalf
@@ -5833,6 +5875,10 @@ export default {
     checkFailedHint: 'Update check failed: {reason}',
     companionFetchFailedHint: 'Companion verification assets (.sha256/.sig) were not fetched — updating now would be refused. "Update Now" re-fetches them first; if it still fails, check your network and retry',
     companionFetchFailedReason: 'Reason: {reason}',
+    // npm 安装形态主动提示（P-20261113-4-S1）：面板把「立即更新」替换为本提示
+    // +命令一键复制（UpdateNpmManagedHint）。口径沿 P-20261113-2 定案：0.x 裸命令
+    // 即最新版（latest 跟随），尝鲜走 @next 不在本提示展开
+    npmManagedHint: 'This instance was installed via npm — update through the package manager; in-app self-update does not apply:',
     restartApp: 'Restart app',
     restartConfirm: 'Restart the local Codecombo instance? The service goes offline briefly (a few seconds); the page will wait for it to come back.',
     restartStarted: 'Restart requested — waiting for the service to come back…',
@@ -7375,10 +7421,12 @@ conflictCrossFocusNotes: 'Notes-panel action "{name}" only wins while the notes 
       editorSave: 'Save current file (editor)',
       editorBookmarkToggle: 'Toggle bookmark (cursor line)',
       editorInlineEdit: 'Inline AI edit selection (active session)',
-      // Notes panel domain (P-20261107-5): save/create/rename (useNotesKeyboard focus scope)
+      // Notes panel domain (P-20261107-5): save/create/rename/tab cycle (useNotesKeyboard focus scope)
       notesSave: 'Save current note (name it if untitled)',
       notesCreate: 'New note',
       notesRename: 'Rename current note',
+      notesNextTab: 'Next note tab (wraps around)',
+      notesPrevTab: 'Previous note tab (wraps around)',
     },
   },
   // UI zoom (P-20261002-2): appearance.zoom.* prefix — in-app zoom levels (mirrors VS Code window.zoomLevel)

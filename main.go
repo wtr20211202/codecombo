@@ -329,7 +329,7 @@ func printVersion() {
 }
 
 func printHelp() {
-	fmt.Println(`codecombo - 可视化 Git 编码管理平台
+	fmt.Println(`codecombo - self-hosted single-binary workbench: Git, terminals, AI agents, remote machines
 
 Usage:
   codecombo [command]

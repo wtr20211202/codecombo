@@ -477,10 +477,30 @@ function onTabAuxClick(e: MouseEvent, idx: number) {
   emit('closeFile', idx)
 }
 
+// 按钮区按压标记（P-20261114-5）：dragstart 的 target/composedPath 恒为最近
+// draggable 祖先（tab 本体），看不到按压起点落在哪颗子按钮（探针实测证实，
+// 直接查 composedPath 永不命中）——mousedown 时记下按压起点是否在按钮区，
+// dragstart 同手势内据此早退。dragstart 只会在按压期间发生（必先有本手势的
+// mousedown 改写标记），无跨手势串扰；树拖放/合成 DragEvent 无前置按压，
+// 读到 false 天然放行
+let tabPressInButtonArea = false
+function onTabMouseDown(e: MouseEvent) {
+  const t = e.target
+  tabPressInButtonArea = t instanceof Element && t.closest('.tab-close, .tab-dot') !== null
+}
+
 function onTabDragStart(idx: number, e: DragEvent) {
   // 布局锁定（P-20261003-180）：tab 重排/跨组拖拽统一短路（preventDefault
   // 即拖拽不启动），点击/键盘切签不受影响
   if (useLayoutLockStore().interceptDrag(e)) return
+  // 按钮区不启动拖拽（P-20261114-5）：tab 内关闭钮/脏点按住微动越阈会被
+  // dragstart 抢先吞掉后续 click（未越阈 click 正常派发）——preventDefault
+  // 早退同 interceptDrag 形态，按钮区 click 恒可达；纯光标层不解决此半
+  // （光标只治语义误导，dragstart 抢占是行为层）
+  if (tabPressInButtonArea) {
+    e.preventDefault()
+    return
+  }
   draggedTabIndex.value = idx
   // 跨组移动载荷（P-20261003-38）：x-sc-editor-tab + text/plain 双 payload
   // （树拖放 x-sc-file-path 同款惯例，text/plain 兜底 Firefox 不进拖拽态）。
@@ -866,6 +886,7 @@ watch(() => props.files.length, () => {
             draggable="true"
             @click="emit('switchFile', idx)"
             @auxclick="onTabAuxClick($event, idx)"
+            @mousedown="onTabMouseDown"
             @contextmenu="handleTabContextMenu($event, idx)"
             @keydown.enter="emit('switchFile', idx)"
             @dragstart="onTabDragStart(idx, $event)"
@@ -1482,8 +1503,12 @@ watch(() => props.files.length, () => {
   right: -1px;
 }
 
+/* 条目型拖拽面默认箭头（P-20261114-5）：tab 本体是「点击切换为主 + 按住可拖」
+ * 的混合面，grab 大手属专用拖柄语义（活动栏/悬浮条头），盖住整条 hover 既误导
+ * 内部小按钮的点击手感也吃掉指针语义——对齐 VS Code/Chrome 标签条默认箭头惯例；
+ * 可拖性可发现性由下方 :active grabbing 兜底（拖动中抓手收紧，勿删） */
 .editor-tab[draggable="true"]:hover {
-  cursor: grab;
+  cursor: default;
 }
 
 .editor-tab[draggable="true"]:active {
@@ -1582,6 +1607,9 @@ watch(() => props.files.length, () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 关闭钮可点击（P-20261114-5）：tab 内按钮自持光标语义——不声明会被
+   * .editor-tab 拖拽面光标（:active grabbing 链）继承盖住；同 .tab-dot pointer */
+  cursor: pointer;
 }
 
 .tab-close:active {

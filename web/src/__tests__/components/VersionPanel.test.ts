@@ -34,6 +34,12 @@ vi.mock('@/api/client', () => ({
   },
 }))
 
+// 剪贴板模块 mock（P-20261113-4-S1 npm 提示块一键复制用）：jsdom 无真实剪贴板，
+// 只断言「命令进了 copyText」与成功/失败反馈（降级链本体由 utils/clipboard 既有
+// 纪律承接）；面板内 commit id 复制同走此 mock，不影响既有用例（无人断言它）
+const copyTextMock = vi.hoisted(() => vi.fn())
+vi.mock('@/utils/clipboard', () => ({ copyText: copyTextMock }))
+
 // 前端自动检查电路 store 桩（P-20261109-6）：只观察「自动检查更新」开关保存后的
 // 同帧应用（门控本体由 stores/updateCheck.test.ts 覆盖）
 const applyAutoCheckSetting = vi.hoisted(() => vi.fn())
@@ -758,5 +764,89 @@ describe('VersionPanel 伴随校验资产告警（P-20261109-9）', () => {
     })
     expect(wrapper.find('[data-testid="version-update-now"]').exists()).toBe(true)
     expect(wrapper.find('.version-companion-warn').exists()).toBe(false)
+  })
+})
+
+// npm 安装形态主动提示（P-20261113-4-S1）：check 响应 npmManaged=true 时面板把
+// 「立即更新」替换为 npm 更新指引+一键复制命令——主动提示取代「点更新被 409
+// 拦下才后知后觉」；新版本徽标/更新内容照常渲染；旧服务端不携旗标回落按钮+
+// 409 反应式映射兜底（KNOWN_ERROR_I18N 路径保持）。复制走剪贴板模块 mock，
+// 只断言「命令进了 copyText」与反馈文案
+describe('VersionPanel npm 安装形态提示（P-20261113-4-S1）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    resetNaiveRuntimeMocks()
+    checkMock.mockReset()
+    applyMock.mockReset()
+    statusMock.mockReset()
+    statusMock.mockResolvedValue({ data: { status: 'idle', progress: 0, total: 0, version: '' } })
+    notificationAdd.mockClear()
+    copyTextMock.mockReset()
+    copyTextMock.mockResolvedValue(true)
+  })
+
+  async function mountChecked(payload: Record<string, unknown>) {
+    checkMock.mockResolvedValue({ data: payload })
+    const wrapper = mount(VersionPanel, { props: { buildInfo } })
+    await flushPromises()
+    await findCheckButton(wrapper).trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('npmManaged=true：提示块+命令 chip 替换「立即更新」，新版本徽标照常', async () => {
+    const wrapper = await mountChecked({
+      currentVersion: '0.0.1', latestVersion: '0.0.2', hasUpdate: true, npmManaged: true,
+    })
+
+    const hint = wrapper.find('[data-testid="version-npm-managed-hint"]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.attributes('role')).toBe('note')
+    expect(hint.text()).toContain('本实例经 npm 安装')
+    expect(hint.text()).toContain('npm i -g codecombo')
+    // 「立即更新」被替换（npm 形态点它必 409，留着即误导）
+    expect(wrapper.find('[data-testid="version-update-now"]').exists()).toBe(false)
+    // 新版本徽标照常：最新版本行高亮 + 「发现新版本」通知照发
+    expect(wrapper.find('.version-value.highlight').text()).toBe('v0.0.2')
+    expect(wrapper.emitted('update-detected')?.[0]).toEqual(['0.0.2'])
+    wrapper.unmount()
+  })
+
+  it('一键复制命令：命令原文进 copyText，成功出「已复制」；失败出兜底错误', async () => {
+    const wrapper = await mountChecked({
+      currentVersion: '0.0.1', latestVersion: '0.0.2', hasUpdate: true, npmManaged: true,
+    })
+    await wrapper.find('[data-testid="version-npm-copy"]').trigger('click')
+    await flushPromises()
+    expect(copyTextMock).toHaveBeenCalledTimes(1)
+    expect(copyTextMock).toHaveBeenCalledWith('npm i -g codecombo')
+    expect(messageMock.success).toHaveBeenCalledWith('已复制')
+
+    copyTextMock.mockResolvedValueOnce(false)
+    await wrapper.find('[data-testid="version-npm-copy"]').trigger('click')
+    await flushPromises()
+    expect(messageMock.error).toHaveBeenCalledWith('复制失败，请手动选择文本复制')
+    wrapper.unmount()
+  })
+
+  it('npmManaged 缺失（旧服务端）：「立即更新」照常在场，提示块不渲染——409 反应式映射兜底路径保持', async () => {
+    const wrapper = await mountChecked({
+      currentVersion: '0.0.1', latestVersion: '0.0.2', hasUpdate: true,
+    })
+    expect(wrapper.find('[data-testid="version-npm-managed-hint"]').exists()).toBe(false)
+    const updateBtn = wrapper.find('[data-testid="version-update-now"]')
+    expect(updateBtn.exists()).toBe(true)
+    expect(updateBtn.element.disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('npmManaged=true 且伴随资产失败：npm 指引让伴随告警让位（npm 闸先于伴随预检，告警引用的「立即更新」已不存在）', async () => {
+    const wrapper = await mountChecked({
+      currentVersion: '0.0.1', latestVersion: '0.0.2', hasUpdate: true,
+      npmManaged: true, companionFetchFailed: true, companionFetchError: 'checksum: status 503',
+    })
+    expect(wrapper.find('.version-companion-warn').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="version-npm-managed-hint"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 })

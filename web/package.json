@@ -18,6 +18,7 @@
     "check:errcodes": "node scripts/check-i18n.mjs --errcodes",
     "check:errmarkers": "node scripts/check-errmarkers.mjs",
     "check:api-routes": "node scripts/check-api-routes.mjs",
+    "check:uistate-lanes": "node scripts/check-uistate-lanes.mjs",
     "check:theme": "node scripts/check-theme-contrast.mjs",
     "check:hardcoded-colors": "node scripts/check-hardcoded-colors.mjs",
     "check:fonts": "node scripts/check-hardcoded-fonts.mjs",
@@ -34,8 +35,8 @@
     "test:watch": "vitest",
     "lint": "eslint . --ext .vue,.ts --cache",
     "lint:fix": "eslint . --ext .vue,.ts --fix --cache",
-    "check": "vue-tsc --build && npm run lint && vitest run && npm run check:e2e-conventions && npm run check:e2e-dualpath && npm run check:hardcoded-colors && npm run check:fonts && npm run check:motion && npm run check:icon-titles && npm run check:icon-semantics && npm run check:keybindings && npm run check:audit-actions && npm run check:errmarkers && npm run check:errcodes && npm run check:event-names && npm run check:api-routes",
-    "check:fast": "vue-tsc --build && npm run lint && node scripts/vitest-changed.mjs && npm run check:e2e-conventions && npm run check:e2e-dualpath && npm run check:hardcoded-colors && npm run check:fonts && npm run check:motion && npm run check:icon-titles && npm run check:icon-semantics && npm run check:keybindings && npm run check:audit-actions && npm run check:errmarkers && npm run check:errcodes && npm run check:event-names && npm run check:api-routes",
+    "check": "vue-tsc --build && npm run lint && vitest run && npm run check:e2e-conventions && npm run check:e2e-dualpath && npm run check:hardcoded-colors && npm run check:fonts && npm run check:motion && npm run check:icon-titles && npm run check:icon-semantics && npm run check:keybindings && npm run check:audit-actions && npm run check:errmarkers && npm run check:errcodes && npm run check:event-names && npm run check:api-routes && npm run check:uistate-lanes",
+    "check:fast": "vue-tsc --build && npm run lint && node scripts/vitest-changed.mjs && npm run check:e2e-conventions && npm run check:e2e-dualpath && npm run check:hardcoded-colors && npm run check:fonts && npm run check:motion && npm run check:icon-titles && npm run check:icon-semantics && npm run check:keybindings && npm run check:audit-actions && npm run check:errmarkers && npm run check:errcodes && npm run check:event-names && npm run check:api-routes && npm run check:uistate-lanes",
     "check:i18n:unused": "node scripts/check-i18n.mjs --unused"
   },
   "dependencies": {

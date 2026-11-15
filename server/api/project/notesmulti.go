@@ -63,6 +63,7 @@ const notesExportNameMax = 60
 type notesMeta struct {
 	ID        string     `json:"id"`
 	Title     string     `json:"title"`
+	Tags      []string   `json:"tags,omitempty"` // 标签（P-20261112-7；无标签省字段——清单面轻量）
 	UpdatedAt time.Time  `json:"updatedAt"`
 	Size      int        `json:"size"`
 	DeletedAt *time.Time `json:"deletedAt,omitempty"` // 仅回收站视图携带
@@ -70,7 +71,7 @@ type notesMeta struct {
 }
 
 func toNotesMeta(n store.MultiNote) notesMeta {
-	return notesMeta{ID: n.ID, Title: n.Title, UpdatedAt: n.UpdatedAt, Size: n.Size(), DeletedAt: n.DeletedAt, DeletedBy: n.DeletedBy}
+	return notesMeta{ID: n.ID, Title: n.Title, Tags: n.Tags, UpdatedAt: n.UpdatedAt, Size: n.Size(), DeletedAt: n.DeletedAt, DeletedBy: n.DeletedBy}
 }
 
 // notesOriginHeader 笔记写请求的客户端窗口 nonce 头（P-20261111-4 S1 回声抑制）：
@@ -130,7 +131,20 @@ func noteSessionAttribution(c *gin.Context) string {
 
 // ── 作用域参数化实现体（端点族 resolver 注入作用域）──
 
-// notesList 清单（在册 / ?trash=1 回收站视图）；元数据面不内联 content
+// noteHasTag 标签过滤谓词：精确匹配（标签经 store 归一化，查询参数 trim 后
+// 对位比较；≤100 篇量级的内存过滤，仓储不动）
+func noteHasTag(tags []string, want string) bool {
+	for _, t := range tags {
+		if t == want {
+			return true
+		}
+	}
+	return false
+}
+
+// notesList 清单（在册 / ?trash=1 回收站视图）；元数据面不内联 content。
+// 可选 ?tag=<标签> 按标签内存过滤（P-20261112-7）：与 ?trash=1 可叠加——
+// 回收站清单同样按标签过滤（先按视图留软删/在册，再按标签对位）
 func notesList(c *gin.Context, resolve notesScopeResolver) {
 	sc, ok := resolve(c)
 	if !ok {
@@ -144,9 +158,13 @@ func notesList(c *gin.Context, resolve notesScopeResolver) {
 		return
 	}
 	trash := c.Query("trash") == "1"
+	tagFilter := strings.TrimSpace(c.Query("tag"))
 	out := make([]notesMeta, 0, len(notes))
 	for _, n := range notes {
 		if n.Live() == trash { // 在册视图留 Live（跳过软删），回收站视图留软删
+			continue
+		}
+		if tagFilter != "" && !noteHasTag(n.Tags, tagFilter) {
 			continue
 		}
 		out = append(out, toNotesMeta(n))
@@ -163,8 +181,9 @@ func notesCreate(c *gin.Context, resolve notesScopeResolver) {
 	shared.LimitBody(c, notesBodyMaxBytes)
 
 	var req struct {
-		Title   string `json:"title"`
-		Content string `json:"content"`
+		Title   string   `json:"title"`
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"` // 可选（省略/空 = 无标签；store 层归一化）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		if shared.BodyTooLarge(err) {
@@ -175,7 +194,7 @@ func notesCreate(c *gin.Context, resolve notesScopeResolver) {
 		shared.Error(c, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
-	n, err := store.Get().MultiNotes.Create(sc.key, req.Title, req.Content)
+	n, err := store.Get().MultiNotes.Create(sc.key, req.Title, req.Content, req.Tags)
 	if err != nil {
 		notesError(c, err)
 		return
@@ -198,7 +217,9 @@ func notesGet(c *gin.Context, resolve notesScopeResolver) {
 	c.JSON(http.StatusOK, gin.H{"data": n})
 }
 
-// notesPut 保存（title 携带即重命名；baseUpdatedAt 携带即乐观校验）
+// notesPut 保存（title 携带即重命名；tags 携带即整体替换、省略不动标签——
+// nil=不改动使旧前端/纯改名 PUT 不清空他窗标签，显式 [] 才清空；
+// baseUpdatedAt 携带即乐观校验）
 func notesPut(c *gin.Context, resolve notesScopeResolver) {
 	sc, ok := resolve(c)
 	if !ok {
@@ -209,6 +230,7 @@ func notesPut(c *gin.Context, resolve notesScopeResolver) {
 	var req struct {
 		Content       string     `json:"content"`
 		Title         *string    `json:"title"`
+		Tags          *[]string  `json:"tags"` // 指针可选：nil=不动标签；[]=清空；非空=整体替换（与 title 同构）
 		BaseUpdatedAt *time.Time `json:"baseUpdatedAt"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -224,13 +246,13 @@ func notesPut(c *gin.Context, resolve notesScopeResolver) {
 	if req.BaseUpdatedAt != nil {
 		base = *req.BaseUpdatedAt
 	}
-	n, err := store.Get().MultiNotes.Update(sc.key, c.Param("noteId"), req.Title, req.Content, base)
+	n, err := store.Get().MultiNotes.Update(sc.key, c.Param("noteId"), req.Title, req.Content, base, req.Tags)
 	if errors.Is(err, store.ErrNotFound) && c.Param("noteId") == store.DefaultNoteID {
 		// 默认篇是空库占位的虚拟实体（well-known id 特例，其余 id 维持
 		// Create/Update 分离与「服务端生成 id」纪律）：直写不存在时 upsert
 		// 落真身。面板空库占位篇首写（无 baseUpdatedAt）即经此路径落盘
 		// （「打开即可打字」契约）
-		n, err = store.Get().MultiNotes.UpsertDefault(sc.key, req.Content, req.Title)
+		n, err = store.Get().MultiNotes.UpsertDefault(sc.key, req.Content, req.Title, req.Tags)
 	}
 	if err != nil {
 		notesError(c, err)
@@ -359,13 +381,16 @@ func notesError(c *gin.Context, err error) {
 		shared.ErrorWithCode(c, shared.CodeNotesNotFound, "note not found", nil)
 	case errors.Is(err, store.ErrNotesConflict):
 		// 冲突载荷携当前版本（errors.As 取仓储包装的当前文档——files.conflict
-		// currentContent 同款形态），面板据此呈现「载入服务端版本」
+		// currentContent 同款形态），面板据此呈现「载入服务端版本」；currentTags
+		// 随件（P-20261112-7 S2 冲突裁决链：载入服务端版本时本地标签编辑一并放弃，
+		// 编辑面标签回落服务端真值——同快照三字段自洽）
 		var nce *store.NotesConflictError
 		if errors.As(err, &nce) {
 			shared.JSONWithCode(c, shared.CodeNotesConflict, gin.H{
 				"error":            "note was modified externally",
 				"currentContent":   nce.Current.Content,
 				"currentUpdatedAt": nce.Current.UpdatedAt,
+				"currentTags":      nce.Current.Tags,
 			})
 			return
 		}

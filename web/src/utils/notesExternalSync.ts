@@ -10,11 +10,21 @@
 // 纯函数无副作用：不入引擎/组件状态，单测直测数学形态。
 import type { MultiNoteMeta } from '../api/client'
 
+/** 标签数组逐位相等（P-20261112-7 S3 侧栏徽记数据源新鲜度：外部仅改标签的
+ *  写入 updatedAt/size/title 都可能不动，旧比对会误复用旧条目——徽记停在旧
+ *  真值。tags 有序数组逐位比对，缺省/空数组视作同态） */
+function sameNoteTags(a?: string[], b?: string[]): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  return a.every((t, i) => t === b[i])
+}
+
 /**
  * 清单静默合并（服务端序 updatedAt 降序为权威序，next 即目标序）：
  * 未变更条目复用 prev 的对象引用（Vue keyed 行零 DOM 写入的依据），变更/新增
  * 用 next 的条目，next 缺失的 id 自然落出。deletedAt/deletedBy 只比有无（软删
- * 篇不入在册清单，字段仅防御性对齐）。
+ * 篇不入在册清单，字段仅防御性对齐）；tags 逐位比对（S3 侧栏徽记数据源——
+ * 仅改标签的写入无 updatedAt 以外变化面，漏比会复用旧对象致徽记陈旧）。
  */
 export function mergeNoteLists(prev: MultiNoteMeta[], next: MultiNoteMeta[]): MultiNoteMeta[] {
   const prevById = new Map(prev.map(n => [n.id, n]))
@@ -22,7 +32,8 @@ export function mergeNoteLists(prev: MultiNoteMeta[], next: MultiNoteMeta[]): Mu
     const old = prevById.get(n.id)
     if (!old) return n
     if (old.title === n.title && old.updatedAt === n.updatedAt && old.size === n.size
-      && !!old.deletedAt === !!n.deletedAt && !!old.deletedBy === !!n.deletedBy) {
+      && !!old.deletedAt === !!n.deletedAt && !!old.deletedBy === !!n.deletedBy
+      && sameNoteTags(old.tags, n.tags)) {
       return old
     }
     return n

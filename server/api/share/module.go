@@ -59,6 +59,9 @@ type Module struct {
 	flushPending func() int
 	// live 终端直播馈线 hub（Start 构造，Stop 收尾全部馈线并摘对账回调）
 	live *liveterm.Hub
+	// unsubStale 快照陈旧加速器的总线退订（P-20261114-3-S2，Start 装配，
+	// Stop 摘除——停机后旧 hub 不得再收 file.changed）
+	unsubStale func()
 }
 
 // NewModule 创建分享模块（tlsOn/cert/key = 主服务已解析的传输配置）
@@ -165,6 +168,10 @@ func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 					// 记录死亡后上行桥不能残留（writable.go 头注级联语义）
 					svc.CascadeWritableDown(keep)
 				}
+				// 陈旧状态 keep 集对账（P-20261114-3-S2 生命周期三件）：过期
+				// 清账刚扫走的记录，其陈旧标记/索引项随宿主消亡
+				//（CascadeRelease 同族钩子同点位）
+				staleHubSvc.Prune(keep)
 				// 直播馈线收口（P-20261106-9）：TTL 到期的直播记录刚被
 				// CleanupExpired 直接删除（不经 Unwire），其馈线若不收口会挂着
 				// tap 直到会话关闭——未过滤馈线的原文尾流不应驻留到那时
@@ -274,6 +281,19 @@ func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 		})
 	}
 
+	// 快照陈旧状态中枢（P-20261114-3-S2，双档判定）：加速器=订阅内核总线
+	// file.changed + 分享根前缀过滤（秒级置位）；主档=管理面列表惰性对比
+	//（判定原语在 server/share，此处只调度节流）。降级轮询的广播（path=项目
+	// 根、无 op）在回调内双守卫跳过，降级窗口靠主档兜底。事件总线未装配
+	//（测试 fake 返回 nil）时只降加速器，主档与投影不受影响
+	hub := newStaleHub(st)
+	setStaleHub(hub)
+	if k.Events() != nil {
+		m.unsubStale = k.Events().Subscribe("file.changed", func(env kernel.Envelope) {
+			hub.onFileChanged(projectEvent{Payload: env.Payload})
+		})
+	}
+
 	port := m.cfg.Server.SharePortOrDefault(m.cfg.Server.Port)
 	addr := fmt.Sprintf("%s:%d", m.cfg.Server.Host, port)
 	srv := &http.Server{
@@ -332,6 +352,13 @@ func (m *Module) Stop(_ context.Context, _ kernel.Kernel) error {
 	// 同源入口先收回：主应用后续的 /s/* 请求走 503，不落到正在关闭的
 	// Handler（Stop 末尾会兜底冲一次访问计数，期间无新访客请求更干净）
 	share.ClearSameOriginHandler()
+	// 陈旧加速器先摘订阅再卸中枢（liveWire 同款装配契约）：停机后总线事件
+	// 不得触达旧 hub，管理端点投影随之静默缺省
+	if m.unsubStale != nil {
+		m.unsubStale()
+		m.unsubStale = nil
+	}
+	setStaleHub(nil)
 	// 管理面协作端点同步摘除（setShareSvc 装配契约）：停机后 GetShareDirect
 	// 等端点不再触达旧服务实例
 	if svc := shareSvc; svc != nil {

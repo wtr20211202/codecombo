@@ -1316,7 +1316,11 @@ prompt 首行是任务模板（缺省要求「说明两侧取舍理由，完成�
                                            分享已被查看且宽限窗走完后 consumed:true，见下方「一次性」；
                                            响应附 frozenUsage{totalBytes,capBytes} 快照库占用——
                                            冻结快照总量护栏 1GB 的透明化，容量治理先看这里再动撤销；
-                                           有快照在盘的行另带 frozenBytes=该份快照字节量，找大头逐条撤销）
+                                           有快照在盘的行另带 frozenBytes=该份快照字节量，找大头逐条撤销；
+                                           冻结快照行的 staleAt=源相对创建基准已变化（P-20261114-3-S2：
+                                           快照陈旧认定时点，agent 代发分享后巡检快照新旧看它——
+                                           缺省=未认定变化，提示性非阻断；要跟进最新内容走
+                                           POST /api/share/:token/refresh 原地刷新保链接换内容）
 - POST   /api/share                         创建（幂等）{"projectId","path"(项目内相对路径，空=整个项目根),"mode"?:"live"(默认)|"frozen","ttl"?:有效期预设（P-20261020-5：1h|1d|7d|30d|permanent，相对创建时刻）,"expiresAt"?:自定义绝对时点（RFC3339，与 ttl 互斥）,"passphrase"?:访问口令（设门后访客需口令，响应 hasPassphrase）,"watermark"?:访客页溯源水印（P-20261005-193，缺省开；false 关；截图外传可按水印尾号对账）,"viewOnce"?:一次性查看（P-20261006-27；true=访客在确认页显式点击「查看内容」（POST /s/{token}/view）后进入 10 分钟宽限窗、窗后失效，GET/HEAD 预览抓取不武装；frozen 模式不支持 400）}
                                            未显式选择有效期时 live 文件分享应用 settings.shareDefaultTTL（GET/PUT /api/settings 可读写，
                                            缺省 permanent=存量行为；frozen 仍默认 30 天）；访客页出「此链接将于 … 过期」弱提示，

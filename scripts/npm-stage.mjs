@@ -147,4 +147,4 @@ for (const p of PLATFORMS) {
 }
 console.log('==> 发布顺序（平台包先行，主包 optionalDependencies 引用其版本）：')
 console.log('    for d in npm/dist/codecombo-*/; do npm publish "$d"; done && npm publish npm/dist/codecombo/')
-console.log('    （预发布版本加 --tag next，防 rc/beta 抢占 latest 通道）')
+console.log('    （预发布版本 publish 侧加 --tag next；0.x 由 release.yml 对 0.* 版 dist-tag add latest 跟随发布线，1.0 起恢复不占 latest——P-20261113-2）')

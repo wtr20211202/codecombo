@@ -80,8 +80,11 @@ function cycleTheme() {
 const showAddModal = ref(false)
 // 实例详情侧边栏（「管理实例」入口打开，面板为 fixed 定位不依赖父布局）
 const showInstanceDetail = ref(false)
-// 首页远程控制台全屏 overlay：不进项目直接使用远程终端
-const showRemoteConsole = ref(false)
+// 首页远程控制台全屏 overlay：不进项目直接使用远程终端。开态收敛 usePanelLayout
+// 共享 showRemoteConsole（P-20261114-4-S1，原宿主本地 ref 两病：①死于路由卸载，
+// 场景快照无从覆盖首页 overlay 族；②内嵌 RemoteConsoleView.persistState 绑共享
+// ref，本地开/共享关会把首页使用回声成 open=false 腐化持久化槽）——per-scene
+// 快照统一覆盖，回项目恢复项目快照、回首页恢复首页快照，互不越界
 
 // 智能体终端（悬浮窗）：经 useAgentTerminal 单例驱动，此处仅挂载组件
 const agentTerminal = useAgentTerminal()
@@ -94,16 +97,20 @@ const panelLayout = usePanelLayout()
 const dshEverOpened = ref(false)
 watch(() => panelLayout.showDshConsole.value, (v) => { if (v) dshEverOpened.value = true }, { immediate: true })
 
-// 笔记独立视图（P-20261108-2）：首页=纯首页（P-20261107-3 同口径）——开态是
-// usePanelLayout 模块级单例，项目页开着笔记返回首页时不得以 overlay 自动展开，
-// 到达首页即路过收起（setup 期同步收：早于 NotesView 宿主挂载判定，免一帧闪现）
-panelLayout.closeNotesView()
+// 笔记独立视图（P-20261108-2）：首页到达按 **home 场景**运行态呈现——工作面归属
+// 打开它的场景（P-20261114-4 推翻 P-20261114-1「到达不清开态、项目开态在首页按
+// overlay 如实呈现」）：项目开的笔记回首页不呈现（首页纯导航）、回项目恢复；
+// 首页显式打开（openNotes）才在本场景显示，去项目不跟随。开态是 usePanelLayout
+// 模块级单例，由 per-scene 快照（P-20261114-4-S1）与分场景持久化槽（S2：home 场景
+// 落 notesView.homeOpen）承接；NotesView context=home 宿主 everOpened immediate
+// 重挂同步渲染免一帧闪现。agent docked 回首页收起是导航语义（P-20261107-3），
+// 不在本面
 
 /** 首页笔记入口：近全屏 overlay，与远程控制台/agent docked overlay 交叉关闭
  *  （同为 z 900 全屏层；dsh 由 openNotesView 互斥收起）。笔记是项目无关的单库
  *  （P-20261108-3），首页与项目页两宿主同库同数据，无数据源可选 */
 function openNotes() {
-  showRemoteConsole.value = false
+  panelLayout.showRemoteConsole.value = false
   agentTerminal.hideDocked()
   panelLayout.openNotesView()
 }
@@ -237,7 +244,9 @@ onMounted(() => {
   // 更新检查不在此处做（P-20261109-6）：首页挂载即查的旁路曾绕过「自动检查更新」
   // 开关（关了照查），且与 App 层 updateCheck store 的启动首查重复请求、每浏览器
   // 会话重复入账「发现新版本」通知——自动检查统一收口 store（开关门控 + 按版本去重）
-  void restoreDshConsoleOnce() // 刷新后恢复上次的 dsh 控制台浮层开关
+  // 刷新后恢复上次的 dsh 控制台浮层开关；notes 开态恢复已由 NotesView 宿主
+  // onMounted 先行发起（P-20261112-6-S1），本调用加入同一恢复链（notes 先、dsh 后）
+  void restoreDshConsoleOnce()
 })
 
 // 监听解锁：isLocked 从 true → false 时，刷新项目列表 + ahead/behind
@@ -329,7 +338,7 @@ useHomeGlobalListeners({
         <button
           class="home-action-btn"
           :title="t('dshConsole.title')"
-          @click="showRemoteConsole = false; agentTerminal.hideDocked(); panelLayout.toggleDshConsole()"
+          @click="panelLayout.showRemoteConsole.value = false; agentTerminal.hideDocked(); panelLayout.toggleDshConsole()"
         >
           <n-icon size="16">
             <DshIcon />
@@ -338,7 +347,7 @@ useHomeGlobalListeners({
         <button
           class="home-action-btn"
           :title="t('remoteConsole.title')"
-          @click="panelLayout.showDshConsole.value = false; panelLayout.closeNotesView(); showRemoteConsole = true"
+          @click="panelLayout.showDshConsole.value = false; panelLayout.closeNotesView(); panelLayout.showRemoteConsole.value = true"
         >
           <n-icon
             size="16"
@@ -706,8 +715,9 @@ useHomeGlobalListeners({
       @cloned="refreshAfterClone"
     />
 
-    <!-- 远程控制台全屏 overlay（不进项目直接使用） -->
-    <RemoteConsoleOverlay v-model:show="showRemoteConsole" />
+    <!-- 远程控制台全屏 overlay（不进项目直接使用；开态绑共享 showRemoteConsole，
+         P-20261114-4-S1 收敛进 per-scene 快照） -->
+    <RemoteConsoleOverlay v-model:show="panelLayout.showRemoteConsole.value" />
 
     <!-- dsh 控制台（首页浮层，与项目页主区视图同一组件：懒挂载保活，
          iframe 经回环反代嵌入 dsh Web UI；自带头部含关闭/Esc） -->

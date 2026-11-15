@@ -69,9 +69,11 @@ interface BootstrapDeps {
   openFileByPath: (path: string) => Promise<void>
   openFilesCount: () => number
   setActiveFileIndex: (i: number) => void
-  revealExpandedDirs: (dirs: string[]) => void
+  /** git 面板折叠节/分支恢复（uiState gitPanel 命名空间）。注意：收集端
+   *  （collectCurrentUIState 的 extra）自 init commit 起从未接线，生产恒收
+   *  空值——本恢复口保留为 P-20261114-2 审计升格项（gitPanel.collapsedSections
+   *  漏收集）的现成落点，重接收集端后此桥即生效（见 docs/ui-state-audit-20261114.md） */
   restoreGitPanel: (collapsed: string[], branch: string) => void
-  restoreTerminalTab: (tabId: string) => void
 }
 
 export function useLayoutBootstrap(deps: BootstrapDeps) {
@@ -256,18 +258,19 @@ export function useLayoutBootstrap(deps: BootstrapDeps) {
     // 草稿库陈旧对账（P-20261003-152）：文件已删的草稿清账（后台对账，不阻塞
     // 余下恢复步骤——探测是数个 silent 请求，与文件树/git 面板恢复无先后依赖）
     if (projectRestored) void deps.reconcileStaleDrafts()
-    // 恢复文件树展开目录
-    if (projectRestored && state.fileTree?.expandedDirs?.length) {
-      deps.revealExpandedDirs(state.fileTree.expandedDirs)
-    }
-    // 恢复 Git 面板状态
+    // 恢复 Git 面板状态（收集端断线恒空值——见 deps.restoreGitPanel 注记）
     if (projectRestored && state.gitPanel) {
       deps.restoreGitPanel(state.gitPanel.collapsedSections || [], state.gitPanel.selectedBranch || '')
     }
-    // 恢复终端活跃 tab
-    if (projectRestored && state.terminal?.activeTabId) {
-      deps.restoreTerminalTab(state.terminal.activeTabId)
-    }
+    // 树展开与终端活跃 tab 不经 uiState 恢复（P-20261114-2 审计退役，2026-11-14）：
+    // 真源早已迁移 localStorage 各自键控面——树展开 = FileTreeView 挂载自恢复
+    // `sc.fileTree.expanded.<projectId>`（watch 回写，useLayoutReset 清键对账），
+    // 终端 tab = TerminalView 项目切换恢复 `sc.term.activeTabMap`（terminalActiveTab
+    // recall/remember 对）；uiState 侧 fileTree.expandedDirs/terminal.activeTabId
+    // 因 collectCurrentUIState 的 extra 自 init commit 起从未接线而恒写空值，此处
+    // 旧恢复段收到的只可能是恒空（或历史遗留真值——时序上 FileTreeView/TerminalView
+    // 的 localStorage 恢复总是后到覆盖，终态不受影响）。恢复段与宿主桥已删，防
+    // 「死恢复口」误导后来者以为该车道由 uiState 承载
   }
 
   // 锁定/解锁联动：锁定时关闭所有可能干扰 LockScreenOverlay 焦点的弹窗

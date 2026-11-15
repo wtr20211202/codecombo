@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Getting started — Codecombo Docs</title>
+  <!--
+    Codecombo 文档模块（P-20261112-10-S1，guide/ 分页族首期两页之一）。
+    零框架纯 HTML，样式复用/扩展 site/assets/site.css，交互复用 assets/site.js
+    （语言切换/一键复制与本页同链路；平台探测下载仅 landing 有，本页无
+    #dl-primary 即自动跳过）。
+
+    「同 PR 双语同改」纪律（本页族成文）：本页全部文案以 <span data-lang-en> /
+    <span data-lang-zh> 双份内联，任何文案改动必须在同一个 PR 内同时改两种语言
+    的同一处——发现单语改动即视为半成品，不许合入。侧边导航/顶栏是分页族共享
+    骨架的静态复制（零框架无 partial 机制）：改导航结构须 guide/ 全部页面同
+    PR 同改。
+
+    素材源逐块标注（本页族=使用向长文的事实源；README 对应节已收敛为摘要+
+    详情链接——P-20261112-12-S1 落地，README Highlights 典型场景叙事的事实源
+    即本页 #restart-restore / #share-notes，改长文先改本页）。各块「源=」注记
+    照旧溯 upstream；素材重组不新造——改动前先核对源文件实况。
+
+    截图路径基准：docs/img 唯一截图事实源。源码态（site/guide/*.html，比
+    landing 深一层）用 ../../docs/img/*；发布树落 docs/guide/*.html 后由
+    release-export.sh 的 img 改写统一处理——现行 :210 正则按尾段 ../docs/img/
+    命中，../../docs/img/* 实际产出 ../img/*，恰为 docs/guide/ 页的正确相对
+    路径（2026-11-12 模拟导出树逐引用解析实测零断链；评审「子目录页不命中」
+    的前提实测不成立，S2 发布链适配定案时以此实测为准）——两种落位语义都要顾。
+
+    SEO：本页独立 title/meta/og（分页族每页独立成卡）；hreflang 指向 ?lang
+    查询变体（与 landing 同机制，site.js 读取查询参数切换语言）。
+  -->
+  <meta name="description" content="Install Codecombo, set the lock password, add your first project — or let an AI agent set everything up from chat — then restore sessions after restarts and share results with one link.">
+  <link rel="alternate" hreflang="en" href="getting-started.html">
+  <link rel="alternate" hreflang="zh-CN" href="getting-started.html?lang=zh-CN">
+  <link rel="icon" type="image/svg+xml" href="../assets/logo/codecombo-icon-auto.svg">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Getting started — Codecombo Docs">
+  <meta property="og:description" content="Install, set the lock, add projects (yourself or via an agent session), restore sessions after restarts, share with one link.">
+  <meta property="og:image" content="../assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#0d1117">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+  <!-- ============ Header（分页族共享骨架，guide/ 各页同构） ============ -->
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="../index.html" aria-label="Codecombo home">
+        <img class="brand-icon" src="../assets/logo/codecombo-icon-auto.svg" alt="" width="30" height="30">
+        <span class="brand-name">Codecombo</span><span class="beta-chip">Beta</span>
+      </a>
+      <nav class="header-nav" aria-label="Site">
+        <a href="getting-started.html"><span data-lang-en>Docs</span><span data-lang-zh>文档</span></a>
+        <span class="lang-toggle" role="group" aria-label="Language">
+          <button type="button" class="lang-btn" data-lang-set="en" aria-pressed="true">EN</button>
+          <button type="button" class="lang-btn" data-lang-set="zh" aria-pressed="false">中文</button>
+        </span>
+        <a class="gh-link" href="https://github.com/wtr20211202/codecombo" target="_blank" rel="noopener">
+          <svg class="gh-mark" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="wrap guide-layout">
+    <!-- ============ Sidebar（分页族共享骨架：改导航 guide/ 全页同 PR 同改） ============ -->
+    <aside class="guide-side">
+      <p class="side-head"><span data-lang-en>Documentation</span><span data-lang-zh>文档</span></p>
+      <nav aria-label="Docs">
+        <a href="getting-started.html" aria-current="page"><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></a>
+        <a href="faq.html"><span data-lang-en>FAQ</span><span data-lang-zh>常见问题</span></a>
+      </nav>
+      <p class="side-head"><span data-lang-en>On this page</span><span data-lang-zh>本页目录</span></p>
+      <nav aria-label="Sections">
+        <a href="#install"><span data-lang-en>Install</span><span data-lang-zh>安装</span></a>
+        <a href="#first-start"><span data-lang-en>Set the lock password</span><span data-lang-zh>设置锁密码</span></a>
+        <a href="#add-project"><span data-lang-en>Add a project</span><span data-lang-zh>添加项目</span></a>
+        <a href="#agent-setup"><span data-lang-en>Let an agent set it up</span><span data-lang-zh>智能体代办</span></a>
+        <a href="#restart-restore"><span data-lang-en>Restart &amp; restore</span><span data-lang-zh>重启与恢复</span></a>
+        <a href="#share-notes"><span data-lang-en>Share &amp; notes</span><span data-lang-zh>分享与笔记</span></a>
+      </nav>
+      <p class="side-head"><span data-lang-en>Elsewhere</span><span data-lang-zh>更多去处</span></p>
+      <nav aria-label="Resources">
+        <a href="../index.html"><span data-lang-en>← Product home</span><span data-lang-zh>← 返回官网</span></a>
+        <a href="https://github.com/wtr20211202/codecombo/blob/main/README.md" target="_blank" rel="noopener"><span data-lang-en>README</span><span data-lang-zh>README</span></a>
+        <a href="https://github.com/wtr20211202/codecombo/tree/main/docs" target="_blank" rel="noopener"><span data-lang-en>docs/ (deployment &amp; ops)</span><span data-lang-zh>docs/（部署与运维）</span></a>
+      </nav>
+    </aside>
+
+    <main class="guide-main">
+      <!-- ============ Page hero ============ -->
+      <div class="doc-hero">
+        <h1><span data-lang-en>Getting started</span><span data-lang-zh>快速上手</span></h1>
+        <p class="doc-lede">
+          <span data-lang-en>From download to a working workbench: install, set the lock password,
+          add a project — or let an AI agent do it from chat — then keep your sessions across
+          restarts and share results with one link.</span>
+          <span data-lang-zh>从下载到就绪的工作台：安装、设锁密码、添加项目——或者让 AI 智能体
+          在聊天里代办——重启不丢会话现场，成果一条链接分享。</span>
+        </p>
+      </div>
+
+      <!-- ============ 1. Install（源=README §Quickstart + scripts/install.sh 输出，改先改源） ============ -->
+      <section class="doc-section" id="install">
+        <h2><span data-lang-en>1 · Install</span><span data-lang-zh>1 · 安装</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>One command — downloads the latest release, verifies SHA256 and registers
+          a service. <code>npm i -g codecombo</code> also works (Node.js 18+). Building from source
+          requires Go 1.26+, Node.js 20.19+ / 22.12+ and Git.</span>
+          <span data-lang-zh>一条命令——下载最新正式版、SHA256 校验并注册服务。
+          <code>npm i -g codecombo</code> 也可以（需 Node.js 18+）。从源码构建需 Go 1.26+、
+          Node.js 20.19+ / 22.12+、Git。</span>
+        </p>
+        <div class="cmd-lines">
+          <div class="cmd-row">
+            <code class="cmd-text">p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" &amp;&amp; sh "$p"; rm -f "$p"</code><span class="qs-cmt"># Linux / macOS — installs + service</span>
+            <button class="copy-btn" type="button" data-copy="p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o &quot;$p&quot; &amp;&amp; sh &quot;$p&quot;; rm -f &quot;$p&quot;" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+          </div>
+          <div class="cmd-row">
+            <code class="cmd-text">$p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue</code><span class="qs-cmt"># Windows PowerShell — downloads to a temp file, verifies, runs</span>
+            <button class="copy-btn" type="button" data-copy="$p=&quot;$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1&quot;;[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$p&quot;;Remove-Item &quot;$p&quot; -ErrorAction SilentlyContinue" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+          </div>
+          <div class="cmd-row">
+            <code class="cmd-text">npm i -g codecombo@next</code><span class="qs-cmt"># or via npm (Node.js 18+)</span>
+            <button class="copy-btn" type="button" data-copy="npm i -g codecombo@next" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+          </div>
+        </div>
+        <!-- npm 特例（P-20261113-4-S2）：源=faq #upgrading 判别表 npm 行 + README §Install with npm，措辞循 faq 口径（steps aside / 恒为最新版）不新造 -->
+        <div class="doc-note">
+          <p>
+            <span data-lang-en><b>Installed via npm?</b> The in-app updater steps aside for this
+            install shape — updating means re-running the install command (always the newest
+            build). Details in the <a href="faq.html#upgrading">FAQ</a>.</span>
+            <span data-lang-zh><b>用 npm 安装的？</b>该安装形态的应用内更新器自动让位——更新 =
+            重跑安装命令（恒为最新版）。详见<a href="faq.html#upgrading">常见问题</a>。</span>
+          </p>
+        </div>
+        <p class="perm-note">
+          <span data-lang-en>Registering the service needs elevation (admin PowerShell / sudo); without
+          it you still get the binary plus a manual start command (runs as a background daemon).</span>
+          <span data-lang-zh>注册服务需要提权（管理员 PowerShell / sudo）；不提权则安装二进制并给出
+          手动启动命令（后台守护运行）。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en>Second instance next to an existing one? Give it its own port and data
+          directory (<code>CODECOMBO_PORT</code> / <code>CODECOMBO_DATA_DIR</code> at install time) —
+          two instances must never share one data directory. Details in the
+          <a href="faq.html#data">FAQ</a>.</span>
+          <span data-lang-zh>要在已有实例旁边再装一套？给它独立的端口和数据目录（安装时
+          <code>CODECOMBO_PORT</code> / <code>CODECOMBO_DATA_DIR</code>）——两个实例绝不能共用
+          一个数据目录。详见<a href="faq.html#data">常见问题</a>。</span>
+        </p>
+      </section>
+
+      <!-- ============ 2. First start（源=README §Quickstart/§LAN + server/api/system/lock.go 首启设密语义，改先改源） ============ -->
+      <section class="doc-section" id="first-start">
+        <h2><span data-lang-en>2 · First start: set the lock password</span><span data-lang-zh>2 · 首次启动：设置锁密码</span></h2>
+        <div class="cmd-lines">
+          <div class="cmd-row">
+            <code class="cmd-text">codecombo start</code><span class="qs-cmt"># daemon mode (script / npm installs)</span>
+            <button class="copy-btn" type="button" data-copy="codecombo start" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+          </div>
+          <div class="cmd-row">
+            <code class="cmd-text">http://localhost:9999</code><span class="qs-cmt" data-lang-en># first visit asks for the lock password</span><span class="qs-cmt" data-lang-zh># 首次访问会要求设置锁密码</span>
+          </div>
+        </div>
+        <p class="doc-p">
+          <span data-lang-en>The lock password is the gate for the whole workbench — UI, API and
+          terminals. It lives in the data directory and survives upgrades and re-installs.</span>
+          <span data-lang-zh>锁密码是整个工作台的门——UI、API 与终端都过这道门。它存在数据目录里，
+          升级与重装都不会丢。</span>
+        </p>
+        <div class="doc-note">
+          <p>
+            <span data-lang-en><b>Headless box?</b> First-time setup is a credential-claiming
+            operation, so it is allowed from <code>localhost</code> only. When the server is bound
+            to all interfaces (<code>codecombo start -H 0.0.0.0</code>), the setup can be completed
+            from another machine on the LAN — the setup page tells you when that applies.</span>
+            <span data-lang-zh><b>无头服务器？</b>首次设密属于凭证占位操作，默认只允许从
+            <code>localhost</code> 完成。服务以通配地址启动（<code>codecombo start -H 0.0.0.0</code>）
+            时，可以在局域网另一台机器上完成设密——适用时设置页会明确提示。</span>
+          </p>
+        </div>
+        <div class="cmd-lines">
+          <div class="cmd-row">
+            <code class="cmd-text">codecombo reset-lock</code><span class="qs-cmt" data-lang-en"># forgot the password? run on the machine</span><span class="qs-cmt" data-lang-zh># 忘记密码？在机器上执行</span>
+            <button class="copy-btn" type="button" data-copy="codecombo reset-lock" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 3. Add a project（源=README §Build and run + ops 手册 projects 节（POST /api/projects 的 path 须为 git 仓库），改先改源） ============ -->
+      <section class="doc-section" id="add-project">
+        <h2><span data-lang-en>3 · Add a project</span><span data-lang-zh>3 · 添加项目</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>A project is a Git repository on the machine running Codecombo. Add one
+          from the UI: pick a local repo, or paste a URL to clone it into place.</span>
+          <span data-lang-zh>项目 = 运行 Codecombo 这台机器上的一个 Git 仓库。在界面里添加：选一个
+          本地仓库，或贴一个 URL 就地克隆。</span>
+        </p>
+        <div class="doc-note">
+          <p>
+            <span data-lang-en><b>Prerequisite:</b> the project path must be a Git repository — run
+            <code>git init</code> (or clone) first if it isn't one yet. This holds no matter who adds
+            the project: you in the UI, or an agent over the ops channel.</span>
+            <span data-lang-zh><b>前置条件：</b>项目路径必须是一个 Git 仓库——还不是的话先
+            <code>git init</code>（或先克隆）。无论谁来添加都一样：你在界面里加，或智能体经
+            ops 通道加。</span>
+          </p>
+        </div>
+        <figure class="doc-shot">
+          <!-- 源=docs/img/project-editor.png（截图唯一事实源 docs/img，只引用不复制） -->
+          <img src="../../docs/img/project-editor.png" alt="Codecombo project workspace — file tree, Monaco editor and a live terminal" loading="lazy">
+          <figcaption>
+            <span data-lang-en>Project workspace — files, editor and live terminal in one tab</span>
+            <span data-lang-zh>项目工作区——文件、编辑器与实时终端同屏</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ============ 4. Agent-driven setup（源=实例内 /ops-manual：terminals 免项目会话 + env 注入 + projects 节 + 审批卡语义，改先改源） ============ -->
+      <section class="doc-section" id="agent-setup">
+        <h2><span data-lang-en>4 · Or let an agent set everything up</span><span data-lang-zh>4 · 或者，让智能体全部代办</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>Skip the forms. Open an <b>agent session</b> — starting one needs no
+          project — and just say it in chat: <i>“Add every repo under my projects folder as a
+          project and set each one up.”</i> The agent drives the same APIs the UI uses: listing and
+          adding projects, cloning what's missing, then configuring each one.</span>
+          <span data-lang-zh>可以不填表单。开一个<b>智能体会话</b>——开会话本身不需要任何项目——
+          然后在聊天里直接说：<i>「把我项目目录下的每个仓库都添加成项目，并逐个配置好。」</i>
+          智能体调用的正是界面所用的同一组 API：列出与添加项目、缺仓库就先克隆，再逐个配置。</span>
+        </p>
+        <ul class="doc-list">
+          <li>
+            <span data-lang-en>The session talks to the workbench out of the box: its access token
+            and API base URL are injected as environment variables (<code>CC_LOCK_TOKEN</code> /
+            <code>CC_BASE_URL</code>) — nothing to copy or paste.</span>
+            <span data-lang-zh>会话开箱即可驱动工作台：访问令牌与 API 基址以环境变量注入
+            （<code>CC_LOCK_TOKEN</code> / <code>CC_BASE_URL</code>）——无需复制粘贴任何密钥。</span>
+          </li>
+          <li>
+            <span data-lang-en>The full API surface is documented in the <b>ops manual</b>, served
+            by your own instance at <code>/ops-manual</code> — the agent reads it from there, so its
+            knowledge matches your running version.</span>
+            <span data-lang-zh>完整 API 面在 <b>ops 手册</b>里，由你自己的实例在
+            <code>/ops-manual</code> 提供——智能体也从那里读，手册与运行版本永远一致。</span>
+          </li>
+          <li>
+            <span data-lang-en>Guardrails carry over: a project path must be a Git repository (the
+            agent can <code>git init</code> or clone first), and high-risk actions — mass deletes,
+            force pushes, batch replacements — come back as <b>approval cards</b>. You approve, deny
+            or edit per item, with a live terminal recording attached.</span>
+            <span data-lang-zh>护栏照旧生效：项目路径必须是 Git 仓库（智能体会先 <code>git init</code>
+            或克隆）；高危动作——批量删除、强推、批量替换——以<b>审批卡</b>回流，逐条允许、拒绝
+            或改写，并附实时终端录像。</span>
+          </li>
+        </ul>
+        <figure class="doc-shot">
+          <!-- 源=docs/img/agent-session.png（截图唯一事实源 docs/img，只引用不复制） -->
+          <img src="../../docs/img/agent-session.png" alt="AI agent session running in a real PTY" loading="lazy">
+          <figcaption>
+            <span data-lang-en>Agent session — chat drives the workbench over the structured ops API</span>
+            <span data-lang-zh>智能体会话——聊天经结构化 ops API 驱动工作台</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ============ 5. Restart & restore（源=landing 典型场景 + docs/deploy-linux.md §3（tmux 持久化/KillMode）+ ops 手册 sessions 节（timeline 回放），改先改源） ============ -->
+      <section class="doc-section" id="restart-restore">
+        <h2><span data-lang-en>5 · Restart without losing the day</span><span data-lang-zh>5 · 重启不丢现场</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>A power cut or reboot mid-task kills terminal processes — not the work.
+          Sessions persist across service restarts (persistent terminal backends keep them alive),
+          and every session keeps a full, replayable output history. Open Codecombo and tell any
+          agent: <i>“restore my previous sessions.”</i> Each project's sessions come back the way
+          they were, with the whole output readable and replayable from the session timeline.</span>
+          <span data-lang-zh>断电或重启会杀掉终端进程——但杀不掉活儿。会话跨服务重启持久存在
+          （持久化终端后端让它们存活），每个会话都保留完整可回放的输出历史。打开 Codecombo，
+          对任意智能体说一句：<i>「恢复我之前的会话。」</i>每个项目的会话原样回来，全部输出
+          可在会话时间线里回看与回放。</span>
+        </p>
+      </section>
+
+      <!-- ============ 6. Share & notes（源=README §Sharing links + landing Features 卡，改先改源） ============ -->
+      <section class="doc-section" id="share-notes">
+        <h2><span data-lang-en>6 · A day trip: share and notes</span><span data-lang-zh>6 · 一日游：分享与笔记</span></h2>
+        <p class="doc-p">
+          <span data-lang-en>A colleague needs the report you just generated? Right-click the file →
+          Share → send the link. TTL, passphrase, view-once and frozen snapshots are one toggle
+          away, and you can revoke the link at any moment — visitors need no account.</span>
+          <span data-lang-zh>同事要你刚生成的报告？右键文件 → 分享 → 发链接。TTL、口令、阅后即焚
+          与冻结快照随手可开，链接随时可吊销——访客无需账号。</span>
+        </p>
+        <p class="doc-p">
+          <span data-lang-en>Keep findings in the built-in <b>Notes</b> instead of scratch files —
+          searchable, always one panel away, and agents can read and write them over the ops
+          channel too.</span>
+          <span data-lang-zh>查到的结论记进内置<b>笔记</b>，别散落临时文件——可搜索、随手可达，
+          智能体经 ops 通道也能读写。</span>
+        </p>
+        <p class="doc-next">
+          <span data-lang-en>Something not behaving as described? Check the
+          <a href="faq.html">FAQ</a> — ports, data directory, upgrade paths and the usual error
+          messages are all covered there.</span>
+          <span data-lang-zh>哪里和说的不一样？去翻<a href="faq.html">常见问题</a>——端口、数据目录、
+          升级路径与常见报错都在那里。</span>
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============ Footer（与 landing 同骨架，加返回官网链接） ============ -->
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <img src="../assets/logo/codecombo-icon-auto.svg" alt="" width="22" height="22">
+        <span>Codecombo</span>
+      </div>
+      <nav class="footer-nav" aria-label="Footer">
+        <a href="../index.html"><span data-lang-en>← Home</span><span data-lang-zh>← 返回官网</span></a>
+        <a href="faq.html"><span data-lang-en>FAQ</span><span data-lang-zh>常见问题</span></a>
+        <a href="https://github.com/wtr20211202/codecombo" target="_blank" rel="noopener">
+          <span data-lang-en>GitHub</span><span data-lang-zh>GitHub</span>
+        </a>
+        <a href="https://github.com/wtr20211202/codecombo/issues" target="_blank" rel="noopener">
+          <span data-lang-en>Issues</span><span data-lang-zh>反馈</span>
+        </a>
+      </nav>
+      <p class="footer-note">
+        <span data-lang-en>Self-hosted, single binary, no database. Windows · Linux · macOS.</span>
+        <span data-lang-zh>自托管、单二进制、零数据库。Windows · Linux · macOS。</span>
+      </p>
+    </div>
+  </footer>
+
+  <script src="../assets/site.js"></script>
+</body>
+</html>

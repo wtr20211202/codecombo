@@ -41,7 +41,7 @@ func globalNotesScope(c *gin.Context) (notesScope, bool) {
 	return notesScope{key: store.GlobalNotesScope, label: store.GlobalNotesScope}, true
 }
 
-// ListGlobalNotes    GET /api/notes[?trash=1]
+// ListGlobalNotes    GET /api/notes[?trash=1][&tag=<标签>]
 func ListGlobalNotes(c *gin.Context) { notesList(c, globalNotesScope) }
 
 // CreateGlobalNote   POST /api/notes
@@ -65,19 +65,24 @@ func ExportGlobalNote(c *gin.Context) { notesExport(c, globalNotesScope) }
 func init() {
 	agentops.RegisterSection(agentops.Section{
 		ID: "notes-global", Title: "笔记库（人机共享 notepad，项目无关）", Order: notesManualOrder,
-		Summary: "唯一笔记库全 CRUD（/api/notes 族）：接手项目先按「[项目名]」标题前缀搜交接篇；任务终态结论沉淀进「[项目名] 交接」单篇（找到即追加、没有才新建）",
-		Body: ` - GET    /api/notes                    在册篇清单 [{id,title,updatedAt,size}]
-                                                       （updatedAt 降序；绝不内联 content）
+		Summary: "唯一笔记库全 CRUD（/api/notes 族）：接手项目先按「[项目名]」标题前缀或标签搜交接篇（GET /api/notes?tag=<标签>）；任务终态结论沉淀进「[项目名] 交接」单篇（找到即追加、没有才新建，建议携 tags:[\"<项目名>\"]）",
+		Body: ` - GET    /api/notes                    在册篇清单 [{id,title,tags,updatedAt,size}]
+                                                       （updatedAt 降序；绝不内联 content；无标签
+                                                        篇省 tags 字段）
+- GET    /api/notes?tag=<标签>         按标签过滤（精确匹配；可与 ?trash=1 叠加——
+                                                       回收站清单同样按标签过滤）
 - GET    /api/notes?trash=1            回收站视图（软删篇，携 deletedAt/deletedBy）
-- POST   /api/notes                    新建一篇 {"title"?,"content"?} → 201 {data:{id,...}}
+- POST   /api/notes                    新建一篇 {"title"?,"content"?,"tags"?} → 201 {data:{id,...}}
                                                        （id 服务端生成；≤100 篇含回收站，
                                                         超限 notes.global_limit）
-- GET    /api/notes/:noteId            读单篇 {data:{id,title,content,createdAt,updatedAt,...}}
-- PUT    /api/notes/:noteId            保存 {"content","title"?,"baseUpdatedAt"?} → {data:note}
-                                                       title 携带即重命名；noteId=default 不存在时
-                                                       upsert 落真身；baseUpdatedAt 过期
-                                                       409 {"code":"notes.conflict","currentContent",
-                                                       "currentUpdatedAt"}——先读现状再决策
+- GET    /api/notes/:noteId            读单篇 {data:{id,title,tags,content,createdAt,updatedAt,...}}
+- PUT    /api/notes/:noteId            保存 {"content","title"?,"tags"?,"baseUpdatedAt"?} → {data:note}
+                                                       title 携带即重命名；tags 携带即整体替换
+                                                       （省略=不动现有标签，显式 [] 才清空；≤8 个/
+                                                        单个 1~32 字符/自动去重，非法项静默丢弃）；
+                                                       noteId=default 不存在时 upsert 落真身；
+                                                       baseUpdatedAt 过期 409 {"code":"notes.conflict",
+                                                       "currentContent","currentUpdatedAt","currentTags"}——先读现状再决策
 - DELETE /api/notes/:noteId            软删进回收站（30 天内可恢复；幂等）
 - POST   /api/notes/:noteId/restore    回收站恢复（幂等——重试安全）
 - GET    /api/notes/:noteId/export?format=md|txt  单篇导出（md 缺省）
@@ -89,13 +94,19 @@ func init() {
 
 笔记只有这一个库，不挂任何项目（旧端点 /api/projects/:id/notes 与
 /api/projects/:id/notes-multi 已退役 404；/api/meta 能力项只剩 notes-global）。
-项目归属靠标题前缀「[项目名] 」表达：
+项目归属双轨并存：标题前缀「[项目名] 」+ 标签（tags）——标签不替代前缀，两轨
+都按同一项目名取值（P-20261112-7 标签体系）：
 - **接手项目**：先 GET /api/notes，按标题前缀「[<项目名>]」筛出该项目的篇（交接篇、
-  旧项目笔记迁移篇都带此前缀），逐篇 GET 读里面的交接说明/待办/决策记录。项目名
+  旧项目笔记迁移篇都带此前缀），或按标签直达 GET /api/notes?tag=<项目名>（沉淀
+  交接篇建议打「<项目名>」标签），逐篇 GET 读里面的交接说明/待办/决策记录。项目名
   取 GET /api/projects/$CC_PROJECT_ID 的 name（项目绑定会话注入 CC_PROJECT_ID）。
 - **写回**：阶段性结论/交接说明一律写进「[<项目名>] 交接」这**一篇**——找到就追加，
-  没有才新建；不要每个任务新建一篇（100 篇上限会被任务数吃满）。随手记/通用备忘
-  不必带前缀。
+  没有才新建（新建时建议携 tags:["<项目名>"]）；不要每个任务新建一篇（100 篇上限
+  会被任务数吃满）。随手记/通用备忘不必带前缀。
+- **标签（tags）用法**：PUT/POST 携 tags 即整体替换该篇标签，省略 tags 字段=不动
+  现有标签（纯改标题/纯改正文的 PUT 不要带 tags——避免清掉别的会话打的标签），
+  显式 "tags":[] 才清空；清单按标签过滤用 GET /api/notes?tag=<标签>（与 ?trash=1
+  可叠加，回收站清单同样按标签过滤）。
 - 并发为后写覆盖：写前先读、写整份内容，携 baseUpdatedAt 防覆盖（409 = 期间被
   人或别的会话改过，重读再追加，勿盲目重试覆盖）。
 - 不随实例同步：多实例同步（sync）的 notes/notes-multi 单元已退役，笔记只留在
@@ -106,10 +117,12 @@ func init() {
 任务到达终态（task.progress 上报 done/failed）时，把结论沉淀进「[<项目名>] 交接」
 篇——结论只留在终端 scrollback 里，下次会话/别的设备就得靠人重新总结。三步：
 
-1. GET /api/notes 按标题找交接篇（没有则下一步直接 POST 新建，首节即正文）
+1. GET /api/notes 按标题找交接篇（没有则下一步直接 POST 新建，首节即正文；新建
+   建议携 tags:["<项目名>"]——交接篇按标签直达，与标题前缀双轨并存）
 2. 找到则 GET 单篇读现文，markdown 末尾追加一节：标题「## <日期> <任务简称>」，
    结论 3~5 行——结果（done/failed）、做了什么、关键决定、遗留项。保持极简防刷屏
-3. PUT 整份写回（原文 + 新节一起写，携 baseUpdatedAt；不要只写新节）
+3. PUT 整份写回（原文 + 新节一起写，携 baseUpdatedAt；不要只写新节。写回不带
+   tags 字段——不动该篇既有标签）
 
 示例（找到即追加、没有才新建）：
 ` + "```bash" + `

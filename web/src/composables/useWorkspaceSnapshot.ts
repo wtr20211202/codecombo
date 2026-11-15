@@ -309,7 +309,8 @@ export function useWorkspaceSnapshot(deps: WorkspaceSnapshotDeps) {
   }
 
   /** 采集文件树展开目录：真实数据源是 localStorage 展开键（FileTreeView watch
-   *  回写），uiState 的 fileTree.expandedDirs 被 auto-save 恒写空表不可采 */
+   *  回写），uiState 的 fileTree.expandedDirs 无真值（P-20261114-2 审计定案：
+   *  collect 面已退役此键，见 docs/ui-state-audit-20261114.md） */
   function treeExpandedDirs(): string[] {
     const pid = projectStore.currentProjectId
     if (!pid) return []

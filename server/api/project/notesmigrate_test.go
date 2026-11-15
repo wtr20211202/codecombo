@@ -60,10 +60,10 @@ func countMigratedAudits(t *testing.T) int {
 // 审计恰一条汇总；只读端点零写盘（GET 后源键仍在）
 func TestNotesMigration_StatusThenResume(t *testing.T) {
 	r := setupNotesGlobalTest(t) // 项目 p1 名 "t"
-	if _, err := store.Get().MultiNotes.Create("p1", "交接说明", "# 老项目笔记\n\n- 待办 A"); err != nil {
+	if _, err := store.Get().MultiNotes.Create("p1", "交接说明", "# 老项目笔记\n\n- 待办 A", nil); err != nil {
 		t.Fatalf("seed project note: %v", err)
 	}
-	if _, err := store.Get().MultiNotes.UpsertDefault("p1", "默认篇正文", nil); err != nil {
+	if _, err := store.Get().MultiNotes.UpsertDefault("p1", "默认篇正文", nil, nil); err != nil {
 		t.Fatalf("seed default note: %v", err)
 	}
 
@@ -118,11 +118,11 @@ func TestNotesMigration_StatusThenResume(t *testing.T) {
 func TestNotesMigration_FullReportsPending(t *testing.T) {
 	r := setupNotesGlobalTest(t)
 	for i := 0; i < store.NotesMaxGlobal; i++ {
-		if _, err := store.Get().MultiNotes.Create(store.GlobalNotesScope, "", "filler"); err != nil {
+		if _, err := store.Get().MultiNotes.Create(store.GlobalNotesScope, "", "filler", nil); err != nil {
 			t.Fatalf("fill #%d: %v", i, err)
 		}
 	}
-	src, _ := store.Get().MultiNotes.Create("p1", "满额滞留", "keep me")
+	src, _ := store.Get().MultiNotes.Create("p1", "满额滞留", "keep me", nil)
 
 	if st := getMigration(t, r); st.Data.Pending != 1 || !st.Data.Full {
 		t.Fatalf("status = %+v, want pending=1 full=true", st.Data)
@@ -143,7 +143,7 @@ func TestNotesMigration_FullReportsPending(t *testing.T) {
 // 补回项目名，残留篇带前缀并入（笔记不随项目删除）
 func TestNotesMigration_ProjectDeleteEntry(t *testing.T) {
 	setupNotesGlobalTest(t)
-	if _, err := store.Get().MultiNotes.Create("p-gone", "遗留交接", "orphan body"); err != nil {
+	if _, err := store.Get().MultiNotes.Create("p-gone", "遗留交接", "orphan body", nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	// p-gone 不在项目表（模拟 DeleteProject 已先摘除记录）

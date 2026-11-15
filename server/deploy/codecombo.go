@@ -140,7 +140,7 @@ func buildSystemdUnit(port, bindHost, user, binPath string, sandbox bool) string
 		sandboxLine = "NoNewPrivileges=true\n"
 	}
 	return `[Unit]
-Description=Codecombo - Lightweight Coding Platform
+Description=Codecombo - self-hosted single-binary workbench (Git, terminals, AI agents, remote machines)
 After=network.target
 
 [Service]

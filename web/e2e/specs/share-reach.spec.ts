@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import {
-  DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, mockRelayAddressContext, projectCardByName, RELAY_FIXTURE_LAN,
+  closeShareManagerAndClearState, DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, mockRelayAddressContext, projectCardByName, RELAY_FIXTURE_LAN,
 } from '../../tests/helpers'
 import { API_BASE } from '../../tests/api-base'
 
@@ -64,6 +64,13 @@ async function openManager(page: Page): Promise<void> {
   await expect(page.locator('.sm-card table')).toBeVisible({ timeout: 10000 })
 }
 
+// 分享管理开态残留清场（P-20261112-6-S3）：本 spec 用例以管理视图在屏结束，
+// 开态即时写落 uiState 后会在后续用例/后续 spec 的新页面恢复出管理视图——rail
+// 再点被 toggle 语义反转（closeDshConsoleAndClearState 头注同款事故面）。先卸载
+// SPA 防 unload 路径回写，再 API 只清 shareManager 命名空间
+test.afterEach(async ({ page, request }) => {
+  await closeShareManagerAndClearState(page, request, BASE)
+})
 test.beforeEach(async ({ request }) => {
   await cleanupShares(request)
 })

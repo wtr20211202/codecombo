@@ -192,7 +192,10 @@ const singleHtmlTarget = computed(() => {
           </div>
         </NRadioGroup>
       </template>
-      <!-- 批量 = 仅冻结快照：静态说明替代模式单选（live 多根锚定未提供） -->
+      <!-- 批量 = 仅冻结快照：静态说明替代模式单选（live 多根锚定未提供）。
+           服务端约束就地披露（P-20261114-3-S1）：paths 非空且非 frozen 服务端
+           400（handlers.go "paths requires frozen mode"），创建前讲明，不让
+           用户撞 400 才知道批量不可切实时 -->
       <div
         v-else
         class="batch-mode"
@@ -201,6 +204,10 @@ const singleHtmlTarget = computed(() => {
         <span class="mode-name">{{ t('share.create.frozenLabel') }}</span>
         <span class="mode-desc">{{ t('share.batch.frozenDesc') }}</span>
         <span class="mode-note">{{ t('share.create.frozenNote') }}</span>
+        <span
+          class="mode-note batch-only-note"
+          data-testid="share-batch-frozen-only"
+        >{{ t('share.batch.frozenOnlyNote') }}</span>
       </div>
 
       <div class="mode-label pass-label">
@@ -353,6 +360,9 @@ const singleHtmlTarget = computed(() => {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
 }
+/* 服务端约束句（P-20261114-3-S1）：警示色与单文件 HTML 提示同语义——不是错误，
+   而是批量边界的前置知情 */
+.batch-only-note { color: var(--accent-orange, #d97706); }
 .mode-label { margin-top: 14px; font-size: 12.5px; color: var(--text-secondary); }
 .mode-options { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 .mode-item { display: flex; flex-direction: column; gap: 2px; }

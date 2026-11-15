@@ -10,7 +10,8 @@
 // 快捷键（keymap notes 域，useNotesKeyboard 焦点域消费——按面板根 contains 判定，
 // 宿主无关）：保存（未命名且有内容时顺带命名——notepad「保存即命名」心智，取消
 // 即本会话不再追问）/新建（命名后置：空标题建篇即激活进编辑，「无标题笔记」占位）/
-// 重命名。
+// 重命名/笔记 tab 键盘循环（P-20261112-9-S2）。页签双击 = 重命名（与容器空白区
+// 双击新建 P-20261112-8 分层）。
 //
 // 兼容端点协议保持：notes-editor/notes-preview/notes-mode-*/notes-status 等
 // data-testid 与单文档时代一致（e2e 既有契约面）。
@@ -23,16 +24,18 @@ import { CloseOutline } from '@vicons/ionicons5'
 import { getUnlockToken } from '../../stores/lock'
 import { useI18n } from '../../composables/useI18n'
 import { promptDialog } from '../../composables/useDialog'
-import { useNarrowLayout } from '../../composables/useNarrowLayout'
 import { useNotesKeyboard } from '../../composables/useNotesKeyboard'
+import { useNotesPanelPresentation } from '../../composables/useNotesPanelPresentation'
 import { suggestNoteTitle } from '../../utils/noteTitle'
 import { computeAnchoredSelection } from '../../utils/notesExternalSync'
 import { NOTES_EXTERNAL_UPDATE, NOTES_ORIGIN_HEADER, notesOriginNonce, notesSaveUrl, useNotesMulti } from '../../composables/useNotesMulti'
 import { OPS_NOTES_UPDATED, type NotesExternalUpdateDetail } from '../../utils/opsEvents'
+import SidebarResizer from '../../components/common/SidebarResizer.vue'
 import NotesMigrationBanner from './NotesMigrationBanner.vue'
 import NotesPanelHeader from './NotesPanelHeader.vue'
 import NotesPreviewPane from './NotesPreviewPane.vue'
 import NotesSidebar from './NotesSidebar.vue'
+import NotesTagsRow from './NotesTagsRow.vue'
 
 defineProps<{
   /** 宿主提供关闭语义（NotesView 两形态）：头部出关闭钮，点击抛 close */
@@ -46,10 +49,23 @@ const { t } = useI18n()
 const notes = useNotesMulti()
 
 // edit | preview——切换不重置编辑态，仅换呈现层
-const mode = ref<'edit' | 'preview'>('edit')
 // 管理侧栏（列表/搜索/回收站，子组件 NotesSidebar）显隐——独立视图大区域默认常显
-// （P-20261108-2，notepad 文档列表心智）；窄屏（≤700px）放不下列表+编辑面默认收起
-const sidebarOpen = ref(!useNarrowLayout().narrow.value)
+// （P-20261108-2，notepad 文档列表心智）；窄屏（≤700px）放不下列表+编辑面默认收起。
+// 两态随 uiState notesView 呈现态子字段持久化（P-20261112-6-S3）：跨刷新/跨宿主
+// 切换一致恢复（窄屏 sidebarOpen 恢复让位出厂收起），读写与竞态守卫收口在
+// useNotesPanelPresentation
+const { mode, sidebarOpen, restorePresentation } = useNotesPanelPresentation()
+
+// 侧栏宽度可调（P-20261112-9 S1）：180-400px 拖拽 + localStorage 记忆
+// （sc.notes.sidebarWidth，键名约定 sc.<panel>.sidebarWidth 同 agentTerminal/
+// remoteConsole 先例——不进 uiState 键族）；拖拽/记忆/键盘微调/双击复位全在
+// SidebarResizer（useSidebarWidth）内，本面板只持值。默认宽 220→260：「[项目名]
+// 交接」前缀标题少截断（远程主机列表同款痛点先例）；无存量记忆值（新键），
+// 不涉及迁移。窄屏默认收起不受影响（侧栏与把手同随 sidebarOpen 不挂载）
+const NOTES_SIDEBAR_W_MIN = 180
+const NOTES_SIDEBAR_W_MAX = 400
+const NOTES_SIDEBAR_W_DEFAULT = 260
+const notesSidebarWidth = ref(NOTES_SIDEBAR_W_DEFAULT)
 
 const panelRoot = ref<HTMLElement | null>(null)
 const editorRef = ref<HTMLTextAreaElement | null>(null)
@@ -98,10 +114,40 @@ async function createNoteAndFocus(): Promise<void> {
   if (created) focusEditor()
 }
 
-/** 重命名当前篇（头部动作 + notesRename 快捷键共用）：promptDialog 与侧栏行
- *  内重命名同款 */
-async function renameActiveNote(): Promise<void> {
-  const cur = notes.activeNote.value
+/** tab 条空白区双击新建（P-20261112-8，Notepad++/浏览器标签条同款心智）：
+ *  dblclick 只认容器本体空白面（target === currentTarget）；页签本体上的双击
+ *  是页签自己的重命名（P-20261112-9-S2），容器守卫只认空白面，两链分层互不波及 */
+function onTabsDblclick(e: MouseEvent): void {
+  if (e.target !== e.currentTarget) return
+  void createNoteAndFocus()
+}
+
+/** 标签行 add/remove（P-20261112-7 S2）：NotesTagsRow 纯呈现，增删在此转
+ *  引擎 editTags（全量数组）——归一化/去重短路/防抖保存/409 冲突链全在
+ *  引擎内，与内容编辑同窗合并一次 PUT */
+function onTagAdd(tag: string): void {
+  const id = notes.activeId.value
+  if (!id) return
+  notes.editTags(id, [...notes.activeTags.value, tag])
+}
+function onTagRemove(tag: string): void {
+  const id = notes.activeId.value
+  if (!id) return
+  notes.editTags(id, notes.activeTags.value.filter(x => x !== tag))
+}
+
+/** chip 点击按标签过滤（P-20261112-7 S3，与侧栏徽记同链）：过滤结果清单在
+ *  侧栏——窄屏侧栏收起时点 chip 是纯盲操作，顺手展开让反馈可见（桌面侧栏
+ *  常开时零行为差异） */
+function onTagFilter(tag: string): void {
+  void notes.setTagFilter(tag)
+  if (!sidebarOpen.value) sidebarOpen.value = true
+}
+
+/** 重命名一篇（notesRename 快捷键与头部未来入口缺省当前篇；页签双击显式传
+ *  目标篇）：promptDialog 与侧栏行内重命名同款 */
+async function renameNote(note?: { id: string; title: string }): Promise<void> {
+  const cur = note ?? notes.activeNote.value
   if (!cur) return
   const next = await promptDialog({
     title: t('notes.panel.rename'),
@@ -111,6 +157,25 @@ async function renameActiveNote(): Promise<void> {
   if (next === null) return
   const ok = await notes.renameNote(cur.id, next.trim())
   if (ok && next.trim()) flashSaved()
+}
+
+/** 页签双击重命名（P-20261112-9-S2，侧栏行内重命名按钮的页签对位——tab 条是
+ *  高频扫读面；双击前置的两次 click 已 select 本篇，显式传篇消除时序假设） */
+function onTabRename(n: { id: string; title: string }): void {
+  void renameNote(n)
+}
+
+/** 笔记 tab 键盘循环切换（P-20261112-9-S2，notesNextTab/notesPrevTab 消费）：
+ *  沿页签条可见序（updatedAt 降序）取模首尾相连；单篇（含空库占位）无可切换
+ *  零动作。切篇走引擎 select 同链（内容按需载入），textarea 是 v-show 同一
+ *  DOM 节点——焦点留在原处不挪（编辑中连续切篇不丢焦点，notepad 同款心智） */
+function cycleTab(delta: 1 | -1): void {
+  const list = notes.notes.value
+  if (list.length <= 1) return
+  const idx = list.findIndex(n => n.id === notes.activeId.value)
+  const next = list[(idx < 0 ? 0 : idx + delta + list.length) % list.length]
+  if (!next) return
+  void notes.select(next.id)
 }
 
 /** 保存当前篇（notesSave 快捷键 + 头部未来入口共用）：先落挂起修改，未命名
@@ -147,8 +212,41 @@ async function saveActiveNote(): Promise<void> {
 useNotesKeyboard(panelRoot, {
   save: () => { void saveActiveNote() },
   create: () => { void createNoteAndFocus() },
-  rename: () => { void renameActiveNote() },
+  rename: () => { void renameNote() },
+  nextTab: () => { cycleTab(1) },
+  prevTab: () => { cycleTab(-1) },
 })
+
+/** tab 条右缘溢出渐隐（P-20261112-9-S2 可滚提示）：overflow-x 横滚且右缘外还有
+ *  页签时挂 mask 渐隐；滚到最右即摘——提示不撒谎。重算入口：容器 scroll /
+ *  自身尺寸变化（ResizeObserver 覆盖侧栏拖宽/窗口缩放）/ 清单面变化（增删篇
+ *  与改名都改 scrollWidth；上界 100 篇，派生键拼接零成本） */
+const tabsEl = ref<HTMLElement | null>(null)
+const tabsFadeRight = ref(false)
+
+function updateTabsFade(): void {
+  const el = tabsEl.value
+  tabsFadeRight.value = !!el
+    && el.scrollWidth > el.clientWidth + 1
+    && el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+}
+
+watch(tabsEl, (el, _prev, onCleanup) => {
+  if (!el) {
+    tabsFadeRight.value = false
+    return
+  }
+  // jsdom 无 ResizeObserver（组件直测环境）：跳过尺寸观测，模板上的 scroll
+  // 监听仍生效（SessionTimeline 同款 typeof 守卫先例）
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(updateTabsFade)
+    ro.observe(el)
+    onCleanup(() => ro.disconnect())
+  }
+  updateTabsFade()
+})
+
+watch(() => notes.notes.value.map(n => `${n.id}:${n.title}`).join('|'), () => nextTick(updateTabsFade))
 
 /** 管理侧栏展开时拉取软删清单（回收站徽标与恢复/彻底删除动作的数据面）——
  *  immediate：大区域侧栏默认常显，挂载即拉 */
@@ -204,7 +302,14 @@ function onBeforeUnload(): void {
   for (const id of notes.dirtyIds.value) {
     const content = notes.contents[id] ?? ''
     const base = notes.bases[id]
-    const body = JSON.stringify({ content, baseUpdatedAt: base || undefined })
+    // 标签编辑挂起同链携带（与 axios 保存链同口径——tagsDirty 即整体替换，
+    // 无挂起不带 tags 不动他窗标签）
+    const carryTags = notes.tagsDirty[id] === true
+    const body = JSON.stringify({
+      content,
+      ...(carryTags ? { tags: notes.tags[id] ?? [] } : {}),
+      baseUpdatedAt: base || undefined,
+    })
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -228,6 +333,9 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('beforeunload', onBeforeUnload)
   void notes.loadList()
+  // 呈现态恢复（P-20261112-6-S3）：与 loadList 活动篇恢复同窗——开态恢复置开 →
+  // NotesPanel 懒挂载 → 此处 sidebarOpen/mode 落位（窄屏 sidebarOpen 让位出厂收起）
+  void restorePresentation()
 })
 onBeforeUnmount(() => {
   window.removeEventListener(NOTES_EXTERNAL_UPDATE, onExternalUpdate)
@@ -272,18 +380,42 @@ onBeforeUnmount(() => {
     />
     <template v-else>
       <div class="np-body">
-        <!-- 管理侧栏（列表/搜索/回收站，子组件持有过滤与确认态） -->
+        <!-- 管理侧栏（列表/搜索/回收站，子组件持有过滤与确认态）；
+             @create = 空白区双击新建走本面板 createNoteAndFocus 同链 -->
         <NotesSidebar
           v-if="sidebarOpen"
           :notes="notes"
+          :width="notesSidebarWidth"
+          @create="createNoteAndFocus"
+        />
+
+        <!-- 侧栏宽度拖拽把手（P-20261112-9 S1，随侧栏显隐；键盘/双击语义在组件内） -->
+        <SidebarResizer
+          v-if="sidebarOpen"
+          v-model="notesSidebarWidth"
+          storage-key="sc.notes.sidebarWidth"
+          :min="NOTES_SIDEBAR_W_MIN"
+          :max="NOTES_SIDEBAR_W_MAX"
+          :default-width="NOTES_SIDEBAR_W_DEFAULT"
+          :label="t('notes.panel.sidebarResizeTip')"
         />
 
         <!-- 主编辑区 -->
         <div class="np-main">
+          <!-- tab 条空白区双击新建（P-20261112-8）：dblclick 只认容器本体空白面；
+               页签自带完整标题 title（超宽截断仍可读全文），兼防容器「双击新建」
+               提示经 title 继承漏到页签悬停误导。页签本体双击 = 重命名（S2，见
+               页签 @dblclick）。右缘溢出渐隐（S2 可滚提示）挂 np-tabs-fade -->
           <div
             v-if="notes.notes.value.length > 0"
+            ref="tabsEl"
             class="np-tabs"
+            :class="{ 'np-tabs-fade': tabsFadeRight }"
             data-testid="notes-tabs"
+            :title="t('notes.panel.dblclickCreate')"
+            :aria-label="t('notes.panel.dblclickCreate')"
+            @dblclick="onTabsDblclick"
+            @scroll.passive="updateTabsFade"
           >
             <button
               v-for="n in notes.notes.value"
@@ -291,7 +423,9 @@ onBeforeUnmount(() => {
               class="np-tab"
               :class="{ active: n.id === notes.activeId.value }"
               :data-testid="'notes-tab-' + n.id"
+              :title="noteTitle(n)"
               @click="notes.select(n.id)"
+              @dblclick="onTabRename(n)"
             >
               <span class="np-tab-title">{{ noteTitle(n) }}</span>
               <span
@@ -305,9 +439,23 @@ onBeforeUnmount(() => {
                 :component="CloseOutline"
                 :aria-label="t('notes.panel.trash')"
                 @click.stop="onTrash(n.id)"
+                @dblclick.stop
               />
             </button>
           </div>
+
+          <!-- 标签行（P-20261112-7 S2）：当前篇 chips + 尾部「+」内联输入，
+               增删 emit 转引擎 editTags 进防抖保存链（与内容变更同窗合并一次
+               PUT）；零标签时仅显「+」轻量占位不占行高。chip 本体点击=按该
+               标签过滤侧栏清单（S3，@filter 与侧栏徽记同链落引擎 setTagFilter） -->
+          <NotesTagsRow
+            v-if="notes.activeId.value"
+            :tags="notes.activeTags.value"
+            :all-tags="notes.allTags.value"
+            @add="onTagAdd"
+            @remove="onTagRemove"
+            @filter="onTagFilter"
+          />
 
           <!-- 冲突条（覆盖保护三件套②：409 不静默覆盖，三动作裁决） -->
           <div
@@ -402,6 +550,13 @@ onBeforeUnmount(() => {
   overflow-x: auto;
   flex-shrink: 0;
   scrollbar-width: thin;
+}
+/* 右缘渐隐提示可滚（P-20261112-9-S2）：overflow-x 横滚且未滚到最右时由
+   np-tabs-fade 挂上——遮罩只消费 alpha 通道，black 无主题色语义（主题适配
+   红线不涉及；AppearanceSettings 终端预览卡同款先例，该处以 #000 入基线） */
+.np-tabs-fade {
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - 16px), transparent);
 }
 .np-tab {
   display: inline-flex;

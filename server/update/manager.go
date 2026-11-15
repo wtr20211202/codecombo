@@ -143,6 +143,14 @@ func (m *Manager) Source() UpdateSource {
 	return m.source
 }
 
+// NpmManaged 本二进制是否 npm 分发安装（P-20261113-4-S1）。检查/状态响应的
+// npmManaged 旗标经本方法透出：与 applyUpdate 的 ErrNpmManaged 拒绝闸同一对象
+//（binaryPath）同一判据（IsNpmManaged），保证「响应旗标说 npm」与「点了更新必
+// 被 409」是同一事实，不另立判定防两处漂移
+func (m *Manager) NpmManaged() bool {
+	return IsNpmManaged(m.binaryPath)
+}
+
 // GetStatus 获取当前更新状态
 func (m *Manager) GetStatus() UpdateStatusResult {
 	m.mu.Lock()

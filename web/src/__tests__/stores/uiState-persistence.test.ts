@@ -1,6 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { useUIStateStore, diffChangedKeys, uiJsonValueEqual } from '@/stores/uiState'
+import { useUIStateStore, diffChangedKeys, uiJsonValueEqual, NESTED_UISTATE_SUBFIELDS } from '@/stores/uiState'
 import { uiStateApi } from '@/api/client'
 
 // uiState 持久化语义测试（P-20261002-8 键级补丁）：写入从「GET 全量→合并→PUT
@@ -139,6 +139,116 @@ describe('uiStateStore 命名空间读取器（脏数据防御）', () => {
     await expect(store.getDshConsoleOpen()).resolves.toBe(true)
   })
 
+  it('getNotesViewOpen：缺省/旧存档无键 false，落盘 true 后读到 true（P-20261112-6-S1）', async () => {
+    // 旧数据面（无 notesView 键）= 不恢复按关处理，零迁移
+    mockServerData({})
+    const store = useUIStateStore()
+    await expect(store.getNotesViewOpen()).resolves.toBe(false)
+
+    await store.saveNotesViewOpen(true)
+    mockServerData({ local: { notesView: { open: true } } })
+    await expect(store.getNotesViewOpen()).resolves.toBe(true)
+  })
+
+  it('notesView/dsh 分场景槽：home 读写 homeOpen、project 读写 open，两槽互不覆写（P-20261114-4-S2）', async () => {
+    mockServerData({})
+    const store = useUIStateStore()
+
+    // home 场景：写 homeOpen 槽，open（project 槽）不出现
+    await store.saveNotesViewOpen(true, 'home')
+    await store.saveDshConsoleOpen(true, 'home')
+    const homePatch = vi.mocked(uiStateApi.patch).mock.calls.at(-2)![0] as AllState
+    const dshHomePatch = vi.mocked(uiStateApi.patch).mock.calls.at(-1)![0] as AllState
+    expect(homePatch.local?.notesView).toEqual({ homeOpen: true })
+    expect(dshHomePatch.local?.dshConsole).toEqual({ homeOpen: true })
+
+    // project 场景：写 open 槽；前两笔 home 写已把 homeOpen 推进基底，本补丁缺
+    // homeOpen 子键由注册表从基底回填（命名空间整键替换不丢对侧槽——回填即
+    // 「不覆写」的实现机制）
+    vi.mocked(uiStateApi.patch).mockClear()
+    await store.saveNotesViewOpen(true, 'project')
+    const projPatch = vi.mocked(uiStateApi.patch).mock.calls[0]![0] as AllState
+    expect(projPatch.local?.notesView).toEqual({ open: true, homeOpen: true })
+
+    // 读取分槽：home 读 homeOpen、project 读 open，互不串槽
+    mockServerData({ local: { notesView: { open: true }, dshConsole: { homeOpen: true } } })
+    await expect(store.getNotesViewOpen('home')).resolves.toBe(false)
+    await expect(store.getNotesViewOpen('project')).resolves.toBe(true)
+    await expect(store.getDshConsoleOpen('home')).resolves.toBe(true)
+    await expect(store.getDshConsoleOpen('project')).resolves.toBe(false)
+    // null（无路由环境/单测）按 project 槽——既有单测语义零变化
+    await expect(store.getNotesViewOpen()).resolves.toBe(true)
+  })
+
+  it('getNotesViewActiveId：缺省/脏值回落 \'\'，落盘后读到 id（P-20261112-6-S2）', async () => {
+    mockServerData({})
+    const store = useUIStateStore()
+    // 旧数据面无 notesView.activeId = ''（loadList 两段式第二段天然兜底）
+    await expect(store.getNotesViewActiveId()).resolves.toBe('')
+
+    // 手改 JSON 的脏值（数字）回落 ''，防下游把非串当篇 id 比对
+    mockServerData({ local: { notesView: { activeId: 42 } } })
+    await expect(store.getNotesViewActiveId()).resolves.toBe('')
+
+    await store.saveNotesViewActiveId('n-abc')
+    mockServerData({ local: { notesView: { activeId: 'n-abc' } } })
+    await expect(store.getNotesViewActiveId()).resolves.toBe('n-abc')
+  })
+
+  it('saveNotesViewActiveId 键级补丁：open 子键经注册表回填不被整键替换剥掉（P-20261112-6-S2）', async () => {
+    // 基底已存开态（S1 三件套写入）：saveNotesViewActiveId 只带 activeId 补丁，
+    // finalizeRecord 依 NESTED_UISTATE_SUBFIELDS 从内存基底回填 open——命名空间
+    // 级浅合并（服务端整键替换）不丢开态（钉选丢失根因模式的防线兑现）。
+    // 基底经读取器预热（loadState 进 lastKnownAll，真实链路是 boot 先读后写）
+    mockServerData({ local: { notesView: { open: true } } })
+    const store = useUIStateStore()
+    await store.getNotesViewActiveId()
+    await store.saveNotesViewActiveId('n-abc') // patchNamespaces 即时写，await 即已发出
+    expect(vi.mocked(uiStateApi.patch)).toHaveBeenCalledWith(
+      { local: { notesView: { open: true, activeId: 'n-abc' } } },
+      { silent: true },
+    )
+  })
+
+  it('getShareManagerOpen：缺省/旧存档无键 false，落盘 true 后读到 true（P-20261112-6-S3）', async () => {
+    mockServerData({})
+    const store = useUIStateStore()
+    await expect(store.getShareManagerOpen()).resolves.toBe(false)
+
+    await store.saveShareManagerOpen(true)
+    mockServerData({ local: { shareManager: { open: true } } })
+    await expect(store.getShareManagerOpen()).resolves.toBe(true)
+  })
+
+  it('getNotesViewPresentation：缺省/脏值回落 null/\'\'（出厂口径），落盘后读到呈现态（P-20261112-6-S3）', async () => {
+    mockServerData({})
+    const store = useUIStateStore()
+    // 旧数据面无呈现态子键：null/'' = 消费端回落出厂（sidebarOpen 窄屏收起、mode edit）
+    await expect(store.getNotesViewPresentation()).resolves.toEqual({ sidebarOpen: null, mode: '' })
+
+    // 手改 JSON 的脏值（数字/未知枚举）一律回落，防下游把非布尔/非枚举当呈现态
+    mockServerData({ local: { notesView: { sidebarOpen: 1, mode: 'dialog' } } })
+    await expect(store.getNotesViewPresentation()).resolves.toEqual({ sidebarOpen: null, mode: '' })
+
+    await store.saveNotesViewSidebarOpen(false)
+    await store.saveNotesViewMode('preview')
+    mockServerData({ local: { notesView: { sidebarOpen: false, mode: 'preview' } } })
+    await expect(store.getNotesViewPresentation()).resolves.toEqual({ sidebarOpen: false, mode: 'preview' })
+  })
+
+  it('saveNotesViewSidebarOpen 键级补丁：open/activeId 子键经注册表回填不被整键替换剥掉（P-20261112-6-S3）', async () => {
+    // 基底已存开态+活动篇（S1/S2 写入）：呈现态写端只带 sidebarOpen 补丁，注册表
+    // 从基底回填同族子键——notesView 命名空间整键替换不丢既有写作现场
+    mockServerData({ local: { notesView: { open: true, activeId: 'n-abc' } } })
+    const store = useUIStateStore()
+    await store.getNotesViewPresentation()
+    await store.saveNotesViewSidebarOpen(false)
+    expect(vi.mocked(uiStateApi.patch)).toHaveBeenCalledWith(
+      { local: { notesView: { open: true, activeId: 'n-abc', sidebarOpen: false } } },
+      { silent: true },
+    )
+  })
+
   it('getDashboardLanding：缺省 false，落盘 true 后读到 true（P-20261005-224）', async () => {
     mockServerData({})
     const store = useUIStateStore()
@@ -254,7 +364,7 @@ describe('uiStateStore 保存语义（脏键 diff / 防抖 / PATCH）', () => {
       instanceId: 'local',
       projectId: 'p1',
       layout: { sidePanelWidth: 460, bottomPanelHeight: 260, showSidePanel: true, showBottomPanel: false, sideView: 'files', bottomTab: 'git' },
-      editor: { openFiles: ['a.ts'], activeIndex: 0, scrollPositions: {}, splitOpen: false },
+      editor: { openFiles: ['a.ts'], activeIndex: 0, splitOpen: false },
       remoteConsole: { tabs: [{ hostId: 'h1', sessionId: 's1', title: 't' }] },
       agentTerminal: { groups: [{ id: 'g1', name: '组', sessionIds: [] }] },
     }
@@ -281,7 +391,7 @@ describe('uiStateStore 保存语义（脏键 diff / 防抖 / PATCH）', () => {
       instanceId: 'local',
       projectId: 'p1',
       layout: { sidePanelWidth: 460, bottomPanelHeight: 260, showSidePanel: true, showBottomPanel: false, sideView: 'files', bottomTab: 'git' },
-      editor: { openFiles: ['a.ts'], activeIndex: 0, scrollPositions: {}, splitOpen: false },
+      editor: { openFiles: ['a.ts'], activeIndex: 0, splitOpen: false },
       fileTree: { expandedDirs: ['src'], selectedFile: 'src/a.ts' },
       terminal: { activeTabId: '' },
       gitPanel: { collapsedSections: [], selectedBranch: '' },
@@ -361,6 +471,36 @@ describe('uiStateStore 保存语义（脏键 diff / 防抖 / PATCH）', () => {
     expect(payload.local?.agentTerminal).toBeUndefined() // 保留交服务端合并
   })
 
+  it('saveRemoteConsoleState persistOpen=false：不落 open 子键（P-20261114-4-S2 首页 overlay 场景写面门禁），基底有 open 时注册表回填保值', async () => {
+    const store = useUIStateStore()
+    // 无基底：open 缺席（首次使用场景，读取端 !! 归一 false）
+    await store.saveRemoteConsoleState(
+      [{ hostId: 'h1', sessionId: 's1', title: 'web' }], [], true, false, false,
+    )
+    const bare = vi.mocked(uiStateApi.patch).mock.calls[0]![0] as AllState
+    expect(bare.local?.remoteConsole).toEqual({
+      tabs: [{ hostId: 'h1', sessionId: 's1', title: 'web' }],
+      groups: [],
+      sidebarCollapsed: false,
+    })
+
+    // 基底有 open（项目页曾开）：缺 open 子键由 NESTED_UISTATE_SUBFIELDS 从基底
+    // 回填——首页 overlay 开合回声不腐蚀 project 槽
+    mockServerData({ local: { remoteConsole: { open: true, tabs: [], groups: [] } } })
+    await store.loadState()
+    vi.mocked(uiStateApi.patch).mockClear()
+    await store.saveRemoteConsoleState(
+      [{ hostId: 'h1', sessionId: 's1', title: 'web' }], [], false, false, false,
+    )
+    const backfilled = vi.mocked(uiStateApi.patch).mock.calls[0]![0] as AllState
+    expect(backfilled.local?.remoteConsole).toEqual({
+      tabs: [{ hostId: 'h1', sessionId: 's1', title: 'web' }],
+      groups: [],
+      sidebarCollapsed: false,
+      open: true, // 从基底回填，project 槽零影响
+    })
+  })
+
   it('saveEditorMdModePreference 键级补丁：只动 editorPrefs 字段', async () => {
     mockServerData({})
     const store = useUIStateStore()
@@ -422,7 +562,7 @@ describe('uiStateStore 保存语义（脏键 diff / 防抖 / PATCH）', () => {
       instanceId: 'local',
       projectId: 'p1',
       layout: { sidePanelWidth: 460, bottomPanelHeight: 260, showSidePanel: true, showBottomPanel: false, sideView: 'files', bottomTab: 'git' },
-      editor: { openFiles: ['a.ts'], activeIndex: 0, scrollPositions: {}, splitOpen: false },
+      editor: { openFiles: ['a.ts'], activeIndex: 0, splitOpen: false },
       fileTree: { expandedDirs: [], selectedFile: '' },
       terminal: { activeTabId: '' },
       gitPanel: { collapsedSections: [], selectedBranch: '' },
@@ -481,7 +621,7 @@ describe('uiStateStore 保存语义（脏键 diff / 防抖 / PATCH）', () => {
       instanceId: 'local',
       projectId: 'p1',
       layout: { sidePanelWidth: 280, bottomPanelHeight: 260, showSidePanel: true, showBottomPanel: false, sideView: 'files', bottomTab: 'git' },
-      editor: { openFiles: [], activeIndex: -1, scrollPositions: {}, splitOpen: false },
+      editor: { openFiles: [], activeIndex: -1, splitOpen: false },
     }
     store.alignBaseline(initial as Parameters<typeof store.alignBaseline>[0])
 
@@ -595,5 +735,43 @@ describe('uiStateStore fileTree.pinnedDirs（钉选持久化）', () => {
     const payload = vi.mocked(uiStateApi.patch).mock.calls[0]![0] as AllState
     expect(Object.keys(payload.local!)).toEqual(['layout', 'fileTree'])
     expect(payload.local?.fileTree).toEqual({ expandedDirs: [], selectedFile: '', pinnedDirs: { p1: ['docs'] } })
+  })
+})
+
+// ============== 主区视图家族持久化名单（P-20261112-6-S3 口径收尾） ==============
+
+describe('主区视图持久化名单（应持久化键在位/临时态键不在位）', () => {
+  // S3 审计补齐后的定案名单：主区/浮层视图开态族全部落盘（远程 remoteConsole.open /
+  // dsh dshConsole.open / 笔记 notesView.open + 呈现态 sidebarOpen/mode / 分享管理
+  // shareManager.open），加上落点偏好（dashboard.landing）与写作现场（notesView.
+  // activeId）。回潮即红：新键漏登记注册表会在 satisfies 编译期先红，本名单钉
+  // 「登记的面正确」这一运行时事实。
+  it('应持久化键在位：视图开态族 + 笔记呈现态 + 活动篇 + 落点偏好', () => {
+    expect(NESTED_UISTATE_SUBFIELDS.remoteConsole).toEqual({ tabs: true, groups: true, open: true, sidebarCollapsed: true })
+    // P-20261114-4-S2 分场景槽：dshConsole/notesView 开态键族各加 homeOpen 子字段
+    // （open=project 槽 / homeOpen=home 槽）；remoteConsole 不分槽（open 唯一读端
+    // 在项目页 bootstrap，槽天然 project 槽——首页 overlay persistState 不落 open）
+    expect(NESTED_UISTATE_SUBFIELDS.dshConsole).toEqual({ open: true, homeOpen: true })
+    expect(NESTED_UISTATE_SUBFIELDS.shareManager).toEqual({ open: true })
+    expect(NESTED_UISTATE_SUBFIELDS.notesView).toEqual({ open: true, homeOpen: true, activeId: true, sidebarOpen: true, mode: true })
+    expect(NESTED_UISTATE_SUBFIELDS.dashboard).toEqual({ landing: true })
+  })
+
+  it('临时态键不在位：纯查看面显隐与最大化族不入注册表', () => {
+    // 仪表盘显隐不落盘（纯查看面，刷新回上次工作形态；落点偏好 landing 已在位
+    // 是替代面——注册表内 dashboard 只许有 landing，不许长出 open/visible 类子键）
+    expect(Object.keys(NESTED_UISTATE_SUBFIELDS.dashboard)).toEqual(['landing'])
+    // dsh 最大化（fixed 全屏覆盖）：临时聚焦态，刷新从常态开始——dshConsole 命名
+    // 空间只有 open/homeOpen 两槽位子键（P-20261114-4-S2 分场景槽），不得登记
+    // maximized
+    expect(Object.keys(NESTED_UISTATE_SUBFIELDS.dshConsole)).toEqual(['open', 'homeOpen'])
+    // 编辑器组/终端 pane 最大化（P-20261004-64）：uiState 无键——不存在任何
+    // editorGroupMaximized/terminalPaneMaximized 命名空间
+    expect(NESTED_UISTATE_SUBFIELDS).not.toHaveProperty('editorGroupMaximized')
+    expect(NESTED_UISTATE_SUBFIELDS).not.toHaveProperty('terminalPaneMaximized')
+    // 终端自身最大化同理不落盘（layout 内已登记的是底部面板两态，无 terminalMaximized）
+    expect(NESTED_UISTATE_SUBFIELDS.layout).not.toHaveProperty('terminalMaximized')
+    // 分享管理视图只有开态（无 sidebarCollapsed/maximized 类子键）
+    expect(Object.keys(NESTED_UISTATE_SUBFIELDS.shareManager)).toEqual(['open'])
   })
 })

@@ -87,6 +87,13 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   headers = await unlockHeaders()
   await purgeAllGlobal()
+  // uiState notesView 开态键兜底归位（P-20261112-6-S1）：本 spec 多个用例以笔记
+  // 在屏结束（用例内已收尾关闭），用例异常中断留下的开态残留会跨 spec/跨 run
+  // 恢复出首页 overlay 挡住 project-card 点击；命名空间浅合并只清本键（notes-view
+  // afterAll 同款机制）
+  await fetch(`${API_BASE}/api/ui-state`, {
+    method: 'PUT', headers, body: JSON.stringify({ local: { notesView: null } }),
+  })
   if (projId) {
     await fetch(`${API_BASE}/api/projects/${projId}`, { method: 'DELETE', headers })
   }
@@ -264,6 +271,12 @@ test('面板：单库无数据源切换；快捷新建 + Ctrl+S 保存命名 + C
   expect(first).toBeTruthy()
   await panel.locator(`[data-testid="notes-tab-${first!.id}"]`).click()
   await expect(editor).toHaveValue('# 全局随手记', { timeout: 8000 })
+
+  // 收尾关闭（P-20261112-6-S1：笔记开态落 uiState notesView.open——本用例以面板
+  // 在屏结束会把开态残留落盘，下一个用例 goto 首页即恢复出 overlay 挡住 project-card
+  // 点击；项目页关闭走头部 ×，不接 Esc）
+  await page.locator('[data-testid="notes-close"]').click()
+  await expect(page.locator('[data-testid="notes-view"]')).toBeHidden()
 })
 
 async function defaultNoteContent(): Promise<string | undefined> {
@@ -332,6 +345,10 @@ test('外部更新无扰换装（P-20261111-4 S2）：同内容零触碰；异�
   await panel.locator('[data-testid="notes-conflict-load"]').click() // 载入服务端版本
   await expect(panel.locator('[data-testid="notes-conflict"]')).toBeHidden({ timeout: 4000 })
   await expect(editor).toHaveValue('连续输入期间的外部写', { timeout: 8000 })
+
+  // 收尾关闭（P-20261112-6-S1 同前）：开态残留会挡住下一用例的首页 project-card 点击
+  await page.locator('[data-testid="notes-close"]').click()
+  await expect(page.locator('[data-testid="notes-view"]')).toBeHidden()
 })
 
 test('双窗互写可见性（P-20261111-4 S2）：B 窗写入 A 窗换装可见，A 窗回写 B 窗可见', async ({ page }) => {
@@ -347,6 +364,13 @@ test('双窗互写可见性（P-20261111-4 S2）：B 窗写入 A 窗换装可见
   await expect(editorA).toBeVisible({ timeout: 8000 })
   await editorA.fill('A 窗基线')
   await expect.poll(defaultNoteContent, { timeout: 8000 }).toBe('A 窗基线')
+
+  // B 窗全新加载前清开态键（P-20261112-6-S1）：A 窗 openNotesPanel 已把
+  // notesView.open=true 落盘——B 窗 goto 首页会恢复出 overlay 挡住项目卡点击；
+  // 两窗互见走 notes.updated 广播，与开态键无关，清键零语义影响
+  await fetch(`${API_BASE}/api/ui-state`, {
+    method: 'PUT', headers, body: JSON.stringify({ local: { notesView: null } }),
+  })
 
   // B 窗（同 context 新页 = 独立窗口 nonce；同库同数据）
   const pageB = await page.context().newPage()
@@ -369,5 +393,9 @@ test('双窗互写可见性（P-20261111-4 S2）：B 窗写入 A 窗换装可见
   await expect.poll(defaultNoteContent, { timeout: 8000 }).toBe('A 窗回写\n第二行')
   await expect(editorB).toHaveValue('A 窗回写\n第二行', { timeout: 8000 })
 
+  // 收尾关闭（P-20261112-6-S1 同前）：A 窗头部 × 关笔记再收 B 窗，防开态残留
+  // 跨用例/跨 spec 复活（B 窗关闭不写 notesView——collect 面不含该命名空间）
+  await page.locator('[data-testid="notes-close"]').click()
+  await expect(page.locator('[data-testid="notes-view"]')).toBeHidden()
   await pageB.close()
 })

@@ -41,7 +41,7 @@ SELinux 默认拒绝服务进程写 `/home`（保护家目录的策略，非 bug
 ```ini
 # /etc/systemd/system/codecombo.service
 [Unit]
-Description=Codecombo - Lightweight Coding Platform
+Description=Codecombo - self-hosted single-binary workbench (Git, terminals, AI agents, remote machines)
 After=network-online.target
 Wants=network-online.target
 
@@ -384,20 +384,20 @@ Windows 服务与 macOS launchd 形态的差异（`sc.exe query` 短暂 STOPPED 
 ### 6b. 重跑 install.sh（仅限脚本装布局）
 
 ```bash
-sudo -v && curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_HOST=<原值> CODECOMBO_PORT=<原值> sh
+sudo -v && p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_HOST=<原值> CODECOMBO_PORT=<原值> sh "$p"; rm -f "$p"
 ```
 
-- 原 `--host`/`--port` 读自 unit 的 `ExecStart` 行，环境变量必须放在管道
-  `sh` 一侧——写在 `curl` 前只对 curl 进程生效，`sh` 读不到，端口/绑定
-  回落默认 9999/127.0.0.1；
+- 原 `--host`/`--port` 读自 unit 的 `ExecStart` 行，环境变量必须前缀在
+  末段 `sh "$p"` 上（与旧管道形态「放在 sh 一侧」同语义）——写在 `curl`
+  前只对 curl 进程生效，`sh` 读不到，端口/绑定回落默认 9999/127.0.0.1；
 - 装时用 `CODECOMBO_DATA_DIR` 指定过数据目录的（unit 里有
   `Environment="CC_DATA_DIR=…"` 行），重跑须以同值带回
   `CODECOMBO_DATA_DIR=<原值>`——漏带则改写后的 unit 不再下发该变量，服务
   下次重启回落默认 `~/.codecombo`（数据仍在原目录，只是实例不再读它）；
   参数全表与并存第二套实例的注意事项见 README「可选参数」节；
-- 先 `sudo -v` 缓存提权凭据：`curl | sh` 下脚本无法交互输入密码，只认
-  免密 sudo（脚本内部写 `/etc/systemd/system` 需要它）；无可用凭据时脚本
-  跳过 unit 改写、只换盘上二进制；
+- 先 `sudo -v` 缓存提权凭据：脚本以 `sudo -n` 非交互探测提权，只认已
+  缓存/免密的 sudo（脚本内部写 `/etc/systemd/system` 需要它）；无可用凭据
+  时脚本跳过 unit 改写、只换盘上二进制；
 - 脚本以 `mv` 换包（rename 不碰运行中的旧 inode，服务在跑也不会 Text file
   busy），但旧进程仍是旧版本：提示「检测到正在运行的 Codecombo 实例——
   服务已注册但【未启动】」时，在跑的就是本服务则直接

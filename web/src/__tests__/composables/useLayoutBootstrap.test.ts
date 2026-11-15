@@ -43,9 +43,7 @@ function makeDeps() {
     openFileByPath: () => Promise.resolve(),
     openFilesCount: () => 0,
     setActiveFileIndex: () => {},
-    revealExpandedDirs: () => {},
     restoreGitPanel: () => {},
-    restoreTerminalTab: () => {},
   }
 }
 
@@ -256,5 +254,30 @@ describe('useLayoutBootstrap 布局恢复 sideView 归一', () => {
     const ok = restoreDeps('stream')
     await useLayoutBootstrap(ok.deps).bootstrap()
     expect(ok.sideView.value).toBe('stream')
+  })
+})
+
+// 树展开/终端 tab 恢复退役（P-20261114-2 审计定案）：两车道真源在 localStorage
+// 各自键控面（sc.fileTree.expanded.<pid> / sc.term.activeTabMap），FileTreeView/
+// TerminalView 挂载自恢复时序总在其后——uiState 侧恢复段收到的恒是 collect
+// 已退役的空值或历史遗留真值。此处钉住：legacy 记录即便携带真值，bootstrap
+// 也零异常且不触碰编辑器打开链（无恢复桥可触）——防「死恢复口」回潮
+describe('useLayoutBootstrap 已退役恢复段（树展开/终端 tab）', () => {
+  it('legacy 记录携带 fileTree.expandedDirs/terminal.activeTabId 真值时零异常跳过', async () => {
+    const deps = {
+      ...makeDeps(),
+      getInstanceState: () => Promise.resolve({
+        projectId: 'p1',
+        editor: { openFiles: ['a.ts'], activeIndex: 0 },
+        fileTree: { expandedDirs: ['src/', 'docs/'], selectedFile: 'src/a.ts' },
+        terminal: { activeTabId: 'sess-legacy' },
+      } as unknown as UIStateData),
+      hasProject: () => true,
+      currentProjectId: () => 'p1',
+      openFileByPath: vi.fn(),
+    }
+    await expect(useLayoutBootstrap(deps).bootstrap()).resolves.toBe(true)
+    // 主组文件恢复照常工作（未退役车道不受影响）
+    expect(deps.openFileByPath).toHaveBeenCalledWith('a.ts')
   })
 })

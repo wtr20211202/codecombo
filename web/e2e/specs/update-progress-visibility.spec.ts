@@ -359,14 +359,17 @@ test('长 changelog：收起态摘要不顶屏，展开限高内滚，「立即�
 test('更新内容 markdown 净化渲染与页内锚点切换（P-20261112-2 S1）', async ({ page }) => {
   await routeStatus(page, { status: 'idle', progress: 0, total: 0, version: '' })
   await page.route('**/api/updates/check*', async (route) => {
-    // 发布说明真实形态：中英文锚点行 + 小节标题；夹带一段危险 html 验证净化
+    // 发布说明真实形态（P-20261112-5 起 release.yml 模板同款）：ASCII 锚切换行
+    // + 显式 id 原生 HTML 小节标题（markdown 双井在 Release 页 slug 为空无锚
+    // id）；夹带一段危险 html 验证净化
     const changelog = [
-      '[中文](#中文) | [English](#english)',
+      '[English](#en) | [中文](#zh)',
       '<script>window.__xss = 1</script>',
-      '## 中文',
-      '- **加粗** 条目',
-      '## English',
+      '<h2 id="en">English</h2>',
       '- **bold** entry',
+      '---',
+      '<h2 id="zh">中文</h2>',
+      '- **加粗** 条目',
     ].join('\n\n')
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: { currentVersion: '0.0.1', latestVersion: '9.9.9', hasUpdate: true, changelog } }) })
   })
@@ -384,16 +387,17 @@ test('更新内容 markdown 净化渲染与页内锚点切换（P-20261112-2 S1�
   // 净化：脚本剥除、变量不落全局；加粗渲染为 strong，不再裸露标记
   await expect(md.locator('script')).toHaveCount(0)
   expect(await page.evaluate(() => (window as { __xss?: unknown }).__xss)).toBeUndefined()
-  await expect(md.locator('strong')).toHaveText(['加粗', 'bold'])
-  // heading 挂 slug id，锚点行渲染为页内链接
-  await expect(md.locator('h2#english')).toHaveText('English')
+  await expect(md.locator('strong')).toHaveText(['bold', '加粗'])
+  // 显式 id 原生 HTML 标题经 marked+DOMPurify 原样保留（id 原值、无
+  // user-content- 前缀），切换行渲染为 ASCII 页内链接
+  await expect(md.locator('h2#en')).toHaveText('English')
   const anchorHref = await md.locator('a', { hasText: 'English' }).first().getAttribute('href')
-  expect(anchorHref).toContain('#english')
+  expect(anchorHref).toBe('#en')
 
   // 点锚点：容器内平滑滚动到目标小节，hash 不进 SPA 地址栏（地址逐字不变）
   const urlBefore = page.url()
   await md.locator('a', { hasText: 'English' }).first().click()
-  await expect(md.locator('h2#english')).toBeInViewport()
+  await expect(md.locator('h2#en')).toBeInViewport()
   expect(page.url()).toBe(urlBefore)
   await expect(md).toBeVisible()
 })

@@ -19,7 +19,7 @@ describe('useLayoutState', () => {
 
   it('restoreState 返回持久化的状态', async () => {
     vi.mocked(uiStateApi.get).mockResolvedValue({
-      data: { local: { projectId: 'p1', editor: { openFiles: [], activeIndex: -1, scrollPositions: {} } } },
+      data: { local: { projectId: 'p1', editor: { openFiles: [], activeIndex: -1 } } },
     })
     const { restoreState } = useLayoutState(
       { openFiles: { value: [] } as any, activeFileIndex: { value: -1 } as any },
@@ -49,6 +49,19 @@ describe('useLayoutState', () => {
     const s = collectCurrentUIState()
     expect(s.editor.openFiles).toEqual(['a.ts', 'b.ts'])
     expect(s.editor.activeIndex).toBe(1)
+  })
+
+  it('collect 面不产 fileTree/terminal 键（P-20261114-2 审计退役：真源在 localStorage 键控面）', () => {
+    const panel = { sidePanelWidth: { value: 280 }, bottomPanelHeight: { value: 260 }, showSidePanel: { value: true }, showBottomPanel: { value: false }, sideView: { value: 'files' }, bottomTab: { value: 'terminal' }, commitLocation: { value: 'sidebar' }, bottomPanelMaximized: { value: false }, bottomPanelEditorMaximized: { value: false } } as any
+    const { collectCurrentUIState } = useLayoutState(
+      panel,
+      { openFiles: { value: [] } as any, activeFileIndex: { value: -1 } as any },
+    )
+    const s = collectCurrentUIState()
+    expect('fileTree' in s).toBe(false)
+    expect('terminal' in s).toBe(false)
+    // gitPanel 键保留（漏收集升格项的重接落点）：extra 未接线时仍产空值
+    expect(s.gitPanel).toEqual({ collapsedSections: [], selectedBranch: '' })
   })
 
   it('活跃标签是 untitled 草稿时持久化 activeIndex 为 -1（草稿不跨刷新）', () => {

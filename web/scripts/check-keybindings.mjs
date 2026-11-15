@@ -27,8 +27,9 @@
 //              addAction、改键重注册）——入 monaco 作用域（消费方同 addAction 族）；
 //              消费链锚点对账见 extractEditorKeymapConsumers
 //   notes     = stores/keymap.ts KEYMAP_ACTIONS domain:'notes' 条目（P-20261107-5
-//              笔记面板域：notesSave/notesCreate/notesRename，useNotesKeyboard
-//              document capture 消费、面板根节点包含判定）——独立作用域（焦点域）；
+//              笔记面板域：notesSave/notesCreate/notesRename，P-20261112-9-S2 扩
+//              notesNextTab/notesPrevTab，useNotesKeyboard document capture 消费、
+//              面板根节点包含判定）——独立作用域（焦点域）；
 //              消费链锚点对账见 extractNotesKeymapConsumers
 //   monaco   = editor.addAction({ keybindings: [monaco.KeyMod... | monaco.KeyCode...] })
 //              （全 src 扫描；历史提案写的 addCommand 已演进为 addAction，纯右键菜单项
@@ -293,11 +294,11 @@ function extractEditorKeymapConsumers() {
   need(/actionDescriptor\(\)/.test(inline), 'useEditorInlineEdit actionDescriptor（sc-ask.inline-edit 键位注册收敛编辑器域注册表）')
 }
 
-// ---- ③b notes-keymap：笔记面板域消费链对账（P-20261107-5） --------------------
+// ---- ③b notes-keymap：笔记面板域消费链对账（P-20261107-5，P-20261112-9-S2 扩）----
 //
-// notesSave/notesCreate/notesRename 三动作键位经 keymap notes 域注册表生效值消费
-//（useNotesKeyboard document capture + 面板根包含判定），此处对账消费链在位
-//（锚点漂移说明接线被改断）
+// notesSave/notesCreate/notesRename/notesNextTab/notesPrevTab 五动作键位经 keymap
+// notes 域注册表生效值消费（useNotesKeyboard document capture + 面板根包含判定），
+// 此处对账消费链在位（锚点漂移说明接线被改断）
 
 function extractNotesKeymapConsumers() {
   const host = read(path.join('views', 'notes', 'NotesPanel.vue'))
@@ -305,7 +306,7 @@ function extractNotesKeymapConsumers() {
   need(/useNotesKeyboard\(/.test(host), 'NotesPanel.vue useNotesKeyboard 接线（笔记面板域键位消费链）')
   const kb = read(path.join('composables', 'useNotesKeyboard.ts'))
   if (!kb) return
-  for (const id of ['notesSave', 'notesCreate', 'notesRename']) {
+  for (const id of ['notesSave', 'notesCreate', 'notesRename', 'notesNextTab', 'notesPrevTab']) {
     need(new RegExp(`combos\\.${id}`).test(kb), `useNotesKeyboard.ts ${id} 经 notesActionFor 读 keymap 生效值`)
   }
 }

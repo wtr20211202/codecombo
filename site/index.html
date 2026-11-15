@@ -12,7 +12,10 @@
     双语承载：全部文案以 <span data-lang-en> / <span data-lang-zh> 双份内联在
     HTML 里（无 JS 时显示英文 = SEO 默认语言），site.js 只切换 html 上的
     data-lang 并记忆选择。文案双维护纪律——各内容块头注「源=README §X，
-    改先改 README」。
+    改先改 README」（landing 现有块维持源=README 不变；使用向长文的事实源在
+    site/guide/ 文档分页族——guide 页头注已反向标注本分层。例外：典型场景卡
+    的叙事事实源自 P-20261112-12-S1 起在 guide 页——README 场景叙事已收敛为
+    摘要+详情链接，见场景块头注）。
 
     注意截图路径基准：docs/img 是唯一截图事实源，本页只引用不复制。源码态
     （site/index.html）用 ../docs/img/*（相对路径在源码仓内可达）；导出时
@@ -50,6 +53,11 @@
         <a href="#quickstart" data-lang-en>Quickstart</a><a href="#quickstart" data-lang-zh>快速上手</a>
         <a href="#features" data-lang-en>Features</a><a href="#features" data-lang-zh>功能</a>
         <a href="#scenarios" data-lang-en>Scenarios</a><a href="#scenarios" data-lang-zh>场景</a>
+        <!-- Docs 入口指入文档分页族（P-20261112-10-S3）：相对路径 guide/getting-started.html
+             在源码态（site/ 根）与导出态（发布树 docs/ 根，guide 页同落 docs/guide/）两态皆通；
+             ≤640px 顶导航锚链接按既有响应式规则收起（site.css .header-nav > a 隐藏行），
+             文档入口由页尾 Docs 链接承接（footer-nav 移动端不隐藏）。 -->
+        <a href="guide/getting-started.html" data-lang-en>Docs</a><a href="guide/getting-started.html" data-lang-zh>文档</a>
         <span class="lang-toggle" role="group" aria-label="Language">
           <button type="button" class="lang-btn" data-lang-set="en" aria-pressed="true">EN</button>
           <button type="button" class="lang-btn" data-lang-set="zh" aria-pressed="false">中文</button>
@@ -158,26 +166,26 @@
             </p>
             <div class="cmd-lines">
               <div class="cmd-row">
-                <code class="cmd-text">curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh</code><span class="qs-cmt"># Linux / macOS — installs + service</span>
-                <button class="copy-btn" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+                <code class="cmd-text">p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" &amp;&amp; sh "$p"; rm -f "$p"</code><span class="qs-cmt"># Linux / macOS — installs + service</span>
+                <button class="copy-btn" type="button" data-copy="p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o &quot;$p&quot; &amp;&amp; sh &quot;$p&quot;; rm -f &quot;$p&quot;" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
               </div>
               <div class="cmd-row">
-                <code class="cmd-text">iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))</code><span class="qs-cmt"># Windows PowerShell</span>
-                <button class="copy-btn" type="button" data-copy="iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+                <code class="cmd-text">$p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue</code><span class="qs-cmt"># Windows PowerShell — downloads to a temp file, verifies, runs</span>
+                <button class="copy-btn" type="button" data-copy="$p=&quot;$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1&quot;;[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$p&quot;;Remove-Item &quot;$p&quot; -ErrorAction SilentlyContinue" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
               </div>
               <div class="cmd-row">
-                <code class="cmd-text">npm i -g codecombo</code><span class="qs-cmt"># or via npm (Node.js 18+)</span>
-                <button class="copy-btn" type="button" data-copy="npm i -g codecombo" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+                <code class="cmd-text">npm i -g codecombo@next</code><span class="qs-cmt"># or via npm (Node.js 18+)</span>
+                <button class="copy-btn" type="button" data-copy="npm i -g codecombo@next" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
               </div>
               <!-- 参数化样例（P-20261109-16，源=README §Optional parameters，改先改 README）：
-                   环境变量须在管道 sh 一侧 / PowerShell 在 iex 前 $env: 赋值；全表与并存注意事项见 README -->
+                   环境变量须前缀在末段 sh "$p" 上 / PowerShell 在落盘一行式前 $env: 赋值（子进程继承）；全表与并存注意事项见 README -->
               <div class="cmd-row">
-                <code class="cmd-text">curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test sh</code><span class="qs-cmt" data-lang-en># options: port + data dir</span><span class="qs-cmt" data-lang-zh># 可选：端口 + 数据目录</span>
-                <button class="copy-btn" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test sh" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+                <code class="cmd-text">p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" &amp;&amp; CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test sh "$p"; rm -f "$p"</code><span class="qs-cmt" data-lang-en># options: port + data dir</span><span class="qs-cmt" data-lang-zh># 可选：端口 + 数据目录</span>
+                <button class="copy-btn" type="button" data-copy="p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o &quot;$p&quot; &amp;&amp; CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test sh &quot;$p&quot;; rm -f &quot;$p&quot;" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
               </div>
               <div class="cmd-row">
-                <code class="cmd-text">$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))</code><span class="qs-cmt" data-lang-en># same on Windows</span><span class="qs-cmt" data-lang-zh># Windows 同款</span>
-                <button class="copy-btn" type="button" data-copy="$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR=&quot;$HOME\.codecombo-test&quot;; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1'))" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+                <code class="cmd-text">$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; $p="$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1";[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File "$p";Remove-Item "$p" -ErrorAction SilentlyContinue</code><span class="qs-cmt" data-lang-en># same on Windows</span><span class="qs-cmt" data-lang-zh># Windows 同款</span>
+                <button class="copy-btn" type="button" data-copy="$env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR=&quot;$HOME\.codecombo-test&quot;; $p=&quot;$env:TEMP\codecombo-install-$([guid]::NewGuid()).ps1&quot;;[Net.ServicePointManager]::SecurityProtocol='Tls12';(New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.ps1',$p);powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$p&quot;;Remove-Item &quot;$p&quot; -ErrorAction SilentlyContinue" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
               </div>
             </div>
           </li>
@@ -295,7 +303,11 @@
       </div>
     </section>
 
-    <!-- ============ 典型场景三段（文案源=README.md §Highlights *Typical scenario* 与 §Multi-instance sync，改先改 README） ============ -->
+    <!-- ============ 典型场景三段（P-20261112-12-S1 起三处叙事源分层定案：本卡=营销摘要，
+         断电恢复/一键分享两段的长文事实源=site/guide/getting-started.html
+         #restart-restore 与 #share-notes——README Highlights 的 *Typical scenario*
+         斜体段已收敛为摘要+详情链接、不再承载场景叙事；fleet 段源=README
+         §Multi-instance sync 摘要。改长文先改 guide 页，再同步本卡摘要） ============ -->
     <section class="section" id="scenarios">
       <div class="wrap">
         <h2><span data-lang-en>Typical scenarios</span><span data-lang-zh>典型场景</span></h2>
@@ -344,7 +356,10 @@
         <a href="https://github.com/wtr20211202/codecombo/blob/main/LICENSE" target="_blank" rel="noopener">
           <span data-lang-en>License (Apache-2.0)</span><span data-lang-zh>许可证（Apache-2.0）</span>
         </a>
-        <a href="https://github.com/wtr20211202/codecombo/tree/main/docs" target="_blank" rel="noopener">
+        <!-- Docs 改指站内文档分页族（P-20261112-10-S3，原指 GitHub 仓库 docs/ 树——
+             该树在发布仓即站点文件列表本身，GitHub 文档入口仍可从 guide 页侧栏
+             Elsewhere 到达；标签零新增，相对路径两态皆通同顶导航注记） -->
+        <a href="guide/getting-started.html">
           <span data-lang-en>Docs</span><span data-lang-zh>文档</span>
         </a>
         <a href="https://github.com/wtr20211202/codecombo/blob/main/SECURITY.md" target="_blank" rel="noopener">

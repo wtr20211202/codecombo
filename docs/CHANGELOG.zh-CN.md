@@ -6,6 +6,51 @@
 
 ## [Unreleased]
 
+## [0.0.1-beta.8] - 2026-11-15
+
+### 新增
+
+- **笔记标签体系** —— 编辑器内打标签（chip 行+补全候选、上限 8、与内容同窗
+  合并进同一防抖保存），服务端按标签过滤笔记库（与侧栏搜索 AND 叠加），
+  侧栏列表行内标签徽记。
+- **工作面面板按场景记忆** —— 首页与项目页对 notes/终端/分享/仪表盘面板
+  各自独立记忆：进场景先于宿主挂载恢复本场景布局（无闪现），首页开着的
+  工作面不再连带改变项目页的面板状态。
+- **npm 安装形态在更新面板被识别** —— 更新检查/状态响应携带 `npmManaged`
+  旗标；版本面板把更新按钮替换为 npm 指引块+安装命令一键复制；getting-started
+  页注明该形态下应用内更新器自动让位。
+- **一键安装脚本 macOS/Windows 双端加固** —— 一行命令改为「下载到临时文件
+  再执行」（不再管道直灌 `sh`/`iex`），脚本末行哨兵自检：被截断或代理改写的
+  下载拒绝执行并指向 npm 渠道。macOS `sh` 误报修复（POSIX 花括号收口）、
+  Windows 老 .NET TLS pin，外加两个内容门禁保障脚本 ASCII 纯净与哨兵同步。
+- **官网文档分页** —— getting-started 与 FAQ 两页（零框架、双语、内联进
+  站点），与 landing 双向导航。
+
+### 变更
+
+- **`npm i -g codecombo` 重新跟随最新发布** —— 发布工作流在每次 0.x 发布时
+  前移 `latest` dist-tag（此前冻结在 beta.2）；README 与官网命令面同步
+  过渡口径。
+- **定位语统一** —— CLI `-h` 头行、systemd unit 描述、Windows 服务名与
+  首页副标题共用一套口径（self-hosted single-binary workbench）。
+- **README 重组** —— 十分钟「First steps」回路、扩充 What's inside 表、
+  模块 Highlights 精简、Docs 节双入口（官网用户文档+仓内架构文档）。
+- **Release 页双语节改显式锚点 id**。
+- **笔记 tab 打磨** —— tab 条/侧栏空白区双击新建、tab 双击重命名、键盘循环
+  切 tab；笔记侧栏宽度可调（180–400 px）。
+
+### 修复
+
+- **分享管理器** —— 快照陈旧徽标有了真实生命周期（mtime 惰性对比+总线订阅）
+  与快捷刷新；批量定格补服务端约束句；重发弹层显式模式引导（批量行禁切
+  模式）。
+- **编辑器 tab** —— 拖拽光标语义收敛：tab 上不再 grab 光标、关闭按钮不再
+  起拖。
+- **笔记在首页往返中保持** —— 回首页再进项目不再强制收起笔记工作面
+  （显式 Esc 关闭仍被记住）。
+- **UI 状态卫生** —— 退役两个从未接线的持久化僵尸键；面板状态恢复语义由
+  代码级注册表+静态门禁+e2e 矩阵三重钉住。
+
 ## [0.0.1-beta.7] - 2026-11-12
 
 ### 新增
@@ -256,7 +301,8 @@
 - 文档全面刷新：快速开始前置、完整工具清单（What's inside）、典型场景
   走查、开放贡献指南（欢迎 DCO 签名的 PR）。
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.7...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.8...HEAD
+[0.0.1-beta.8]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.8
 [0.0.1-beta.7]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.7
 [0.0.1-beta.6]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.6
 [0.0.1-beta.5]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.5

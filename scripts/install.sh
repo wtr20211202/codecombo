@@ -1,11 +1,16 @@
 #!/bin/sh
 # install.sh —— Codecombo 一键安装 + 服务化（Linux/macOS）。
 #
-# 一键形态（终端执行，可整条丢给 AI 助手代跑）：
-#   curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | sh
-# 带参数（见下「环境变量」；变量须放在管道 sh 一侧——写在 curl 前只对 curl
-# 生效，脚本读不到、回落默认值）：
-#   curl -fsSL https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh | CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test sh
+# 一键形态（落盘执行，可整条丢给 AI 助手代跑）：
+#   p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && sh "$p"; rm -f "$p"
+# 带参数（见下「环境变量」；变量须前缀在末段 sh "$p" 上——写在 curl 前只对
+# curl 生效，脚本读不到、回落默认值）：
+#   p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && CODECOMBO_PORT=11000 CODECOMBO_DATA_DIR=$HOME/.codecombo-test sh "$p"; rm -f "$p"
+# 为什么落盘不直灌管道：传输中断/代理改写会把不完整脚本丢给 sh 执行（截断
+# 多报 unexpected EOF，改写可致任意行为），落盘后入口有尾行哨兵自检（见下
+# 「哨兵自检」）拦不完整脚本；mktemp 临时名替代固定 /tmp 名（消除碰撞/
+# 符号链接面，且自带清理）；--retry 3 兼容底线 curl 7.12+（--retry-all-errors
+# 需 curl ≥7.71，老系统遇未知选项直接硬失败，不进默认命令——README 有注记）
 #
 # 行为：探测平台 → 版本决策（正式版优先，无则最新 rc，再无最新 beta）→
 # 从 GitHub Releases 下载对应二进制 →
@@ -67,7 +72,38 @@ if [ "$(id -u)" = "0" ] && [ "$REAL_USER" = "root" ]; then
   echo "ERROR: do not run this installer as root." >&2
   echo "  Create a normal user first, then re-run as that user:" >&2
   echo "    useradd -m -s /bin/bash codecombo && su - codecombo" >&2
-  echo "    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sh" >&2
+  # printf 而非 echo：命令模板含引号/反斜杠语义，echo 在 dash 下会吃转义序列
+  printf '    p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/%s/main/scripts/install.sh -o "$p" && sh "$p"; rm -f "$p"\n' "$REPO" >&2
+  exit 1
+fi
+
+# ---------- 哨兵自检：脚本自身完整性（S2 落盘形态硬化） ----------
+# 一键形态已改「curl 落盘 → sh 执行」（见头注）：本文件最后一行是哨兵注释，
+# 执行前回读校验——传输截断/代理改写丢尾即拒装（fail-closed），不再把不完整
+# 脚本直接跑起来（浅截断保留哨兵前的可解析正文时由本检查拦；深截断由 sh 解
+# 析器 unexpected EOF 拦）。放在 set -eu/变量定义/root 防线之后、任何网络与
+# 安装动作之前
+case "$0" in
+  */*) SELF="$0" ;;    # 落盘形态（mktemp 一行式、./install.sh、绝对路径）
+  sh)  SELF="" ;;      # 管道形态（curl … | sh）：$0 即 sh，stdin 已被消费读不回
+  *)   SELF="./$0" ;;  # sh install.sh 裸名形态：按 cwd 相对路径回读同一文件
+esac
+if [ -n "$SELF" ] && [ -f "$SELF" ]; then
+  # tail -n 5：哨兵须在文件尾（窗口内才算完整——内容被追加时哨兵仍在窗内，
+  # 被截断时哨兵必丢）；tail/grep 任一失效都走 else——环境异常时宁可不装
+  if tail -n 5 "$SELF" | grep -q '__CODECOMBO_INSTALL_SENTINEL__'; then
+    : # 哨兵在位——脚本完整，继续安装
+  else
+    echo "ERROR: 安装脚本下载不完整——网络中断或代理改写（尾部哨兵缺失）。" >&2
+    echo "  请重试下载安装，或改用 npm 渠道：npm i -g codecombo@next" >&2
+    exit 1
+  fi
+else
+  # 管道形态（$0=sh）与进程替换/管道 fd（/dev/fd/N 非常规文件）无法回读校验
+  # ——不误报「下载不完整」，提示即拒绝：无法校验完整性的执行形态不装
+  echo "ERROR: 本脚本正以管道形态执行（curl … | sh），无法校验下载完整性。" >&2
+  echo "  请改用落盘一行式命令（见 README / 官网）：" >&2
+  printf '  p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com/%s/main/scripts/install.sh -o "$p" && sh "$p"; rm -f "$p"\n' "$REPO" >&2
   exit 1
 fi
 
@@ -133,10 +169,16 @@ if [ -z "$TAG" ]; then
   echo "仓库中没有任何可用 release（stable/rc/beta 均无）" >&2
   exit 1
 fi
+# 本文件 $VAR 一律 ${VAR} 花括号收口（尤其紧邻全角字符处）：macOS /bin/sh（bash
+# 3.2，2007 年）解析 $VAR 后紧跟多字节字符时把首字节吞进变量名（实测报
+# TAG? unbound——0xEF 残 ?），set -eu 即中止安装；${} 的 } 确定性终结名字解析，
+# POSIX 各 sh（dash/busybox ash/bash 各版）全兼容、零行为变化。门禁
+# scripts/check-install-sh.sh（挂 wsl-verify quick 首步）防回潮——代码行命中
+# 即红，注释行豁免（注释不经变量解析，无此雷）
 case "$KIND" in
-  stable) say "版本：$TAG（最新正式版）" ;;
-  rc) say "版本：$TAG（最新 rc——尚无正式版）" ;;
-  beta) say "版本：$TAG（最新 beta——尚无正式版与 rc）" ;;
+  stable) say "版本：${TAG}（最新正式版）" ;;
+  rc) say "版本：${TAG}（最新 rc——尚无正式版）" ;;
+  beta) say "版本：${TAG}（最新 beta——尚无正式版与 rc）" ;;
 esac
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
@@ -145,24 +187,24 @@ OS=$(uname -s)
 case "$OS" in
   Linux) OS=linux ;;
   Darwin) OS=darwin ;;
-  *) echo "不支持的系统：$OS（Windows 请用 install.ps1）" >&2; exit 1 ;;
+  *) echo "不支持的系统：${OS}（Windows 请用 install.ps1）" >&2; exit 1 ;;
 esac
 ARCH=$(uname -m)
 case "$ARCH" in
   x86_64|amd64) ARCH=amd64 ;;
   aarch64|arm64) ARCH=arm64 ;;
-  *) echo "不支持的架构：$ARCH（amd64/arm64）" >&2; exit 1 ;;
+  *) echo "不支持的架构：${ARCH}（amd64/arm64）" >&2; exit 1 ;;
 esac
 ASSET="codecombo-${OS}-${ARCH}"
 say "平台：${OS}/${ARCH} → ${ASSET}"
 if [ -n "${CODECOMBO_DATA_DIR:-}" ]; then
-  say "数据目录：$DATA_DIR（CODECOMBO_DATA_DIR；首启由应用自建，安装器不写入）"
+  say "数据目录：${DATA_DIR}（CODECOMBO_DATA_DIR；首启由应用自建，安装器不写入）"
 fi
 
 # ---------- 下载（指定版本资产 + 校验和清单） ----------
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-say "下载 $BASE/$ASSET（约 50MB，进度条见下；慢网络需数分钟）"
+say "下载 $BASE/${ASSET}（约 50MB，进度条见下；慢网络需数分钟）"
 # -# 进度条（静默模式像卡死）；--connect-timeout/--max-time 防死连接挂起
 # -C - 断点续传（BASE 固定 GitHub Releases 下载端点，支持 Range）：有续传条件
 # 时按已收字节数发 Range 接着下，慢网大包不再每次重试从零重来。curl 行为随版
@@ -214,7 +256,7 @@ fi
 SERVICE_unit() {
   cat <<UNIT
 [Unit]
-Description=Codecombo - Lightweight Coding Platform
+Description=Codecombo - self-hosted single-binary workbench (Git, terminals, AI agents, remote machines)
 After=network.target
 
 [Service]
@@ -233,7 +275,7 @@ UNIT
 
 if [ "$OS" = linux ] && command -v systemctl >/dev/null 2>&1; then
   if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    say "注册 systemd 系统服务 codecombo.service（端口 $PORT）"
+    say "注册 systemd 系统服务 codecombo.service（端口 ${PORT}）"
     SERVICE_unit | sudo tee /etc/systemd/system/codecombo.service >/dev/null
     sudo systemctl daemon-reload
     # 自更新/页面重启配套（与远程部署器 server/deploy/codecombo.go 同款规则）：
@@ -281,7 +323,7 @@ PKLA
       sudo systemctl enable --now codecombo.service
       say "服务已启动：systemctl status codecombo"
     fi
-    say "访问 http://localhost:$PORT（首启设置锁密码）"
+    say "访问 http://localhost:${PORT}（首启设置锁密码）"
     exit 0
   fi
   say "无免密 sudo——跳过系统服务，给出手动启动命令（不注册系统服务，后台守护运行；或重跑前先 sudo -v）"
@@ -325,7 +367,7 @@ PLIST
   launchctl unload "$PLIST" 2>/dev/null || true
   launchctl load "$PLIST"
   say "服务已启动：launchctl list | grep codecombo"
-  say "访问 http://localhost:$PORT（首启设置锁密码）"
+  say "访问 http://localhost:${PORT}（首启设置锁密码）"
   exit 0
 fi
 
@@ -338,6 +380,10 @@ START_ARGS=""
 if [ -n "${CODECOMBO_PORT:-}" ]; then START_ARGS="$START_ARGS --port $PORT"; fi
 if [ -n "${CODECOMBO_HOST:-}" ]; then START_ARGS="$START_ARGS --host $BIND_HOST"; fi
 if [ -n "${CODECOMBO_DATA_DIR:-}" ]; then START_ARGS="$START_ARGS --data-dir \"$DATA_DIR\""; fi
-say "手动启动：$BIN start$START_ARGS（不注册系统服务，后台守护运行；排障看实时报错加 --serve 换前台形态）"
-say "访问 http://localhost:$PORT（首启设置锁密码）"
+say "手动启动：$BIN start${START_ARGS}（不注册系统服务，后台守护运行；排障看实时报错加 --serve 换前台形态）"
+say "访问 http://localhost:${PORT}（首启设置锁密码）"
 say "更新方式：应用内「检查更新」（GitHub 源，失败自动回滚）"
+# 落盘完整性哨兵（须始终为本文件最后一行）：入口「哨兵自检」回读文件尾判定
+# 脚本是否完整——后续维护在本行之后不得再追加内容；纯 ASCII 大写下划线注释
+# 行、无 CJK 邻接变量，不触发 check-install-sh.sh 的扫描
+# __CODECOMBO_INSTALL_SENTINEL__

@@ -116,9 +116,9 @@ const groups = computed<ShortcutGroup[]>(() => [
       { keys: keysOf('mdModeCycle'), scope: 'global', desc: t('shortcuts.mdModeCycle') },
     ],
   },
-  // 笔记面板组（P-20261107-5）：notes 域三键（keymap 注册表动态行，改绑跟随）——
-  // 焦点域 = 事件 target 在笔记面板根节点内（useNotesKeyboard 包含判定），
-  // 面板外按键零影响（同编辑器/终端焦点域口径）
+  // 笔记面板组（P-20261107-5，P-20261112-9-S2 扩 tab 循环）：notes 域键（keymap
+  // 注册表动态行，改绑跟随）——焦点域 = 事件 target 在笔记面板根节点内
+  //（useNotesKeyboard 包含判定），面板外按键零影响（同编辑器/终端焦点域口径）
   {
     title: t('shortcuts.groupNotes'),
     items: [
@@ -126,6 +126,10 @@ const groups = computed<ShortcutGroup[]>(() => [
       { keys: keysOf('notesSave'), scope: 'notes', desc: t('shortcuts.notesSave') },
       { keys: keysOf('notesCreate'), scope: 'notes', desc: t('shortcuts.notesCreate') },
       { keys: keysOf('notesRename'), scope: 'notes', desc: t('shortcuts.notesRename') },
+      // 笔记 tab 键盘循环（P-20261112-9-S2）：与全局 navBack/navForward 同默认
+      // ctrl+alt+←/→ 是焦点域分层共存（面板内切篇优先，面板外编辑器导航照常）
+      { keys: keysOf('notesNextTab'), scope: 'notes', desc: t('shortcuts.notesNextTab') },
+      { keys: keysOf('notesPrevTab'), scope: 'notes', desc: t('shortcuts.notesPrevTab') },
     ],
   },
   {
@@ -187,6 +191,9 @@ const groups = computed<ShortcutGroup[]>(() => [
       { trigger: [t('shortcuts.mouseTriggerMiddle')], scope: 'editor', desc: t('shortcuts.mouseMiddleCloseEditorTab') },
       // 双击签钉选（EditorGroupPane .editor-tab @dblclick → togglePin）
       { trigger: [t('shortcuts.mouseTriggerDblclick')], scope: 'editor', desc: t('shortcuts.mouseDblclickPinTab') },
+      // 双击笔记页签重命名（NotesPanel.vue .np-tab @dblclick → renameNote，
+      // P-20261112-9-S2——tab 条高频扫读面的重命名路径，侧栏行内按钮同链）
+      { trigger: [t('shortcuts.mouseTriggerDblclick')], scope: 'notes', desc: t('shortcuts.mouseDblclickRenameNote') },
       // 面包屑段点击同级下拉（Breadcrumb toggleSiblings，非末段目录段，P-20261002-128）
       { trigger: [t('shortcuts.mouseTriggerClick')], scope: 'editor', desc: t('shortcuts.mouseCrumbSiblings') },
       // 中键关终端签（TerminalTabbar onTabAux → requestClose）

@@ -28,11 +28,11 @@ func newGlobalNotesTestStore(t *testing.T) store.MultiNotesStore {
 func TestGlobalNotes_ScopeIsolation(t *testing.T) {
 	r := newGlobalNotesTestStore(t)
 
-	g, err := r.Create(store.GlobalNotesScope, "全局备忘", "global content")
+	g, err := r.Create(store.GlobalNotesScope, "全局备忘", "global content", nil)
 	if err != nil {
 		t.Fatalf("Create global: %v", err)
 	}
-	p, err := r.Create("p1", "项目交接", "project content")
+	p, err := r.Create("p1", "项目交接", "project content", nil)
 	if err != nil {
 		t.Fatalf("Create project: %v", err)
 	}
@@ -59,21 +59,21 @@ func TestGlobalNotes_ScopeIsolation(t *testing.T) {
 func TestGlobalNotes_Limit100(t *testing.T) {
 	r := newGlobalNotesTestStore(t)
 	for i := 0; i < store.NotesMaxGlobal; i++ {
-		if _, err := r.Create(store.GlobalNotesScope, "", "c"); err != nil {
+		if _, err := r.Create(store.GlobalNotesScope, "", "c", nil); err != nil {
 			t.Fatalf("seed global #%d: %v", i, err)
 		}
 	}
-	if _, err := r.Create(store.GlobalNotesScope, "", "overflow"); err != store.ErrNotesGlobalLimitReached {
+	if _, err := r.Create(store.GlobalNotesScope, "", "overflow", nil); err != store.ErrNotesGlobalLimitReached {
 		t.Errorf("expected ErrNotesGlobalLimitReached, got %v", err)
 	}
 	// 其他作用域计数独立（只扫本作用域前缀）
-	if _, err := r.Create("p1", "", "fine"); err != nil {
+	if _, err := r.Create("p1", "", "fine", nil); err != nil {
 		t.Errorf("project create after global limit: %v", err)
 	}
 	// 软删篇计入额度（同项目档口径），恢复后额度不释放
 	first, _ := r.List(store.GlobalNotesScope)
 	_ = r.SoftDelete(store.GlobalNotesScope, first[0].ID, "human")
-	if _, err := r.Create(store.GlobalNotesScope, "", "still full"); err != store.ErrNotesGlobalLimitReached {
+	if _, err := r.Create(store.GlobalNotesScope, "", "still full", nil); err != store.ErrNotesGlobalLimitReached {
 		t.Errorf("trashed note must count toward limit, got %v", err)
 	}
 }
@@ -83,9 +83,9 @@ func TestGlobalNotes_Limit100(t *testing.T) {
 // 只指活篇）
 func TestGlobalNotes_TrashPurgePipeline(t *testing.T) {
 	r := newGlobalNotesTestStore(t)
-	g1, _ := r.Create(store.GlobalNotesScope, "将清", "old trashed")
+	g1, _ := r.Create(store.GlobalNotesScope, "将清", "old trashed", nil)
 	_ = r.SoftDelete(store.GlobalNotesScope, g1.ID, "human")
-	g2, _ := r.Create(store.GlobalNotesScope, "活篇", "live stays")
+	g2, _ := r.Create(store.GlobalNotesScope, "活篇", "live stays", nil)
 
 	removed, err := r.PurgeDeletedBefore(time.Now().Add(store.NotesTrashRetention + time.Hour))
 	if err != nil {

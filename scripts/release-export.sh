@@ -177,6 +177,12 @@ NODE
 #    以 ../docs/img/* 引用截图（docs/img 唯一事实源，只引用不复制）；落到发布
 #    树 docs/index.html 后该相对路径失效（Pages 站点根 = docs/），故改写为
 #    img/*——发布树里 docs/img/ 原样在场（导出白名单自动带上），一次改写即通。
+#    子目录页 site/guide/*.html（P-20261112-10 文档分页族）截图引用比 landing
+#    深一层（../../docs/img/*）：同一改写正则按尾段 ../docs/img/ 命中，产出
+#    ../img/*——恰为发布树 docs/guide/ 页的正确相对路径（2026-11-12 导出树
+#    逐引用解析实测零断链，S2 定案：正则零改动沿用）。单层正则靠尾段覆盖两层
+#    引用，将来若新增三层引用（../../../docs/img/*）尾段命中同样成立（产出
+#    ../../img/*），层级无关；改写块动刀前先按本注记重跑导出逐引用解析。
 #    冲突护栏：docs/index.html 与 docs/assets/ 是 site 专属落位——内部文档
 #    将来若新增同名路径会静默覆盖官网，先炸出来。
 if [ ! -f "$DEST_ABS/site/index.html" ]; then
@@ -206,7 +212,8 @@ walk(root);
 let changed = 0;
 for (const f of files) {
   const src = fs.readFileSync(f, 'utf8');
-  // 源码态 ../docs/img/* → 发布树 docs/ 根态 img/*
+  // 源码态 ../docs/img/* → 发布树 docs/ 根态 img/*；子目录页 ../../docs/img/*
+  // 经尾段命中产出 ../img/*（guide/ 分页族两层引用，见上方第 3 步注记）
   const out = src.replace(/\.\.\/docs\/img\//g, 'img/');
   if (out !== src) {
     fs.writeFileSync(f, out);
@@ -230,7 +237,9 @@ done
 for must in main.go go.mod go.sum LICENSE NOTICE README.md CONTRIBUTING.md SECURITY.md CHANGELOG.md \
             build.sh build.bat .gitignore .golangci.yml \
             site/index.html site/assets/site.css site/assets/site.js site/assets/og-image.png \
+            site/guide/getting-started.html site/guide/faq.html \
             docs/index.html docs/assets/site.css docs/img/project-editor.png \
+            docs/guide/getting-started.html docs/guide/faq.html \
             docs/whatsnew.md docs/EXTENSION_POINTS.md docs/README.zh-CN.md docs/adr/README.md \
             server/api/tools/dsh.go server/share/assets/xterm.js web/public/fonts/LICENSE-JetBrainsMono.txt \
             web/package.json web/package-lock.json scripts/e2e-seed.sh scripts/check-event-names.mjs \

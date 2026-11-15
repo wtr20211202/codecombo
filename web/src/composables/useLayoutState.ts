@@ -40,11 +40,16 @@ export function useLayoutState(
   const uiStateStore = useUIStateStore()
   const projectStore = useProjectStore()
 
-  /** 收集当前完整的 UI 状态快照 */
+  /** 收集当前完整的 UI 状态快照。
+   *  extra 收集面（P-20261114-2 审计收窄）：仅保留 gitPanelCollapsed/gitPanelBranch
+   *  两键——fileTreeExpanded/terminalActiveTab 自 init commit 起从未有任何调用方
+   *  接线（考古 git show 832a7b31 确认），对应树展开/终端 tab 真源早已各自迁移
+   *  localStorage 键控面（sc.fileTree.expanded.<pid> / sc.term.activeTabMap），
+   *  传递恒空值只是给 uiState 写已迁移车道的死副本，故从 collect 面退役
+   *  （详见 docs/ui-state-audit-20261114.md）。gitPanel 两键同样至今无接线
+   *  （恒空），保留类型位作为漏收集升格项的重接落点 */
   function collectCurrentUIState(
     extra?: {
-      fileTreeExpanded?: string[]
-      terminalActiveTab?: string
       gitPanelCollapsed?: string[]
       gitPanelBranch?: string
     },
@@ -72,7 +77,8 @@ export function useLayoutState(
       editor: {
         openFiles: persistList.map(f => f.path),
         activeIndex: restoredActive,
-        scrollPositions: {},
+        // scrollPositions 写面已随字段退役删除（P-20261114-2-S2 裁决：Monaco
+        // 滚动记忆从未实现，恒写 {} 属死写面；见 uiState.ts editor 字段墓碑注）
         splitOpen: editorState.splitOpen?.value ?? false,
         splitFiles,
         splitActiveFile,
@@ -81,10 +87,11 @@ export function useLayoutState(
         // 关屏/重开后旧记录被新零值覆盖（幂等）
         splitDirection: editorState.splitDirection?.value ?? 'horizontal',
       },
-      fileTree: {
-        expandedDirs: extra?.fileTreeExpanded || [],
-        selectedFile: '',
-      },
+      // fileTree/terminal 命名空间不进 collect 面（P-20261114-2 审计退役）：
+      // 树展开真源在 localStorage 按项目键（FileTreeView watch 回写）、终端 tab
+      // 真源在 sc.term.activeTabMap——此处恒写空值只会让 auto-save 持续维护两份
+      // 已迁移车道的死副本；fileTree.pinnedDirs 由 saveFileTreePinnedDirs 独立
+      // 键级写端承载，注册表 backfill 兜底不受本收窄影响
       layout: {
         sidePanelWidth: panelState.sidePanelWidth.value,
         bottomPanelHeight: panelState.bottomPanelHeight.value,
@@ -95,9 +102,6 @@ export function useLayoutState(
         commitLocation: panelState.commitLocation.value,
         bottomPanelMaximized: panelState.bottomPanelMaximized.value,
         bottomPanelEditorMaximized: panelState.bottomPanelEditorMaximized.value,
-      },
-      terminal: {
-        activeTabId: extra?.terminalActiveTab || '',
       },
       gitPanel: {
         collapsedSections: extra?.gitPanelCollapsed || [],

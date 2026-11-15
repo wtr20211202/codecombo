@@ -87,6 +87,13 @@ const NotesMaxTitleBytes = 200
 // NotesTrashRetention 软删篇保留窗：超期由 ticker + 惰性把守双路径硬清
 const NotesTrashRetention = 30 * 24 * time.Hour
 
+// NotesMaxTags 单篇标签数上限（P-20261112-7 标签体系：写作期横向归组，非
+// 全量分类学——上限即防标签行刷屏）
+const NotesMaxTags = 8
+
+// NotesMaxTagRunes 单个标签 rune 上限（rune 非字节——中英混排标签同档）
+const NotesMaxTagRunes = 32
+
 // MultiNote 单篇笔记文档
 type MultiNote struct {
 	ID        string     `json:"id"`                  // noteID（不含项目前缀；服务端生成，REST 客户端不可指定）
@@ -96,6 +103,82 @@ type MultiNote struct {
 	UpdatedAt time.Time  `json:"updatedAt"`           // 最后写入时刻（乐观校验基准 / 列表排序键）
 	DeletedAt *time.Time `json:"deletedAt,omitempty"` // 软删时刻（nil=在册；非 nil=回收站）
 	DeletedBy string     `json:"deletedBy,omitempty"` // 软删操作者标识（human / agent:<session>）
+	// Tags 标签（P-20261112-7）：≤8 个/单个 trim 后 1~32 rune/去重保序/空串
+	// 丢弃——写路径与解码共用 normalizeNoteTags 归一（decode 容错=非法 tag
+	// 丢弃不报错，便签语义坏数据不阻断）；旧数据零迁移（encoding/json 未知
+	// 字段忽略，无 tags 字段的旧记录解码后 Tags=nil）
+	Tags []string `json:"tags,omitempty"`
+}
+
+// UnmarshalJSON 解码容错：tags 经 normalizeNoteTags 归一（超限/重复/空白项
+// 读取时丢弃，不报错）；tags 字段形态坏（如元素混入非字符串）只弃标签不弃
+// 整篇——便签语义坏数据不阻断清单/面板（整篇非法 JSON 仍按原语义报错，走
+// filestore 损坏隔离）
+func (n *MultiNote) UnmarshalJSON(data []byte) error {
+	type alias MultiNote // 类型定义剥去方法集防递归；字段 json 语义随 MultiNote 原样
+	var a alias
+	err := json.Unmarshal(data, &a)
+	if err == nil {
+		*n = MultiNote(a)
+		n.Tags = normalizeNoteTags(a.Tags)
+		return nil
+	}
+	// 第一轮报错：探坏点是否只在 tags（encoding/json 遇类型错误继续解码其余
+	// 字段，a 已保全；为稳妥再探键面确认）
+	var probe map[string]json.RawMessage
+	if json.Unmarshal(data, &probe) != nil || probe["tags"] == nil {
+		return err // 整篇非法 JSON 或坏点不在 tags：维持报错原语义
+	}
+	*n = MultiNote(a)
+	n.Tags = noteTagsFromJSON(probe["tags"])
+	return nil
+}
+
+// noteTagsFromJSON tags 字段的容错解码：合法数组直解（再经 normalizeNoteTags
+// 归一）；元素混入非字符串时只取字符串元素——非法 tag 丢弃不报错
+func noteTagsFromJSON(raw json.RawMessage) []string {
+	var tags []string
+	if json.Unmarshal(raw, &tags) == nil {
+		return normalizeNoteTags(tags)
+	}
+	var anys []any
+	if json.Unmarshal(raw, &anys) != nil {
+		return nil // 连数组都不是（手改坏数据）：当无标签
+	}
+	out := make([]string, 0, len(anys))
+	for _, v := range anys {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return normalizeNoteTags(out)
+}
+
+// normalizeNoteTags 标签归一化（写路径与解码同一函数——写进去的数据再读出
+// 来不变，写校验与 decode 容错天然对称）：trim 每项、空串丢弃、去重保序
+// （首现位置）、超 32 rune 丢弃、超 8 个截断保前 8。非法 tag 一律丢弃而非
+// 报错（便签语义坏数据不阻断；上限/去重由 UI 侧与本文档双向兜底）
+func normalizeNoteTags(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	seen := make(map[string]struct{}, len(tags))
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || len([]rune(t)) > NotesMaxTagRunes {
+			continue
+		}
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+		if len(out) == NotesMaxTags {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil // 无标签归 nil：omitempty 落盘省字段，清单面同形
+	}
+	return out
 }
 
 // Live 在册（未软删）
@@ -107,12 +190,15 @@ func (n MultiNote) Size() int { return len(n.Content) }
 // MultiNotesStore 笔记库仓储（projectID 形参即作用域键：REST 面恒为全局库
 // 哨兵 GlobalNotesScope；项目 id 作用域只剩单库化迁移读侧与测试面使用）
 type MultiNotesStore interface {
-	// Create 新建一篇（服务端生成 id；作用域篇数达上限返回 ErrNotesGlobalLimitReached）
-	Create(projectID, title, content string) (MultiNote, error)
+	// Create 新建一篇（服务端生成 id；作用域篇数达上限返回 ErrNotesGlobalLimitReached；
+	// tags 经 normalizeNoteTags 归一落盘）
+	Create(projectID, title, content string, tags []string) (MultiNote, error)
 	// Update 全量覆盖写入。baseUpdatedAt 非零时与当前 UpdatedAt 比对，不符返回
 	// ErrNotesConflict 携当前文档（调用方按 409 呈现 currentContent）；为零值
-	// 保持 last-writer-wins。title nil = 不改标题（重命名折叠进 PUT 的可选字段）
-	Update(projectID, noteID string, title *string, content string, baseUpdatedAt time.Time) (MultiNote, error)
+	// 保持 last-writer-wins。title nil = 不改标题（重命名折叠进 PUT 的可选字段）；
+	// tags nil = 不改标签（旧前端/纯改名 PUT 不清空他窗标签——携带即整体替换，
+	// 显式 [] 才清空；标签行是全量编辑面）
+	Update(projectID, noteID string, title *string, content string, baseUpdatedAt time.Time, tags *[]string) (MultiNote, error)
 	// Get 读取单篇（含软删篇原样返回——回收站恢复/预览需要；不存在 ErrNotFound）
 	Get(projectID, noteID string) (MultiNote, error)
 	// List 作用域全部篇（含软删原样返回，调用方按 Live() 过滤在册/回收站两视图）
@@ -129,8 +215,9 @@ type MultiNotesStore interface {
 	// 全 kind 扫描，单条失败不阻断整轮返回已清计数）
 	PurgeDeletedBefore(cutoff time.Time) (int, error)
 	// UpsertDefault 默认篇 upsert（PUT /api/notes/default 直写——默认篇是空库
-	// 占位的虚拟实体，直写即落真身；title 非 nil 时随建随改）
-	UpsertDefault(projectID, content string, title *string) (MultiNote, error)
+	// 占位的虚拟实体，直写即落真身；title 非 nil 时随建随改；tags 非 nil 携带
+	// 即整体替换——PUT 带 tags 的默认篇首写经此路径不丢标签）
+	UpsertDefault(projectID, content string, title *string, tags *[]string) (MultiNote, error)
 	// MigrateLegacyProjectNotes 启动期幂等迁移：旧单文档键（projnotes kind 裸
 	// projectID）→ 默认篇 <projectID>-default。返回迁移篇数（读路径零副作用
 	// 红线：迁移类操作一律启动期——CLAUDE.md 持久化三车道纪律）
@@ -187,7 +274,7 @@ func (r *multiNotesRepo) get(projectID, noteID string) (MultiNote, error) {
 
 // Create 新建一篇（服务端生成 noteID，客户端不可指定——REST Create 不收 id
 // 字段）。互斥锁内「数额度→写」两段串行，并发首写不会双双越限
-func (r *multiNotesRepo) Create(projectID, title, content string) (MultiNote, error) {
+func (r *multiNotesRepo) Create(projectID, title, content string, tags []string) (MultiNote, error) {
 	if len(content) > ProjNotesMaxBytes {
 		return MultiNote{}, ErrNotesTooLarge
 	}
@@ -205,6 +292,7 @@ func (r *multiNotesRepo) Create(projectID, title, content string) (MultiNote, er
 		ID:        uuid.NewString(),
 		Title:     title,
 		Content:   content,
+		Tags:      normalizeNoteTags(tags),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -220,7 +308,7 @@ func (r *multiNotesRepo) Create(projectID, title, content string) (MultiNote, er
 
 // Update 全量覆盖写入。baseUpdatedAt 非零时乐观校验（读版本→写两段在互斥锁
 // 内，校验通过即写必落——锁内无他人可插入写）；为零值 last-writer-wins
-func (r *multiNotesRepo) Update(projectID, noteID string, title *string, content string, baseUpdatedAt time.Time) (MultiNote, error) {
+func (r *multiNotesRepo) Update(projectID, noteID string, title *string, content string, baseUpdatedAt time.Time, tags *[]string) (MultiNote, error) {
 	if len(content) > ProjNotesMaxBytes {
 		return MultiNote{}, ErrNotesTooLarge
 	}
@@ -240,6 +328,11 @@ func (r *multiNotesRepo) Update(projectID, noteID string, title *string, content
 			return MultiNote{}, err
 		}
 		cur.Title = *title
+	}
+	if tags != nil {
+		// 携带即整体替换（标签行是全量编辑面）；nil=不改动——PUT 语义与
+		// title *string 指针可选同构（S2 防抖保存链与 409 冲突裁决共用此面）
+		cur.Tags = normalizeNoteTags(*tags)
 	}
 	cur.Content = content
 	cur.UpdatedAt = time.Now()
@@ -383,8 +476,9 @@ func trimProjectPrefix(projectID, key string) string {
 
 // UpsertDefault 默认篇 upsert：不存在则创建（确定性 id=default——空库占位篇
 // 首写落点），存在则全量覆盖（last-writer-wins）；title 非 nil 时随建随改
-// （面板占位篇首写重命名同路径）
-func (r *multiNotesRepo) UpsertDefault(projectID, content string, title *string) (MultiNote, error) {
+// （面板占位篇首写重命名同路径）；tags 非 nil 携带即整体替换（创建即落、
+// Update-404→upsert 竞态窗口落已有篇时同 PUT 语义替换）
+func (r *multiNotesRepo) UpsertDefault(projectID, content string, title *string, tags *[]string) (MultiNote, error) {
 	if len(content) > ProjNotesMaxBytes {
 		return MultiNote{}, ErrNotesTooLarge
 	}
@@ -405,6 +499,9 @@ func (r *multiNotesRepo) UpsertDefault(projectID, content string, title *string)
 		if title != nil {
 			n.Title = *title
 		}
+		if tags != nil {
+			n.Tags = normalizeNoteTags(*tags)
+		}
 		data, err := json.Marshal(n)
 		if err != nil {
 			return MultiNote{}, err
@@ -417,6 +514,9 @@ func (r *multiNotesRepo) UpsertDefault(projectID, content string, title *string)
 	cur.Content = content
 	if title != nil {
 		cur.Title = *title
+	}
+	if tags != nil {
+		cur.Tags = normalizeNoteTags(*tags)
 	}
 	cur.UpdatedAt = time.Now()
 	return cur, r.put(projectID, cur)
@@ -624,6 +724,7 @@ func (r *multiNotesRepo) MigrateProjectNotesToGlobal(labels map[string]string) (
 			ID:        migrationTargetID(s.key, s.note.Content),
 			Title:     migratedTitle(s.label, s.note.Title),
 			Content:   s.note.Content,
+			Tags:      s.note.Tags, // 标签随迁移逐字保留（同内容/时间戳零丢弃口径；源解码时已归一）
 			CreatedAt: s.note.CreatedAt,
 			UpdatedAt: s.note.UpdatedAt,
 			DeletedAt: s.note.DeletedAt,

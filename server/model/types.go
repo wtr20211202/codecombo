@@ -282,6 +282,13 @@ type CheckUpdateResponse struct {
 	// 拉取失败原因
 	CompanionFetchFailed bool   `json:"companionFetchFailed,omitempty"`
 	CompanionFetchError  string `json:"companionFetchError,omitempty"`
+	// NpmManaged 本二进制经 npm 分发安装（P-20261113-4-S1）：node_modules 归 npm
+	// 管，应用内自更新必被 409 拒（update.Manager.NpmManaged 单发射点，与
+	// ApplyUpdate 拒绝闸同对象同判据）。npm 装法此前只在「点更新被 409 拦下」时
+	// 才反应式可见——面板据旗标主动把「立即更新」替换为 npm 更新指引。omitempty
+	// 可选字段：旧前端忽略未知字段；旧二进制不携带即前端回落 409 反应式映射
+	//（KNOWN_ERROR_I18N → errors.known.updateNpmManaged 兜底保留）
+	NpmManaged bool `json:"npmManaged,omitempty"`
 }
 
 // UpdateStatusResponse 更新状态响应
@@ -300,6 +307,10 @@ type UpdateStatusResponse struct {
 	// 透传自 update.UpdateStatusResult；全量下载为 0 省略）。增量字段——旧前端
 	// 忽略未知字段，无 schema 变更
 	ResumedBytes int64 `json:"resumedBytes,omitempty"`
+	// NpmManaged 安装形态旗标（P-20261113-4-S1，与 CheckUpdateResponse 同源判定
+	// update.Manager.NpmManaged）：面板只消费 check 响应，status 面为 agent 经
+	// 状态端点感知安装形态留口（智能体可操作性一等公民）。omitempty 可选字段
+	NpmManaged bool `json:"npmManaged,omitempty"`
 }
 
 // LockConfig 锁定机制配置，持久化到 docstore 集合 "lock" 的 "config" 文档

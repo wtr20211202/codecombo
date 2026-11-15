@@ -42,19 +42,19 @@ func globalByTitle(t *testing.T, r store.MultiNotesStore) map[string]store.Multi
 // 未登记作用域（项目已删的孤儿）保原标题；源键全部清空
 func TestNotesMigration_PrefixContentTrashAndOrphan(t *testing.T) {
 	_, r := newMigrationTestStores(t)
-	a, _ := r.Create("p1", "交接说明", "# A 篇\n\n正文")
-	if _, err := r.UpsertDefault("p1", "默认篇内容", nil); err != nil {
+	a, _ := r.Create("p1", "交接说明", "# A 篇\n\n正文", nil)
+	if _, err := r.UpsertDefault("p1", "默认篇内容", nil, nil); err != nil {
 		t.Fatalf("seed default: %v", err)
 	}
-	trashed, _ := r.Create("p1", "旧篇", "回收站内容")
+	trashed, _ := r.Create("p1", "旧篇", "回收站内容", nil)
 	if err := r.SoftDelete("p1", trashed.ID, "human"); err != nil {
 		t.Fatalf("SoftDelete: %v", err)
 	}
 	src, _ := r.Get("p1", trashed.ID)
-	if _, err := r.Create("ghost-project", "孤儿篇", "孤儿内容"); err != nil {
+	if _, err := r.Create("ghost-project", "孤儿篇", "孤儿内容", nil); err != nil {
 		t.Fatalf("seed orphan: %v", err)
 	}
-	pre, _ := r.Create(store.GlobalNotesScope, "已有全局篇", "g")
+	pre, _ := r.Create(store.GlobalNotesScope, "已有全局篇", "g", nil)
 
 	res, err := r.MigrateProjectNotesToGlobal(map[string]string{"p1": "alpha"})
 	if err != nil {
@@ -99,15 +99,15 @@ func TestNotesMigration_PrefixContentTrashAndOrphan(t *testing.T) {
 func TestNotesMigration_FullAbortAndResume(t *testing.T) {
 	_, r := newMigrationTestStores(t)
 	for i := 0; i < store.NotesMaxGlobal-1; i++ {
-		if _, err := r.Create(store.GlobalNotesScope, "", "filler"); err != nil {
+		if _, err := r.Create(store.GlobalNotesScope, "", "filler", nil); err != nil {
 			t.Fatalf("fill #%d: %v", i, err)
 		}
 	}
-	older, _ := r.Create("p1", "较旧在册", "older")
+	older, _ := r.Create("p1", "较旧在册", "older", nil)
 	time.Sleep(5 * time.Millisecond)
-	newer, _ := r.Create("p1", "较新在册", "newer")
+	newer, _ := r.Create("p1", "较新在册", "newer", nil)
 	time.Sleep(5 * time.Millisecond)
-	tr, _ := r.Create("p1", "回收站篇", "trashed")
+	tr, _ := r.Create("p1", "回收站篇", "trashed", nil)
 	_ = r.SoftDelete("p1", tr.ID, "human") // 回收站篇即便最新也排在在册篇之后
 
 	res, err := r.MigrateProjectNotesToGlobal(map[string]string{"p1": "alpha"})
@@ -156,7 +156,7 @@ func TestNotesMigration_FullAbortAndResume(t *testing.T) {
 // 旧二进制改写过的源（同键异内容）另存一篇——零丢弃优先于去重
 func TestNotesMigration_IdempotentAndDowngradeWindow(t *testing.T) {
 	fs, r := newMigrationTestStores(t)
-	n, _ := r.Create("p1", "交接", "v1")
+	n, _ := r.Create("p1", "交接", "v1", nil)
 	key := "p1-" + n.ID
 	raw, err := fs.Get("notesmulti", key)
 	if err != nil {
@@ -211,13 +211,13 @@ func TestNotesMigration_IdempotentAndDowngradeWindow(t *testing.T) {
 func TestNotesMigration_TitleBounds(t *testing.T) {
 	_, r := newMigrationTestStores(t)
 	longTitle := strings.Repeat("标", 66) // 198B
-	if _, err := r.Create("p1", longTitle, "c1"); err != nil {
+	if _, err := r.Create("p1", longTitle, "c1", nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := r.Create("p1", "[alpha] 已带前缀", "c2"); err != nil {
+	if _, err := r.Create("p1", "[alpha] 已带前缀", "c2", nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := r.Create("p2", "", "c3"); err != nil {
+	if _, err := r.Create("p2", "", "c3", nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	labels := map[string]string{"p1": "alpha", "p2": strings.Repeat("项", 80)} // 240B 项目名
@@ -264,5 +264,25 @@ func TestNotesMigration_LegacyChain(t *testing.T) {
 	}
 	if p, _ := r.PendingProjectNotes(); p != 0 {
 		t.Errorf("pending = %d, want 0", p)
+	}
+}
+
+// TestNotesMigration_TagsPreserved 标签随迁移逐字保留（P-20261112-7 S1：
+// 迁移「内容与时间戳逐字保留」口径延伸到 tags——源解码时已归一，目标原样带过）
+func TestNotesMigration_TagsPreserved(t *testing.T) {
+	_, r := newMigrationTestStores(t)
+	if _, err := r.Create("p1", "带标签交接", "body", []string{" 项目A ", "项目A", ""}); err != nil {
+		t.Fatalf("seed tagged note: %v", err)
+	}
+	res, err := r.MigrateProjectNotesToGlobal(map[string]string{"p1": "alpha"})
+	if err != nil || res.Migrated != 1 || res.Pending != 0 {
+		t.Fatalf("migrate: %+v err=%v", res, err)
+	}
+	got, ok := globalByTitle(t, r)["[alpha] 带标签交接"]
+	if !ok {
+		t.Fatal("migrated note missing under prefixed title")
+	}
+	if len(got.Tags) != 1 || got.Tags[0] != "项目A" {
+		t.Errorf("tags must be preserved through migration (normalized), got %v", got.Tags)
 	}
 }

@@ -261,8 +261,10 @@ test('dsh 控制台：打开→回首页→再进项目，主区视图随选中�
   await expect(railDsh).toHaveClass(/active/)
 
   await page.locator('.ide-header button[title="返回首页"]').click()
-  // 回首页：首页浮层随模块态呈现（HomeView dshEverOpened 挂载即同步）
-  await expect(page.locator('.dsh-console-home')).toBeVisible({ timeout: 10000 })
+  // 回首页：工作面归属打开它的场景（P-20261114-4，翻转 P-20261114-1 时代「首页
+  // 浮层随模块态呈现」）——项目开的 dsh 不越界到首页浮层，回项目经场景快照恢复
+  await expect(page.locator('[data-testid="home-notes"]')).toBeVisible({ timeout: 10000 })
+  await expect(page.locator('.dsh-console-home')).toHaveCount(0)
 
   await page.goBack()
   await page.waitForURL('**/project')

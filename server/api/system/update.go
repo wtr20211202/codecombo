@@ -35,6 +35,9 @@ func CheckUpdate(c *gin.Context) {
 		resp := model.CheckUpdateResponse{
 			CurrentVersion: buildVersion,
 			HasUpdate:      false,
+			// 安装形态旗标（P-20261113-4-S1）：npm 装法点更新必被 409 拒，与检查
+			// 是否成功无关——失败路径同样如实携带
+			NpmManaged: mgr.NpmManaged(),
 		}
 		switch {
 		case errors.Is(err, update.ErrNoStableRelease):
@@ -65,6 +68,11 @@ func CheckUpdate(c *gin.Context) {
 		DownloadURL:    info.DownloadURL,
 		FileSize:       info.FileSize,
 		ReleaseURL:     info.ReleaseURL,
+		// npm 分发形态（P-20261113-4-S1）：检查端点不被 npm 门控（npm 用户照常
+		// 看到新版本徽标），形态旗标随响应透出、面板据此主动提示「更新请走 npm」
+		//——不在点更新被 409 拦下时才后知后觉。判定与 ApplyUpdate 拒绝闸同源
+		//（mgr.NpmManaged → IsNpmManaged）
+		NpmManaged: mgr.NpmManaged(),
 	}
 	// 伴随校验资产拉取失败旗标（P-20261109-9，channelEmpty 同款 omitempty 先例）：
 	// 只在有更新且已注定被校验拒绝时置位——「更新将被拒」提示必须是真话
@@ -155,6 +163,9 @@ func GetUpdateStatus(c *gin.Context) {
 		ResumedBytes: st.ResumedBytes,
 		Version:      st.Version,
 		Error:        st.ErrMsg,
+		// 安装形态旗标（P-20261113-4-S1）：面板只消费 check 响应，status 面为
+		// agent 经状态端点感知安装形态留口（npm 形态更新请走包管理器）
+		NpmManaged: mgr.NpmManaged(),
 	}
 
 	// 终态或空闲时检查结果文件

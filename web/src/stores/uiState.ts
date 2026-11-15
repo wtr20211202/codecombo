@@ -31,7 +31,13 @@ export interface UIStateData {
   editor?: {
     openFiles: string[]
     activeIndex: number
-    scrollPositions: Record<string, number>
+    // scrollPositions（Monaco 滚动位置记忆）已显式退役删除（P-20261114-2-S2
+    // 裁决，终结论见 docs/ui-state-audit-20261114.md 二节/七节 #2）：S1 审计
+    // 实证从未有任何写端/恢复端（collect 恒写 {}），实现属新收集/恢复链不属
+    // 点修，故不走「字段保留兼容」而整体删除——类型面、NESTED_UISTATE_SUBFIELDS
+    // 登记行、collect 写面四处同步清退。旧记录残留的 scrollPositions 键成为
+    // 沉淀数据无人读写（服务端按命名空间浅合并，editor 下次补丁自然冲掉），
+    // 向后兼容零迁移
     /** 分屏开合（P-13）；分屏组文件清单/活跃位见下两字段（P-20261002-94 起一并记忆） */
     splitOpen?: boolean
     /** 分屏组（组 1）路径清单（P-20261002-94）：与主组 openFiles 同为项目相对
@@ -47,7 +53,13 @@ export interface UIStateData {
     splitDirection?: 'horizontal' | 'vertical'
   }
   fileTree?: {
+    /** 恒空字段（P-20261114-2 审计定案）：树展开真源 = FileTreeView 的
+     *  localStorage 按项目键 `sc.fileTree.expanded.<projectId>`（watch 回写/
+     *  挂载自恢复/useLayoutReset 清键对账），uiState 侧自 init commit 起恒写
+     *  空表（collect 面已退役此键）；bootstrap 亦不再消费本字段。字段保留为
+     *  旧记录读取兼容 */
     expandedDirs: string[]
+    /** 恒空字段（同上定案）：无写端无恢复端，选中文件跟随时事实派生 */
     selectedFile: string
     /** 常用目录钉选（P-20261002-97）：projectId -> 有序路径表（新→旧，上限 8）。
      *  做成映射而非平铺数组：实例内切换项目时 fileTree 命名空间会被新项目快照
@@ -67,9 +79,18 @@ export interface UIStateData {
     bottomPanelEditorMaximized?: boolean
   }
   terminal?: {
+    /** 恒空字段（P-20261114-2 审计定案）：终端激活 tab 真源 =
+     *  localStorage `sc.term.activeTabMap`（terminalActiveTab recall/remember，
+     *  TerminalView 项目切换恢复），uiState 侧自 init commit 起恒写空串
+     *  （collect 面已退役此键）；bootstrap 亦不再消费本字段。字段保留为旧
+     *  记录读取兼容 */
     activeTabId: string
   }
   gitPanel?: {
+    /** 漏收集定案（P-20261114-2 审计）：collapsedSections 真值从未进 collect 面
+     *  （extra 自 init commit 未接线）→ 恒空；恢复桥 restoreGitPanel 在位等重接
+     *  （升格项，见 docs/ui-state-audit-20261114.md）。selectedBranch 恒空是有意
+     *  ——分支跟随 git 事实派生，不持久化选择 */
     collapsedSections: string[]
     selectedBranch: string
   }
@@ -96,10 +117,42 @@ export interface UIStateData {
     /** 最后查看的会话 id（boot 恢复选中用；跨刷新延续查看上下文） */
     lastViewedSessionId?: string
   }
-  // dsh 控制台主区视图/首页浮层可见性——刷新后原样恢复（项目页主区与首页
-  // 浮层共用同一全局开关，宿主各自响应）
+  // dsh 控制台主区视图/首页浮层可见性——刷新后原样恢复。开态按场景分槽
+  // （P-20261114-4-S2 工作面场景归属隔离持久化面）：open = project 槽（旧单槽值
+  // 原位即 project 槽，向后兼容零迁移；旧前端读新档忽略未知子字段零影响），
+  // homeOpen = home 槽（首页浮层独立槽位，旧存档无键 = home 场景按关恢复）
   dshConsole?: {
     open?: boolean
+    /** home 场景槽（P-20261114-4-S2）：首页浮层开态独立于项目页主区 */
+    homeOpen?: boolean
+  }
+  // 文件分享管理主区视图可见性（P-20261112-6-S3，dshConsole 同族口径）——
+  // 远程/dsh/笔记开态均持久化唯它不落的族内缺口补齐：刷新后分享管理控制台
+  // 原样恢复（项目页主区视图，无首页形态）。旧存档无键 = 不恢复（零迁移）
+  shareManager?: {
+    open?: boolean
+  }
+  // 笔记独立视图/首页 overlay 可见性（P-20261112-6-S1，dshConsole 同族口径）——
+  // 刷新后原样恢复写作现场。开态按场景分槽（P-20261114-4-S2 工作面场景归属隔离
+  // 持久化面）：open = project 槽（旧单槽值原位即 project 槽，向后兼容零迁移；
+  // 旧前端读新档忽略未知子字段零影响），homeOpen = home 槽（旧存档无键 = home
+  // 场景按关恢复）；activeId/sidebarOpen/mode 是面板内容/呈现态不随场景分槽
+  // （笔记单库跨宿主同数据，P-20261108-3）。
+  // activeId（P-20261112-6-S2）：写作现场的活动篇——select()/createNote() 成功
+  // 即写、占位篇不记（无服务端实体）；loadList 保底选篇两段式数据源（持久化 id
+  // 仍在清单 → 选中它，否则回落 updatedAt 首篇）。旧存档无键/脏值 = '' → 天然
+  // 落第二段，向后兼容零迁移
+  // sidebarOpen/mode（P-20261112-6-S3）：面板呈现态（管理侧栏开合 + edit|preview
+  // 模式）——NotesPanel 每宿主挂载各自实例化，落盘让呈现态跨刷新与跨路由宿主
+  // 切换一致；sidebarOpen 恢复仅桌宽生效（窄屏默认收起是出厂口径，消费端守卫），
+  // mode 无宽条件。旧存档无键/脏值 = null/'' → 出厂回落，零迁移
+  notesView?: {
+    open?: boolean
+    /** home 场景槽（P-20261114-4-S2）：首页 overlay 开态独立于项目页主区 */
+    homeOpen?: boolean
+    activeId?: string
+    sidebarOpen?: boolean
+    mode?: string
   }
   // 项目仪表盘（P-20261005-224）：landing = 进入项目时的默认落点偏好（开 =
   // 从首页等显式入口进项目先落仪表盘视图）；视图本身的显隐不落盘（纯查看面，
@@ -200,6 +253,19 @@ export interface UIStateData {
 }
 
 // ============== 嵌套命名空间子字段注册表（P-20261006-24） ==============
+//
+// 「UI 状态保持语义登记」与本表的关系（P-20261114-2-S2 定案）：语义级登记
+// （每项{车道，恢复时机，清除语义}，与 docs/PERSISTENCE_LANES.md「UI 状态
+// 保持矩阵」逐行对应）**不扩族进本表、另立新表**
+// web/src/persistence/uiStateLanes.json。理由：①本表值形态 Record<sf, true>
+// 是 backfillNestedSubfields 的键名面（Object.keys(subfields) 逐子字段回填），
+// 扩语义字段会破坏 SubfieldTable 类型（Record<keyof …, true> 全键必需）与
+// 回填语义（语义字段会被误当子字段名遍历）；②本表只覆盖 uiState 命名空间
+// 的子字段回填面，而登记纪律需覆盖三轨全域（collect 面/专用读写器/localStorage
+// 键控面/临时态），两表口径不同；③新表为纯数据（供 check:uistate-lanes 门禁
+// 与一致性单测读取），不参与运行时回填。两表分工：本表=键级补丁协议的回填
+// 键名面（漏登由 satisfies 编译期兜底），新表=语义登记+存量豁免基线（漏登由
+// check:uistate-lanes 门禁兜底）。
 
 /** 注册表范围类型：UIStateData 的「固定形状嵌套命名空间」顶层键。排除三类：
  *  instanceId/projectId 标量；snapshots/bookmarks/diffComments 整表 Record
@@ -222,14 +288,16 @@ type SubfieldTable<K extends NestedNamespaceKey> = Record<keyof NonNullable<UISt
  *  表——漏登由 satisfies 对账断言编译期兜底（npm run check 红），表驱动单测
  *  uiState-nested-keys.test.ts 随新键自动覆盖（守卫模板） */
 export const NESTED_UISTATE_SUBFIELDS = {
-  editor: { openFiles: true, activeIndex: true, scrollPositions: true, splitOpen: true, splitFiles: true, splitActiveFile: true, splitDirection: true },
+  editor: { openFiles: true, activeIndex: true, splitOpen: true, splitFiles: true, splitActiveFile: true, splitDirection: true },
   fileTree: { expandedDirs: true, selectedFile: true, pinnedDirs: true },
   layout: { sidePanelWidth: true, bottomPanelHeight: true, showSidePanel: true, showBottomPanel: true, sideView: true, bottomTab: true, commitLocation: true, bottomPanelMaximized: true, bottomPanelEditorMaximized: true },
   terminal: { activeTabId: true },
   gitPanel: { collapsedSections: true, selectedBranch: true },
   remoteConsole: { tabs: true, groups: true, open: true, sidebarCollapsed: true },
   agentTerminal: { groups: true, sidebarCollapsed: true, collapsedProjects: true, collapsedGroups: true, projectOrder: true, projectSessionOrder: true, lastViewedSessionId: true },
-  dshConsole: { open: true },
+  dshConsole: { open: true, homeOpen: true },
+  shareManager: { open: true },
+  notesView: { open: true, homeOpen: true, activeId: true, sidebarOpen: true, mode: true },
   dashboard: { landing: true },
   taskRunner: { recent: true },
   editorPrefs: { mdMode: true },
@@ -576,17 +644,25 @@ export const useUIStateStore = defineStore('uiState', () => {
     }
   }
 
-  /** 保存远程控制台状态（低频操作即时写，键级补丁只动 remoteConsole 字段） */
+  /** 保存远程控制台状态（低频操作即时写，键级补丁只动 remoteConsole 字段）。
+   *  persistOpen=false（P-20261114-4-S2 remote 槽随件评估落地）：首页 overlay 内嵌
+   *  RemoteConsoleView 实例的 persistState 不落 open 子键——remoteConsole.open 的
+   *  唯一读端是项目页 bootstrap 的 open+tabs>0 恢复守卫（首页 boot 不恢复远程
+   *  视图），槽天然 project 槽；首页场景的开合回声会把项目场景未动的开态腐蚀进
+   *  槽（跨场景越界）。缺 open 子键由 NESTED_UISTATE_SUBFIELDS 注册表从内存基底
+   *  回填（backfillNestedSubfields），project 槽零影响；基底无 open（首次使用）
+   *  则不注水，读取端 !! 归一 false */
   async function saveRemoteConsoleState(
     tabs: { hostId: string; sessionId: string; title: string; tmuxName?: string }[],
     groups: { id: string; name: string; hostIds: string[] }[],
     open: boolean,
     sidebarCollapsed: boolean,
+    persistOpen = true,
   ) {
     const instanceStore = useInstanceStore()
-    await patchNamespaces(instanceStore.currentInstanceId, {
-      remoteConsole: { tabs, groups, open, sidebarCollapsed },
-    })
+    await patchNamespaces(instanceStore.currentInstanceId, persistOpen
+      ? { remoteConsole: { tabs, groups, open, sidebarCollapsed } }
+      : { remoteConsole: { tabs, groups, sidebarCollapsed } })
   }
 
   // ============== agentTerminal 命名空间（智能体多会话终端：会话分组 + 侧栏折叠） ==============
@@ -637,18 +713,113 @@ export const useUIStateStore = defineStore('uiState', () => {
     await patchNamespaces(instanceStore.currentInstanceId, { agentTerminal: state })
   }
 
+  // ============== 场景槽位（P-20261114-4-S2，notesView/dsh 开态分槽共用） ==============
+
+  /** 场景槽位场景：'home' 读 homeOpen 槽 / 'project' 与 null（无路由环境、业务
+   *  单测）读 open 槽——null 归 project 槽与 usePanelLayout 的 boot 守卫 scene=null
+   *  不设防惯例一致，既有单测语义零变化 */
+  type SceneSlotScene = 'home' | 'project' | null
+
   // ============== dshConsole 命名空间（dsh 控制台视图可见性） ==============
 
-  /** 读取当前实例的 dsh 控制台持久化开关 */
-  async function getDshConsoleOpen(): Promise<boolean> {
+  /** 读取当前实例的 dsh 控制台持久化开关（scene='home' 读 homeOpen 槽，其余读
+   *  open 槽——旧单槽值原位即 project 槽，向后兼容零迁移） */
+  async function getDshConsoleOpen(scene: SceneSlotScene = null): Promise<boolean> {
     const state = await getInstanceState()
-    return !!state?.dshConsole?.open
+    return scene === 'home' ? !!state?.dshConsole?.homeOpen : !!state?.dshConsole?.open
   }
 
-  /** 保存 dsh 控制台开关（低频操作即时写；键级补丁只动 dshConsole 字段） */
-  async function saveDshConsoleOpen(open: boolean) {
+  /** 保存 dsh 控制台开关（低频操作即时写；键级补丁只动 dshConsole 字段）。
+   *  按场景只携带本槽子键（另一槽由注册表 backfillNestedSubfields 从基底回填，
+   *  命名空间整键替换不丢对侧槽位）——分支各写字面量键是 check:uistate-lanes
+   *  writer 面提取惯例（计算键提取不到，见 uistate-lanes-lib.mjs 提取边界注） */
+  async function saveDshConsoleOpen(open: boolean, scene: SceneSlotScene = null) {
     const instanceStore = useInstanceStore()
+    if (scene === 'home') {
+      await patchNamespaces(instanceStore.currentInstanceId, { dshConsole: { homeOpen: open } })
+      return
+    }
     await patchNamespaces(instanceStore.currentInstanceId, { dshConsole: { open } })
+  }
+
+  // ============== shareManager 命名空间（文件分享管理视图可见性 P-20261112-6-S3） ==============
+
+  /** 读取当前实例的分享管理视图持久化开关（dshConsole 同款口径；旧存档无键 = false） */
+  async function getShareManagerOpen(): Promise<boolean> {
+    const state = await getInstanceState()
+    return !!state?.shareManager?.open
+  }
+
+  /** 保存分享管理视图开关（低频操作即时写；键级补丁只动 shareManager 字段；
+   *  patchNamespaces 乐观推进基底，同 dshConsole 纪律） */
+  async function saveShareManagerOpen(open: boolean) {
+    const instanceStore = useInstanceStore()
+    await patchNamespaces(instanceStore.currentInstanceId, { shareManager: { open } })
+  }
+
+  // ============== notesView 命名空间（笔记独立视图可见性 P-20261112-6-S1） ==============
+
+  /** 读取当前实例的笔记视图持久化开关（scene='home' 读 homeOpen 槽，其余读 open
+   *  槽——dshConsole 同款分槽口径；旧存档无键 = false） */
+  async function getNotesViewOpen(scene: SceneSlotScene = null): Promise<boolean> {
+    const state = await getInstanceState()
+    return scene === 'home' ? !!state?.notesView?.homeOpen : !!state?.notesView?.open
+  }
+
+  /** 保存笔记视图开关（低频操作即时写；键级补丁只动 notesView 字段）。
+   *  按场景只携带本槽子键（saveDshConsoleOpen 同款分槽口径与字面量键惯例） */
+  async function saveNotesViewOpen(open: boolean, scene: SceneSlotScene = null) {
+    const instanceStore = useInstanceStore()
+    if (scene === 'home') {
+      await patchNamespaces(instanceStore.currentInstanceId, { notesView: { homeOpen: open } })
+      return
+    }
+    await patchNamespaces(instanceStore.currentInstanceId, { notesView: { open } })
+  }
+
+  /** 读取当前实例的笔记活动篇（P-20261112-6-S2；旧存档无键/脏值 = ''——读取端
+   *  loadList 保底选篇回落 updatedAt 首篇，向后兼容零迁移） */
+  async function getNotesViewActiveId(): Promise<string> {
+    const state = await getInstanceState()
+    const raw = state?.notesView?.activeId
+    return typeof raw === 'string' ? raw : ''
+  }
+
+  /** 保存笔记活动篇（select/createNote 成功即时写；键级补丁只动 notesView 字段
+   *  ——open 子键由 backfillNestedSubfields 注册表从基底回填，命名空间整键替换
+   *  不丢开态；patchNamespaces 乐观推进基底，同 notificationCenter 纪律） */
+  async function saveNotesViewActiveId(activeId: string) {
+    const instanceStore = useInstanceStore()
+    await patchNamespaces(instanceStore.currentInstanceId, { notesView: { activeId } })
+  }
+
+  // ============== notesView 呈现态（面板 sidebarOpen/mode，P-20261112-6-S3） ==============
+
+  /** 读取笔记面板呈现态（管理侧栏开合 + edit|preview 模式，一次 GET 同取双子键
+   *  ——getRemoteConsoleState/getMonitorBoardLayout 同款合取读取器先例）。
+   *  sidebarOpen null / mode '' = 旧存档无键或脏值，消费端回落出厂口径
+   *  （sidebarOpen 窄屏默认收起、mode 回 'edit'），向后兼容零迁移 */
+  async function getNotesViewPresentation(): Promise<{ sidebarOpen: boolean | null; mode: 'edit' | 'preview' | '' }> {
+    const state = await getInstanceState()
+    const rawSide = state?.notesView?.sidebarOpen
+    const rawMode = state?.notesView?.mode
+    return {
+      sidebarOpen: typeof rawSide === 'boolean' ? rawSide : null,
+      mode: rawMode === 'edit' || rawMode === 'preview' ? rawMode : '',
+    }
+  }
+
+  /** 保存笔记面板侧栏开合（头部切换即时写；键级补丁只动 notesView 字段，
+   *  open/activeId/mode 子键由注册表从基底回填不丢） */
+  async function saveNotesViewSidebarOpen(sidebarOpen: boolean) {
+    const instanceStore = useInstanceStore()
+    await patchNamespaces(instanceStore.currentInstanceId, { notesView: { sidebarOpen } })
+  }
+
+  /** 保存笔记面板编辑/预览模式（头部切换即时写；键级补丁同上） */
+  async function saveNotesViewMode(mode: 'edit' | 'preview') {
+    const instanceStore = useInstanceStore()
+    await patchNamespaces(instanceStore.currentInstanceId, { notesView: { mode } })
   }
 
   // ============== dashboard 命名空间（项目仪表盘默认落点偏好 P-20261005-224） ==============
@@ -1023,9 +1194,18 @@ export const useUIStateStore = defineStore('uiState', () => {
     getAgentTerminalState,
     saveAgentTerminalState,
     getDshConsoleOpen,
+    getNotesViewOpen,
+    getNotesViewActiveId,
+    getNotesViewPresentation,
+    getShareManagerOpen,
     getDashboardLanding,
     saveDashboardLanding,
     saveDshConsoleOpen,
+    saveNotesViewOpen,
+    saveNotesViewActiveId,
+    saveNotesViewSidebarOpen,
+    saveNotesViewMode,
+    saveShareManagerOpen,
     saveLayoutLocked,
     saveRailTopOrder,
     getMonitorBoardLayout,

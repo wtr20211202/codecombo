@@ -14,7 +14,8 @@ import { notifyUserPrefsDirty } from './userPrefsLink'
 // - editor   编辑器域（P-20261008-14）：Monaco 自定义动作（MonacoEditor 的
 //   save-file / sc-bookmark.toggle、useEditorInlineEdit 的 sc-ask.inline-edit）
 //   按注册表生效值 addAction、变更重注册（views/editor/editorKeymapBindings.ts）
-// - notes    笔记面板域（P-20261107-5）：笔记面板聚焦时的保存/新建/重命名
+// - notes    笔记面板域（P-20261107-5，P-20261112-9-S2 扩 tab 循环）：笔记面板
+//   聚焦时的保存/新建/重命名/笔记 tab 键盘循环
 //   （useNotesKeyboard document capture 监听 + 面板根节点包含判定——焦点在面板
 //   外即不触发，与 editor/terminal 同为焦点域）
 // 明确不在范围（诚实边界）：
@@ -189,6 +190,15 @@ export const KEYMAP_ACTIONS = [
   // 重命名当前笔记：F2（VS Code rename 惯例）是单键无修饰、不在布局键捕获面
   //（normalizeLayoutCombo 要求 ≥1 修饰符），退避 Ctrl+Alt+R（三面无占用）
   { id: 'notesRename', default: 'ctrl+alt+r', domain: 'notes' },
+  // 笔记 tab 键盘循环切换（P-20261112-9-S2，多篇横滚无逐篇点选外的手段）：沿
+  // notes 域既有 ctrl+alt+m/-r 族惯例，避开 textarea 内原生 Ctrl+方向光标按块
+  // 导航（裸 Ctrl+←/→ 是编辑语义不能吞）。与全局 navBack/navForward 同默认
+  // ctrl+alt+←/→ 是焦点域分层共存（同 editorSave × notesSave 的 ctrl+s 口径）：
+  // 笔记面板聚焦时本动作 capture 优先接管，面板外导航键照常；Linux 桌面
+  // Ctrl+Alt+方向常被工作区切换先抢（OS 级 grab，浏览器收不到）——帮助中心
+  // shortcuts 词条注记，键位经设置→快捷键可改绑
+  { id: 'notesNextTab', default: 'ctrl+alt+arrowright', domain: 'notes' },
+  { id: 'notesPrevTab', default: 'ctrl+alt+arrowleft', domain: 'notes' },
 ] as const
 
 export type KeymapAction = (typeof KEYMAP_ACTIONS)[number]['id']

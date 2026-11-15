@@ -96,9 +96,9 @@ describe('useKeymapStore', () => {
     localStorage.clear()
   })
 
-  it('默认表：51 个动作各就位（28 布局 + 17 终端域 + 3 编辑器域 + 3 笔记面板域），含 P-24 草稿键、P-51 导航后退/前进键、P-38 新建终端键、P-93 分屏键、P-20261005-230 下方分屏键、P-101 全部保存键、P-135 标签线性切换键、P-149 多剪贴板粘贴键、P-20261003-18 Markdown 模式循环键、P-20261003-111 终端域键、P-20261003-269 命令块导航键、P-20261004-16 书签列表键、P-20261004-102 书签间跳转键、P-20261004-111 pane 焦点切换键、P-20261005-201 键盘移动标签键、P-20261008-14 编辑器域键与 P-20261107-5 笔记面板域键', () => {
+  it('默认表：53 个动作各就位（28 布局 + 17 终端域 + 3 编辑器域 + 5 笔记面板域），含 P-24 草稿键、P-51 导航后退/前进键、P-38 新建终端键、P-93 分屏键、P-20261005-230 下方分屏键、P-101 全部保存键、P-135 标签线性切换键、P-149 多剪贴板粘贴键、P-20261003-18 Markdown 模式循环键、P-20261003-111 终端域键、P-20261003-269 命令块导航键、P-20261004-16 书签列表键、P-20261004-102 书签间跳转键、P-20261004-111 pane 焦点切换键、P-20261005-201 键盘移动标签键、P-20261008-14 编辑器域键、P-20261107-5 笔记面板域键与 P-20261112-9-S2 笔记 tab 循环键', () => {
     const store = useKeymapStore()
-    expect(KEYMAP_ACTION_ORDER).toHaveLength(51)
+    expect(KEYMAP_ACTION_ORDER).toHaveLength(53)
     expect(store.combos.commandPalette).toBe('ctrl+k')
     expect(store.combos.quickOpen).toBe('ctrl+p')
     expect(store.combos.toggleSidebar).toBe('ctrl+b')
@@ -190,16 +190,25 @@ describe('useKeymapStore', () => {
       expect(TERMINAL_DOC_ACTIONS.has(id) || ['terminalSearch', 'terminalCopy', 'terminalPaste', 'terminalSplitH', 'terminalSplitV', 'terminalClosePane', 'termFocusOtherPane', 'terminalCyclePrev', 'terminalCycleNext', 'terminalCmdPrev', 'terminalCmdNext', 'terminalBookmarkList'].includes(id)).toBe(true)
     }
     expect(KEYMAP_ACTION_ORDER.filter(id => KEYMAP_ACTION_DOMAIN[id] === 'editor')).toEqual(['editorSave', 'editorBookmarkToggle', 'editorInlineEdit'])
-    // 笔记面板域（P-20261107-5）：保存/新建/重命名三键；ctrl+s 与编辑器域
-    // editorSave 同默认是焦点域分层共存（Monaco 聚焦 vs 笔记面板聚焦，生效条件
-    // 物理互斥），注册表内不标红——同 editor×terminal 口径
-    expect(KEYMAP_ACTION_ORDER.filter(id => KEYMAP_ACTION_DOMAIN[id] === 'notes')).toEqual(['notesSave', 'notesCreate', 'notesRename'])
+    // 笔记面板域（P-20261107-5，P-20261112-9-S2 扩 tab 循环）：保存/新建/重命名/
+    // tab 循环五键；ctrl+s 与编辑器域 editorSave 同默认、ctrl+alt+←/→ 与全局
+    // navBack/navForward 同默认，都是焦点域分层共存（Monaco 聚焦 / 笔记面板聚焦
+    // / 面板外全局，生效条件物理互斥或按聚焦面分流），注册表内不标红——同
+    // editor×terminal 口径
+    expect(KEYMAP_ACTION_ORDER.filter(id => KEYMAP_ACTION_DOMAIN[id] === 'notes')).toEqual(['notesSave', 'notesCreate', 'notesRename', 'notesNextTab', 'notesPrevTab'])
     expect(store.combos.notesSave).toBe('ctrl+s')
     expect(store.combos.notesCreate).toBe('ctrl+alt+m')
     expect(store.combos.notesRename).toBe('ctrl+alt+r')
+    expect(store.combos.notesNextTab).toBe('ctrl+alt+arrowright')
+    expect(store.combos.notesPrevTab).toBe('ctrl+alt+arrowleft')
     expect(store.conflicts.notesSave).toBeNull()
     expect(store.conflicts.notesCreate).toBeNull()
     expect(store.conflicts.notesRename).toBeNull()
+    expect(store.conflicts.notesNextTab).toBeNull()
+    expect(store.conflicts.notesPrevTab).toBeNull()
+    // 同键的全局导航键默认态不标（任一侧改绑才提示 focus 共存）
+    expect(store.conflicts.navBack).toBeNull()
+    expect(store.conflicts.navForward).toBeNull()
   })
 
   it('分屏键位匹配：移位字符变体（Shift+\\ 报 |）经别名命中；两键位互不误吞', () => {
@@ -386,6 +395,20 @@ describe('useKeymapStore', () => {
     store.setBinding('editorBookmarkToggle', 'ctrl+s')
     expect(store.conflicts.editorBookmarkToggle).toEqual({ kind: 'action', other: 'editorSave' })
     expect(store.conflicts.editorSave).toBeNull()
+  })
+
+  it('跨域冲突（P-20261112-9-S2）：笔记 tab 循环改绑撞全局键 → focus 共存提示（笔记面板聚焦侧优先）', () => {
+    const store = useKeymapStore()
+    // 笔记域动作改绑到全局键位：笔记侧提示共存（面板外全局动作照常）
+    store.setBinding('notesNextTab', 'ctrl+shift+f')
+    expect(store.conflicts.notesNextTab).toEqual({ kind: 'action', other: 'projectSearch', cross: 'focus' })
+    expect(store.conflicts.projectSearch).toBeNull()
+    store.resetAll()
+    // 全局动作改绑到笔记 tab 循环默认键（ctrl+alt+←/→ 与 navBack/navForward
+    // 同键面）：全局侧提示共存（笔记面板聚焦时对方优先）
+    store.setBinding('toggleSidebar', 'ctrl+alt+arrowleft')
+    expect(store.conflicts.toggleSidebar).toEqual({ kind: 'action', other: 'notesPrevTab', cross: 'focus' })
+    expect(store.conflicts.notesPrevTab).toBeNull()
   })
 
   it('终端域同域冲突：注册序靠后者被遮蔽（terminalSearch 注册先于 terminalCopy，占用其键位后对方标红）', () => {

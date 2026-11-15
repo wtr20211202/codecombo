@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
-import { DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, projectCardByName } from '../../tests/helpers'
+import { closeShareManagerAndClearState, DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, projectCardByName } from '../../tests/helpers'
 import { API_BASE } from '../../tests/api-base'
 
 /**
@@ -46,6 +46,14 @@ async function openProjectWithFile(page: Page): Promise<void> {
   // 等 Monaco 内容就绪：loading 期间 OpenFile 不算「已保存」，分享入口按设计不注册
   await expect(page.locator('.monaco-editor')).toBeVisible({ timeout: 20_000 })
 }
+
+// 分享管理开态残留清场（P-20261112-6-S3）：本 spec 用例以管理视图在屏结束，
+// 开态即时写落 uiState 后会在后续用例/后续 spec 的新页面恢复出管理视图——rail
+// 再点被 toggle 语义反转（closeDshConsoleAndClearState 头注同款事故面）。先卸载
+// SPA 防 unload 路径回写，再 API 只清 shareManager 命名空间
+test.afterEach(async ({ page, request }) => {
+  await closeShareManagerAndClearState(page, request, BASE)
+})
 
 test('命令面板「分享当前文件」打开创建弹层', async ({ page }) => {
   await openProjectWithFile(page)

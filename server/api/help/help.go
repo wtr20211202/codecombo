@@ -108,9 +108,9 @@ var entries = []Entry{
 	{
 		ID: "shortcuts", Category: "general", Tags: []string{"快捷键", "键位", "速查"},
 		Q:   "全部快捷键在哪看？",
-		A:   "按 `?`（Shift+/）呼出完整速查表；命令面板里搜「快捷键」同样可达。常用：\n\n- `Ctrl+K` 命令面板（搜索文件、切换项目、新建终端、设置等）；`Ctrl+Shift+P` 直达命令模式\n- `Ctrl+P` 快速打开文件；`Ctrl+B` 侧栏开关；``Ctrl+` `` 终端开关\n- `Ctrl+1-9` 直达活动栏面板（按视觉顺序）；`Ctrl+,` 打开设置\n- `Ctrl+W` 关闭当前标签；`Alt+1-9` 切换终端\n- 编辑器内：`Ctrl+S` 保存、`Ctrl+F` 查找、`Ctrl+D` 多光标",
+		A:   "按 `?`（Shift+/）呼出完整速查表；命令面板里搜「快捷键」同样可达。常用：\n\n- `Ctrl+K` 命令面板（搜索文件、切换项目、新建终端、设置等）；`Ctrl+Shift+P` 直达命令模式\n- `Ctrl+P` 快速打开文件；`Ctrl+B` 侧栏开关；``Ctrl+` `` 终端开关\n- `Ctrl+1-9` 直达活动栏面板（按视觉顺序）；`Ctrl+,` 打开设置\n- `Ctrl+W` 关闭当前标签；`Alt+1-9` 切换终端\n- 编辑器内：`Ctrl+S` 保存、`Ctrl+F` 查找、`Ctrl+D` 多光标\n- 笔记面板内：`Ctrl+S` 保存、`Ctrl+Alt+M` 新建、`Ctrl+Alt+R` 重命名、`Ctrl+Alt+←/→` 循环切换笔记页签、双击页签重命名\n- Linux 桌面（GNOME/KDE 等）常把 `Ctrl+Alt+←/→` 抢作工作区切换——笔记页签切换无反应时，在「设置 → 快捷键」把「下一篇/上一篇笔记」改绑到其他组合即可",
 		QEn: "Where can I find all keyboard shortcuts?",
-		AEn: "Press `?` (Shift+/) for the full cheat-sheet; searching \"shortcuts\" in the command palette works too. Most used:\n\n- `Ctrl+K` command palette (search files, switch project, new terminals, settings); `Ctrl+Shift+P` commands mode\n- `Ctrl+P` quick open; `Ctrl+B` toggle sidebar; ``Ctrl+` `` toggle terminal\n- `Ctrl+1-9` jump to activity bar panels (visual order); `Ctrl+,` open settings\n- `Ctrl+W` close tab; `Alt+1-9` switch terminal\n- Editor: `Ctrl+S` save, `Ctrl+F` find, `Ctrl+D` multi-cursor",
+		AEn: "Press `?` (Shift+/) for the full cheat-sheet; searching \"shortcuts\" in the command palette works too. Most used:\n\n- `Ctrl+K` command palette (search files, switch project, new terminals, settings); `Ctrl+Shift+P` commands mode\n- `Ctrl+P` quick open; `Ctrl+B` toggle sidebar; ``Ctrl+` `` toggle terminal\n- `Ctrl+1-9` jump to activity bar panels (visual order); `Ctrl+,` open settings\n- `Ctrl+W` close tab; `Alt+1-9` switch terminal\n- Editor: `Ctrl+S` save, `Ctrl+F` find, `Ctrl+D` multi-cursor\n- Notes panel: `Ctrl+S` save, `Ctrl+Alt+M` new note, `Ctrl+Alt+R` rename, `Ctrl+Alt+←/→` cycle note tabs, double-click a tab to rename\n- Linux desktops (GNOME/KDE etc.) often grab `Ctrl+Alt+←/→` for workspace switching — if note tab cycling does not respond, rebind \"next/previous note tab\" in Settings → Keyboard",
 	},
 	{
 		ID: "notify-prefs", Category: "general", Tags: []string{"通知", "偏好", "桌面提醒", "过滤", "齿轮"},

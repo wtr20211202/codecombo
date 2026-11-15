@@ -31,7 +31,8 @@ import ShareTtlModal from '../../components/share/ShareTtlModal.vue'
 import {
   shareHealth, useShareManagerList,
 } from '../../composables/useShareManagerList'
-import { shareCanReshare, useShareReshare } from '../../composables/useShareReshare'
+import { shareCanReshare, useShareReshare, type ReshareSubmit } from '../../composables/useShareReshare'
+import ShareReshareDialog from '../../components/share/ShareReshareDialog.vue'
 import { shareCanLocate, useShareLocate } from '../../composables/useShareLocate'
 import { useNotificationStore } from '../../stores/notification'
 import { useProjectStore } from '../../stores/project'
@@ -131,6 +132,13 @@ function canReshare(s: ShareInfo): boolean {
   return shareCanReshare(s, now.value, projectIds.value)
 }
 
+/** 快照陈旧（P-20261114-3-S2）：服务端 staleHub 认定（frozen file 专有投影，
+ *  staleAt = 认定时点），提示性非阻断——处置主路「刷新快照」（保 token 换
+ *  内容），重发换新链为辅 */
+function isStale(s: ShareInfo): boolean {
+  return !!s.staleAt
+}
+
 /**
  * 过期倒计时文案（凡带 expiresAt 的行）：已过显「已过期」；<1h 显分钟、
  * <24h 显小时、其余显天。snippet 与 file（opt-in TTL）各用一套键位——
@@ -194,8 +202,25 @@ async function fetchAll() {
 }
 
 // 「重新分享」行操作（P-20261020-10）：过期/已消费 file 分享撤销旧记录后按
-// 原配置重建；成功后刷新列表对账
-const { requestReshare } = useShareReshare(fetchAll)
+// 原配置重建；成功后刷新列表对账。P-20261114-3-S1 起入口改开 ShareReshareDialog
+// 显式确认面（模式/有效期/口令可核可改），确认后交 runReshare/runBatchReshare
+// ——批量记录（Paths 非空）走 runBatchReshare 传原 paths（重发链路只传单
+// path 会把批量记录静默重建为「项目根」单路径分享，比服务端 400 更糟）
+const { runReshare, runBatchReshare } = useShareReshare(fetchAll)
+const reshareTarget = ref<ShareInfo | null>(null)
+const showReshare = ref(false)
+
+function openReshare(r: ShareInfo): void {
+  reshareTarget.value = r
+  showReshare.value = true
+}
+
+function onReshareConfirm(submit: ReshareSubmit): void {
+  const s = reshareTarget.value
+  if (!s) return
+  if ((s.paths?.length ?? 0) > 0) void runBatchReshare(s, submit.passphrase, submit.watermark, projectIds.value)
+  else void runReshare(s, submit, projectIds.value)
+}
 
 onMounted(() => {
   void fetchAll()
@@ -905,8 +930,9 @@ const SHARE_COL_WIDTH = {
   created: 156,
   hits: 84,
   lastAccess: 104,
-  // 复制/打开/二维码 3 个 tiny 图标 + 「更多」（留言计数角标可能两位数）留足
-  actions: 150,
+  // 复制/打开/二维码 3 个 tiny 图标 + 「更多」（留言计数角标可能两位数）留足；
+  // 陈旧行另有快捷刷新钮（P-20261114-3-S2，仅 stale frozen 行渲染）按 4 枚计
+  actions: 176,
 } as const
 // 勾选列仅批量模式渲染，naive-ui 内建宽度约 48px——滚动宽度随之增量
 const BULK_SELECTION_WIDTH = 48
@@ -994,6 +1020,17 @@ const columns = computed<DataTableColumns<ShareInfo>>(() => [
           'data-testid': 'sm-retired-badge',
         }, { default: () => t('share.retired.badge', { n: r.retiredHits }) }))
       }
+      // 快照陈旧徽标（P-20261114-3-S2）：源相对创建基准已变化——访客看到的
+      // 仍是创建时版本。warning 色对齐退役访问族；tooltip 携认定时点（相对
+      // 时间，复用 30s tick 刷新）与处置主路文案（原地刷新为主，重发换链为
+      // 辅）；无认定/旧服务端行零噪音（可选字段缺省即不挂）
+      if (isStale(r)) {
+        extra.push(h(NTag, {
+          size: 'small', bordered: false, type: 'warning',
+          title: t('share.stale.badgeTip', { time: relativeAgo(r.staleAt) || '—' }),
+          'data-testid': 'sm-stale-badge',
+        }, { default: () => t('share.stale.typeBadge') }))
+      }
       if (extra.length === 0) return badge
       return h('div', { class: 'sc-share-type-col' }, [badge, ...extra])
     },
@@ -1051,12 +1088,19 @@ const columns = computed<DataTableColumns<ShareInfo>>(() => [
   {
     // 行操作收口（P-20261020-9）：复制/打开/二维码是分发高频动作保留为图标；
     // 口令/留言/刷新/轮换/撤销进「更多」下拉（带文字标签，触屏与低发现性场景
-    // 可读）。全部既有动作保留，撤销仍走原确认弹窗（语义不变）
+    // 可读）。全部既有动作保留，撤销仍走原确认弹窗（语义不变）。
+    // 陈旧行的快捷处置（P-20261114-3-S2，评审修订点④）：原地刷新为主——保
+    // token 换内容是产品对「源变了要最新」的既定答案（P-20261005-177，单路径
+    // /批量链路俱全），重发换新链收在「更多」菜单为辅。仅陈旧 frozen 行渲染
+    // 快捷刷新钮，正常行操作列不添噪
     title: t('share.colActions'), key: 'actions', width: SHARE_COL_WIDTH.actions, fixed: 'right',
     render: (r) => h('div', { class: 'sc-share-actions' }, [
       actionBtn(t('share.copyLink'), CopyOutline, !urlOf(r), () => onCopy(r)),
       actionBtn(t('share.open'), OpenOutline, !urlOf(r), () => onOpen(r)),
       actionBtn(t('share.qr.action'), QrCodeOutline, !urlOf(r), () => onQr(r)),
+      ...(r.frozen && isStale(r)
+        ? [actionBtn(t('share.stale.refreshQuickTip'), RefreshOutline, false, () => onRefresh(r), undefined, 'sm-refresh-quick')]
+        : []),
       moreBtn(r),
     ]),
   },
@@ -1171,7 +1215,7 @@ function onMoreSelect(r: ShareInfo, key: string | number) {
     case 'msg': void onMsg(r); break
     case 'ttl': onTtl(r); break
     case 'locate': locateTarget(r); break
-    case 'reshare': void requestReshare(r, projectIds.value); break
+    case 'reshare': openReshare(r); break
     case 'refresh': onRefresh(r); break
     case 'rotate': onRotate(r); break
     case 'revoke': onRevoke(r); break
@@ -2034,6 +2078,15 @@ function actionBtn(tooltip: string, icon: typeof CopyOutline, disabled: boolean,
         </div>
       </template>
     </NModal>
+
+    <!-- 重新分享弹层（P-20261114-3-S1）：显式确认面——模式默认沿用来源但可改
+         （批量行禁切，走 createBatch 按原选择集重建），有效期/口令确认前可核 -->
+    <ShareReshareDialog
+      :source="reshareTarget"
+      :show="showReshare"
+      @confirm="onReshareConfirm"
+      @update:show="showReshare = $event"
+    />
   </div>
 </template>
 

@@ -2,36 +2,47 @@ import { onBeforeUnmount, onMounted, type Ref } from 'vue'
 import { matchLayoutCombo, useKeymapStore, type KeymapActionCombo } from '../stores/keymap'
 
 /**
- * 笔记面板焦点域快捷键（P-20261107-5，keymap 注册表 notes 域的消费方）：
- * 保存（notesSave）/新建（notesCreate）/重命名（notesRename）。
+ * 笔记面板焦点域快捷键（P-20261107-5，keymap 注册表 notes 域的消费方；
+ * P-20261112-9-S2 扩笔记 tab 键盘循环）：
+ * 保存（notesSave）/新建（notesCreate）/重命名（notesRename）/
+ * 下一笔记 tab（notesNextTab）/上一笔记 tab（notesPrevTab）。
  *
  * 生效语义 = 焦点域：document capture 相位监听 + 事件 target 在笔记面板根节点
  * 内才接管——焦点在面板外（Monaco/终端/其他输入框）零影响，面板未挂载即无
  * 监听（与 editor Monaco 聚焦域 / terminal xterm 焦点域同族的物理互斥边界）。
  * capture 相位先于布局链的 document bubble 监听触发，命中即
  * stopImmediatePropagation——布局链收不到已消费的按键（用户把笔记动作改绑到
- * 与全局动作同键时，面板内是笔记动作优先，面板外全局动作照常）。
+ * 与全局动作同键时，面板内是笔记动作优先，面板外全局动作照常；tab 循环默认
+ * 与全局 navBack/navForward 同为 ctrl+alt+←/→ 即此口径）。
  *
  * 键位读取走 keymap store 生效值（默认表 + 用户覆盖），改绑即时生效。
  */
 
-export type NotesKeyAction = 'save' | 'create' | 'rename'
+export type NotesKeyAction = 'save' | 'create' | 'rename' | 'nextTab' | 'prevTab'
 
 /** 事件 → 笔记动作（纯函数，单测面）：按注册表生效值精确匹配（无移位变体
- *  容差——notes 三键默认全无移位字符歧义） */
+ *  容差——notes 五键默认全无移位字符歧义） */
 export function notesActionFor(
   e: KeyboardEvent,
-  combos: Pick<KeymapActionCombo, 'notesSave' | 'notesCreate' | 'notesRename'>,
+  combos: Pick<KeymapActionCombo, 'notesSave' | 'notesCreate' | 'notesRename' | 'notesNextTab' | 'notesPrevTab'>,
 ): NotesKeyAction | null {
   if (matchLayoutCombo(e, combos.notesSave)) return 'save'
   if (matchLayoutCombo(e, combos.notesCreate)) return 'create'
   if (matchLayoutCombo(e, combos.notesRename)) return 'rename'
+  if (matchLayoutCombo(e, combos.notesNextTab)) return 'nextTab'
+  if (matchLayoutCombo(e, combos.notesPrevTab)) return 'prevTab'
   return null
 }
 
 export function useNotesKeyboard(
   root: Ref<HTMLElement | null>,
-  handlers: { save: () => void; create: () => void; rename: () => void },
+  handlers: {
+    save: () => void
+    create: () => void
+    rename: () => void
+    nextTab: () => void
+    prevTab: () => void
+  },
 ): void {
   const keymap = useKeymapStore()
 

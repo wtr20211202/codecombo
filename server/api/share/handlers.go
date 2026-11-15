@@ -291,6 +291,13 @@ func CreateShare(c *gin.Context) {
 		return
 	}
 	name := shareDisplayName(target.Name, rel, proj.Name)
+	// 源根基准采样（P-20261114-3-S2 快照陈旧徽标，frozen 专有）：副本刚落盘，
+	// 源此刻的 mtime 聚合即「创建时版本」的判定锚。采样失败（超限大树/源瞬时
+	// 不可读）→ nil 基准 = 不追踪陈旧，宁缺勿错不阻塞创建
+	var sourceMtimes map[string]int64
+	if frozen {
+		sourceMtimes, _ = share.CaptureSourceMtimes(proj.Path, []string{rel})
+	}
 	created, err := st.Share.Create(store.Share{
 		Kind:           store.ShareKindFile,
 		ProjectID:      req.ProjectID,
@@ -304,10 +311,15 @@ func CreateShare(c *gin.Context) {
 		Watermark:      watermarkOrDefault(req.Watermark),
 		ViewOnce:       req.ViewOnce,
 		ExpiresAt:      expiresAt,
+		SourceMtimes:   sourceMtimes,
 	})
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, "create share failed", err)
 		return
+	}
+	if frozen {
+		staleHubSvc.Reset(created.Token) // 基准即当前源：陈旧态清零（幂等命中既有链时保持原语义）
+		staleHubSvc.Bump()
 	}
 	// 显式选择的有效期覆写既有记录（幂等重建默认保留旧倒计时）
 	if created, err = applyExplicitExpiry(st, created, expiresAt, explicitExpiry); err != nil {
@@ -508,15 +520,21 @@ func createBatchFrozenShare(c *gin.Context, st *store.Store, proj *config.Projec
 		return
 	}
 	name := batchShareDisplayName(paths)
+	// 源根基准采样（P-20261114-3-S2）：批量 = 逐根采样（键 = 规范化路径），
+	// 预算共享于全部根；超限整单 nil = 不追踪（与单路径同取态）
+	sourceMtimes, _ := share.CaptureSourceMtimes(proj.Path, paths)
 	created, err := st.Share.Create(store.Share{
 		Kind: store.ShareKindFile, ProjectID: proj.ID, ProjectName: proj.Name,
 		Paths: paths, Name: name, IsDir: false, Size: copied, Frozen: true,
 		PassphraseHash: passHash, Watermark: watermarkOrDefault(req.Watermark),
+		SourceMtimes: sourceMtimes,
 	})
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, "create share failed", err)
 		return
 	}
+	staleHubSvc.Reset(created.Token)
+	staleHubSvc.Bump()
 	slog.Info("batch share created", "token", share.TokenSummary(created.Token), "project", proj.Name,
 		"paths", len(paths), "bytes", created.Size, "sensitiveHits", len(scan.Warnings),
 		"passphrase", created.PassphraseHash != "")
@@ -1280,6 +1298,9 @@ func DeleteShare(c *gin.Context) {
 		// 不能残留（连接断开+待批面清空+会话闸随连接 defer 解除）
 		shareSvc.WritableDown(token)
 	}
+	// 陈旧状态摘除（P-20261114-3-S2 生命周期三件）：记录消亡即清标记与索引项
+	//（索引即刻失效，防死 token 无界累积）
+	staleHubSvc.Forget(token)
 	slog.Info("share revoked", "token", share.TokenSummary(token))
 	middleware.AuditAppend(c, store.AuditEvent{
 		Action: store.AuditShareRevoke,
@@ -1320,6 +1341,9 @@ func RotateShare(c *gin.Context) {
 		shareSvc.RevokeDirect(token, "cascade")
 		shareSvc.WritableDown(token)
 	}
+	// 陈旧状态迁键（P-20261114-3-S2 生命周期三件）：轮换换链不换内容——
+	// 陈旧认定随记录走新 token（徽标不闪断），旧 token 键摘除
+	staleHubSvc.Move(token, rotated.Token)
 	// 审计入账：轮换是泄露应对动作，谁在何时轮换了哪条短链值得留痕。
 	// 注意与 slog 不同界：审计台账（AuditEvent）是本地持久化的对账凭证
 	// 而非外发日志工件，Detail 记完整 token（新旧）保指认能力——脱敏只
@@ -1428,7 +1452,11 @@ func RefreshShare(c *gin.Context) {
 	}
 	// 记录面：走幂等创建刷新名称/大小/项目名快照（Token/Rotate/CreatedAt/
 	// ExpiresAt/Hits/口令门/水印等既有字段由 store 幂等分支保留），再把 TTL
-	// 重置为从当下起算的 30 天（「刷新即续期」；SetExpiry 同管线）
+	// 重置为从当下起算的 30 天（「刷新即续期」；SetExpiry 同管线）。
+	// 源根基准同批复位（P-20261114-3-S2）：副本刚从当前源重拷，显式携带新
+	// 采样覆写既有基准（store「请求带新值覆写」语义）——刷新即基准复位，
+	// 陈旧徽标随之消失
+	sourceMtimes, _ := share.CaptureSourceMtimes(proj.Path, []string{cur.Path})
 	updated, err := st.Share.Create(store.Share{
 		Kind:           store.ShareKindFile,
 		ProjectID:      cur.ProjectID,
@@ -1440,6 +1468,7 @@ func RefreshShare(c *gin.Context) {
 		Frozen:         true,
 		PassphraseHash: cur.PassphraseHash,
 		Watermark:      cur.Watermark,
+		SourceMtimes:   sourceMtimes,
 	})
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, "refresh share record failed", err)
@@ -1450,6 +1479,7 @@ func RefreshShare(c *gin.Context) {
 		shared.Error(c, http.StatusInternalServerError, "refresh share record failed", err)
 		return
 	}
+	staleHubSvc.Reset(final.Token)
 	slog.Info("share refreshed", "token", share.TokenSummary(token), "project", proj.Name,
 		"path", cur.Path, "bytes", copied, "sensitiveHits", len(scan.Warnings),
 		"ttl", time.Until(final.ExpiresAt).Round(time.Minute))
@@ -1508,11 +1538,14 @@ func refreshBatchFrozenShare(c *gin.Context, st *store.Store, proj *config.Proje
 		return
 	}
 	// 记录面：集合/展示名/口令/水印原样，体积按新副本实际复制量刷新；
-	// 幂等 Create 保留 Token/Rotate/CreatedAt/ExpiresAt/Hits 等既有字段
+	// 幂等 Create 保留 Token/Rotate/CreatedAt/ExpiresAt/Hits 等既有字段。
+	// 源根基准同批复位（P-20261114-3-S2，单路径刷新同语义）
+	sourceMtimes, _ := share.CaptureSourceMtimes(proj.Path, cur.Paths)
 	updated, err := st.Share.Create(store.Share{
 		Kind: store.ShareKindFile, ProjectID: cur.ProjectID, ProjectName: proj.Name,
 		Paths: cur.Paths, Name: cur.Name, IsDir: false, Size: copied, Frozen: true,
 		PassphraseHash: cur.PassphraseHash, Watermark: cur.Watermark,
+		SourceMtimes: sourceMtimes,
 	})
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, "refresh share record failed", err)
@@ -1523,6 +1556,7 @@ func refreshBatchFrozenShare(c *gin.Context, st *store.Store, proj *config.Proje
 		shared.Error(c, http.StatusInternalServerError, "refresh share record failed", err)
 		return
 	}
+	staleHubSvc.Reset(final.Token)
 	slog.Info("batch share refreshed", "token", share.TokenSummary(final.Token), "project", proj.Name,
 		"paths", len(cur.Paths), "bytes", copied, "sensitiveHits", len(scan.Warnings),
 		"ttl", time.Until(final.ExpiresAt).Round(time.Minute))
@@ -1804,6 +1838,15 @@ func shareResponse(s store.Share) gin.H {
 	// 不携带（存量零迁移语义——缺省即已遮蔽）
 	if s.Unfiltered {
 		out["unfiltered"] = true
+	}
+	// 快照陈旧投影（P-20261114-3-S2，可选字段旧消费方忽略零影响）：frozen
+	// file 分享源根相对基准发生变化时携带 staleAt（陈旧认定时点）——管理
+	// 列表「源已更新——快照为创建时版本」徽标的数据源。判定双档在
+	// staleness.go（加速器=总线订阅秒级置位；主档=列表惰性对比，置位带记忆）；
+	// live/无基准/过期/判定不出一律不携带（提示性面宁缺勿错）。hub 未装配
+	//（测试/降级）静默缺省
+	if staleAt, ok := staleVerdict(s); ok {
+		out["staleAt"] = staleAt
 	}
 	if s.Consumed(time.Now()) {
 		out["consumed"] = true
