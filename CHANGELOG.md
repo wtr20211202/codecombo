@@ -20,8 +20,7 @@ history is not part of this public changelog.
   preference remembered. The share-preview pipeline was extracted into a
   shared package, so fixes and features land on both sides at once.
 - **Terminal share "Permanent" tier** — live terminal shares can now be
-  truly permanent (a deliberate overturn of the earlier "no permanent live
-  shares" decision): an explicit server-side channel, a "permanent" badge
+  truly permanent: an explicit server-side channel, a "permanent" badge
   across the management UI, an expiry editor on each share row, and a
   warning-instead-of-error combination with the unfiltered mode.
 - **Guest keyboard input, unified** — the two guest-typing modes
