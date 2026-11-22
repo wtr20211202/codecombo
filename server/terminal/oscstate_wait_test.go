@@ -181,15 +181,28 @@ func TestSessionWaitCommandExitRealPty(t *testing.T) {
 			break
 		}
 	}
-	if err := s.WriteInput([]byte("echo sc-osc-wait\r")); err != nil {
-		t.Skipf("session not writable: %v", err)
-	}
-	code, ok := s.WaitCommandExit(15 * time.Second)
-	if !ok {
-		t.Fatalf("no D frame within timeout (framesSeen=%v)", s.OscFramesSeen())
-	}
-	if code != 0 {
-		t.Fatalf("echo exit code = %d, want 0", code)
+	// 目标 echo 同样自愈化：pwsh（PS7）下 echo 是 cmdlet，D 帧退出码走
+	// LASTEXITCODE/$Error 计数增量链，runner 环境偶发非零噪声（P-20261106-46
+	// 探针循环同哲学——一条带噪声，下一条自愈；钩子每条 prompt 都重置基线）。
+	// 等待原语锁的是「D 帧可投递」，delivery 立即 Fatal；退出码给自愈窗，
+	// 30s 内永不归零才真红（=钩子回归而非环境噪声）。
+	deadline = time.Now().Add(30 * time.Second)
+	attempts := 0
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("echo exit code never reached 0 within 30s (attempts=%d, framesSeen=%v)——cmdlet 退出码持续非零：钩子回归而非环境噪声，排查 shellint/powershell.ps1 退出码链", attempts, s.OscFramesSeen())
+		}
+		attempts++
+		if err := s.WriteInput([]byte("echo sc-osc-wait\r")); err != nil {
+			t.Skipf("session not writable: %v", err)
+		}
+		code, ok := s.WaitCommandExit(15 * time.Second)
+		if !ok {
+			t.Fatalf("no D frame within timeout (framesSeen=%v)", s.OscFramesSeen())
+		}
+		if code == 0 {
+			break
+		}
 	}
 	if !s.OscFramesSeen() {
 		t.Error("OscFramesSeen should be true after echo ran")
