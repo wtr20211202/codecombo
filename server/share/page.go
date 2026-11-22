@@ -52,8 +52,9 @@ type pageData struct {
 
 // pageTmplSrc 模板按段拆分（P-20261007-22 纯搬运重组，零逻辑改动）：页头段
 // 留本文件，CSS 段在 page_css.go、JS 三段在 page_js_core/shell/nav.go；
-// 段间以常量拼接装配，拼接结果与拆分前的单常量逐字节一致（模板解析与
-// 渲染产物零变化）
+// P-20261120-1 起主题注入件（theme.go GuestThemeCSS/guestThemeJS——访客页族
+// 六页单一事实源）按同形拼接装配进 CSS 段之后与 core/shell 之间；
+// 段间以常量拼接装配
 const pageTmplSrc = `<!doctype html>
 <html lang="{{.Lang}}">
 <head>
@@ -72,14 +73,15 @@ const pageTmplSrc = `<!doctype html>
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="{{.Title}}">
 <meta name="twitter:description" content="{{.Description}}">
-` + pageTmplCssSrc + `</head>
+` + pageTmplCssSrc + GuestThemeCSS + `</style>
+</head>
 <body>
 <div class="blob b1"></div><div class="blob b2"></div>
 <div id="app" class="wrap">
 {{if .StatusBanner}}<div class="status-banner" id="status-banner" title="{{.StatusTitle}}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>{{.StatusBanner}}</span></div>{{end}}
 <div class="spin"></div></div>
 <script>
-` + pageTmplJsCoreSrc + pageTmplJsShellSrc + pageTmplJsNavSrc + `</body>
+` + pageTmplJsCoreSrc + guestThemeJS + pageTmplJsShellSrc + pageTmplJsNavSrc + `</body>
 </html>`
 
 var pageTmpl = template.Must(template.New("share").Parse(pageTmplSrc))

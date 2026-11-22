@@ -301,12 +301,12 @@ func TestDropSanitizeName(t *testing.T) {
 		{"a\x01b.txt", "a b.txt"},
 	}
 	for _, c := range cases {
-		if got := sanitizeDropFileName(c.in); got != c.want {
+		if got := SanitizeDropFileName(c.in); got != c.want {
 			t.Errorf("sanitize(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 	long := strings.Repeat("字", 200)
-	if got := sanitizeDropFileName(long); len([]rune(got)) != dropNameMaxRunes {
+	if got := SanitizeDropFileName(long); len([]rune(got)) != dropNameMaxRunes {
 		t.Errorf("long name not truncated: %d", len([]rune(got)))
 	}
 }
@@ -335,7 +335,7 @@ func TestDropTTLCleanup(t *testing.T) {
 			meta.At = now.Add(-73 * time.Hour)
 			dir := dropDirFor(token)
 			data, _ := json.Marshal(meta)
-			if err := writeDropSidecar(dir, &meta); err != nil {
+			if err := WriteDropSidecar(dir, &meta); err != nil {
 				t.Fatalf("rewrite sidecar: %v", err)
 			}
 			_ = data

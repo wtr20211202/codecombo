@@ -2066,6 +2066,7 @@ export default {
     upDone: '升级完成，dsh 已重启并加载新版本',
     upInstallFailed: '新版本安装失败——npm 输出：{output}',
     upRestartFailedHint: '新版本启动失败（插件不兼容或新版要求变化？）——可回退到升级前版本',
+    upRestartExternalOwner: '重启未生效：上游端口被外部运行的 dsh 占用（本系统不会结束非自己拉起的进程），新版本未加载——请手动结束该实例后重试升级重启',
     rollbackHint: '升级前版本 v{version} 已记录为回退点，回退后自动重启 dsh。',
     rollbackTo: '回退到 v{version}',
     rollbackPointLabel: '升级前版本：v{version}',
@@ -2110,14 +2111,26 @@ export default {
     launch: '一键启动 dsh',
     launching: '启动中…',
     launchingHint: '正在拉起 dsh 并自动捕获访问令牌（无需手动配置）…',
-    launchFailed: '启动未成功：请确认 dsh 已安装且命令可用，详细输出见日志 {path}',
+    launchingWaitHint: '仍在等待 dsh 就绪（冷启动需加载插件树，最长约 1 分钟）…',
+    launchFailed: '启动未成功：等待的地址 {base} 未就绪（完整日志 {path}）',
     launchFailedReason: '启动未成功：{reason}（完整日志 {path}）',
     installHint: '未找到 dsh 命令：请先在该机器安装（npm install -g @deepseek-ai/dsh），或在「设置 → 终端 → dsh Web UI」把启动命令配置为完整路径',
     launchNoCommand: '启动失败：可在「设置 → 终端 → dsh Web UI」中配置启动命令（如 wsl.exe dsh web --no-open）',
+    launchPortBusy: '端口被占用：检测到已有实例监听 {base}——若为外部运行的 dsh，请手动停止后重试，或在设置中调整上游地址',
+    launchExternalDetected: '检测到已有 dsh 实例在运行（非本系统拉起，本系统不会结束它）——如需一键启动接管，请先手动停止该实例；嵌入未授权时可直接在设置中填入访问令牌',
+    // 空态诊断行（P-20261118-4 空态可诊断化）：实际探测的 base/目标与失败归因
+    probeDiagLine: '已探测 {base}（目标 {target}）：{reason}',
+    probeErrTimeout: '探测超时',
+    probeErrRefused: '连接被拒绝（端口上没有监听进程？）',
+    probeErrTls: 'TLS/证书错误',
+    probeErrOther: '探测失败',
+    probeErrRaw: '{cls}（{raw}）',
     tokenUnset: 'dsh 需要授权：尚未配置访问令牌，嵌入页无法通过 dsh 鉴权门',
     tokenStale: 'dsh 需要重新授权：令牌已失效（dsh 每次启动会更换令牌，重启后旧令牌即失效）',
-    launchAlreadyRunning: 'dsh 已在运行，本次未捕获新令牌——请先退出/重启 dsh 再点一键启动，或在设置中手动更新令牌',
     openDshSettings: '打开设置',
+    // 外部目标令牌入口（P-20261118-6 ⑥）：外部目标令牌在目标管理器维护，
+    // 「打开设置」改的是本机令牌——入口随目标分支
+    openTargetManager: '打开目标管理器',
     restartBtn: '重启并重新捕获令牌',
     clTitle: 'v{version} 更新内容',
     clOpenPage: '查看发布页',
@@ -2133,7 +2146,19 @@ export default {
     restarting: '正在重启 dsh 并捕获新令牌…',
     restartFailed: '重启未成功：请确认 dsh 启动命令可用（详见设置 → 终端 → dsh Web UI 与 dsh-web.log）',
     restartPortBusy: '新令牌已捕获，但探测仍提示未授权：上游端口疑似仍被一个旧 dsh 进程占用（本系统不会结束非自己拉起的进程）——请手动结束旧 dsh 后重试',
-    notRunningHint: '请确认本机 dsh 已启动（默认端口 3080），或在「设置 → 终端 → dsh Web UI」中调整上游地址；也可先在新标签中直接打开。',
+    restartExternalOwner: '重启未生效：上游端口被外部运行的 dsh 占用（本系统不会结束非自己拉起的进程）——请手动结束该实例后重试',
+    // 双层判活（P-20261118-6）：拨号通而 HTTP 持续不通的 notReady 显式态
+    launchNotReady: 'dsh 端口已监听，但 HTTP 尚未就绪（目标机响应缓慢？）——请稍候，若长时间无恢复可手动刷新',
+    notRunningHint: '请确认本机 dsh 已启动，或在「设置 → 终端 → dsh Web UI」中检查上游地址；也可先在新标签中直接打开。',
+    // 外部目标空态文案（P-20261118-6 ⑥）：目标机 ≠ 本机、base ≠ 默认 3080、
+    // 令牌编辑在目标管理器——「本机/默认端口/设置→终端」三重误导一次收口
+    notRunningHintTarget: '请确认目标机 {host} 上的 dsh 已启动，或在目标管理器中检查该目标的地址与访问令牌；也可先在新标签中直接打开。',
+    // 外部目标 + 反代关闭警告（P-20261118-6 ⑩）：直连嵌入三重坏
+    externalTargetProxyOff: '外部目标需要启用反代通道才能嵌入（直连缺少帧限制剥离与令牌自动签发，https 主站下 http 外链会被混合内容硬阻断）：请在「设置 → 终端 → dsh Web UI」启用反代端口',
+    // 版本面本机标注与只读化（P-20261118-6 ⑦）：版本与变更取自本机 dsh，
+    // 升级/回退仅作用于本机
+    versionsLocalNote: '版本信息取自本机 dsh',
+    versionsLocalOnlyNote: '版本与更新信息取自本机 dsh：升级/回退仅作用于本机，目标机上的 dsh 版本无法在本侧变更（请登录目标机自行升级）。',
     retry: '重新检测',
     closeEsc: '关闭 (Esc)',
     maximize: '最大化',
@@ -2486,6 +2511,17 @@ export default {
     revokeConfirm: '确定撤销「{name}」的分享？撤销后短链立即失效。',
     revoked: '已撤销 {name} 的分享',
     linkCopied: '分享链接已复制',
+    // 复制可达性警示（P-20261119-7；P-20261120-4 扩 loopbackSelf 档）：回环
+    // 入口下的链接不能承诺对端可达——判定单一事实源
+    // utils/shareAddress.shouldWarnCopy，文案按来源分形
+    //（回环本源=对方必失败、显式候选=可能不同网络，旧格式回退=仅本机可达；
+    // 显式配置基址不打扰）
+    copyWarn: {
+      loopbackSelf: '当前以本机回环地址生成链接，对方无法访问；本机自测可用，要发给别人请在二维码面板切换局域网地址（或配置分享外发基址）后再复制',
+      candidate: '链接按所选局域网地址生成，对方可能无法直接访问——打不开时可在二维码面板切换地址后重新复制',
+      legacy: '此链接仅本机可达，对方很可能无法访问；建议先在设置 · 通用中配置分享外发基址或外部访问地址',
+      quickdropLoopback: '当前以本机回环地址（localhost）打开，复制的投递链接对方无法访问；请改用局域网地址或外部访问地址打开本页',
+    },
     rotate: {
       action: '轮换',
       title: '轮换分享链接',
@@ -2520,7 +2556,8 @@ export default {
         external: '已使用设置中的外部访问地址，任意网络可访问',
         public: '当前使用公网地址，任意网络可访问（需服务器防火墙放行）',
         lan: '链接使用局域网地址，接收方需与服务器处于同一网络',
-        candidate: '当前以本机回环地址打开，已自动改用局域网地址；接收方需与服务器处于同一网络。若对端不在同一网络，请在设置 · 通用中配置分享外发基址',
+        loopbackSelf: '当前以本机回环地址生成链接，仅本机可打开；要发给别人，请在二维码面板切换局域网地址，或在设置 · 通用中配置分享外发基址',
+        candidate: '链接使用所选局域网地址，接收方需与服务器处于同一网络。若对端不在同一网络，请在设置 · 通用中配置分享外发基址',
         legacy: '此链接仅本机可达——请在设置 · 通用中配置分享外发基址（Tailscale / Cloudflare Tunnel / 公网反代），或改用外部访问地址',
         unreachable: '分享服务未就绪或没有可用地址，链接暂不可用',
       },
@@ -2646,6 +2683,9 @@ export default {
     // 终端只读直播分享（P-20261003-306）：token→终端会话，访客看遮蔽化只读输出流
     terminal: {
       resultDesc: '访客可通过短链只读观看该终端的实时输出（敏感值自动遮蔽为 ***，遮蔽为启发式并非绝对），默认 30 分钟后自动过期，可随时撤销',
+      // 永久挡（P-20261119-5）：无 expiresAt = 链接/记录不过期；直播态本身仍随
+      // 会话（会话关闭访客页「已结束」），文案与通用描述分流防矛盾
+      resultDescPermanent: '访客可通过短链只读观看该终端的实时输出（敏感值自动遮蔽为 ***，遮蔽为启发式并非绝对），链接永久有效（可在分享管理中随时撤销）；直播状态随会话——会话关闭后访客页显示「已结束」',
       typeBadge: '直播',
       pathEmpty: '（终端直播）',
     },
@@ -2653,6 +2693,8 @@ export default {
     // 跑、内容不更新，会话关闭后链接仍可访问（报障求援场景）
     termFrozen: {
       resultDesc: '访客可通过短链查看该终端在创建时刻的输出定格快照（敏感值已遮蔽为 ***，内容不随后续输出更新），默认 30 天后自动过期，会话关闭后仍可访问，可随时撤销',
+      // 永久挡（P-20261119-5）：快照档经 ShareTtlPicker 清成永久后同口径
+      resultDescPermanent: '访客可通过短链查看该终端在创建时刻的输出定格快照（敏感值已遮蔽为 ***，内容不随后续输出更新），链接永久有效（可在分享管理中随时撤销），会话关闭后仍可访问',
       typeBadge: '快照',
       pathEmpty: '（终端输出快照）',
     },
@@ -2725,6 +2767,9 @@ export default {
       badgeTip: '未过滤分享：创建时关闭了敏感值遮蔽，访客看到原样输出（可能含令牌 / 密码 / 密钥），请谨慎分发链接',
       resultNote: '已关闭敏感值遮蔽：访客将看到原样输出（未过滤）——请确认接收方环境可信后再分发链接',
       resultDescLive: '访客可通过短链只读观看该终端的实时输出（未过滤：原样输出，不遮蔽敏感值），默认 30 分钟后自动过期，可随时撤销',
+      // 永久挡（P-20261119-5【用户定向修订】unfiltered+permanent 合法）：无
+      // expiresAt = 链接不过期（撤销兜底在分享管理）；直播态仍随会话
+      resultDescLivePermanent: '访客可通过短链只读观看该终端的实时输出（未过滤：原样输出，不遮蔽敏感值），链接永久有效（可在分享管理中随时撤销）；直播状态随会话——会话关闭后访客页显示「已结束」',
       resultDescFrozen: '访客可通过短链查看该终端在创建时刻的输出定格快照（未过滤：原样输出，不遮蔽敏感值，内容不随后续输出更新），24 小时内强制失效，可随时撤销',
       ttlCapNote: '未过滤分享的有效期上限为 24 小时：更长的档位（含永久）保存后会收敛到 24 小时',
     },
@@ -2745,7 +2790,13 @@ export default {
       maskNote: '输出中的令牌 / 密码赋值 / 云密钥自动替换为 ***（模式启发式，非绝对）',
       maskOffWarn: '关闭后输出将原样暴露给访客（可能含令牌 / 密码 / 密钥等敏感信息）——仅建议在内网协作、接收方可信的场景使用',
       maskOffFrozenTtl: '未过滤的快照含敏感原文，链接将在 24 小时内强制失效且不可延长',
+      maskOffLiveTtl: '未过滤的直播限时档最长 24 小时；选「永久」则原样输出长期公开——可随时在分享管理撤销',
       maskFixedNote: '遮蔽设置在创建时定死：分享进行中不可切换，需要变更请先撤销后重新分享（将生成新链接）',
+      // 开放直入快捷选择（P-20261121-1 创建弹层，仅直播形态；缺省关——键盘
+      // 授权面显式 opt-in，口令门与行内开关同闸）
+      writableLabel: '访客输入（开放直入）',
+      writableNote: '开启后，持链接（+口令）访客可直接向终端键入并提交；缺省关——访客仍可申请输入（批准制）',
+      writablePassWarn: '开放直入需要访问口令：请在下方设置口令后确认',
       confirm: '创建分享',
       confirmUnfiltered: '仍然创建（未过滤）',
       egressTitle: '确认关闭敏感值遮蔽？',
@@ -2753,12 +2804,18 @@ export default {
       egressIntroFrozen: '「{name}」的输出快照将不再遮蔽敏感值：原文会写入快照并原样展示，链接 24 小时内强制失效。仅在内网协作、接收方可信时继续。',
       egressConfirm: '我知道风险，继续创建',
       modeMismatch: '该会话已有进行中的直播，已沿用其原遮蔽设置；如需更改请先「结束直播」后重新分享',
+      // 永久挡（P-20261119-5【用户定向修订】：unfiltered+permanent 合法，不再
+      // 400 硬禁）——组合选中时就地警示（知情面保留，行动自由交给用户，撤销
+      // 兜底在分享管理）
+      permanentUnfiltered: '未过滤输出将永久公开（可随时在分享管理撤销）——如需限时暴露，请改选限时档或重新开启遮蔽',
       // 有效期/口令（P-20261107-4 终端弹层透出）：直播档位与快照档位的语义差异见
       // utils/shareTtl TERM_LIVE_TTL_OPTIONS 注
       ttlLiveDefault: '默认（30 分钟）',
       ttlSixHours: '6 小时',
       ttlTwentyFourHours: '24 小时（上限）',
-      ttlLiveNote: '直播是临时暴露面：默认 30 分钟后自动断流，最长可选 24 小时；重复分享同一会话不会续期倒计时',
+      ttlLiveNote: '直播默认 30 分钟后自动断流，最长可选 24 小时；选择「永久」则链接与记录不过期（直播状态仍随会话）；重复分享同一会话不会续期倒计时',
+      ttlLivePermanentNote: '链接永不过期，可随时在分享管理中撤销；直播状态本身仍随会话（会话关闭后访客页显示「已结束」）',
+      ttlLiveUnfilteredNote: '未过滤直播的限时档上限为 24 小时；选择「永久」时链接不过期，可随时在分享管理撤销',
       ttlFrozenNote: '快照默认保留 30 天，可在此改期（创建后立即生效）；关闭遮蔽的快照最长保留 24 小时',
     },
     // 访客留言板主人侧（P-20261006-13）：「留言 N」角标 + 只读列表面板——
@@ -2817,51 +2874,71 @@ export default {
       on: '协作通道已开启——访客页出现素材上传位，留言上限升至 2000 字',
       off: '协作通道已关闭——访客上传/输入端点即刻回收（已收素材保留可读）',
     },
-    // 直通输入档（P-20261024-1 第二档独立开关，与协作通道互不联动）：访客经
-    // 申请-批准握手向锚定 agent 会话直接输入补充信息；开启需显式确认
-    direct: {
-      menuOn: '直通输入：已开启',
-      menuOff: '直通输入：关闭',
-      enable: '开启直通输入',
-      enableTitle: '开启直通输入',
-      enableConfirm: '开启后，访客可申请向「{name}」锚定的智能体会话直接输入补充信息（单持有者、10 分钟无输入自动收回、每批 ≤4KB 全量审计）。普通终端不开放直通。确认开启？',
-      notify: {
-        title: '访客直通输入已授予',
-        body: '「{name}」{nick} 正在向会话输入（10 分钟无输入自动收回）',
-      },
-      on: '直通输入已开启——等待访客申请（批准后访客输入期间你的键盘将暂时让位）',
-      off: '直通输入已关闭——持权立刻回收，会话输入权已归还',
+    // 访客输入·申请通道（P-20261121-1 统一收编：申请-批准握手路径缺省在场，
+    // owner 只保留「关/回开」一枚开关——申请是惰性请求，批准闸始终在 owner；
+    // 旧直通输入档独立开关退役）。键入语义升格诚实口径：批准后访客经统一
+    // WS 上行桥向会话**键入并提交**（可实际驱动终端），管理面文案如实改写
+    guestInput: {
+      menuOn: '申请通道：已开启',
+      menuOff: '申请通道：已关闭',
+      on: '申请通道已开启——访客可在分享页申请输入（批准后访客将可向会话键入并提交，期间你的键盘暂时让位）',
+      off: '申请通道已关闭——访客无法再申请输入，在途申请与持权已一并回收',
+      offTitle: '关闭申请通道',
+      offConfirm: '关闭后，「{name}」的访客页不再出现「申请输入」入口，进行中的申请与已授予的输入权将一并回收（正在键入的访客会被断开）。确认关闭？',
+      // offAction 专用于关闭确认弹层的正向钮短文案；off 是关闭成功 toast 的状态长句，
+      // 两者勿互用——曾把 off 复用当确认钮 label，30+ 字被 warning 强调色撑成横贯琥珀长条并挤压取消钮（P-20261121-3）
+      offAction: '确认关闭',
       granted: '已批准访客「{nick}」的输入申请（10 分钟无输入自动收回）',
       revoked: '已收回访客输入权，会话输入权已归还',
       approveAction: '批准访客输入申请（{nick}）',
       revokeAction: '收回访客输入（{nick}）',
+      deny: '拒绝申请',
+      denied: '已拒绝该输入申请（通道保持开放，访客可重新申请）',
+      requestArrived: '「{name}」收到访客 {nick} 的输入申请',
     },
-    // 可写分享（P-20261106-8「对方可直接输入」模式）：访客键入经 WS 上行桥
-    // 直注终端 PTY——远程协助语义。开启 = 警示确认 + 强制口令门 + confirm
-    // 三闸；关闭/收回即断全部上行连接（回收永远是安全方向）
+    // notify.* 服务端通知模板键（share.direct.notify.*——键名沿旧直通档：
+    // 已落库通知条目引用键名，升级兼容只改文案不改键；UI 面词条在上方
+    // guestInput 块）
+    direct: {
+      notify: {
+        title: '访客输入已授予',
+        body: '「{name}」{nick} 正在向会话键入（10 分钟无输入自动收回）',
+        request: {
+          title: '访客申请输入',
+          body: '「{name}」{nick} 申请向会话键入（10 分钟内有效，批准后访客可实际提交）',
+        },
+      },
+    },
+    // 开放直入（P-20261106-8 可写分享，P-20261121-1 统一收编语义转正）：
+    // 持链接（+口令）访客经统一 WS 上行桥直接键入锚定终端 PTY——远程协助
+    // 语义（语义升格诚实口径：访客可实际提交并驱动终端）。开启 = 警示确认
+    // + 强制口令门 + confirm 三闸；关闭/收回即断开放直入上行连接（申请批准
+    // 路径持权不受影响——两开关独立不互斥，回收永远是安全方向）
     writable: {
-      menuOn: '可写输入：已开启',
-      menuOff: '可写输入：关闭',
-      enable: '开启可写',
-      enableTitle: '开启可写输入（远程协助）',
-      enableConfirm: '开启后，持有链接（+口令）的访客可把键入直接写进「{name}」的终端——等价把键盘临时交给对方。输出侧敏感值遮蔽照常；你的键盘在访客输入期间将暂时让位；主人可随时一键收回。确认开启？',
-      passTitle: '可写分享需要访问口令',
+      menuOn: '开放直入：已开启',
+      menuOff: '开放直入：关闭',
+      enable: '开启开放直入',
+      enableTitle: '开启开放直入（远程协助）',
+      enableConfirm: '开启后，持有链接（+口令）的访客可把键入直接写进「{name}」的终端并可实际提交命令——等价把键盘临时交给对方。输出侧敏感值遮蔽照常；你的键盘在访客输入期间将暂时让位；主人可随时一键收回。开放直入在场时访客无需申请即可键入（覆盖申请路径）。确认开启？',
+      passTitle: '开放直入需要访问口令',
       passLabel: '设置访问口令（访客打开链接需先验证）',
       passPh: '输入口令（≤64 字节）',
-      passHint: '短链是 bearer 凭据，会在聊天中转发——可写模式下泄露半径是「打 shell」，一道口令是成比例的补偿。',
+      passHint: '短链是 bearer 凭据，会在聊天中转发——开放直入模式下泄露半径是「打 shell」，一道口令是成比例的补偿。',
       passRequired: '口令不能为空',
-      on: '可写输入已开启——访客可键入（你的键盘将在访客输入期间让位）',
-      off: '可写输入已关闭——上行连接已断开，访客页回落只读',
+      passRequiredCreate: '开放直入需要访问口令——请先在下方设置口令',
+      coversRequests: '开放直入已开启——持链接访客无需申请即可键入（覆盖申请路径；申请通道仍可单独关闭）',
+      on: '开放直入已开启——访客可键入并提交（你的键盘将在访客输入期间让位）',
+      off: '开放直入已关闭——开放直入连接已断开，访客页回落只读（申请批准路径的持权不受影响）',
       ttlHint: '建议同步缩短该分享的有效期——暴露窗口与授权面成正比',
       revokeAction: '收回访客输入（{n} 路）',
       bulkOn: '开启可写',
-      bulkOnTitle: '批量开启可写输入',
-      bulkOnConfirm: '对所选 {n} 条分享开启可写输入：{names}。无口令的条目将被跳过（需先补设口令），确认继续？',
-      bulkDoneOn: '已对 {n} 条分享开启可写输入',
+      bulkOnTitle: '批量开启开放直入',
+      bulkOnConfirm: '对所选 {n} 条分享开启开放直入：{names}。无口令的条目将被跳过（需先补设口令），确认继续？',
+      bulkDoneOn: '已对 {n} 条分享开启开放直入',
       bulkOff: '关闭可写',
-      bulkOffTitle: '批量关闭可写输入',
-      bulkOffConfirm: '对所选 {n} 条分享关闭可写输入：{names}。进行中的访客输入连接将立即断开，确认继续？',
-      bulkDoneOff: '已对 {n} 条分享关闭可写输入',
+      bulkOffTitle: '批量关闭开放直入',
+      bulkOffConfirm: '对所选 {n} 条分享关闭开放直入：{names}。开放直入的访客连接将立即断开，确认继续？',
+      bulkDoneOff: '已对 {n} 条分享关闭开放直入',
       bulkPartial: '{ok} 条成功，{fail} 条失败，逐条明细见通知中心',
       pasteReviewTitle: '访客粘贴待审批——「{name}」',
       pasteReviewMeta: '访客 {visitor} 粘贴了整块输入（60 秒内不决自动拒绝）',
@@ -2869,6 +2946,8 @@ export default {
       deny: '拒绝',
       pasteApproved: '已批准——粘贴块已注入终端',
       pasteDenied: '已拒绝——粘贴块未注入',
+      // 视口反喂 resize（P-20261120-8）：sc-ops:share.wresize 直通分发的 toast
+      resized: '访客已把「{name}」的终端调整为 {cols}×{rows}（视口同步）',
     },
     // 退役短链外泄观测（P-20261008-2）：轮换作废的旧链接仍被访问的告警与
     // 徽标——零误报的外泄确认信号；notify.* 为服务端外泄告警 titleKey/bodyKey
@@ -2895,7 +2974,21 @@ export default {
       created: '投递链接已生成（明文仅显示这一次，请立即复制保存）',
       revoked: '已撤销，链接即刻失效',
       copied: '已复制',
+      // 本机缓存链接（P-20261117-1）：明文仅服务端显示一次，主人浏览器侧缓存复原复制出口
+      copyCached: '复制完整链接',
+      cacheMissingHint: '本机无缓存凭据——生成或轮换一次即可重新获取',
+      cacheRotatedHint: '凭据已在他处轮换，本机缓存链接已失效',
       noneHint: '未生成投递链接——生成后手机浏览器打开链接即可投递（内容 24 小时自动过期）',
+      // 投递记录区（P-20261117-3 主人侧接收面）：收件箱清单投影 + 逐文件下载 + 摘除联动回收
+      records: '投递记录',
+      recordsHint: '24 小时内有效',
+      badgeText: '文本',
+      badgeFiles: '{n} 个文件',
+      download: '下载',
+      recordDelete: '摘除',
+      recordDeleteTitle: '摘除投递记录',
+      recordDeleteConfirm: '摘除后该条记录与已投递的文件一并删除（配额即时回收），不可恢复。',
+      recordDeleted: '已摘除',
     },
     // 访问口令门（P-20261006-25）：链接+口令双因子，四形态统一守卫
     pass: {
@@ -2961,9 +3054,12 @@ export default {
       action: '二维码',
       title: '分享二维码',
       desc: '手机扫码打开「{name}」的访客页面；也可复制链接手动发送',
-      // 地址计划与可达性徽标（P-20261020-6，复用 P-20261019-10 三形态选址）
+      // 地址计划与可达性徽标（P-20261020-6，复用 P-20261019-10 三形态选址；
+      // P-20261120-4：回环入口默认浏览器地址 + 合成回环候选 + 自动态伪选项）
       loading: '正在选择访问地址…',
       addressLabel: '二维码地址',
+      addressAuto: '自动（当前浏览器地址）',
+      selfLoopback: '本机',
       unreachablePlaceholder: '未找到手机可达的分享地址，请检查分享子服务或外部访问地址配置',
       status: {
         external: '外部地址',
@@ -2976,7 +3072,8 @@ export default {
         external: '已使用设置中的外部访问地址，任意网络可访问',
         public: '当前使用公网地址，任意网络可访问（需放行分享子服务端口）',
         lan: '链接指向局域网地址：对方需与服务器处于同一 Wi-Fi / 局域网',
-        loopback: '已改用局域网地址 {ip}：对方需与服务器处于同一 Wi-Fi / 局域网',
+        loopbackSelf: '当前使用浏览器地址栏地址（本机回环）：本机自测可用，手机等外部设备无法访问；要发给别人，请在下方地址切换局域网地址',
+        loopback: '已选用局域网地址 {ip}：对方需与服务器处于同一 Wi-Fi / 局域网',
         unreachable: '当前为回环入口且未检测到可用局域网地址；请在设置 · 通用中配置外部访问地址',
         networkFailed: '未能获取本机网络地址；请刷新重试，或在设置 · 通用中配置外部访问地址',
       },
@@ -3233,8 +3330,11 @@ export default {
     endLiveShare: '结束直播',
     endLiveShareDone: '直播已结束，访客已断流',
     // 直通输入徽标与一键收回（P-20261024-1）：tab 橙点 title 携持权访客与
-    // 剩余时效；右键「收回访客输入」与直播「结束直播」同区（暴露面收回族）
+    // 剩余时效；右键「收回访客输入」与直播「结束直播」同区（暴露面收回族）。
+    // P-20261121-2 增待批申请徽标 title（amber 空心点——「有人在敲门」与
+    // 「正在输入」两种态扫读可辨）
     directInputBadgeTitle: '访客输入中：{nick}（右键可收回）',
+    directPendingBadgeTitle: '访客申请输入待批准：{nick}（在分享管理器批准或拒绝）',
     revokeDirectInput: '收回访客输入',
     revokeDirectInputDone: '已收回访客输入权，会话输入权已归还',
     frozenShare: '分享输出快照',
@@ -4356,6 +4456,22 @@ export default {
     metaTooLargeHint: '该文件大小为 {size}，超过全文预览上限（10 MB），内容未加载到编辑器。可在终端中使用命令行工具（如 less / tail）查看。',
     metaBinaryTitle: '二进制文件',
     metaBinaryHint: '该文件为二进制或不可预览类型，不在前端展示内容。',
+    // 预览 Kind 命中的二进制「原文件」态：编辑器不承载内容，指向预览/下载
+    //（不再出现「不可预览」与预览开关并存的矛盾提示——用户定向修订）
+    metaBinaryViewHint: '该文件为二进制格式，编辑器无法直接编辑。可在「预览」页查看内容，或下载原文件。',
+    // 统一双视图（P-20261119-4）：「原文件 | 预览」切换 + 预览态文案
+    pvSwitchLabel: '视图切换',
+    pvSource: '原文件',
+    pvPreview: '预览',
+    pvDownload: '下载',
+    pvLoading: '加载预览…',
+    pvFailed: '无法生成预览，可下载查看',
+    pvHtmlNote: '脚本已停用——动态内容可能显示不全（沙箱隔离，读不到本应用登录态）',
+    pvHtmlRunScripts: '运行脚本（隔离）',
+    pvHtmlStopScripts: '停止脚本',
+    pvHtmlScriptsOn: '脚本隔离运行中：读不到本应用登录态，仍可能向网络发请求；请勿在此输入真实凭据',
+    pvHtmlConfirmTitle: '运行该页面的脚本？',
+    pvHtmlConfirmBody: '脚本将在隔离沙箱中运行：读不到本应用登录态与本地存储，但页面仍可能向网络发请求。仅对来源可信的页面开启。',
     // 远程文件编辑（P-20261003-15）：离线降级横幅 + 敏感路径写入警示
     remote: {
       offlineBanner: '远程主机暂不可达，已降级为只读；恢复连接后可重试',
@@ -6269,9 +6385,12 @@ export default {
     },
     // 快投递（P-20261006-51）：手机/脚本 → 工作台的投递到达通知——arrived 为
     // 服务端 titleKey 模板（msgParams.from/size），actionActive/actionNew 为
-    // 行内动作双出口文案；其余为 useQuickdrop 消费链的回执/降级提示
+    // 行内动作双出口文案；其余为 useQuickdrop 消费链的回执/降级提示。
+    // filesArrived 为多文件投递到达模板（P-20261117-2-S1，msgParams.from/count/
+    // size——size 为服务端 FmtSize 预格式化串）
     quickdrop: {
       arrived: '收到快投递（{size} 字节）',
+      filesArrived: '收到快投递文件（{count} 个 · {size}）',
       actionActive: '交给当前会话',
       actionNew: '新会话处理',
     },
@@ -6281,9 +6400,29 @@ export default {
       actionActive: '交给当前会话',
       actionNew: '新会话处理',
     },
-    // 直通输入持权卡（P-20261024-1）：授予即入账条目的「收回」行内动作
+    // 直通输入持权卡（P-20261024-1）：授予即入账条目的「收回」行内动作；
+    // P-20261121-2 增申请卡动作（批准主动作 + 拒绝第二动作）
     shdirect: {
       actionRevoke: '收回访客输入',
+      actionApprove: '批准访客输入',
+      actionDeny: '拒绝申请',
+    },
+    // frontend 设备效应降级通知（P-20261117-4）：定向浏览器不在场/多浏览器
+    // 无法判定作用面时，frontend.* 效应不入广播面改入通知中心条目——标题
+    // 告知「什么效应被转为通知」，正文按成因两档（offline=绑定的浏览器不在场
+    // /unbound=多浏览器并存且会话无绑定）；剪贴板条目正文是内容预览（截断+
+    // 遮蔽），成因单独成键挤在标题括注。actionDownload 是下载条目的行内动作
+    // 钮文案（点击触发既有下载链）
+    frontendFallback: {
+      downloadTitle: '智能体请求下载文件（已转为通知）',
+      openTitle: '智能体请求打开链接（已转为通知）',
+      clipboardTitle: '智能体请求写剪贴板（已转为通知）',
+      reloadTitle: '智能体请求重载页面（已转为通知）',
+      bodyOffline: '发起会话的浏览器当前不在线',
+      bodyUnbound: '当前多台浏览器在线且会话未绑定浏览器，无法定向',
+      clipOffline: '预览：{preview}——发起会话的浏览器当前不在线',
+      clipUnbound: '预览：{preview}——多台浏览器在线且无法定向',
+      actionDownload: '下载文件',
     },
   },
   // 快投递消费链（P-20261006-51，useQuickdrop）：行内动作回执与降级提示。
@@ -8122,15 +8261,17 @@ export default {
         drop: '收到访客协作素材',
         drop_consume: '协作素材标为已消费',
         collab: '协作通道开关',
+        guestInput: '申请通道开关',
         direct: {
-          grant: '批准访客直通输入',
-          revoke: '收回访客直通输入',
-          input: '访客直通输入批次',
+          request: '访客输入申请',
+          grant: '批准访客输入',
+          revoke: '收回访客输入',
         },
-        // 可写分享（P-20261106-8）：开关/输入批次/粘贴审批审计动作词条
+        // 可写分享（P-20261106-8）：开关/输入批次/粘贴审批/视口改格审计动作词条
         writable: '可写分享开关',
-        writableInput: '访客可写输入批次',
+        writableInput: '访客键入批次（mode 分档）',
         writablePaste: '可写粘贴审批',
+        writableResize: '访客视口改格',
       },
       workspace: {
         export: '导出工作区备份',
@@ -8382,11 +8523,14 @@ export default {
         external: '已使用设置中的外部访问地址，任意网络可访问',
         public: '当前使用公网地址，任意网络可访问（需服务器防火墙 / 端口放行）',
         lan: '手机需与服务器处于同一 Wi-Fi / 局域网',
-        loopback: '当前以本机回环地址打开，手机无法访问；已自动改用局域网地址 {ip}。若手机不在同一 Wi-Fi，请在设置 · 通用中配置外部访问地址',
+        loopbackSelf: '当前使用浏览器地址栏地址（本机回环）：手机无法访问，本机自测可用；要发给别人，请在下方地址切换局域网地址',
+        loopback: '已选用局域网地址 {ip}：手机需与服务器处于同一 Wi-Fi / 局域网。若不在同一网络，请在设置 · 通用中配置外部访问地址',
         unreachable: '当前以本机回环地址打开，且未检测到可用的局域网地址，手机无法访问。请在设置 · 通用中配置外部访问地址（Tailscale / Cloudflare Tunnel / 公网反代）',
         networkFailed: '未能获取本机网络地址；请刷新重试，或在设置 · 通用中配置外部访问地址',
       },
       addressLabel: '二维码地址',
+      addressAuto: '自动（当前浏览器地址）',
+      selfLoopback: '本机',
       loading: '正在选择访问地址…',
       unreachablePlaceholder: '无手机可达地址',
     },

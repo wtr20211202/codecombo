@@ -23,7 +23,7 @@ import Breadcrumb from '@/components/common/Breadcrumb.vue'
 import EncodingBadge from '@/components/editor/EncodingBadge.vue'
 import EolBadge from '@/components/editor/EolBadge.vue'
 import CursorPositionBadge from '@/components/editor/CursorPositionBadge.vue'
-const CommitPanel = safeAsync(() => import('@/views/git/CommitPanel.vue'))
+const FilePreviewView = safeAsync(() => import('@/components/editor/FilePreviewView.vue'))
 import { useI18n } from '@/composables/useI18n'
 import { useNarrowLayout } from '@/composables/useNarrowLayout'
 import { useEditorAskAgent } from '@/composables/useEditorAskAgent'
@@ -40,6 +40,8 @@ import { useProjectStore } from '@/stores/project'
 import { isRemoteEditorPath, parseRemoteEditorPath, remoteHostDisplayName } from '@/utils/remoteEditorPath'
 import { isUntitledPath, type OpenFile } from '@/composables/useOpenFiles'
 import { buildGitTabStatusMap, type GitTabKind } from '@/utils/git'
+import { pvBinaryPreviewable, pvPreviewable } from '@/utils/filePreviewMode'
+import { fileDownloadURL } from '@/utils/filePreviewURL'
 // 仅类型引入（编译期擦除，不把 monaco 桥拽进首屏 chunk——symbolCrumbBridge
 // 随编辑器 chunk 加载）
 import type { SymbolCrumbPayload } from '@/views/editor/symbolCrumbBridge'
@@ -48,7 +50,7 @@ import type { SymbolCrumbPayload } from '@/views/editor/symbolCrumbBridge'
 // 键推导的实现由 MonacoEditor 挂载期经注册表注入（monacoViewStateMoves 同款）
 import { viewStateCursorLineOf } from '@/views/editor/monacoViewStateCache'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 // 「就此文件询问智能体」（P-20261001-28）：非编辑器状态修改的全局动作，
 // 不走 emit 链（同 EditorGitActions 直调组合式的口径）
 const { askAgentAboutFile } = useEditorAskAgent()
@@ -78,8 +80,6 @@ const props = defineProps<{
   activeIndex: number
   /** 「重新打开已关闭的标签」菜单项可用态（关闭栈为全组共享） */
   canReopenClosed: boolean
-  /** 侧栏模式提交面板随本组渲染（仅主组传入） */
-  showCommitPanel?: boolean
   /** 本组 tab 右键菜单提供「在右侧分屏打开」（仅主组；分屏组提供「关闭分屏」） */
   allowSplitOpen?: boolean
 }>()
@@ -131,6 +131,9 @@ const emit = defineEmits<{
   toggleMaximize: []
   /** 远程文件离线横幅「重试」（P-20261003-15）：重拉远端内容 */
   remoteRetry: [path: string]
+  /** 统一双视图切换（P-20261119-4）：原文件 ↔ 预览翻转（宿主转调
+   *  useOpenFiles.toggleFileViewMode——共享对象翻转 + per 扩展名偏好记忆） */
+  toggleViewMode: [path: string]
 }>()
 
 const currentFile = computed(() => props.files[props.activeIndex] ?? null)
@@ -178,6 +181,8 @@ const {
 const narrowEditorModeAvailable = computed(() => {
   const f = currentFile.value
   if (!narrow.value || !f) return false
+  // 预览态下编辑器未挂载，「切编辑」语义不成立（P-20261119-4 统一双视图）
+  if (f.viewMode === 'preview') return false
   return !f.isDiff && !f.meta && !f.loading && !f.remoteOffline
 })
 
@@ -347,6 +352,30 @@ function onContextOpenInSplit(direction: 'horizontal' | 'vertical' = 'horizontal
   emit('openInSplit', f.path, direction)
   closeTabContextMenu()
 }
+
+// ── 统一双视图（P-20261119-4）：原文件 ↔ 预览 ──
+// 开关可见性 = 真实文件且预览注册表 kind 可出预览态（md/html/csv/sheet/
+// docx/pdf/image/av/text）且非装载中；diff/普通文件无视图语义不提供。
+// 二进制可预览类两态都在（source=信息卡+下载 / preview=渲染）；文本类
+// 两态都在（source=Monaco / preview=渲染）。info/未注册无预览态 → 不出开关。
+// 元信息卡在场（too-large / sniffed-binary）时只有服务端/字节面可直供的
+// kind 才出开关：内容未加载的文本族预览只会是空缓冲，不给假开关
+const viewToggleVisible = computed(() => {
+  const f = currentFile.value
+  if (!f || f.isDiff || f.loading || isRemoteEditorPath(f.path) || isUntitledPath(f.path)) return false
+  if (!pvPreviewable(f.pvKind)) return false
+  return !f.meta || pvBinaryPreviewable(f.pvKind)
+})
+const viewIsPreview = computed(() => currentFile.value?.viewMode === 'preview')
+/** 渲染端点 lang 参数（评审必改3c）：locale → zh/en（占位块/壳页文案同语境） */
+const pvLang = computed(() => (locale.value === 'zh-CN' || locale.value.startsWith('zh') ? 'zh' : 'en'))
+/** 「原文件」态的二进制信息卡：统一双视图下恒带下载出口（用户定向修订
+ *  ③「二进制且预览未命中=信息卡+下载」——原实现只在预览 Kind 命中时给
+ *  出口，真未知格式（zip/exe）仍是死胡同，此处按材质面而非 kind 判定） */
+const viewIsBinarySourceCard = computed(() => {
+  const f = currentFile.value
+  return !!f && f.meta?.kind === 'binary' && f.viewMode !== 'preview'
+})
 
 /** 就此文件询问智能体：仅目标 tab 正是本组活动 tab 时带光标行号（Monaco
  *  只挂载当前显示文件，其余 tab 的光标位置无从谈起，整文件询问） */
@@ -1189,6 +1218,34 @@ watch(() => props.files.length, () => {
         @symbol-nav="onSymbolNav"
       >
         <template #extra>
+          <div
+            v-if="viewToggleVisible && !narrow"
+            class="pv-mode-switch"
+            data-testid="pv-mode-switch"
+            role="group"
+            :aria-label="t('editor.pvSwitchLabel')"
+          >
+            <button
+              class="pv-mode-btn"
+              data-testid="pv-mode-source"
+              :class="{ on: !viewIsPreview }"
+              :aria-pressed="!viewIsPreview"
+              :title="t('editor.pvSource')"
+              @click.stop="viewIsPreview && emit('toggleViewMode', currentFile!.path)"
+            >
+              {{ t('editor.pvSource') }}
+            </button>
+            <button
+              class="pv-mode-btn"
+              data-testid="pv-mode-preview"
+              :class="{ on: viewIsPreview }"
+              :aria-pressed="viewIsPreview"
+              :title="t('editor.pvPreview')"
+              @click.stop="!viewIsPreview && emit('toggleViewMode', currentFile!.path)"
+            >
+              {{ t('editor.pvPreview') }}
+            </button>
+          </div>
           <EncodingBadge
             v-if="!isRemoteEditorPath(currentFile.path)"
             :file="currentFile"
@@ -1240,7 +1297,8 @@ watch(() => props.files.length, () => {
 
       <!-- 窄屏编辑模式条（P-20261019-7）：默认只读的安全提示 + 一键切编辑。
            放在面包屑下方而非 breadcrumb-extra（该区域在 ≤700px 被隐藏），
-           手机上文字标签比图标更可发现 -->
+           手机上文字标签比图标更可发现；预览态下编辑器未挂载，切编辑语义
+           不成立（P-20261119-4 统一双视图），预览态收起 -->
       <div
         v-if="narrowEditorModeAvailable"
         class="narrow-editor-bar"
@@ -1264,6 +1322,43 @@ watch(() => props.files.length, () => {
         </button>
       </div>
 
+      <!-- 窄屏双视图开关条（P-20261119-4）：面包屑形态（pv-mode-switch）在
+           ≤700px 随 breadcrumb-extra 整体隐藏（main.css 既有决策）——手机上
+           「原文件↔预览」切换会彻底不可达（响应式断裂）。循 narrow-editor-bar
+           同位同款形态在面包屑下方出独立条；testid 带 -narrow 后缀与桌面形态
+           区分（窄屏下面包屑副本已 v-if 收起，无同 id 双挂） -->
+      <div
+        v-if="narrow && viewToggleVisible"
+        class="narrow-view-bar"
+        data-testid="narrow-view-bar"
+      >
+        <span class="narrow-view-bar-hint">{{ t('editor.pvSwitchLabel') }}</span>
+        <div
+          class="pv-mode-switch"
+          role="group"
+          :aria-label="t('editor.pvSwitchLabel')"
+        >
+          <button
+            class="pv-mode-btn"
+            data-testid="pv-mode-source-narrow"
+            :class="{ on: !viewIsPreview }"
+            :aria-pressed="!viewIsPreview"
+            @click.stop="viewIsPreview && emit('toggleViewMode', currentFile!.path)"
+          >
+            {{ t('editor.pvSource') }}
+          </button>
+          <button
+            class="pv-mode-btn"
+            data-testid="pv-mode-preview-narrow"
+            :class="{ on: viewIsPreview }"
+            :aria-pressed="viewIsPreview"
+            @click.stop="!viewIsPreview && emit('toggleViewMode', currentFile!.path)"
+          >
+            {{ t('editor.pvPreview') }}
+          </button>
+        </div>
+      </div>
+
       <div class="editor-content">
         <!-- 呈现面走 displayFile（P-20261004-100）：diff→diff 切换的 loading
              窗口沿用上一个就绪 diff（实例热切），面包屑/徽标仍在 currentFile
@@ -1275,10 +1370,21 @@ watch(() => props.files.length, () => {
         >
           {{ t('layout.loading') }}
         </div>
-        <!-- 预览策略：超大/二进制文件不进编辑器，展示元信息卡（友好提示 + 不发内容） -->
+        <!-- 统一双视图·预览态（P-20261119-4）：优先于元信息卡——预览 Kind
+             命中的二进制类不再「binary not previewable」，S2 能力直出 -->
+        <FilePreviewView
+          v-else-if="displayFile?.viewMode === 'preview' && pvPreviewable(displayFile.pvKind)"
+          :file="displayFile"
+          :project-id="projectStore.currentProjectId || ''"
+          :lang="pvLang"
+        />
+        <!-- 预览策略：超大/二进制文件不进编辑器，展示元信息卡（友好提示 + 不发内容）。
+             P-20261119-4 起「原文件」态补下载出口（预览 Kind 命中的二进制类回
+             原文件态时，信息卡不再是死胡同） -->
         <div
           v-else-if="displayFile?.meta"
           class="file-meta-card"
+          :data-testid="viewIsBinarySourceCard ? 'file-source-card' : undefined"
         >
           <n-icon
             size="36"
@@ -1291,12 +1397,18 @@ watch(() => props.files.length, () => {
           </div>
           <div class="meta-hint">
             {{ displayFile.meta.kind === 'binary'
-              ? t('editor.metaBinaryHint')
+              ? (pvPreviewable(displayFile.pvKind) ? t('editor.metaBinaryViewHint') : t('editor.metaBinaryHint'))
               : t('editor.metaTooLargeHint', { size: displayFile.meta.sizeHuman }) }}
           </div>
           <div class="meta-path">
             {{ displayFile.path }} · {{ displayFile.meta.sizeHuman }}
           </div>
+          <a
+            v-if="viewIsBinarySourceCard && projectStore.currentProjectId"
+            class="meta-download"
+            data-testid="file-source-download"
+            :href="fileDownloadURL(projectStore.currentProjectId, displayFile.path)"
+          >{{ t('editor.pvDownload') }}</a>
         </div>
         <DiffEditor
           v-else-if="displayFile?.isDiff"
@@ -1329,13 +1441,10 @@ watch(() => props.files.length, () => {
           @cursor="cursorState = $event"
           @symbol-crumb="symbolCrumbState = $event"
         />
-        <!-- 侧边栏模式提交面板（仅主组渲染，分屏下不重复挂载） -->
-        <CommitPanel
-          v-if="showCommitPanel"
-          :key="'commit-' + asyncRetryTick"
-          :location="'sidebar'"
-          @retry="asyncRetryTick++"
-        />
+        <!-- 侧栏「变更」视图的提交面板恒在 SidePanel 内渲染（sideView==='changes'
+             分支），编辑器内容区不再重复挂载一份——历史上此处与 SidePanel 同条件
+             双挂载，块流下落在编辑器下方视口外（不可见却盖住状态栏拦截点击），
+             P-20261120-5 随 .editor-content 收容修正一并移除 -->
       </div>
     </template>
   </div>
@@ -1622,10 +1731,16 @@ watch(() => props.files.length, () => {
 .tab-close:hover { opacity: 1 !important; background: var(--bg-hover); }
 
 /* 编辑器内容 */
+/* 收容红线（P-20261120-5）：本容器是编辑器/预览的高度收口点，必须自建 flex
+ * 列布局——子视图的 flex:1 + min-height:0（FilePreviewView 滚动收容、meta-card
+ * 占幅居中）全靠它生效。曾缺 display:flex 退化块流：预览高度失控撑破整条收容
+ * 链（文档级滚动滚走左侧工具栏、内容透过底部面板下缘外泄），用户三症状共同根因 */
 .editor-content {
   flex: 1;
   min-height: 0;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 窄屏编辑模式条（P-20261019-7）：只读默认的安全提示 + 一键切编辑。
@@ -1668,6 +1783,35 @@ watch(() => props.files.length, () => {
 .narrow-editor-mode-btn:hover { background: var(--bg-hover); }
 .narrow-editor-mode-btn:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
 
+/* 窄屏双视图开关条（P-20261119-4）：与 narrow-editor-bar 同位同款容器，
+ * 分段开关沿用桌面 .pv-mode-btn 形态但触达面抬到窄屏标准（≥28px 高） */
+.narrow-view-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 3px var(--space-2);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: var(--fs-tiny);
+  flex-shrink: 0;
+}
+
+.narrow-view-bar-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.narrow-view-bar .pv-mode-btn {
+  min-height: var(--hit-target-min, 28px);
+  padding: 2px 14px;
+  font-size: var(--fs-tiny);
+}
+
 /* 远程离线降级横幅（P-20261003-15）：与 Layout 断连指示条同语（橙点 + 警示
  * 底色 + 重试钮），占据面包屑与编辑器内容之间的细条，不遮内容 */
 .remote-offline-bar {
@@ -1709,6 +1853,49 @@ watch(() => props.files.length, () => {
   color: var(--text-dim);
   font-size: 0.92em;
 }
+
+/* 统一双视图分段开关（P-20261119-4）：面包屑区「原文件|预览」两钮，激活态
+ * 品牌色（与 tab 活跃指示同语）；信息卡「原文件」态下载出口同族排版 */
+.pv-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-right: var(--space-2);
+  flex-shrink: 0;
+}
+
+.pv-mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: var(--fs-tiny) var(--font-ui);
+  padding: 2px 10px;
+  min-height: var(--hit-target-min, 24px);
+  cursor: pointer;
+  transition: background var(--motion-fast), color var(--motion-fast);
+}
+
+.pv-mode-btn + .pv-mode-btn { border-left: 1px solid var(--border-default); }
+.pv-mode-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.pv-mode-btn.on { background: var(--brand-accent-soft); color: var(--brand-accent); }
+.pv-mode-btn:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+
+.meta-download {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 2px;
+  padding: 4px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--accent-blue);
+  font-size: 0.88em;
+  text-decoration: none;
+  transition: all var(--motion-base);
+}
+
+.meta-download:hover { border-color: var(--accent-blue); background: var(--bg-hover); }
 
 /* 预览策略元信息卡（超大/二进制文件占位） */
 .file-meta-card {

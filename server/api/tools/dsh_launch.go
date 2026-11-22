@@ -297,23 +297,57 @@ func dshQuoteIfNeeded(p string) string {
 
 // launchExitGrace 包装进程退出后的宽限窗口：`nohup dsh web &` 这类自守护
 // 命令的包装器会立刻退出而 dsh 存活，见退出就判死会误杀这种正常用法；
-// 宽限期内继续探活，仍无上游才按失败返回
+// 宽限期内继续探活，仍无上游才按失败返回。（P-20261118-4 注记两条收口路径
+// 都不烧满 launchReadyTimeout 60s：外部实例占端口（EADDRINUSE）秒退形态——
+// 探活成功走 externalOwner 即刻收口（<1s）、探活连败走本宽限（≤5s））
 const launchExitGrace = 5 * time.Second
+
+// dshLaunchOutcome launchAndWait 的结果集（P-20261118-4 由 5 个裸返回值聚合：
+// 外部占用判读/端口占用归因/探测 base 入响应后返回值越过 5 个，聚合防调用
+// 点参数错位——DshLaunch/重启/回退三个调用点同构取用）
+type dshLaunchOutcome struct {
+	Available     bool
+	TokenCaptured bool
+	LogPath       string
+	SpawnErr      error
+	LogTail       string
+	// ExternalOwner 探活可用但本次拉起的包装进程已退出且日志无新令牌：监听
+	// 端口的是外部运行的实例（第二实例撞 EADDRINUSE 秒退后探到外部进程的
+	// 典型形态）。重启/升级链据此显式报「重启未生效：端口被外部进程占用」，
+	// 不再静默无效被误判为新版本已加载
+	ExternalOwner bool
+	// NotReady deadline 收口时拨号通而 HTTP 持续不通的显式态（P-20261118-6
+	// 双层判活）：进程在听但 node 事件循环/磁盘被拖慢，HTTP 层迟迟不应答——
+	// 不谎报就绪也不假阴性（available=true + NotReady=true，前端提示「已监听
+	// 但未就绪」而非笼统成功）
+	NotReady bool
+	// PortBusy 启动日志明示端口占用（EADDRINUSE / address already in use）：
+	// 探活失败但日志归因明确的边缘形态（端口被不响应 TCP 探测的对象占据）
+	// 的兜底提示；与 ExternalOwner 并存时二者同源
+	PortBusy bool
+	// ProbeBase 就绪等待实际探测的本机上游 base（就绪失败时随响应下发——
+	// base 被设置导入带偏时一眼可见，衔接空态诊断块）
+	ProbeBase string
+}
 
 // launchAndWait 拉起 dsh 并等待就绪 + 捕获 token（DshLaunch 与升级重启共用）。
 // pid 落盘 DataDir/dsh-web.pid（升级重启/停止需定位进程）。
 // 包装进程退出（命令不存在/端口冲突/自守护启动）时快速失败并回传日志尾部，
 // 不再干等满 launchReadyTimeout——那正是「一键启动卡一分钟」的体感来源
-func launchAndWait() (available bool, tokenCaptured bool, logPath string, spawnErr error, logTail string) {
+func launchAndWait() dshLaunchOutcome {
+	var out dshLaunchOutcome
 	launchMu.Lock()
 	defer launchMu.Unlock()
 	cfg := readConfig()
+	out.ProbeBase = cfg.Base
 	cmdStr, _ := resolveLaunchCommand(cfg)
-	logPath = dshWebLogPathFn()
+	logPath := dshWebLogPathFn()
+	out.LogPath = logPath
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		slog.Warn("dsh launch: open log file failed", "path", logPath, "err", err)
-		return false, false, logPath, err, ""
+		out.SpawnErr = err
+		return out
 	}
 	// 首行记录解析后的实际命令（默认命令经平台兜底解析，可能与配置不同）
 	_, _ = logFile.WriteString("[sc] launch: " + cmdStr + "\n")
@@ -330,7 +364,8 @@ func launchAndWait() (available bool, tokenCaptured bool, logPath string, spawnE
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		slog.Warn("dsh launch: spawn failed", "cmd", cmdStr, "err", err)
-		return false, false, logPath, err, ""
+		out.SpawnErr = err
+		return out
 	}
 	logFile.Close()
 	_ = os.WriteFile(filepath.Join(config.DataDir(), "dsh-web.pid"),
@@ -340,7 +375,7 @@ func launchAndWait() (available bool, tokenCaptured bool, logPath string, spawnE
 
 	exitedAt := time.Time{}
 	deadline := time.Now().Add(launchReadyTimeout)
-	available = false
+	alive := false // 最近一轮拨号结果（deadline 收口时区分 notReady 与真失败）
 	for time.Now().Before(deadline) {
 		select {
 		case <-waitCh: // 包装进程已退出（原因在日志尾部，探活/宽限后由 available 反映）
@@ -349,44 +384,104 @@ func launchAndWait() (available bool, tokenCaptured bool, logPath string, spawnE
 			}
 		default:
 		}
-		if !tokenCaptured {
+		if !out.TokenCaptured {
 			if b, err := os.ReadFile(logPath); err == nil {
 				if tok, ok := captureLaunchToken(b); ok {
 					saveDshToken(tok)
-					tokenCaptured = true
+					out.TokenCaptured = true
 				}
 			}
 		}
-		if probeAvailable(readConfig()) {
-			available = true
-			break
+		if alive, _ = probeAvailableBase(readConfig().Base); alive {
+			// 端口可连但令牌未捕获：等一轮让「EADDRINUSE 秒退」落定（探活拨号
+			// 快于包装器退出通知的送达，不 drain 会把秒退误判成前台正常形态）
+			// 并给令牌打印留窗口（listen 先于 URL 打印的时序差，含 nohup 自守护
+			// 形态）——落定后：令牌出现=本次拉起；包装仍活=前台正常形态；包装
+			// 已退出且仍无令牌=端口被外部实例占用（监听方非本次拉起）
+			if !out.TokenCaptured {
+				select {
+				case <-waitCh:
+					if exitedAt.IsZero() {
+						exitedAt = time.Now()
+					}
+				default:
+				}
+				time.Sleep(300 * time.Millisecond)
+				if b, err := os.ReadFile(logPath); err == nil {
+					if tok, okT := captureLaunchToken(b); okT {
+						saveDshToken(tok)
+						out.TokenCaptured = true
+					}
+				}
+				select {
+				case <-waitCh:
+					if exitedAt.IsZero() {
+						exitedAt = time.Now()
+					}
+				default:
+				}
+			}
+			// 双层判活（P-20261118-6，P-20261118-4 复审执行要点 R5-1）：拨号通=
+			// 活性信号，HTTP 通（任意状态码响应）=就绪判据。有令牌或包装仍活
+			// （监听方大概率是本次拉起）时以 HTTP 就绪收口；HTTP 慢的环境继续
+			// 等（磁盘卡顿拖慢 node 响应时拨号早已通，若按拨号收口会把「未就绪」
+			// 谎报为就绪）——deadline 收口见环外 NotReady 分支
+			if out.TokenCaptured || exitedAt.IsZero() {
+				if httpProbeReady(readConfig().Base) {
+					out.Available = true
+					break
+				}
+			} else {
+				// 包装已退出且仍无令牌：端口被外部实例占用。收口不依赖 HTTP
+				// 就绪（外部实例可能同样响应缓慢，等它只会白烧 deadline——
+				// 重启链「重启未生效」的归因必须及时）
+				out.Available = true
+				out.ExternalOwner = true
+				break
+			}
 		}
-		if !exitedAt.IsZero() && time.Since(exitedAt) >= launchExitGrace {
-			break // 包装已退出且宽限期内上游仍未就绪：注定起不来，快速失败
+		if !exitedAt.IsZero() && time.Since(exitedAt) >= launchExitGrace && !alive {
+			break // 包装已退出且宽限期内上游拨号也不通：注定起不来，快速失败
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
+	if !out.Available && alive {
+		// deadline 收口（NotReady 显式态）：deadline 内拨号通而 HTTP 持续不通
+		// → available=true + NotReady=true——不谎报就绪也不假阴性（卡顿机磁盘
+		// 拖慢 HTTP 响应场景两全）
+		out.Available = true
+		out.NotReady = true
+	}
 	// token 可能晚于端口就绪打印（实测 0.1.5：就绪即返回会让 settings 留下
 	// 过期 token）——就绪后再补捕获最多 5s；进程已退出且上游没起来时无 token
-	// 可补，跳过（快速失败路径不多等）
-	if available || exitedAt.IsZero() {
-		for i := 0; i < 10 && !tokenCaptured; i++ {
+	// 可补，跳过（快速失败路径不多等）；externalOwner 形态同理——本次拉起的
+	// 进程已死（端口在听的是外部实例），日志不会再出现令牌行，等待无意义
+	if (out.Available && !out.ExternalOwner) || exitedAt.IsZero() {
+		for i := 0; i < 10 && !out.TokenCaptured; i++ {
 			time.Sleep(500 * time.Millisecond)
 			if b, err := os.ReadFile(logPath); err == nil {
 				if tok, ok := captureLaunchToken(b); ok {
 					saveDshToken(tok)
-					tokenCaptured = true
+					out.TokenCaptured = true
 				}
 			}
 		}
 	}
-	tail := tailFile(logPath, 600)
-	if !available {
+	out.LogTail = tailFile(logPath, 600)
+	out.PortBusy = logTailSaysPortBusy(out.LogTail)
+	if !out.Available {
 		// 服务日志补一行：失败详情只落在 dsh-web.log 与 API 响应体里，后端日志
 		// 一片安静会让「到底有没有失败/为什么」无从查起（logTail 即日志尾部）
-		slog.Warn("dsh launch not ready", "cmd", cmdStr, "logPath", logPath, "logTail", tail)
+		slog.Warn("dsh launch not ready", "cmd", cmdStr, "logPath", logPath, "logTail", out.LogTail)
 	}
-	return available, tokenCaptured, logPath, spawnErr, tail
+	return out
+}
+
+// logTailSaysPortBusy 启动日志明示端口占用（跨运行时关键词：node 的
+// listen EADDRINUSE 与 go/其他运行时的 address already in use 变体）
+func logTailSaysPortBusy(tail string) bool {
+	s := strings.ToLower(tail)
+	return strings.Contains(s, "eaddrinuse") || strings.Contains(s, "address already in use")
 }
 
 // tailFile 取文本文件尾部（最多 max 字节；切在行中间时丢弃残行对齐，
@@ -411,66 +506,78 @@ func tailFile(path string, max int) string {
 // DshLaunch POST /api/tools/dsh/launch（launchAndWait 的薄壳）
 func DshLaunch(c *gin.Context) {
 	cfg := readConfig()
-	if probeAvailable(cfg) {
+	if ok, _ := probeAvailableBase(cfg.Base); ok {
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"available": true, "spawned": false, "tokenCaptured": false}})
 		return
 	}
 	ownHint := dshDataDirWritableHint()
-	available, tokenCaptured, logPath, spawnErr, logTail := launchAndWait()
-	if spawnErr != nil {
+	out := launchAndWait()
+	if out.SpawnErr != nil {
 		shared.Error(c, http.StatusInternalServerError, "launch dsh failed",
-			fmt.Errorf("%v\n%s", spawnErr, logTail))
+			fmt.Errorf("%v\n%s", out.SpawnErr, out.LogTail))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
-		"available":     available,
+		"available":     out.Available,
 		"spawned":       true,
-		"tokenCaptured": tokenCaptured,
-		"logPath":       logPath,
-		"logTail":       logTail,
+		"tokenCaptured": out.TokenCaptured,
+		"logPath":       out.LogPath,
+		"logTail":       out.LogTail,
 		"ownHint":       ownHint,
+		"externalOwner": out.ExternalOwner,
+		"notReady":      out.NotReady,
+		"portBusy":      out.PortBusy,
+		"probeBase":     out.ProbeBase,
 	}})
 }
 
-// stopDsh 停止本机 dsh（三路覆盖，确保上游端口真正释放后再拉新实例）：
-//  1. pid 文件定位 SC 自己拉起的进程（非 Windows 核验 cmdline 含 dsh，防止
-//     pid 复用误杀）
-//  2. 启动包装前缀（WSL 等跨系统拓扑：DshLaunchCommand = "wsl.exe dsh web …"
-//     时 dsh 跑在 WSL 里，Windows 侧 pid/端口都够不着）——经同一执行环境
-//     pkill -f "<dsh> web"（吸收自 dsh-web 脚本 stop 的命令匹配 + 端口兜底）
-//  3. 等待上游端口释放（探活由活变死，最多 10s）
-func stopDsh() {
+// stopDsh 停止本机 dsh（P-20261118-4 守卫收窄：外部管理的 dsh 生命周期归
+// 用户——收窄是实现向「本系统不会结束非自己拉起的进程」承诺对齐）。
+// 返回 owned=是否持有「进程由本系统拉起」的归属证据（pid 文件在案）：
+//   - owned=true：pid 定位+核验+杀（非 Windows 核验 cmdline 含 dsh，防 pid
+//     复用误杀）→ pkill 兜底（WSL 等跨系统拓扑：DshLaunchCommand =
+//     "wsl.exe dsh web …" 时 dsh 跑在 WSL 里，Windows 侧 pid 够不着，经同一
+//     执行环境 pkill -f "<dsh> web"；启发式边界注记：启动命令在案≠本系统
+//     拉起——显式配置过启动命令后改用 systemd 常驻的用户仍会被 pkill 命中，
+//     与承诺存在残余缝隙，如实注记不做伪证）→ 等待上游端口由活变死（最多 10s）
+//   - owned=false：pid 文件缺失=无证据表明 dsh 由本系统管理 → 不执行 pkill
+//     （防杀外部 node/systemd 进程）且不做端口等待——外部进程可能继续持
+//     端口，白烧 10s 等待无意义，重启链由 launchAndWait 的探测自行感知
+func stopDsh() (owned bool) {
 	pidFile := filepath.Join(config.DataDir(), "dsh-web.pid")
-	if b, readErr := os.ReadFile(pidFile); readErr == nil {
-		if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil && pid > 0 {
-			killable := true
-			if runtime.GOOS != "windows" {
-				if cl, rerr := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); rerr == nil &&
-					!strings.Contains(string(cl), "dsh") {
-					killable = false // pid 已被无关进程复用：不杀
-				}
-			} else if out, terr := exec.Command("tasklist", "/FI",
-				fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH").CombinedOutput(); terr == nil {
-				// Windows 无 /proc：按镜像名核验。pid 是我方 cmd /C（或 wsl.exe）
-				// 包装进程，cmd.exe/wsl.exe 属预期；node.exe/dsh* 是免包装直启。
-				// tasklist 失败时保守放行——僵尸 dsh 比误杀低概率更可容忍
-				line := strings.ToLower(strings.TrimSpace(string(out)))
-				killable = strings.Contains(line, "node.exe") || strings.Contains(line, "dsh") ||
-					strings.Contains(line, "cmd.exe") || strings.Contains(line, "wsl.exe")
+	b, readErr := os.ReadFile(pidFile)
+	if readErr != nil {
+		return false // pid 文件缺失：无归属证据，守卫收窄（外部进程归用户）
+	}
+	owned = true
+	if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil && pid > 0 {
+		killable := true
+		if runtime.GOOS != "windows" {
+			if cl, rerr := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); rerr == nil &&
+				!strings.Contains(string(cl), "dsh") {
+				killable = false // pid 已被无关进程复用：不杀
 			}
-			if killable {
-				if runtime.GOOS == "windows" {
-					// 树杀：pid 是包装器，dsh（node）是其子进程，只杀包装器会漏
-					_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()
-				} else if p, perr := os.FindProcess(pid); perr == nil {
-					_ = p.Kill()
-				}
+		} else if out, terr := exec.Command("tasklist", "/FI",
+			fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH").CombinedOutput(); terr == nil {
+			// Windows 无 /proc：按镜像名核验。pid 是我方 cmd /C（或 wsl.exe）
+			// 包装进程，cmd.exe/wsl.exe 属预期；node.exe/dsh* 是免包装直启。
+			// tasklist 失败时保守放行——僵尸 dsh 比误杀低概率更可容忍
+			line := strings.ToLower(strings.TrimSpace(string(out)))
+			killable = strings.Contains(line, "node.exe") || strings.Contains(line, "dsh") ||
+				strings.Contains(line, "cmd.exe") || strings.Contains(line, "wsl.exe")
+		}
+		if killable {
+			if runtime.GOOS == "windows" {
+				// 树杀：pid 是包装器，dsh（node）是其子进程，只杀包装器会漏
+				_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()
+			} else if p, perr := os.FindProcess(pid); perr == nil {
+				_ = p.Kill()
 			}
 		}
 	}
 	_ = os.Remove(pidFile)
 	// 经同一执行环境停止 dsh：包装器 = dsh 二进制之前的部分（wsl.exe 等），
-	// pkill 限定匹配 "<dsh> web"，避免全机误杀
+	// pkill 限定匹配 "<dsh> web"，避免全机误杀；仅 owned（pid 在案）时执行
 	launch := readConfig().LaunchCommand
 	if launch == "" {
 		launch = "dsh web --no-open"
@@ -486,11 +593,12 @@ func stopDsh() {
 	}
 	cfg := readConfig()
 	for i := 0; i < 20; i++ {
-		if !probeAvailableBase(cfg.Base) {
-			return
+		if ok, _ := probeAvailableBase(cfg.Base); !ok {
+			return owned
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+	return owned
 }
 
 // DshUpgradeRestart POST /api/tools/dsh/upgrade/restart
@@ -511,17 +619,26 @@ func restartDshProcess(c *gin.Context) {
 	_ = rc.SetReadDeadline(time.Time{})
 	_ = rc.SetWriteDeadline(time.Time{})
 	stopDsh()
-	available, tokenCaptured, logPath, spawnErr, logTail := launchAndWait()
-	if spawnErr != nil {
+	out := launchAndWait()
+	if out.SpawnErr != nil {
 		shared.Error(c, http.StatusInternalServerError, "restart dsh failed",
-			fmt.Errorf("%v\n%s", spawnErr, logTail))
+			fmt.Errorf("%v\n%s", out.SpawnErr, out.LogTail))
 		return
 	}
+	// externalOwner 显式随响应下发（P-20261118-4 评审必改1）：外部 dsh 占端口
+	// 时新实例 EADDRINUSE 秒退、探活探到的是外部进程——available=true 但重启
+	// 静默无效，缺此字段前端会误判「新版本已加载」（restartPortBusy 的既有
+	// 条件 tokenCaptured&&!valid 在 tokenCaptured=false 时不成立，横幅不触发）
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
-		"ok":            available,
-		"available":     available,
-		"tokenCaptured": tokenCaptured,
-		"logPath":       logPath,
-		"logTail":       logTail,
+		"ok":            out.Available,
+		"available":     out.Available,
+		"tokenCaptured": out.TokenCaptured,
+		"logPath":       out.LogPath,
+		"logTail":       out.LogTail,
+		"spawned":       true,
+		"externalOwner": out.ExternalOwner,
+		"notReady":      out.NotReady,
+		"portBusy":      out.PortBusy,
+		"probeBase":     out.ProbeBase,
 	}})
 }

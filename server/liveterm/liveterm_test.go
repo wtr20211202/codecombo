@@ -42,6 +42,8 @@ func (f *fakeSession) CaptureScrollback(int) ([]byte, error) {
 
 func (f *fakeSession) Size() (uint16, uint16) { return f.cols, f.rows }
 
+func (f *fakeSession) DisplayName() string { return "e2e-src" }
+
 func (f *fakeSession) emit(data []byte) {
 	f.mu.Lock()
 	hs := make([]func([]byte), 0, len(f.handlers))

@@ -4,8 +4,9 @@
 // 三类部署形态：
 //   - 配置了外部访问地址（Tailscale/Cloudflare Tunnel/公网反代）→ 用它；
 //   - 当前 host 非回环（局域网 IP / 公网域名）→ 用当前 origin；
-//   - 当前为回环（桌面端 localhost 最常见）→ 用 /api/system/network 返回的
-//     局域网候选（多网卡下拉，默认第一项）；无候选 → 不可达态。
+//   - 当前为回环（桌面端 localhost 最常见）→ 默认用浏览器地址栏 origin
+//     （P-20261120-4：本机访问场景链接即当前地址），要发给别人时在下拉显式
+//     切换局域网候选（多网卡 + 合成回环项）；既无候选也未选择 → 不可达态。
 
 export interface NetworkAddress {
   ip: string
@@ -21,7 +22,7 @@ export interface RelayAddressPlan {
   state: RelayAccessState
   /** 用于拼二维码的 origin（不含尾斜杠）；unreachable 时为空串 */
   baseOrigin: string
-  /** 回环入口下的局域网候选（stable 排序，首项即默认） */
+  /** 回环入口下的候选（降权序 + 置尾回环合成项；首项只是展示序，链接地址由显式选择/自动态决定） */
   candidates: NetworkAddress[]
 }
 
@@ -122,7 +123,29 @@ export function formatUrlHost(ip: string): string {
   return ip.includes(':') && !ip.startsWith('[') ? `[${ip}]` : ip
 }
 
-/** 候选排序：私有地址优先、v4 优先，同族按地址数值序（稳定默认首项） */
+/**
+ * 虚拟/内部网卡名模式表（P-20261119-7 评审必改2 最小表，大小写不敏感子串匹配）：
+ * 这些接口的地址通常是 NAT/宿主侧虚拟网段（Windows vEthernet/WSL、docker0、
+ * libvirt virbr、VMware/VirtualBox host-only），接收方往往不可达——而纯 IP
+ * 数值排序会让 172.16/12 段的虚拟网卡恰好排到 192.168 物理网卡之前。
+ * 命中者仅降权不剔除（后端枚举「不做接口名启发式过滤」决策语义兼容，用户
+ * 仍可在下拉中选择）。Tailscale/utun 刻意不入表：CGNAT 100.64/10 与 macOS
+ * utun 是代码自述的典型外部可达入口形态，降权会把真实可用入口排后；`br-`
+ * 前缀同样不入表（OpenWrt br-lan/br-wan 物理网桥会被误伤，docker 自定义
+ * 网络 br-<id> 漏降可接受——仍在下拉可选）。
+ */
+const VIRTUAL_IFACE_PATTERNS = ['vethernet', 'wsl', 'docker', 'virbr', 'vmnet', 'vmware', 'virtualbox', 'loopback'] as const
+
+/** 接口名是否命中虚拟/内部网卡模式（排序降权用，非过滤） */
+export function isVirtualIfaceName(iface: string): boolean {
+  const name = iface.toLowerCase()
+  return VIRTUAL_IFACE_PATTERNS.some(p => name.includes(p))
+}
+
+/**
+ * 候选排序：物理网卡优先（虚拟/内部网卡名降权排后，见上表），物理网卡间
+ * 私有地址优先、v4 优先，同族按地址数值序（稳定默认首项）。
+ */
 export function sortRelayCandidates(addresses: NetworkAddress[]): NetworkAddress[] {
   const seen = new Set<string>()
   const deduped: NetworkAddress[] = []
@@ -131,6 +154,7 @@ export function sortRelayCandidates(addresses: NetworkAddress[]): NetworkAddress
     seen.add(a.ip)
     deduped.push(a)
   }
+  const rank = (a: NetworkAddress) => (isVirtualIfaceName(a.iface) ? 1 : 0)
   const score = (a: NetworkAddress) => (a.private ? 0 : 2) + (a.family === 'v4' ? 0 : 1)
   const v4Value = (ip: string) => {
     const parts = ipv4Parts(ip)
@@ -139,6 +163,8 @@ export function sortRelayCandidates(addresses: NetworkAddress[]): NetworkAddress
     return (((a * 256 + b) * 256 + c) * 256 + d)
   }
   return deduped.sort((a, b) => {
+    // 降权层只看接口名：同档内沿用既有 private/v4/数值序
+    if (rank(a) !== rank(b)) return rank(a) - rank(b)
     if (score(a) !== score(b)) return score(a) - score(b)
     const av = v4Value(a.ip)
     const bv = v4Value(b.ip)
@@ -159,6 +185,33 @@ export function candidateOrigin(currentHref: string, address: NetworkAddress): s
 }
 
 /**
+ * 回环合成候选（P-20261120-4）：本机回环入口不依赖后端网卡枚举即可用——
+ * 127.0.0.1 与 localhost 恒可合成。label 由调用方以 i18n 解析后传入
+ * （纯函数不依赖 i18n；合成项在下拉中展示为「<label> · 127.0.0.1」）。
+ */
+export function loopbackSelfCandidates(selfLabel: string): NetworkAddress[] {
+  return [
+    { ip: '127.0.0.1', family: 'v4', iface: selfLabel, private: true },
+    { ip: 'localhost', family: 'v4', iface: selfLabel, private: true },
+  ]
+}
+
+/** buildRelayPlan 的可选语义参数（P-20261120-4 显式选择语义） */
+export interface RelayPlanOptions {
+  /**
+   * 用户在下拉中显式选中的候选 ip（含回环合成项）；空 = 「自动（浏览器
+   * 地址）」态。仅显式选择时生效——自动态不再被排序结果改写（P-20261120-4
+   * 的一致性 bug 根因正是显式选择被 sortRelayCandidates 重排覆盖）。
+   */
+  preferredIp?: string
+  /**
+   * 回环合成候选（label 已在调用方解析）；回环分支内排序后置尾追加——
+   * LAN 切换一步可达，回环项垫底不劫持视线。
+   */
+  loopbackExtras?: NetworkAddress[]
+}
+
+/**
  * 生成地址计划。当前 URL 不可解析时按不可达处理（弹窗仍可展示提示）。
  * external 优先于一切——用户显式配置的外部入口应压过自动推断。
  */
@@ -166,6 +219,7 @@ export function buildRelayPlan(
   currentHref: string,
   externalAccessUrl: string,
   addresses: NetworkAddress[],
+  options: RelayPlanOptions = {},
 ): RelayAddressPlan {
   let current: URL
   try {
@@ -184,13 +238,21 @@ export function buildRelayPlan(
       candidates: [],
     }
   }
-  const candidates = sortRelayCandidates(addresses)
+  const lan = sortRelayCandidates(addresses)
+  // 合成回环项按 ip 去重后置尾（网卡枚举不返回环，正常无碰撞；防御性去重）
+  const extras = (options.loopbackExtras ?? []).filter(e => e?.ip && !lan.some(a => a.ip === e.ip))
+  const candidates = [...lan, ...extras]
   if (candidates.length === 0) {
     return { state: 'unreachable', baseOrigin: '', candidates: [] }
   }
+  // 显式选择钉住 baseOrigin（排序只决定下拉展示序，不再劫持链接地址）；
+  // 自动态 = 浏览器地址栏 origin 本身（用户就在本机访问时链接即当前地址）
+  const preferred = options.preferredIp
+    ? candidates.find(a => a.ip === options.preferredIp)
+    : undefined
   return {
     state: 'loopback',
-    baseOrigin: candidateOrigin(currentHref, candidates[0] as NetworkAddress),
+    baseOrigin: preferred ? candidateOrigin(currentHref, preferred) : current.origin,
     candidates,
   }
 }

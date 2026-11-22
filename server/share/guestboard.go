@@ -371,10 +371,10 @@ func boardMsgMax(collab bool) int {
 // 各页同源的 :root 主题 token，零新增依赖）。列表内部滚动 + 折叠形态，
 // 不与内容区抢高度
 const guestBoardCSS = `
-.gb-root{flex-shrink:0;margin-top:10px;background:var(--card);border:1px solid var(--border);
+.gb-root{flex-shrink:0;margin-top:8px;background:var(--card);border:1px solid var(--border);
 border-radius:12px;overflow:hidden}
 .gb-head{display:flex;align-items:center;gap:8px;width:100%;border:none;background:transparent;
-color:var(--text);padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;text-align:left}
+color:var(--text);padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;text-align:left}
 .gb-head:hover{background:var(--hover)}
 .gb-head .gb-cnt{color:var(--muted);font-weight:400;font-variant-numeric:tabular-nums}
 .gb-head .gb-arrow{margin-left:auto;color:var(--muted);transition:transform .15s}
@@ -442,8 +442,19 @@ const guestBoardJS = `
   form.append(nick, ta, foot, status);
   body.append(list, form);
   root.append(head, body);
-  const footer = wrap.querySelector('.footer');
-  if (footer) wrap.insertBefore(root, footer); else wrap.appendChild(root);
+  // 挂载形态二分（P-20261119-3 入口条合并）：终端直播页由 entryBarJS 先建
+  // 条壳——留言入口以 chip 形态挂进条内（testid 迁按钮级 gb-root-btn，不复用
+  // gb-root 于条内防语义漂移；浮层锚条定位，termlayout/entryBarCSS 覆写）；
+  // 条壳缺席（文件/定格/回放页，本件不注入）维持既有独立单条原样——
+  // share-guestbook.spec 的 gb-root 断言面（文件页）零触碰
+  const bar = document.querySelector('[data-testid="sc-entrybar"]');
+  if (bar) {
+    root.setAttribute('data-testid', 'gb-root-btn');
+    bar.appendChild(root);
+  } else {
+    const footer = wrap.querySelector('.footer');
+    if (footer) wrap.insertBefore(root, footer); else wrap.appendChild(root);
+  }
 
   let loaded = false;
   let msgCount = 0;

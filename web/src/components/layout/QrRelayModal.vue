@@ -7,8 +7,9 @@
 // 这里按三形态选址（utils/networkAddress 纯函数）：
 //   配置了外部访问地址 → 用它（Tailscale/Cloudflare Tunnel/公网反代）；
 //   当前 host 非回环 → 用当前 origin；
-//   当前为回环 → 用 GET /api/system/network 的局域网候选（多网卡可切换）；
-//   无候选 → 红色不可达提示，不再发出注定打不开的码。
+//   当前为回环 → 默认用浏览器地址栏 origin 本身（P-20261120-4：本机访问场景
+//     链接即当前地址），要发给别人时在下拉显式切换局域网候选或回环合成项；
+//   既无候选也未选择 → 红色不可达提示，不再发出注定打不开的码。
 import { computed, ref, watch } from 'vue'
 import { NModal, NButton, NCheckbox, NInput, NIcon, NQrCode, NSelect, NSpin, useMessage } from 'naive-ui'
 import { CopyOutline, PhonePortraitOutline } from '@vicons/ionicons5'
@@ -19,7 +20,8 @@ import { copyText } from '../../utils/clipboard'
 import {
   buildRelayPlan,
   buildRelayUrl,
-  candidateOrigin,
+  isLoopbackHostname,
+  loopbackSelfCandidates,
   relayStatusTone,
   type NetworkAddress,
 } from '../../utils/networkAddress'
@@ -77,45 +79,39 @@ watch(() => props.show, (v) => {
   void loadAddressContext()
 }, { immediate: true })
 
-const plan = computed(() => buildRelayPlan(frozenHref.value, externalAccessUrl.value, networkAddresses.value))
+const plan = computed(() => buildRelayPlan(frozenHref.value, externalAccessUrl.value, networkAddresses.value, {
+  preferredIp: selectedIP.value,
+  loopbackExtras: loopbackSelfCandidates(t('qr.relay.selfLoopback')),
+}))
 const candidates = computed(() => plan.value.candidates)
 
-// 默认第一项；候选变化（刷新/重开）时把失效选择复位，保证码与下拉一致
+// 候选变化（刷新/重开）时只把失效的显式选择复位回自动态；绝不强制赋首项
+// （P-20261120-4：默认=浏览器地址，首项劫持会让自动态永远不成立）
 watch(candidates, (list) => {
-  if (list.length === 0) {
+  if (selectedIP.value && !list.some(a => a.ip === selectedIP.value)) {
     selectedIP.value = ''
-    return
-  }
-  if (!list.some(a => a.ip === selectedIP.value)) {
-    const first = list[0]
-    if (first) selectedIP.value = first.ip
   }
 }, { immediate: true })
 
+/** 当前显式选中的候选；自动态为 null（hint 与链接同走 plan.baseOrigin，
+ *  不再有「hint 已切、链接没切」的两条路） */
 const selectedAddress = computed<NetworkAddress | null>(() => {
-  const list = candidates.value
-  if (list.length === 0) return null
-  return list.find(a => a.ip === selectedIP.value) ?? list[0] ?? null
+  if (!selectedIP.value) return null
+  return candidates.value.find(a => a.ip === selectedIP.value) ?? null
 })
 
-// 回环入口下 origin 跟随下拉切换；其余形态直接用计划中的 origin
-const activeOrigin = computed(() => {
-  if (plan.value.state === 'loopback' && selectedAddress.value) {
-    return candidateOrigin(frozenHref.value, selectedAddress.value)
-  }
-  return plan.value.baseOrigin
-})
+// baseOrigin 已内含显式选择语义（preferredIp 钉住 / 自动态=当前 origin）：
+// 码/文本框/剪贴板三方同源这一份 origin
+const url = computed(() => buildRelayUrl(frozenHref.value, plan.value.baseOrigin, carryLocation.value))
 
-// 关 = 干净入口（origin 根，P-20261003-127）：隐私/通用入口场景不把个人
-// 所在位置编进码里；origin 从定格 URL 派生，与码/文本/剪贴板快照同口径
-const url = computed(() => buildRelayUrl(frozenHref.value, activeOrigin.value, carryLocation.value))
-
-const candidateOptions = computed(() =>
-  candidates.value.map(a => ({
+// 首项「自动（当前浏览器地址）」伪选项：自动态可见可选，显式选择后仍可切回
+const candidateOptions = computed(() => [
+  { label: t('qr.relay.addressAuto'), value: '' },
+  ...candidates.value.map(a => ({
     label: `${a.iface} · ${a.ip}`,
     value: a.ip,
   })),
-)
+])
 
 const statusTone = computed(() => relayStatusTone(plan.value.state))
 const statusKey = computed(() => `qr.relay.status.${plan.value.state}`)
@@ -127,8 +123,13 @@ const hint = computed(() => {
     case 'lan': return t('qr.relay.hint.lan')
     case 'unreachable':
       return networkFailed.value ? t('qr.relay.hint.networkFailed') : t('qr.relay.hint.unreachable')
-    default:
+    default: {
+      // 回环本源（自动态默认/显式选回环合成项）与显式选局域网候选双语境区分；
+      // 按 baseOrigin 主机归类，与 shareAddress 的 source 判定同一规则
+      const loopbackSelf = !selectedAddress.value || isLoopbackHostname(new URL(plan.value.baseOrigin).hostname)
+      if (loopbackSelf) return t('qr.relay.hint.loopbackSelf')
       return t('qr.relay.hint.loopback', { ip: selectedAddress.value?.ip || '' })
+    }
   }
 })
 

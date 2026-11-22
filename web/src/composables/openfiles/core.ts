@@ -12,6 +12,7 @@ import { isRemoteEditorPath, parseRemoteEditorPath } from '../../utils/remoteEdi
 import { registerBeforeProjectSwitchHook } from '../../stores/project'
 import type { EditorConfigEffective } from '../../utils/editorConfig'
 import { confirmDialog } from '../useDialog'
+import { defaultViewMode, pvPreviewable, rememberViewMode } from '../../utils/filePreviewMode'
 import type { OpenFilesCtx } from './context'
 import { isUntitledPath } from './types'
 import type { ClosedFileRecord, EditorGroup, OpenFile, OpenFileOptions, SplitDirection } from './types'
@@ -271,7 +272,7 @@ export function createCore(ctx: OpenFilesCtx): void {
     // 查询失败走旧读取路径兜底时无该约定（回落全局设置）
     let ec: EditorConfigEffective | undefined
     try {
-      const pol = await projectApi.filePolicy(projectId, file.path, opts?.silent ? { silent: true } : undefined) as { data?: { kind?: string; size?: number; sizeHuman?: string; reason?: string }; editorconfig?: EditorConfigEffective } | undefined
+      const pol = await projectApi.filePolicy(projectId, file.path, opts?.silent ? { silent: true } : undefined) as { data?: { kind?: string; size?: number; sizeHuman?: string; reason?: string; pv?: { kind?: string; mime?: string } }; editorconfig?: EditorConfigEffective } | undefined
       const d = pol?.data
       ec = pol?.editorconfig
       if (d && (d.kind === 'too-large' || d.kind === 'binary')) {
@@ -279,9 +280,34 @@ export function createCore(ctx: OpenFilesCtx): void {
         // path 守卫：槽位可能已被后续预览打开换装，迟到的元信息不写入新文件
         if (f && f.path === file.path) {
           f.loading = false
+          // 预览注册表 kind（P-20261119-4）：统一双视图分流判定源。
+          // 二进制 + 预览 Kind 命中 → 默认预览态（S2 能力直出，「binary not
+          // previewable」从用户路径消失——用户定向修订）；未命中（真未知
+          // 格式/已知无预览格式/嗅探 binary 的文本族）维持信息卡现状。
+          // meta 照常记录：原文件态的信息卡 + 下载出口仍需要它
+          const pv = d.pv
+          f.pvKind = typeof pv?.kind === 'string' ? pv.kind : undefined
+          f.pvMime = typeof pv?.mime === 'string' ? pv.mime : undefined
           f.meta = { kind: d.kind, size: d.size || 0, sizeHuman: d.sizeHuman || '', reason: d.reason }
+          // 仅 binary 分流默认视图态：too-large 维持现提示（元信息卡，评审
+          // 必改1 定案）——偏好记忆不当「超大文档」的通行证（预览请求会被
+          // 服务端上限拦回错误卡，与其绕一圈不如直落信息卡）
+          if (d.kind === 'binary') {
+            f.viewMode = defaultViewMode(file.path, f.pvKind, true)
+          }
         }
         return
+      }
+      // 文本文件：登记 pvKind 供「原文件 | 预览」开关可用性判定（md=前端
+      // 管线/html=沙箱/csv·sheet=服务端净化/代码族=只读文本态）；缺省视图
+      // 态仍 source（编辑工作流零回归），但用户的 per 扩展名偏好覆盖缺省
+      //（S3 增补①「记住上次选择」——偏好只在打开时读，kind 不可预览则忽略）
+      const f = g.files[fileIdx]
+      if (f && f.path === file.path) {
+        const pv = d?.pv
+        f.pvKind = typeof pv?.kind === 'string' ? pv.kind : undefined
+        f.pvMime = typeof pv?.mime === 'string' ? pv.mime : undefined
+        if (pvPreviewable(f.pvKind)) f.viewMode = defaultViewMode(file.path, f.pvKind, false)
       }
     } catch {
       // 策略查询失败 → 走旧读取路径兜底（服务端 ReadFile 自身仍有策略拦截）
@@ -641,5 +667,19 @@ export function createCore(ctx: OpenFilesCtx): void {
     f.loading = true
     f.remoteOffline = false
     await loadRemoteInto(g, found.idx, f, remote)
+  }
+
+  /** 统一双视图切换（P-20261119-4）：原文件 ↔ 预览翻转 + per 扩展名偏好
+   *  记忆（utils/filePreviewMode，GitHub/VS Code「记住上次选择」惯例）。
+   *  状态在 OpenFile 共享对象上——分屏两组同 buffer 同步翻转；非预览 Kind
+   *  （info/未注册/pv 缺席）为 no-op（开关不可见处调用不产生副作用） */
+  ctx.toggleFileViewMode = function toggleFileViewMode(path) {
+    for (const g of groups.value) {
+      const f = g.files.find(x => x.path === path)
+      if (!f || !pvPreviewable(f.pvKind)) continue
+      const next = f.viewMode === 'preview' ? 'source' : 'preview'
+      f.viewMode = next
+      rememberViewMode(path, next)
+    }
   }
 }

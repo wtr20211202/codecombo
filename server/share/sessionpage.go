@@ -23,9 +23,11 @@ import (
 // 由浏览器原生滚动承载（条目文本服务端已按解析层上限截断，DOM 规模有界）。
 
 type sessionBootState struct {
-	Token string            `json:"token"`
-	Lang  string            `json:"lang"`
-	Dict  map[string]string `json:"dict"`
+	Token string `json:"token"`
+	Lang  string `json:"lang"`
+	// Name 分享展示名（P-20261118-9 去品牌前缀）：页面校准 document.title 用
+	Name string            `json:"name,omitempty"`
+	Dict map[string]string `json:"dict"`
 	// Wm 溯源水印文本（P-20261005-193；空串 = 记录未开水印，页面不出水印层）
 	Wm string `json:"wm,omitempty"`
 }
@@ -47,17 +49,25 @@ var sessionDictZh = map[string]string{
 	"stepsLine":     "{n} 个步骤",
 	"thinkingLine":  "{n} 条思考",
 	"poweredBy":     "由 Codecombo 提供",
-	"gbTitle":       "留言",
-	"gbNick":        "昵称（可选）",
-	"gbPh":          "写下你的问题或反馈（≤500 字）…",
-	"gbSend":        "发送",
-	"gbSending":     "发送中…",
-	"gbSent":        "已收到你的留言，分享者可在管理面板看到",
-	"gbEmpty":       "还没有留言",
-	"gbAnon":        "匿名访客",
-	"gbTooLong":     "留言超过 500 字上限",
-	"gbLimited":     "发送太频繁，请稍后再试",
-	"gbFailed":      "发送失败，请重试",
+	// 主题切换器（P-20261120-1，theme.go guestThemeJS 消费；键名与文件页
+	// page_i18n.go 主题段同表，六页同键）
+	"theme":        "主题",
+	"themeAuto":    "跟随系统",
+	"themeLight":   "GitHub 浅色",
+	"themeDark":    "GitHub 深色",
+	"themeOneDark": "One Dark",
+	"themeDracula": "Dracula",
+	"gbTitle":      "留言",
+	"gbNick":       "昵称（可选）",
+	"gbPh":         "写下你的问题或反馈（≤500 字）…",
+	"gbSend":       "发送",
+	"gbSending":    "发送中…",
+	"gbSent":       "已收到你的留言，分享者可在管理面板看到",
+	"gbEmpty":      "还没有留言",
+	"gbAnon":       "匿名访客",
+	"gbTooLong":    "留言超过 500 字上限",
+	"gbLimited":    "发送太频繁，请稍后再试",
+	"gbFailed":     "发送失败，请重试",
 }
 
 var sessionDictEn = map[string]string{
@@ -77,17 +87,24 @@ var sessionDictEn = map[string]string{
 	"stepsLine":     "{n} steps",
 	"thinkingLine":  "{n} thinking blocks",
 	"poweredBy":     "Powered by Codecombo",
-	"gbTitle":       "Messages",
-	"gbNick":        "Nickname (optional)",
-	"gbPh":          "Leave a question or feedback (≤500 chars)…",
-	"gbSend":        "Send",
-	"gbSending":     "Sending…",
-	"gbSent":        "Your message was received — the owner will see it in the share manager.",
-	"gbEmpty":       "No messages yet",
-	"gbAnon":        "Anonymous",
-	"gbTooLong":     "Message exceeds the 500-character limit",
-	"gbLimited":     "Too many messages, please try again later.",
-	"gbFailed":      "Failed to send, try again",
+	// 主题切换器（P-20261120-1；键名与文件页 page_i18n.go 主题段同表）
+	"theme":        "Theme",
+	"themeAuto":    "Auto (system)",
+	"themeLight":   "GitHub Light",
+	"themeDark":    "GitHub Dark",
+	"themeOneDark": "One Dark",
+	"themeDracula": "Dracula",
+	"gbTitle":      "Messages",
+	"gbNick":       "Nickname (optional)",
+	"gbPh":         "Leave a question or feedback (≤500 chars)…",
+	"gbSend":       "Send",
+	"gbSending":    "Sending…",
+	"gbSent":       "Your message was received — the owner will see it in the share manager.",
+	"gbEmpty":      "No messages yet",
+	"gbAnon":       "Anonymous",
+	"gbTooLong":    "Message exceeds the 500-character limit",
+	"gbLimited":    "Too many messages, please try again later.",
+	"gbFailed":     "Failed to send, try again",
 }
 
 func sessionDictFor(lang string) map[string]string {
@@ -103,6 +120,10 @@ type sessionPageData struct {
 	Boot     template.JS
 	BoardCSS template.CSS
 	BoardJS  template.JS
+	// ThemeCSS/ThemeJS 访客页族主题切换注入件（P-20261120-1，theme.go 单一
+	// 事实源——CSS 进 <style>，JS 在 head 先行 initTheme 防闪白）
+	ThemeCSS template.CSS
+	ThemeJS  template.JS
 }
 
 // 模板与 castpage.go/termpage.go 同族（头/横幅/卡片/主题化样式对齐）。单文件
@@ -123,6 +144,7 @@ const sessionPageTmplSrc = `<!doctype html>
 @media (prefers-color-scheme: dark){:root{--bg:#0e1320;--card:#161d2f;--text:#e6eaf3;--muted:#8b94a9;
 --border:#263149;--chip:#1e2a4a;--warn-bg:#2d2410;--warn-bd:#5a4a1e;--warn-tx:#e8c87a;
 --think-bg:#201a33;--think-bd:#3b3060;--tool-bg:#141d31;--tool-bd:#27406b;--fail:#ff6b81;--shadow:0 10px 30px rgba(0,0,0,.35)}}
+{{.ThemeCSS}}
 *{box-sizing:border-box}
 html,body{min-height:100%}
 body{margin:0;color:var(--text);overflow:hidden;
@@ -133,24 +155,24 @@ font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microso
 .b2{width:320px;height:320px;background:rgba(61,123,253,.26);bottom:-90px;left:-60px}
 .wrap{position:relative;z-index:1;height:100vh;max-width:1040px;margin:0 auto;padding:22px 22px 10px;
 display:flex;flex-direction:column}
-.header{flex-shrink:0;display:flex;align-items:center;gap:14px;
+.header{flex-shrink:0;display:flex;align-items:center;gap:12px;
 background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:14px;
-padding:13px 20px;color:#fff;box-shadow:var(--shadow)}
-.header .icon{flex:0 0 auto;width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.16);
+padding:9px 16px;color:#fff;box-shadow:var(--shadow)}
+.header .icon{flex:0 0 auto;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.16);
 display:flex;align-items:center;justify-content:center}
 .header .meta{flex:1;min-width:0}
-.header h1{margin:0;font-size:16.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.header .sub{margin-top:2px;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header h1{margin:0;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header .sub{margin-top:1px;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.16);
-border:1px solid rgba(255,255,255,.4);border-radius:999px;padding:4px 13px;font-size:12px;font-weight:600;
+border:1px solid rgba(255,255,255,.4);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:600;
 letter-spacing:.4px;font-variant-numeric:tabular-nums}
-.banner{flex-shrink:0;margin-top:12px;display:flex;gap:9px;align-items:flex-start;
+.banner{flex-shrink:0;margin-top:8px;display:flex;gap:9px;align-items:flex-start;
 background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx);
-border-radius:10px;padding:9px 14px;font-size:12.5px;line-height:1.55}
+border-radius:10px;padding:6px 12px;font-size:12.5px;line-height:1.5}
 .banner svg{flex:0 0 auto;margin-top:2px}
 .trunc{flex-shrink:0;margin-top:8px;border:1px dashed var(--border);border-radius:9px;padding:7px 12px;
 font-size:12px;color:var(--muted);display:none}
-.card{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:12px;
+.card{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:8px;
 background:var(--card);border:1px solid var(--border);border-radius:14px;
 box-shadow:var(--shadow);overflow:hidden}
 .list{flex:1;min-height:0;overflow-y:auto;padding:10px 16px 18px}
@@ -184,9 +206,10 @@ color:var(--muted);text-align:center;padding:30px}
 display:flex;align-items:center;justify-content:center}
 .state h2{margin:0 0 6px;font-size:16px;color:var(--text)}
 .state p{margin:0;font-size:12.5px}
+/* foot-note 并入 footer 单行（P-20261118-9）：原两行（提示行+版权行）合并为
+   flex 两端单行——roTip 左、版权右；.footer 锚点语义保留（挂载脚本插入位） */
 .foot-note{flex-shrink:0;display:flex;justify-content:space-between;gap:12px;
-padding:8px 6px 2px;color:var(--muted);font-size:11.5px;opacity:.85}
-.footer{flex-shrink:0;text-align:center;color:var(--muted);font-size:11.5px;margin-top:9px;opacity:.75}
+padding:6px 6px 0;color:var(--muted);font-size:11.5px;opacity:.85}
 .sc-wm{position:fixed;inset:0;pointer-events:none;z-index:65;
 -webkit-user-select:none;user-select:none}
 .sc-wm span{position:absolute;font-size:13px;font-weight:600;letter-spacing:.4px;
@@ -195,6 +218,7 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 .sc-wm .wm-b{bottom:16%;right:5%}
 {{.BoardCSS}}
 </style>
+<script>{{.ThemeJS}}</script>
 </head>
 <body>
 <div class="blob b1"></div><div class="blob b2"></div>
@@ -202,10 +226,11 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
   <div class="header">
     <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg></div>
     <div class="meta">
-      <h1>{{.Title}}</h1>
+      <h1 id="pageTitle">{{.Title}}</h1>
       <div class="sub" id="sub"></div>
     </div>
     <div class="badge" id="badgeText"></div>
+    <span id="themeSlot"></span>
   </div>
   <div class="banner">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -216,18 +241,22 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
     <div class="list" id="list" style="display:none"></div>
     <div class="state" id="stateBox"></div>
   </div>
-  <div class="foot-note"><span id="roTip"></span><span></span></div>
-  <div class="footer" id="powered"></div>
+  <!-- foot-note 并入 footer 单行（P-20261118-9 布局紧凑化） -->
+  <div class="footer foot-note"><span id="roTip"></span><span id="powered"></span></div>
 </div>
 <script>
 const SC = {{.Boot}};
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
-document.title = t('appTitle');
+// 标签页标题 = 分享名（P-20261118-9 去品牌前缀；<title> 已是分享名，此处校准）
+document.title = SC.name || document.title;
 $('bannerText').textContent = t('maskBanner');
 $('roTip').textContent = t('readonlyTip');
 $('powered').textContent = t('poweredBy');
 $('badgeText').textContent = t('loadingTip');
+// 主题切换器（P-20261120-1，theme.go 共享注入件——head 已先行 initTheme 设
+// data-theme 防闪白；渐变头部上的落位观感由页面实测门禁三视口裁定）
+$('themeSlot').appendChild(makeThemeSelect());
 
 // 溯源水印（P-20261005-193）：文本服务端下发（空 = 不出层），textContent 防注入
 (function mountWatermark(){
@@ -361,15 +390,18 @@ var sessionPageTmpl = template.Must(template.New("sessionreplay").Parse(sessionP
 // renderSessionPage 输出会话回放访客页（已知 token；调用方已做 lookup）。
 // wm 为溯源水印文本（P-20261005-193，空串 = 未开水印）
 func renderSessionPage(w io.Writer, token, lang, title, wm string) error {
-	boot, err := json.Marshal(sessionBootState{Token: token, Lang: lang, Dict: sessionDictFor(lang), Wm: wm})
+	boot, err := json.Marshal(sessionBootState{Token: token, Lang: lang, Dict: sessionDictFor(lang), Wm: wm, Name: title})
 	if err != nil {
 		return err
 	}
+	// Title 无品牌前缀（P-20261118-9，termpage.go 同款口径）
 	return sessionPageTmpl.Execute(w, sessionPageData{
 		Lang:     lang,
-		Title:    "Codecombo " + title,
+		Title:    title,
 		Boot:     template.JS(boot),
 		BoardCSS: template.CSS(guestBoardCSS),
 		BoardJS:  template.JS(guestBoardJS),
+		ThemeCSS: template.CSS(GuestThemeCSS),
+		ThemeJS:  template.JS(guestThemeJS),
 	})
 }

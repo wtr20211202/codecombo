@@ -49,6 +49,9 @@ type LiveSession interface {
 	CaptureScrollback(maxLines int) ([]byte, error)
 	// Size 会话当前终端尺寸（SSE hello 帧供访客页初始化 xterm 网格）
 	Size() (cols, rows uint16)
+	// DisplayName 会话当前显示名（P-20261118-9：SSE rename 帧源——主人侧改名
+	// 后访客页标题跟随；实时读会话，语义与 Size 的实时读对齐）
+	DisplayName() string
 }
 
 // 会话解析：默认走 terminal.DefaultManager（recording 同款先例）；测试经
@@ -106,6 +109,10 @@ type Subscription interface {
 	// 会话不可读/报 0 尺寸/馈线已终结时回落接线时刻尺寸；会话从未存在过则为
 	// 0 值（访客页回落容器自适应）
 	Size() (cols, rows uint16)
+	// Name 会话当前显示名（P-20261118-9：实时读会话，SSE 端点据此下发
+	// hello/rename 帧——主人侧改名后访客页 h1 与标签页标题跟随；馈线已终结
+	// 时回落终结时刻名）
+	Name() string
 	// Release 释放本路订阅（并发访客计数 -1）；SSE handler 退出必须调用
 	Release()
 }
@@ -117,6 +124,7 @@ type subscription struct {
 	done  <-chan struct{}
 	ended bool
 	size  func() (uint16, uint16)
+	name  func() string
 	rele  func()
 }
 
@@ -125,6 +133,7 @@ func (s *subscription) Live() <-chan []byte    { return s.live }
 func (s *subscription) Done() <-chan struct{}  { return s.done }
 func (s *subscription) Ended() bool            { return s.ended }
 func (s *subscription) Size() (uint16, uint16) { return s.size() }
+func (s *subscription) Name() string           { return s.name() }
 func (s *subscription) Release()               { s.rele() }
 
 // sub 内部订阅条目。done 的关闭三路并发（终结/踢出/释放），sync.Once 收口
@@ -157,6 +166,9 @@ type feed struct {
 	// cols/rows 接线时刻尺寸：会话不可读/报 0 尺寸时的回落值（构造期定格）
 	cols uint16
 	rows uint16
+	// nameAt 接线时刻显示名：会话不在/报空名时的回落值（构造期定格，
+	// P-20261118-9 与 cols/rows 同款）
+	nameAt string
 	// wiredAt 接通时刻（构造期定格）：Prune 的新馈线豁免窗判据
 	wiredAt time.Time
 }
@@ -177,6 +189,22 @@ func (f *feed) size() (uint16, uint16) {
 		}
 	}
 	return cols, rows
+}
+
+// name 当前会话显示名（P-20261118-9）：实时读会话，会话不在回落接线时刻值。
+// 锁序纪律与 size() 同款——f.mu 内只取引用，DisplayName（取会话锁）在 f.mu 外
+// 调用。接线时刻值在构造期定格（f.nameAt，feed 入 map 前写定无锁读竞态）
+func (f *feed) name() string {
+	f.mu.Lock()
+	sess := f.sess
+	nameAt := f.nameAt
+	f.mu.Unlock()
+	if sess != nil {
+		if n := sess.DisplayName(); n != "" {
+			return n
+		}
+	}
+	return nameAt
 }
 
 // filter 遮蔽层：遮蔽馈线走流式 Masker；未过滤馈线原样转发但必须拷贝——
@@ -319,11 +347,13 @@ func (h *Hub) Wire(token, sessionID string, unfiltered bool) {
 // 二次查表——并发 Unwire 摘除后指针上的 ended 态即「已结束」语义，无空指针窗）
 func (h *Hub) wire(token, sessionID string, unfiltered bool) *feed {
 	sess := lookupSession(sessionID)
-	// feed 全部字段在入 map（对其他 goroutine 可见）前定格：cols/rows 在
+	// feed 全部字段在入 map（对其他 goroutine 可见）前定格：cols/rows/nameAt 在
 	// 构造期取定，tap 注册后的注销检查走 f.mu——构造后不再有锁外写
 	var cols, rows uint16
+	var nameAt string
 	if sess != nil {
 		cols, rows = sess.Size()
+		nameAt = sess.DisplayName()
 	}
 	f := &feed{
 		sessionID: sessionID,
@@ -331,6 +361,7 @@ func (h *Hub) wire(token, sessionID string, unfiltered bool) *feed {
 		subs:      make(map[*sub]struct{}),
 		cols:      cols,
 		rows:      rows,
+		nameAt:    nameAt,
 		wiredAt:   time.Now(),
 	}
 	if !unfiltered {
@@ -457,8 +488,10 @@ func (h *Hub) Subscribe(token, sessionID string, unfiltered bool) (Subscription,
 		live:  s.ch,
 		done:  s.done,
 		ended: ended,
-		// 实时尺寸（P-20261107-4）：不在订阅时刻定格——SSE 端点按此下发 resize 帧
+		// 实时尺寸（P-20261107-4）/实时显示名（P-20261118-9）：不在订阅时刻
+		// 定格——SSE 端点按此下发 resize/rename 帧
 		size: f.size,
+		name: f.name,
 		rele: func() {
 			f.mu.Lock()
 			delete(f.subs, s)

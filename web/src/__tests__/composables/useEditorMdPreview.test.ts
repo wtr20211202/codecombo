@@ -7,10 +7,11 @@
 //    （不炸）、相对 .md 链接仍走 OPS_OPEN_FILE_AT 既有打开链（P-108 语义不回退）。
 // 渲染走 150ms 防抖尾沿，用真实定时器短等；滚动断言与 mdAnchorNav.test.ts 同款
 // scrollTo stub（jsdom 无布局引擎）。
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 import type { useI18n } from 'vue-i18n'
 import { OPS_OPEN_FILE_AT, type OpenFileAtDetail } from '@/utils/opsEvents'
 import { useEditorMdPreview } from '@/composables/useEditorMdPreview'
+import { closeMdLightbox } from '@/utils/mdLightbox'
 
 const t = vi.fn((key: string, named?: Record<string, unknown>) =>
   named ? `${key}:${JSON.stringify(named)}` : key,
@@ -108,5 +109,51 @@ describe('useEditorMdPreview handlePreviewClick 锚点分流', () => {
     clickAnchor(c, root.querySelector('a')!)
     window.removeEventListener(OPS_OPEN_FILE_AT, listener)
     expect(seen).toEqual([{ path: 'docs/guide.md', projectId: 'p1' }])
+  })
+})
+
+describe('useEditorMdPreview handlePreviewClick 图片灯箱分流（P-20261120-3）', () => {
+  afterEach(() => {
+    closeMdLightbox()
+    document.querySelectorAll('.md-lightbox').forEach((el) => el.remove())
+  })
+
+  function clickImg(c: ReturnType<typeof buildComposable>, img: HTMLImageElement): MouseEvent {
+    // 与 clickAnchor 同构：dispatch 后直调委托函数（真组件由 EditorMdPreviewPane
+    // 容器 @click 上抛）
+    const e = new MouseEvent('click', { bubbles: true, cancelable: true })
+    img.dispatchEvent(e)
+    c.handlePreviewClick(e)
+    return e
+  }
+
+  const URI = 'data:image/png;base64,iVBORw0KGgo='
+
+  it('无链接包裹的 img 点击开灯箱：src 同源 + preventDefault', () => {
+    const c = buildComposable('')
+    const { root } = buildPreviewDom(`<img src="${URI}" width="3000" height="1600">`)
+    const e = clickImg(c, root.querySelector('img')!)
+    expect(e.defaultPrevented).toBe(true)
+    const lb = document.querySelector('.md-lightbox')
+    expect(lb).not.toBeNull()
+    expect(lb!.querySelector('img')?.getAttribute('src')).toBe(URI)
+  })
+
+  it('a 包裹图不进灯箱——链接分流优先（[![alt](img)](link) 惯例）', () => {
+    const c = buildComposable('')
+    const { root } = buildPreviewDom(`<a href="https://example.com"><img src="${URI}"></a>`)
+    const e = clickImg(c, root.querySelector('img')!)
+    expect(document.querySelector('.md-lightbox')).toBeNull()
+    // 外链语义保留：preventDefault + window.open 由锚点分流承接
+    expect(e.defaultPrevented).toBe(true)
+  })
+
+  it('Esc 关闭灯箱（委托侧开、全局键收）', () => {
+    const c = buildComposable('')
+    const { root } = buildPreviewDom(`<img src="${URI}">`)
+    clickImg(c, root.querySelector('img')!)
+    expect(document.querySelector('.md-lightbox')).not.toBeNull()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(document.querySelector('.md-lightbox')).toBeNull()
   })
 })

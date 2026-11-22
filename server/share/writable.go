@@ -1,27 +1,49 @@
 package share
 
-// 可写分享——「对方可直接输入」模式（P-20261106-8）：访客经 WS 上行桥把
-// 键入直接注入锚定终端的 PTY。这是对 P-20261024-1 直通输入档头注红线
-// （「普通终端直通 = 匿名远程 shell 等价，明确不做」）的**显式推翻**：
-// 远程协助语义需要把终端临时交给对方操作，等价「坐在同一台键盘前」。
-// 推翻的前提 = 五重补偿控制同时在场（缺一即整档不落地）：
+// 访客输入·统一 WS 上行桥（P-20261106-8 可写分享，P-20261121-1 统一收编
+// 为「访客输入」双授权模式的单一传输面）：
 //
-//   - owner 逐案开关：可写从不悄悄出生（创建面兜底清零，store.Share.Writable），
-//     开启走管理面动作端点（显式 confirm + 强制口令门——token 短链是 bearer
-//     凭据会在聊天中转发，可写把泄露半径从「看输出」抬到「打 shell」，一道
-//     口令是成比例的补偿），主人随时开/关，关闭即断全部上行连接。
+//   - 开放直入模式（store.Share.Writable，owner 显式开关 + 强制口令门——
+//     P-20261106-8 五重补偿控制原样在场：owner 逐案开关/出域警示/全量审计/
+//     实时可见/一键收回）：持链接（+口令）访客接入即开键入，远程协助语义
+//    （等价「坐在同一台键盘前」——语义升格诚实口径：访客可实际提交并
+//     驱动终端，管理面文案已如实改写）。
+//   - 申请批准模式（申请通道默认在场，GuestInputOff=false；P-20261024-1
+//     直通档的握手机制保留为统一能力的授权路径）：访客接入只看状态
+//    （申请/等待/持权），键入帧仅在持权（directHub.holds 绑 token+visitorId）
+//     时被接受，持权帧顺带 directHub.touch 续 10min 滑动时效；收回/过期
+//     主动断开该访客连接（direct.go kickDirectVisitor）。
+//   - 两开关独立不互斥（用户定案：owner 面两枚开关）：并开时开放直入覆盖
+//     申请路径（宽松优先——任何访客已可直接键入，申请批准形同虚设由 owner
+//     开启面提示承担告知），连接按接入时点定格模式（字段翻转不断开既有
+//     连接，保守侧语义）。
+//   - 会话输入闸经 gateLedger 合并账本驱动（direct.go 必改3）：开放直入的
+//     「开放连接在场」与申请批准的「持权在场」统一记账，单点落
+//     writableSink.SetWritableGate（= terminal.Session.directInputHold 同一
+//     服务端强制面，P-20261008-17 input-lock 同源）；双开关并存时关其一
+//     不得误归还 owner 键盘给另一模式在场访客。
+//
+// 五重补偿控制（开放直入，缺一即整档不落地）：
+//
+//   - owner 逐案开关：可写从不悄悄出生（创建面快捷选择同样显式 opt-in +
+//     口令门强制，store.Share.Writable），开启走管理面动作端点（显式
+//     confirm + 强制口令门——token 短链是 bearer 凭据会在聊天中转发，可写
+//     把泄露半径从「看输出」抬到「打 shell」，一道口令是成比例的补偿），
+//     主人随时开/关，关闭即断开放直入上行连接。
 //   - 出域警示：访客页常驻「你的输入将直达主人终端」横幅（termpage），
-//     管理面开启时二次确认（confirm 标记，与直通档同款摩擦硬闸）。
+//     管理面开启时二次确认（confirm 标记）。
 //   - 全量审计：开/关/批量入账（share.writable）+ 每一注入批次入账
-//     （share.writable.input，元数据口径——字节数/visitorId 摘要/IP，
-//     文本本体不入账，quickdrop「内容不入审计」同口径）+ 粘贴审批决策
-//     入账（share.writable.paste）。
-//   - 实时可见：任一上行连接在场即广播 sc-ops:share.wtyping（owner 侧
-//     「访客输入中」会话行徽标即时点亮），且 owner 终端 WS 输入被
-//     directInputHold 反向闸拒绝（复用 P-20261024-1 同一服务端强制面——
-//     「谁在输入」单写语义的 owner 侧让位）。
+//     （share.writableInput 统一单事件，Detail mode=open|hold 分档授权
+//     模式，元数据口径——字节数/visitorId 摘要/IP，文本本体不入账，
+//     quickdrop「内容不入审计」同口径）+ 粘贴审批决策入账
+//     （share.writablePaste）。
+//   - 实时可见：任一**开放**上行连接在场即广播 sc-ops:share.wtyping（owner
+//     侧「访客输入中」会话行徽标即时点亮；申请批准路径的持权在 direct
+//     投影有同族徽标——徽标语义=可键入，连接在场但无持权不点亮），且
+//     owner 终端 WS 输入被 directInputHold 反向闸拒绝（复用 P-20261024-1
+//     同一服务端强制面——「谁在输入」单写语义的 owner 侧让位）。
 //   - 一键收回：管理面开关关 / 会话行右键 / 撤销轮换级联，三路入口同一
-//     下游（WritableDown）——上行连接即刻断开、输入闸即刻解除。
+//     下游（WritableDown）——开放直入连接即刻断开、输入闸账本即刻解除。
 //
 // 审批分层（评审修订点2定案，沿 commandrisk 诚实边界）：
 //   - 按键级输入**不做命令审批**——PTY 流无法可靠提取当前输入行，模式表
@@ -31,7 +53,8 @@ package share
 //     命令串整体可知）复用 commandrisk 预检（装配层注入，本包不 import
 //     terminal）：命中 danger 档即挂待批面、广播 sc-ops:share.paste-review
 //     审批卡，**未批不注入 PTY**；warning/未命中直接注入（owner 输出侧
-//     实时可见）。60s 不决自动拒绝（owner 不在场 = 不注入）。
+//     实时可见）。60s 不决自动拒绝（owner 不在场 = 不注入）。两授权模式
+//     同闸——申请批准路径的持权访客键入同样过粘贴预检。
 //   - 脱敏仅作用输出侧（liveterm 同一管线）；访客输入不做「脱敏」——
 //     否则主人看到的审批卡与回显都不可信。
 //
@@ -40,31 +63,46 @@ package share
 //     cookie/viewOnce 同语义）+ Origin 同源校验（与 api/shared.SameOrigin
 //     同判据：Origin 在场必须同 Host，缺失放行=非浏览器客户端——凭据面
 //     仍由口令门把守，跨站 WS 劫持在 CheckOrigin 被拒）。
-//   - 访客身份绑 visitorId（直通档持权绑定键同款：localStorage 随机 id，
-//     sanitizeVisitorID 清洗；此处是审计/可见性的标识键，不是凭据——凭据
-//     = 短链 + 口令门会话）。
+//   - 访客身份绑 visitorId（localStorage 随机 id，sanitizeVisitorID 清洗；
+//     此处是审计/可见性/持权绑定的标识键，不是凭据——凭据 = 短链 + 口令
+//     门会话）。
 //   - 上行限流新定档（令牌桶）：连接级 40 帧/秒持续 / 120 帧瞬发 + token
 //     全局 120 帧/秒持续 / 240 帧瞬发（≤ MaxWritersPerToken 条连接的合计
 //     护栏），单帧 16KiB 读上限——防 PTY 刷屏；触限帧丢弃并回
 //     input_throttled 控制帧（访客侧提示「输入太快」）。
-//   - 断连语义：**WS 断开即释放持权**（末条上行连接断开即解除会话输入闸，
-//     owner 键盘即时归还——方向安全的取态；SSE「凭 visitorId 恢复持权」
-//     的直通档先例在此不映射：可写键入没有可恢复的队列态，重连即重新
-//     接入并重过全部门禁）。持权/连接/待批面全部进程内（重启即清——
-//     「无人看管的悬空写权」不该活过重启，直通档同款保守侧语义）。
+//   - 断连语义：**开放直入 WS 断开即释放连接**（末条开放连接断开即经账本
+//     解除会话输入闸，owner 键盘即时归还——方向安全的取态；可写键入没有
+//     可恢复的队列态，重连即重新接入并重过全部门禁）。**申请批准路径的
+//     持权不受断连影响**（持权=显式授权物，凭 visitorId 恢复键入资格——
+//     P-20261024-1 保留语义；收回/过期/关通道才断开，kickDirectVisitor）。
+//     持权/连接/待批面全部进程内（重启即清——「无人看管的悬空写权」不该
+//     活过重启，保守侧语义）。
 //
 // 并发输入语义（评审修订点4定案）：
 //   - owner vs 访客：互斥，经 terminal.Session.directInputHold 反向闸强制
-//     （任一上行连接在场 owner 输入即拒，末条断开即归还）。
-//   - 访客 vs 访客：**多访客并发键入（「多人混打」）显式声明为允许**——
-//     单 token 上行连接上限 MaxWritersPerToken=3（远程结对/教学的量级），
-//     各连接独立注入、互不仲裁；「单持有者模式」（owner 限定一次只一人
-//     键入）v1 不提供——需要时走直通输入档（申请-批准握手天然单持有者）。
+//     （闸值由 gateLedger 账本驱动，任一来源在场 owner 输入即拒，末个来源
+//     离场即归还）。
+//   - 访客 vs 访客：**开放直入多访客并发键入（「多人混打」）显式声明为
+//     允许**——单 token 上行连接上限 MaxWritersPerToken=3（远程结对/教学
+//     的量级），各连接独立注入、互不仲裁；**单持有者语义由申请批准路径
+//     提供**（申请-批准握手天然单持有者：持权 visitorId 绑定，非持权帧
+//     拒收）。
 //
-// 组合语义（评审修订点6定案）：可写仅 live 直播形态（kind=terminal），
+// 组合语义（评审修订点6定案）：仅 live 直播形态（kind=terminal），
 // frozen/cast/session/file 定格或静态语义天然只读；遮蔽只作用输出流
 // （liveterm 主人/访客同一管线），访客输入的明文回显对 owner 可见——
 // 否则「看到访客输入中」与审批卡都失去裁决依据。
+//
+// 视口反喂 resize（P-20261120-8）：访客键入让渡的画布面——访客视口宽度
+// 反喂主机 PTY（业界 ttyd/VS Code web 终端「客户端窗口=终端宽度」语义），
+// 文字按视口折行零结构性留白。只读直播页不新增任何 resize 上行（严格只读
+// 契约不变），其显示栅格仍经 SSE resize 帧跟随主机变化（P-20261107-4 既有
+// 面）。resize 控制面复用同一 WS 连接与门禁（gateGuard+Origin+visitor
+// 绑定），帧类型新增控制指令而非走键入帧率桶；服务端承接链 = 钳制 →
+// conn 节流 ≥1s → token 合并窗 500ms（last-write-wins）→ 落点应用
+// （TmuxExternal 会话禁用）→ resize_applied 回执 + 审计 + sc-ops 广播；
+// 申请批准连接仅持权在窗口期才受理 resize（无持权忽略——画布让渡随键入
+// 资格走）。
 
 import (
 	"bytes"
@@ -130,19 +168,77 @@ const (
 	// pastePreviewRunes 审批卡预览的 rune 上限：让 owner 认出「这是在粘什么」
 	// 即可，完整块在终端回显侧随时可见
 	pastePreviewRunes = 200
+
+	// ── 视口反喂 resize（P-20261120-8）：可写上行桥的控制面指令 ──
+
+	// wsResizeConnMinInterval conn 级 resize 帧独立节流（≥1s，评审必改3）：与
+	// 键入帧率桶分离——resize 是控制面低频指令，跟输入字节共享桶既不必要也会
+	// 在窗口拖拽时挤占键入配额；1s 对真实拖拽（前端另有 250ms 防抖）零感知
+	wsResizeConnMinInterval = time.Second
+
+	// wsResizeMergeWindow token 级合并窗（评审必改4：多访客 last-write-wins +
+	// 500ms-1s 服务端合并窗）：窗内多访客/多帧只保留最后上报值（pending 覆盖），
+	// 到期一次应用——并发突刺收敛为单次 PTY resize（Session.Resize 同尺寸去重
+	// 兜底防 PSReadLine banner 重发污染，terminal/manager.go Resize 注记）
+	wsResizeMergeWindow = 500 * time.Millisecond
+
+	// 访客上报尺寸的服务端钳制域（评审必改3）：与主人侧前端初连 resize 的合法
+	// 域（useTerminalSession cols≥20/rows≥2）和访客页栅格钳制（termpage setHost
+	// cols≤500/rows≤300）对齐——两端同域则应用值恒等于请求值，不产生钳制差振荡
+	writableResizeMinCols = 20
+	writableResizeMaxCols = 500
+	writableResizeMinRows = 2
+	writableResizeMaxRows = 300
 )
 
-// WritableSink 可写输入落点（装配层适配 terminal 会话——本包不 import
-// terminal，DirectSink 同款接口注入先例）。
+// WritableSink 访客输入落点（装配层适配 terminal 会话——本包不 import
+// terminal，接口注入先例）。
 type WritableSink interface {
 	// WritableWrite 把一批访客键入写入会话 PTY（语义 = 键入，字节原样——
-	// 控制字符是合法终端输入；普通终端开放，这正是对直通档红线的推翻点）
+	// 控制字符是合法终端输入；开放直入与申请批准两模式统一走本落点）
 	WritableWrite(sessionID, text string) error
-	// SetWritableGate 会话侧输入互斥闸：复用直通持权闸 directInputHold
-	//（owner WS 键盘让位的服务端强制面，P-20261024-1 同一闸口）——首条
-	// 上行连接建立置位、末条断开/开关关闭/级联解除。会话已关幂等直通
-	//（闸随会话消亡）
+	// SetWritableGate 会话侧输入互斥闸：gateLedger 合并账本的单点落闸
+	//（direct.go 必改3）——开放直入「连接在场」与申请批准「持权在场」两
+	// 来源统一记账后在此落 terminal.Session.directInputHold 同一强制面。
+	// 会话已关幂等直通（闸随会话消亡）
 	SetWritableGate(sessionID string, held bool)
+}
+
+// WritableResizer 可写视口 resize 落点（可选装配，P-20261120-8——与 WritableSink
+// 分面注入：resize 权随可写让渡，但落点能力独立（测试桩不必实现；nil = resize
+// 帧静默忽略，键入链零影响）。装配层桥 terminal.Session.Resize 与 TmuxExternal
+// 判定，本包不 import terminal）
+type WritableResizer interface {
+	// WritableResizeAllowed 会话是否允许访客视口 resize：TmuxExternal 外部接管
+	// 会话禁用（评审必改4——真机 tmux 客户端的 window-size 交互未定义，访客改格
+	// 会与用户本机 tmux 客户端互相踩踏）；会话不在同禁（apply 路径按会话不在收场）
+	WritableResizeAllowed(sessionID string) bool
+	// WritableResize 调整锚定会话 PTY 尺寸（语义=视口反喂，rows×cols 与
+	// terminal.Session.Resize 同序）。不判 directInputHold——闸拦的是键入方向
+	// （owner 键盘让位），画布尺寸是可写让渡面的一部分
+	WritableResize(sessionID string, cols, rows uint16) error
+}
+
+// WritableResizeEvent sc-ops:share.wresize 广播载荷（owner 侧「终端被改格」的
+// 最小可见性面，评审必改5：wtyping 徽标给出「访客在场」，本事件给出「改成了
+// 什么格」；agent 侧同事件可感知。仅元数据）
+type WritableResizeEvent struct {
+	Token       string `json:"token"`
+	ShareName   string `json:"shareName"`
+	TerminalID  string `json:"terminalId"`
+	Cols        uint16 `json:"cols"`
+	Rows        uint16 `json:"rows"`
+	VisitorTail string `json:"visitorTail,omitempty"`
+	At          int64  `json:"at"`
+}
+
+// pendingResize 合并窗内的一段待应用 resize（token 键一条，last-write-wins；
+// timer 到期由 fireWritableResize 取走应用）
+type pendingResize struct {
+	cols, rows uint16
+	visitorID  string
+	ip         string
+	timer      *time.Timer
 }
 
 // WritableRisk 粘贴级风险判定投影（装配层桥 terminal.MatchCommandRisk 的
@@ -181,8 +277,10 @@ type PasteReviewEvent struct {
 }
 
 // pendingPaste 一条待批粘贴块（审批中间态，进程内短时效——60s 不决自动
-// 拒绝；开关关闭/分享撤销级联清）。文本本体滞留内存至决策时点（批准注入
-// 的是当时提交的整块；重放窗口 = 审批时效内且仅 owner 批准方向）
+// 拒绝；开放直入关闭/分享撤销级联清）。文本本体滞留内存至决策时点（批准
+// 注入的是当时提交的整块；重放窗口 = 审批时效内且仅 owner 批准方向）。
+// open = 提交连接的授权模式定格（WritableDown 选择性清场按此分档——申请
+// 批准路径的待批块不随开放直入关闭而清，其授权物是持权不是开关）
 type pendingPaste struct {
 	ID        string
 	Token     string
@@ -193,10 +291,14 @@ type pendingPaste struct {
 	Bytes     int
 	Text      string
 	At        time.Time
+	Open      bool
 }
 
 // writableConn 一路上行连接的驻留态（token/sessionID/visitorID/nick/ip/
-// conn/bucket 在接入时定格，此后只读；audit* 走自身 mu）
+// conn/bucket/open 在接入时定格，此后只读；audit* 走自身 mu）。open =
+// 接入时点的授权模式定格（true=开放直入 sh.Writable；false=申请批准——
+// 两开关独立不互斥，字段翻转不断开既有连接，本连接的键入资格判定按定格
+// 模式走）
 type writableConn struct {
 	token     string
 	sessionID string
@@ -205,6 +307,7 @@ type writableConn struct {
 	ip        string
 	conn      *wssafe.Conn
 	bucket    *tokenBucket
+	open      bool
 
 	// audit 聚合器（5s 窗口一条批次事件，断开兜底冲一次——粒度见
 	// pasteAuditWindow 注记）
@@ -212,6 +315,12 @@ type writableConn struct {
 	auditBytes   int
 	auditFrames  int
 	auditLastAdd time.Time
+
+	// lastResize conn 级 resize 帧节流锚（wsResizeConnMinInterval；与键入帧率
+	// 桶分离的控制面独立节流，评审必改3）——resize 帧频度低（前端 250ms 防抖
+	// + 拖拽间歇），互斥锁就够，不必上桶
+	resizeMu   sync.Mutex
+	lastResize time.Time
 }
 
 // tokenBucket 令牌桶（帧率限流的最小实现）：middleware.RateLimiter 是滑窗
@@ -261,14 +370,16 @@ var wsUpgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
 }}
 
 // writableHub 可写上行状态机（Service 持有一枚）：连接表（token → conns）+
-// 待批粘贴面（pasteID 键全局表）+ token 全局帧率桶。锁纪律：mu 护三表；
-// 外部回调（事件广播/会话闸）一律锁外执行（directHub released 快照同款
+// 待批粘贴面（pasteID 键全局表）+ token 全局帧率桶 + 视口 resize 合并窗
+// （token → pendingResize，P-20261120-8）。锁纪律：mu 护四表；外部回调
+// （事件广播/会话闸）一律锁外执行（directHub released 快照同款
 // 纪律——锁内不执行外部代码）
 type writableHub struct {
 	mu      sync.Mutex
 	conns   map[string]map[*writableConn]struct{}
 	pastes  map[string]*pendingPaste
 	buckets map[string]*tokenBucket
+	resizes map[string]*pendingResize
 }
 
 func newWritableHub() *writableHub {
@@ -276,12 +387,15 @@ func newWritableHub() *writableHub {
 		conns:   map[string]map[*writableConn]struct{}{},
 		pastes:  map[string]*pendingPaste{},
 		buckets: map[string]*tokenBucket{},
+		resizes: map[string]*pendingResize{},
 	}
 }
 
-// addConn 登记连接（上限护栏）；返回 (是否首条, 是否准入)。token 全局桶
-// 在首条连接时惰性建、末条断开随表清扫
-func (h *writableHub) addConn(c *writableConn, now time.Time) (first bool, ok bool) {
+// addConn 登记连接（上限护栏）；返回 (是否首条开放连接, 是否准入)。token
+// 全局桶在首条连接时惰性建、末条断开随表清扫。开放连接首条判定在 hub 锁内
+// 原子完成（调用方据此做闸账本 acquire——锁外判 openCount 会与并发接入竞态，
+// 两个同刻接入可能都判非首条而漏 acquire，闸悬挂）
+func (h *writableHub) addConn(c *writableConn, now time.Time) (openFirst bool, ok bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if len(h.conns[c.token]) >= MaxWritersPerToken {
@@ -296,31 +410,49 @@ func (h *writableHub) addConn(c *writableConn, now time.Time) (first bool, ok bo
 	if _, exist := h.buckets[c.token]; !exist {
 		h.buckets[c.token] = newTokenBucket(wsUpTokenFrameRate, wsUpTokenFrameBurst, now)
 	}
-	return len(set) == 1, true
+	if c.open {
+		openFirst = h.countOpenLocked(c.token) == 1
+	}
+	return openFirst, true
 }
 
-// removeConn 摘除连接并清扫空 token 的桶；返回剩余连接数
-func (h *writableHub) removeConn(c *writableConn) int {
+// removeConn 摘除连接并清扫空 token 的桶；返回 (剩余连接数, 剩余开放连接数)
+// ——两值同锁内原子带出（调用方据此做闸账本 release：末条开放连接离场判定
+// 与摘除原子，防「摘除后新开放连接接入、旧连接误 release」的窗口）
+func (h *writableHub) removeConn(c *writableConn) (remain, openRemain int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	set := h.conns[c.token]
 	if set == nil {
-		return 0
+		return 0, 0
 	}
 	delete(set, c)
 	if len(set) == 0 {
 		delete(h.conns, c.token)
 		delete(h.buckets, c.token)
-		return 0
+		return 0, 0
 	}
-	return len(set)
+	return len(set), h.countOpenLocked(c.token)
 }
 
-// countOf 在场上行连接数（管理面 wtyping 投影）
-func (h *writableHub) countOf(token string) int {
+// countOpenLocked 在场开放直入连接数（调用方持 h.mu）
+func (h *writableHub) countOpenLocked(token string) int {
+	n := 0
+	for c := range h.conns[token] {
+		if c.open {
+			n++
+		}
+	}
+	return n
+}
+
+// openCountOf 在场开放直入连接数（管理面 wtyping 投影——徽标语义=可键入，
+// 申请批准连接在场但无持权不点亮；旧全量 countOf 随 P-20261121-1 投影切换
+// openCountOf 失去唯一调用方一并退役，防 lint unused）
+func (h *writableHub) openCountOf(token string) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return len(h.conns[token])
+	return h.countOpenLocked(token)
 }
 
 // tokenBucketOf 取 token 全局桶（连接读循环热路径；连接在场桶必在——
@@ -386,18 +518,31 @@ func (h *writableHub) drainExpiredPastes(token string, now time.Time) []*pending
 	return h.expirePastesLocked(token, now)
 }
 
-// clearTokenLocked 清空某 token 的全部待批粘贴（调用方已持 h.mu——
-// WritableDown 在同一临界区内一并摘连接表/桶/待批面，三表清场原子化）；
-// 返回被清列表供调用方补「拒绝」侧广播
-func (h *writableHub) clearTokenLocked(token string) []*pendingPaste {
+// clearPastesLocked 清某 token 的待批粘贴（调用方已持 h.mu——WritableDown
+// 在同一临界区内摘连接表/桶/待批面，多表清场原子化）；all=false 只清开放
+// 路径的待批块（申请批准路径的待批块授权物是持权不是开关，保留待 owner
+// 决策）。返回被清列表供调用方补「拒绝」侧广播
+func (h *writableHub) clearPastesLocked(token string, all bool) []*pendingPaste {
 	var out []*pendingPaste
 	for id, p := range h.pastes {
-		if p.Token == token {
+		if p.Token == token && (all || p.Open) {
 			delete(h.pastes, id)
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+// clearPendingResizeLocked 摘除某 token 的待应用 resize（调用方已持 h.mu）：
+// 停定时器防泄漏，pending 一并删——owner 杀开关（WritableDown）必须切断访客
+// 侧一切驻留态，合并窗内的尺寸请求不越过开关时刻生效
+func (h *writableHub) clearPendingResizeLocked(token string) {
+	if st, ok := h.resizes[token]; ok {
+		if st.timer != nil {
+			st.timer.Stop()
+		}
+		delete(h.resizes, token)
+	}
 }
 
 // connsOf 取某 token 的连接快照（锁外广播用）
@@ -425,27 +570,60 @@ func (h *writableHub) tokensOf() []string {
 
 // ── 访客端点（gateGuard 后——升级握手过与 HTTP 访客面同一 token+口令门） ──
 
-// handleTermWS GET /s/{token}/termws?visitorId=&nickname= —— 可写分享的访客
-// WS 上行桥。协议面（与终端 WS 同约定：BinaryMessage = PTY 输入字节，
-// TextMessage 整类保留给服务端控制帧 JSON）：
+// handleTermWS GET /s/{token}/termws?visitorId=&nickname= —— 访客输入的
+// WS 上行桥（统一双授权模式）。协议面（与终端 WS 同约定：BinaryMessage =
+// PTY 输入字节，TextMessage = 控制帧 JSON；P-20261120-8 起 Text 上行方向
+// 开控制指令；P-20261121-1 增 state 指令与 direct_state/direct_revoked/
+// input_denied 帧）：
 //
-//	客户端 → 服务端：BinaryMessage 一帧 = 一批键入字节（按键帧或粘贴块）
+//	客户端 → 服务端：
+//	  BinaryMessage 一帧 = 一批键入字节（按键帧或粘贴块）
+//	  {"type":"resize","cols":N,"rows":M}  视口反喂（P-20261120-8）：客户端
+//	                                       窗口=终端宽度语义，服务端钳制+
+//	                                       conn 节流+token 合并窗后应用
+//	                                       到主机 PTY（WritableResizer 落点；
+//	                                       申请批准连接仅持权在窗口期受理）
+//	  {"type":"state"}                     申请批准连接的状态对账轮询（约 10s
+//	                                       一发——hold 惰性时效的对账触发器，
+//	                                       服务端回 direct_state 帧；开放
+//	                                       直入连接忽略）
 //	服务端 → 客户端（TextMessage 控制帧）：
-//	  {"type":"hello"}                 接入成功（可写在场）
+//	  {"type":"hello","mode":"open"}        接入成功（开放直入，键入即开）
+//	  {"type":"hello","mode":"hold","status":s,   接入成功（申请批准——
+//	        "mine":b,"remainSeconds":n}     s=none|pending|held，键入资格随
+//	                                        持权；direct_state 帧同形）
+//	  {"type":"direct_state",...}           申请/持权状态对账（per-conn 计算
+//	                                        mine；授予/收回/过期/轮询各迁移
+//	                                        点推送，见 direct.go）
+//	  {"type":"direct_revoked","reason":r}  本访客持权被收回/过期/关通道
+//	                                        （连接将关闭，可重新申请）
 //	  {"type":"input_throttled"}       帧率触限，本帧已丢弃（访客侧提示稍候）
+//	  {"type":"input_denied","reason":"no_hold"}  申请批准连接无持权键入帧
+//	                                        被拒（客户端应停发——服务端仍兜底）
 //	  {"type":"paste_review","id":p}   粘贴命中 danger，待 owner 审批（未注入）
 //	  {"type":"paste_approved","id":p} 审批通过，字节已注入（回显经 SSE 到达）
 //	  {"type":"paste_denied","id":p}   审批拒绝/超时，字节已丢弃
+//	  {"type":"resize_applied","cols","rows"}  视口 resize 已应用（P-20261120-8，
+//	                                           诚实回执——SSE resize 帧 ≤1s
+//	                                           到达同值对账）
+//	  {"type":"resize_denied","reason":r}      视口 resize 被拒（r=external_
+//	                                           session 外部接管会话禁用）
 //	  {"type":"ended"}                 会话已关（锚定终端不在，连接将关闭）
-//	  {"type":"writable_off"}          主人已关闭可写（连接将关闭，回落只读观看）
+//	  {"type":"writable_off"}          主人已关闭开放直入（仅开放连接收到，
+//	                                   连接将关闭，回落只读观看；申请批准
+//	                                   连接不受影响——两开关独立）
 func (s *Service) handleTermWS(w http.ResponseWriter, r *http.Request) {
 	sh, herr := s.lookup(r, r.PathValue("token"))
 	if herr != nil {
 		writeJSONError(w, herr)
 		return
 	}
-	if !sh.Writable || sh.Kind != store.ShareKindTerminal || sh.TerminalID == "" {
-		// 开关关/形态不对 = 端点不存在（存在性不可探测，drop 族同款语义）
+	// 双授权模式准入（必改2）：开放直入（Writable 标）或申请批准（申请通道
+	// 开，GuestInputOff 反向极性零值=开）任一在场即接入；两开关全关 = 端点
+	// 不存在（存在性不可探测，drop 族同款语义）。接入时点定格模式（字段
+	// 翻转不断开既有连接——保守侧语义，访客重连即取新模式）
+	open := sh.Writable
+	if sh.Kind != store.ShareKindTerminal || sh.TerminalID == "" || (!open && sh.GuestInputOff) {
 		writeJSONErrorStatus(w, http.StatusNotFound, "share_not_found")
 		return
 	}
@@ -475,42 +653,75 @@ func (s *Service) handleTermWS(w http.ResponseWriter, r *http.Request) {
 		ip:        clientIPOf(r),
 		conn:      conn,
 		bucket:    newTokenBucket(wsUpConnFrameRate, wsUpConnFrameBurst, time.Now()),
+		open:      open,
 	}
-	first, ok := s.writable.addConn(c, time.Now())
+	openFirst, ok := s.writable.addConn(c, time.Now())
 	if !ok {
 		s.writeControl(c, "denied", map[string]any{"reason": "writer_limit"})
 		_ = conn.Close()
 		return
 	}
 	defer func() {
-		remain := s.writable.removeConn(c)
+		_, openRemain := s.writable.removeConn(c)
 		s.flushConnAudit(c, true)
-		if remain == 0 {
-			// 末条连接断开：闸解除（owner 键盘即时归还）+ 输入中广播摘除。
-			// 回调均锁外执行（writableHub 锁纪律）
-			s.writableSink.SetWritableGate(sh.TerminalID, false)
+		if c.open && openRemain == 0 {
+			// 末条开放连接断开：账本摘除 ws 来源（另一模式来源在场则闸保持
+			// ——gateLedger 注记）+ 输入中广播摘除。回调均锁外执行
+			s.gateRelease(sh.TerminalID, "ws:"+sh.Token)
 			s.emitWritableTyping(sh, 0, false)
 		}
 	}()
-	if first {
-		s.writableSink.SetWritableGate(sh.TerminalID, true)
+	if openFirst {
+		// 首条开放连接：账本登记 ws 来源（owner 键盘让位——闸值经合并账本
+		// 单点落）+ 输入中广播点亮。申请批准连接不登记（键入资格随持权，
+		// 闸来源是 "direct:"+token）
+		s.gateAcquire(sh.TerminalID, "ws:"+sh.Token)
 		s.emitWritableTyping(sh, 1, true)
 	}
-	s.writeControl(c, "hello", nil)
+	// hello 帧带模式与（申请批准路径的）当前状态——访客页免轮询即知接线形态；
+	// 状态半边复用 writeDirectState 的 per-conn 计算（pending/held/mine）
+	if c.open {
+		s.writeControl(c, "hello", map[string]any{"mode": "open"})
+	} else {
+		now := time.Now()
+		s.flushReleasedHolds(sh)
+		s.writeControl(c, "hello", map[string]any{"mode": "hold"})
+		s.writeDirectState(sh, c, now, "")
+	}
 	stopPing := conn.StartPing()
 	defer stopPing()
 
-	// 读循环：每帧 = 一批键入字节。断连即退出（defer 解除闸/审计收尾），
-	// 无持权恢复面（头注断连语义定案：重连即重新接入并重过全部门禁）
+	// 读循环：Binary 帧 = 一批键入字节；Text 帧方向反转（P-20261120-8）= 访客
+	// 控制指令（resize/state，handleTextControl 内判型）。断连即退出（defer
+	// 解除闸/审计收尾）——开放直入无持权恢复面（重连即重新接入并重过门禁）；
+	// 申请批准持权凭 visitorId 恢复键入资格（direct.go 头注断连语义分档）
 	for {
 		typ, msg, err := rawConn.ReadMessage()
 		if err != nil {
 			return
 		}
+		if typ == websocket.TextMessage {
+			// 控制面分流：Text 上行不与键入帧混走——在键入帧率桶之前判型分流，
+			// resize/state 各走自己的承接路径；未知 Text 帧维持「协议误用，
+			// 忽略不关」的既有容忍（探活端零破坏）
+			s.handleTextControl(sh, c, msg)
+			continue
+		}
 		if typ != websocket.BinaryMessage || len(msg) == 0 {
-			continue // 键入只走 Binary；Text 是协议误用，忽略不关（容忍探活端）
+			continue // 键入只走 Binary；其余类型忽略不关（容忍探活端）
 		}
 		now := time.Now()
+		// 申请批准准入（必改2）：无持权/换人帧拒收（input_denied 回告——
+		// 客户端应停发，服务端兜底；与旧 POST 端点 403 direct_denied 同语义
+		// 的控制帧形态）。持权帧顺带惰性清扫（超时持权回收对账）
+		if !c.open {
+			hold := s.direct.holdOf(sh.Token, sh.TerminalID, now)
+			s.flushReleasedHolds(sh)
+			if hold == nil || c.visitorID == "" || hold.VisitorID != c.visitorID {
+				s.writeControl(c, "input_denied", map[string]any{"reason": "no_hold"})
+				continue
+			}
+		}
 		// 帧率双桶：连接级 + token 全局（合流护栏）。触限帧整帧丢弃——
 		// PTY 输入流没有「部分注入」的安全语义（半条命令比不执行更危险），
 		// 回告让访客侧主动降速
@@ -521,7 +732,7 @@ func (s *Service) handleTermWS(w http.ResponseWriter, r *http.Request) {
 		}
 		text := string(msg)
 		// 粘贴形态判定（整块输入，命令串整体可知）→ 复用 commandrisk 预检；
-		// 按键级帧不做命令审批（头注审批分层定案）
+		// 按键级帧不做命令审批（头注审批分层定案）——两授权模式同闸
 		if len(msg) >= WritablePasteReviewBytes || bytes.ContainsRune(msg, '\n') {
 			if risk := s.writableRiskOf(text); risk != nil && risk.Danger {
 				s.holdPasteForReview(sh, c, text, risk, now)
@@ -530,6 +741,11 @@ func (s *Service) handleTermWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if !s.injectWritable(sh, c, text, now) {
 			return
+		}
+		if !c.open {
+			// 持权帧注入成功即续期（滑动 10min——directHub.touch，必改2：
+			// WS 键入帧路径触达续期，替代旧 POST 端点路径）
+			s.direct.touch(sh.Token, now)
 		}
 	}
 }
@@ -570,9 +786,145 @@ func (s *Service) injectWritable(sh *store.Share, c *writableConn, text string, 
 	return true
 }
 
+// handleTextControl Text 上行控制帧分流（P-20261120-8 视口反喂 + P-20261121-1
+// 状态轮询）：判型 → 各走承接路径（resize：服务端钳制 → conn 级独立节流 →
+// token 合并窗；state：hold 模式连接的 direct_state 对账回帧）。任何一步
+// 不合法都静默忽略（与既有 Text 面同取向：协议误用不关连接）——resize 是
+// 幂等指令，丢帧由访客下一次视口变化重发自愈；state 轮询丢一轮下轮再来
+func (s *Service) handleTextControl(sh *store.Share, c *writableConn, msg []byte) {
+	var fr struct {
+		Type string `json:"type"`
+		Cols uint16 `json:"cols"`
+		Rows uint16 `json:"rows"`
+	}
+	if err := json.Unmarshal(msg, &fr); err != nil {
+		return
+	}
+	switch fr.Type {
+	case "resize":
+		// 画布让渡随键入资格走：申请批准连接仅在持权在窗口期受理 resize
+		//（无持权静默忽略——访客页在无持权态不驱动反喂，此处是服务端兜底）；
+		// 开放直入连接无资格门
+		if !c.open {
+			now := time.Now()
+			hold := s.direct.holdOf(sh.Token, sh.TerminalID, now)
+			if hold == nil || c.visitorID == "" || hold.VisitorID != c.visitorID {
+				return
+			}
+		}
+		// 服务端钳制（访客上报值不可信）：钳到主人终端同款合法域（与前端
+		// useTerminalSession 初连 resize 的 ≥20/≥2 门槛和访客页栅格 ≤500/≤300
+		// 逐字对齐——两端同域防钳制差振荡）
+		cols := uint16(max(writableResizeMinCols, min(writableResizeMaxCols, int(fr.Cols))))
+		rows := uint16(max(writableResizeMinRows, min(writableResizeMaxRows, int(fr.Rows))))
+		// conn 级独立节流（≥1s）：与键入帧率桶分离——控制面低频指令不该也不需要
+		// 消耗键入配额；节流锚在 conn 上的取态=同连接窗口拖拽的后续帧丢弃，窗口
+		// 稳定后的最后一帧已在合并窗里（pending 覆盖），无需重发
+		now := time.Now()
+		c.resizeMu.Lock()
+		if now.Sub(c.lastResize) < wsResizeConnMinInterval {
+			c.resizeMu.Unlock()
+			return
+		}
+		c.lastResize = now
+		c.resizeMu.Unlock()
+		s.scheduleWritableResize(sh, c, cols, rows)
+	case "state":
+		// 申请批准连接的状态对账轮询（writablepage.go ~10s 一发——hold 惰性
+		// 时效的对账触发器：无 ticker 设计下，等待页的轮询让超时持权在
+		// flushReleasedHolds 收口并对账帧回推）。开放直入连接无状态面，忽略
+		if c.open {
+			return
+		}
+		s.flushReleasedHolds(sh)
+		s.writeDirectState(sh, c, time.Now(), "")
+	}
+}
+
+// scheduleWritableResize 进 token 合并窗（评审必改4 last-write-wins 定案）：
+// 窗内任意访客/任意帧只覆盖 pending（最后写者胜），到期一次性应用最终值——
+// 多访客并发 resize 的突刺收敛为单次 PTY 改格（防多访客互相踩踏出的连续
+// banner 重绘）。定时器触发在 hub 锁外跑（锁内不执行外部代码纪律）
+func (s *Service) scheduleWritableResize(sh *store.Share, c *writableConn, cols, rows uint16) {
+	s.writable.mu.Lock()
+	st := s.writable.resizes[c.token]
+	if st == nil {
+		st = &pendingResize{}
+		s.writable.resizes[c.token] = st
+	}
+	st.cols, st.rows, st.visitorID, st.ip = cols, rows, c.visitorID, c.ip
+	if st.timer != nil {
+		// 窗口已在跑：只覆盖 pending，定时器不动（trailing debounce 语义）
+		s.writable.mu.Unlock()
+		return
+	}
+	st.timer = time.AfterFunc(wsResizeMergeWindow, func() { s.fireWritableResize(c.token) })
+	s.writable.mu.Unlock()
+}
+
+// fireWritableResize 合并窗到期：应用 pending 的最终尺寸（last-write-wins 的
+// 收口）。落点未装配（测试/降级）或记录已撤销/过期时静默丢弃——resize 是幂
+// 等指令，访客侧下一次视口变化自然重发；应用成功即广播 resize_applied 回执
+// + 审计入账（元数据口径：尺寸/visitor 摘要/IP——新增指令类型不入敏感值账）
+// + sc-ops:share.wresize（owner 侧最小可见性，评审必改5）
+func (s *Service) fireWritableResize(token string) {
+	s.writable.mu.Lock()
+	st := s.writable.resizes[token]
+	if st == nil {
+		s.writable.mu.Unlock()
+		return
+	}
+	delete(s.writable.resizes, token)
+	s.writable.mu.Unlock()
+
+	if s.writableResizer == nil {
+		return
+	}
+	sh, err := s.shares.Get(token)
+	if err != nil || sh.Kind != store.ShareKindTerminal || sh.TerminalID == "" {
+		return
+	}
+	if !s.writableResizer.WritableResizeAllowed(sh.TerminalID) {
+		// 外部接管会话（TmuxExternal）禁用访客 resize（评审必改4）：诚实回执
+		// 让访客页停用驱动回落保真，不静默丢帧让访客以为是节流
+		s.broadcastControl(token, "resize_denied", map[string]any{"reason": "external_session"})
+		return
+	}
+	if err := s.writableResizer.WritableResize(sh.TerminalID, st.cols, st.rows); err != nil {
+		return // 会话已关：读循环即将收 ended 帧，不伪装成功
+	}
+	s.broadcastControl(token, "resize_applied", map[string]any{"cols": st.cols, "rows": st.rows})
+	name := token
+	if sh.Name != "" {
+		name = sh.Name
+	}
+	s.views.Add(store.AuditEvent{
+		Action: store.AuditShareWritableResize,
+		Result: store.AuditResultSuccess,
+		Time:   time.Now(),
+		IP:     st.ip,
+		Detail: fmt.Sprintf("%s (%s), visitor %s resized terminal to %dx%d -> session %s",
+			name, token, visitorBrief(st.visitorID), st.cols, st.rows, sh.TerminalID),
+	})
+	if s.writableResizeEvents != nil {
+		s.writableResizeEvents(WritableResizeEvent{
+			Token:       sh.Token,
+			ShareName:   sh.Name,
+			TerminalID:  sh.TerminalID,
+			Cols:        st.cols,
+			Rows:        st.rows,
+			VisitorTail: visitorBrief(st.visitorID),
+			At:          time.Now().UnixMilli(),
+		})
+	}
+}
+
 // appendConnAudit 把连接的审计聚合余量写成一条批次事件（窗口到期由
 // injectWritable 触发带余量、断开兜底由 flushConnAudit 全量触发；字节/帧数
-// 在调用前已由调用方清账，这里只负责事件成型）
+// 在调用前已由调用方清账，这里只负责事件成型）。统一单键入批次事件
+// （P-20261121-1 必改8：share.direct.input 批次随 POST 端点退役并入本键，
+// Detail 加 mode=open|hold 分档授权模式——审计对账面区分「谁的键入走了
+// 哪条授权路径」，键入规则统一采用 WS 桥现行规则）
 func (s *Service) appendConnAudit(c *writableConn, bytesAcc, frames int) {
 	if bytesAcc <= 0 {
 		return
@@ -581,13 +933,17 @@ func (s *Service) appendConnAudit(c *writableConn, bytesAcc, frames int) {
 	if sh, err := s.shares.Get(c.token); err == nil && sh.Name != "" {
 		name = sh.Name
 	}
+	mode := "open"
+	if !c.open {
+		mode = "hold"
+	}
 	s.views.Add(store.AuditEvent{
 		Action: store.AuditShareWritableInput,
 		Result: store.AuditResultSuccess,
 		Time:   time.Now(),
 		IP:     c.ip,
-		Detail: fmt.Sprintf("%s (%s), visitor %s input %d bytes in %d frames -> session %s",
-			name, c.token, visitorBrief(c.visitorID), bytesAcc, frames, c.sessionID),
+		Detail: fmt.Sprintf("%s (%s), visitor %s input %d bytes in %d frames mode=%s -> session %s",
+			name, c.token, visitorBrief(c.visitorID), bytesAcc, frames, mode, c.sessionID),
 	})
 }
 
@@ -618,6 +974,7 @@ func (s *Service) holdPasteForReview(sh *store.Share, c *writableConn, text stri
 		Bytes:     len(text),
 		Text:      text,
 		At:        now,
+		Open:      c.open,
 	}
 	if !s.writable.putPaste(c.token, p, now) {
 		// 在途堆积超限：诚实拒绝（访客侧提示），不静默吞
@@ -683,21 +1040,43 @@ func (s *Service) auditPasteExpired(p *pendingPaste) {
 	})
 }
 
-// WritableDown 关闭某 token 的可写上行（owner 开关关闭/撤销轮换级联共用）：
-// 断开全部连接（各连接 defer 解除闸+冲审计）、清待批粘贴面并广播拒绝。
-// 三表清场同临界区原子化（连接表/桶/待批面，clearTokenLocked 变体）。
-// 幂等（无连接且无在途粘贴返回 false）
-func (s *Service) WritableDown(token string) bool {
+// WritableDown 关闭某 token 的开放直入上行（owner 开关关闭/撤销轮换级联
+// 共用）。all=false（owner 开关方向）：只断**开放**连接（回收的是开放直入
+// 的授权物——申请批准路径持权访客的键入通道独立，不受开关翻转影响，两
+// 开关独立定案）、只清开放路径的待批粘贴面；all=true（级联清场：分享
+// 撤销/过期/轮换后记录死亡）：全部连接断开（访客面已 404，上行桥不能
+// 残留）。各连接 defer 经账本解除闸+冲审计；待批面广播拒绝；合并窗
+// pending 在全清时摘除（有 hold 连接残留时保留——持权访客的 resize 请求
+// 仍合法）。幂等（无动作返回 false）
+func (s *Service) WritableDown(token string, all bool) bool {
 	s.writable.mu.Lock()
 	set := s.writable.conns[token]
-	delete(s.writable.conns, token)
-	delete(s.writable.buckets, token)
-	pastes := s.writable.clearTokenLocked(token)
+	var doomed []*writableConn
+	holdRemain := false
+	for c := range set {
+		if all || c.open {
+			doomed = append(doomed, c)
+		} else {
+			holdRemain = true
+		}
+	}
+	pastes := s.writable.clearPastesLocked(token, all)
+	if !holdRemain {
+		// 无 hold 连接残留：合并窗 pending 一并摘（持权访客的 resize 请求
+		// 仍合法时保留——pending 不越过授权物存续时刻生效）
+		s.writable.clearPendingResizeLocked(token)
+	}
+	if len(doomed) == len(set) {
+		// 全清：连接表/桶一并摘（级联或无 hold 残留的开关关闭——该 token
+		// 无残留连接）
+		delete(s.writable.conns, token)
+		delete(s.writable.buckets, token)
+	}
 	s.writable.mu.Unlock()
-	if len(set) == 0 && len(pastes) == 0 {
+	if len(doomed) == 0 && len(pastes) == 0 {
 		return false
 	}
-	for c := range set {
+	for _, c := range doomed {
 		s.writeControl(c, "writable_off", nil)
 		_ = c.conn.Close()
 	}
@@ -709,24 +1088,27 @@ func (s *Service) WritableDown(token string) bool {
 
 // CascadeWritableDown 存活集外的上行连接清场（清账管线调用：分享撤销/
 // 过期/轮换后 token 键不在 keep 集即断开——记录死亡后访客面 404，上行
-// 桥不能残留）。返回清场条数
+// 桥不能残留；all=true 全清含申请批准连接，持权由 CascadeRelease 同 keep
+// 集一并回收）。返回清场条数
 func (s *Service) CascadeWritableDown(keep map[string]bool) int {
 	if keep == nil || s == nil {
 		return 0
 	}
 	n := 0
 	for _, token := range s.writable.tokensOf() {
-		if !keep[token] && s.WritableDown(token) {
+		if !keep[token] && s.WritableDown(token, true) {
 			n++
 		}
 	}
 	return n
 }
 
-// WritableState 管理面的上行在场投影（shareResponse wtyping 字段数据源；
-// 15s 轮询是 sc-ops 广播的断线兜底）。visitors>0 即「访客输入中」
+// WritableState 管理面的开放直入在场投影（shareResponse wtyping 字段数据
+// 源；15s 轮询是 sc-ops 广播的断线兜底）。visitors>0 即「访客输入中」——
+// 只数开放直入连接（徽标语义=可键入；申请批准路径的持权在 direct 投影有
+// 同族徽标，两投影不重叠）
 func (s *Service) WritableState(token string) (visitors int) {
-	return s.writable.countOf(token)
+	return s.writable.openCountOf(token)
 }
 
 // broadcastControl token 全体上行连接广播一枚控制帧
@@ -751,8 +1133,10 @@ func (s *Service) writeControl(c *writableConn, typ string, extra map[string]any
 	_ = c.conn.WriteMessage(websocket.TextMessage, data)
 }
 
-// emitWritableTyping 广播「访客输入中」状态（连接建立/末条断开两界；装配层
-// 接 opschannel——server/share 不反向依赖 api 层，dropEvents 同款回调注入）
+// emitWritableTyping 广播「访客输入中」状态（开放直入连接建立/末条断开
+// 两界；装配层接 opschannel——server/share 不反向依赖 api 层，dropEvents
+// 同款回调注入。申请批准路径的持权在 direct 投影有同族徽标，不走本事件
+// ——徽标语义=可键入，hold 连接在场但无持权不点亮）
 func (s *Service) emitWritableTyping(sh *store.Share, visitors int, active bool) {
 	if s.writableEvents == nil {
 		return
@@ -765,6 +1149,9 @@ func (s *Service) emitWritableTyping(sh *store.Share, visitors int, active bool)
 		Visitors:   visitors,
 	}
 	for _, c := range s.writable.connsOf(sh.Token) {
+		if !c.open {
+			continue // 指认位只取开放连接（hold 连接的指认在 direct 投影）
+		}
 		ev.Nick = c.nick
 		ev.VisitorTail = visitorBrief(c.visitorID)
 		break // 单写者语义展示首位（多写者并存的指认位在审计台账）
@@ -772,11 +1159,12 @@ func (s *Service) emitWritableTyping(sh *store.Share, visitors int, active bool)
 	s.writableEvents(ev)
 }
 
-// handleWritableState GET /s/{token}/writable/state —— 可写状态轮询端点
-// （访客页在未接入上行桥期间 5s 轮询：主人随时开启可写时访客页即时接入，
-// WS 在场即停轮）。gateGuard 后零额外门——开关关也如实回 false（此端点
-// 不承载存在性敏感面：页面本身已经过口令门才可见，轮询节奏与直通档
-// 2s 对账同族且更疏）
+// handleWritableState GET /s/{token}/writable/state —— 访客输入状态轮询端
+// 点（访客页在未接入上行桥期间 5s 轮询：主人开启任一授权模式时访客页即时
+// 接入，WS 在场即停轮）。gateGuard 后零额外门——开关关也如实回 false（此
+// 端点不承载存在性敏感面：页面本身已经过口令门才可见，轮询节奏与留言板
+// 对账同族且更疏）。响应增 guestInput 布尔（P-20261121-1 统一收编增量字段
+// ——申请通道在场与否；旧客户端只读 writable 零影响）
 func (s *Service) handleWritableState(w http.ResponseWriter, r *http.Request) {
 	sh, herr := s.lookup(r, r.PathValue("token"))
 	if herr != nil {
@@ -784,7 +1172,8 @@ func (s *Service) handleWritableState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	on := sh.Writable && sh.Kind == store.ShareKindTerminal && sh.TerminalID != ""
-	writeJSON(w, map[string]any{"writable": on})
+	chanOpen := !sh.GuestInputOff && sh.Kind == store.ShareKindTerminal && sh.TerminalID != ""
+	writeJSON(w, map[string]any{"writable": on, "guestInput": chanOpen})
 }
 
 // ── 小工具 ──

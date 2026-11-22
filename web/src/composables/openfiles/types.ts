@@ -40,6 +40,17 @@ export interface OpenFile {
   remoteOffline?: boolean
   /** 预览策略结果（服务端 filepolicy）：非文本/超大文件不拉内容，仅展示元信息卡 */
   meta?: OpenFileMeta
+  /** 预览注册表 kind/mime（P-20261119-4，file-policy 响应增量 pv 字段）：
+   *  统一双视图（原文件 ↔ 预览）的分流判定源——与分享访客面同一注册表，
+   *  服务端扩展格式两侧同时生效。undefined = 旧响应/查询失败（回落现行为） */
+  pvKind?: string
+  pvMime?: string
+  /** 视图态（P-20261119-4 统一双视图）：source = Monaco 编辑器（文本）/
+   *  信息卡（二进制），preview = FilePreviewView 渲染。缺省 undefined = 源
+   *  视图（现行为零回归）；打开链按 kind 分流赋默认（二进制可预览类默认
+   *  preview），切换经 toggleFileViewMode（偏好记忆 per 扩展名 localStorage）。
+   *  会话内存态不进 uiState 持久化（刷新回落 kind 默认态 + 设备偏好） */
+  viewMode?: 'source' | 'preview'
   /** .editorconfig 生效缩进约定（P-20261003-95）：服务端 file-policy 响应随行
    *  下发（打开链同点位零新增请求）；undefined = 项目无配置/未命中，编辑器
    *  回落全局设置。消费方 MonacoEditor 经 resolveIndentOptions 合成 model

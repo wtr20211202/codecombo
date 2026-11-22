@@ -40,43 +40,44 @@ func TestGuestBoardAssetsInjectedAllPages(t *testing.T) {
 	}
 }
 
-// TestTermPageCollabBootAndAssets 协作位挂载回归（P-20261024-1）：开关随 boot
-// 下发的字段名（collab/directInput）与 collabpage.go 消费端（SC.collab/
-// SC.directInput）必须同键——boot 字段改名而消费端漏跟时直通位整体不挂载
-// （e2e 曾因此假败：cl-root/cl-drop 在而 cl-direct-request 永不出现），渲染级
-// 断言把「开关开 → 页面含协作位资产与 boot 键」钉死在单测层
+// TestTermPageCollabBootAndAssets 协作/输入位挂载回归（P-20261024-1，
+// P-20261121-1 统一收编适配）：开关随 boot 下发的字段名（collab/guestInput/
+// writable）与消费端（SC.collab/SC.guestInput/SC.writable）必须同键——boot
+// 字段改名而消费端漏跟时对应位整体不挂载（e2e 曾因此假败），渲染级断言把
+// 「开关开 → 页面含协作/输入位资产与 boot 键」钉死在单测层
 func TestTermPageCollabBootAndAssets(t *testing.T) {
 	var b strings.Builder
-	if err := renderTermPage(&b, fixedToken("render4"), "zh", "live", "", true, true, false, false); err != nil {
+	// collab 开 + 申请通道开（缺省在场）+ 开放直入开
+	if err := renderTermPage(&b, fixedToken("render4"), "zh", "live", "", true, true, false, true); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := b.String()
 	for _, want := range []string{
-		`"collab":true`,      // boot 下发键（消费端 SC.collab 同名）
-		`"directInput":true`, // boot 下发键（消费端 SC.directInput 同名——回归锚）
-		"mountCollab",        // 协作位脚本已注入
-		"cl-direct-request",  // 直通位申请按钮 testid（wantDirect 分支产物）
-		"cl-drop",            // 上传位拖放区 testid（wantUpload 分支产物）
-		"!!SC.directInput",   // 消费端键名与 boot 键对账（曾因读 SC.direct 恒
-		// undefined 致直通位永不挂载、e2e 假败——键名漂移在这里红）
+		`"collab":true`,     // boot 下发键（消费端 SC.collab 同名）
+		`"guestInput":true`, // boot 下发键（申请通道缺省开——反向极性投影）
+		`"writable":true`,   // boot 下发键（开放直入开关）
+		"mountCollab",       // 协作位脚本已注入
+		"mountWritable",     // 访客输入位脚本已注入（双模式合一）
+		"wr-request",        // 申请批准路径申请按钮 testid（hold 模式产物）
+		"cl-drop",           // 上传位拖放区 testid（素材上行产物）
 	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("term-live page (collab+direct on) missing %q", want)
+			t.Fatalf("term-live page (collab+input on) missing %q", want)
 		}
 	}
-	// 旧 bug 形态守卫：消费端不得出现裸 SC.direct 读取（!!SC.direct; 与
-	// !!SC.directInput; 可区分——direct 后是词字符时不构成前者）
-	if strings.Contains(out, "!!SC.direct;") {
-		t.Fatalf("collab script reads nonexistent boot key SC.direct (must be SC.directInput)")
+	// 直通位退役守卫（P-20261121-1）：旧 SC.directInput 键与 cl-direct-* testid
+	// 不得再出现在页面（词表/UI 随统一收编迁 wr*）
+	if strings.Contains(out, "directInput") || strings.Contains(out, "cl-direct-") {
+		t.Fatalf("retired direct-input boot key / testid must be gone from term-live page")
 	}
-	// 双关（存量语义）：协作资产仍注入模板但 boot 为假——页面脚本首行即退，
-	// 零协作位（资产注入是静态共享，不等于挂载；挂载由 boot 门控）
+	// 全关（存量语义）：协作/输入资产仍注入模板但 boot 为假——页面脚本首行
+	// 即退，零协作/输入位（资产注入是静态共享，不等于挂载；挂载由 boot 门控）
 	var c strings.Builder
 	if err := renderTermPage(&c, fixedToken("render5"), "zh", "live", "", false, false, false, false); err != nil {
 		t.Fatalf("render off: %v", err)
 	}
 	out = c.String()
-	if strings.Contains(out, `"collab":true`) || strings.Contains(out, `"directInput":true`) {
-		t.Fatalf("term-live page (switches off) boot must omit both flags")
+	if strings.Contains(out, `"collab":true`) || strings.Contains(out, `"guestInput":true`) || strings.Contains(out, `"writable":true`) {
+		t.Fatalf("term-live page (switches off) boot must omit all flags")
 	}
 }

@@ -63,6 +63,7 @@ const {
   openInSplitByPath, closeSplit, reorderGroupTabs, moveTabToGroup,
   draftOffer, applyDraftRestore, discardDraftRestore, previewDraftRestore,
   retryRemoteFile,
+  toggleFileViewMode,
   remoteEverOpened, showRemoteConsole, remoteAutoHost,
   shareEverOpened, showShareManager,
   bottomPanelRef, bottomTab, showBottomPanel, bottomPanelHeight, bottomPanelMaximized,
@@ -204,7 +205,6 @@ watch(() => instanceStore.pendingSessionJump, (j) => {
           :active-group="activeGroup"
           :split-open="splitOpen"
           :split-direction="splitDirection"
-          :show-commit-panel="commitLocation === 'sidebar' && showSidePanel && sideView === 'changes'"
           :can-reopen-closed="canReopenClosed"
           :draft-offer="draftOffer"
           @activate-group="(g) => activeGroup = g"
@@ -230,6 +230,7 @@ watch(() => instanceStore.pendingSessionJump, (j) => {
           @close-all-tabs="closeAllTabsInGroup"
           @close-tabs-to-right="closeTabsToRightInGroup"
           @close-saved-tabs="closeSavedTabsInGroup"
+          @toggle-view-mode="toggleFileViewMode"
           @reopen-closed-tab="reopenClosedFile"
           @drag-reorder="reorderGroupTabs"
           @tab-move="moveTabToGroup"

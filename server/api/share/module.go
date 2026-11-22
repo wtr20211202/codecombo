@@ -216,22 +216,33 @@ func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 	svc = svc.WithDropEvents(func(ev share.DropEvent) {
 		opschannel.BroadcastEvent(opschannel.EventShareDrop, ev)
 	})
-	// 直通输入档（P-20261024-1）：落点与会话闸联动接线——DirectWrite/会话
-	// 判定/只读闸全走 terminal.DefaultManager 适配；持权回收回调解除会话闸
-	// + 补审计（owner 缘由的审计在 handler 落，不双写）
-	svc = svc.WithDirectSink(directAdapter{})
+	// 访客输入（P-20261024-1 直通档 + P-20261106-8 可写分享，P-20261121-1
+	// 统一双授权模式）：键入落点与会话闸账本接线——键入统一走
+	// writableAdapter（WritableWrite 直写会话 PTY），会话输入闸经
+	// share.Service gateLedger 账本单点落 SetWritableGate；持权回收回调只补
+	// 非 owner 缘由审计（owner 缘由的审计在 handler 落，不双写）
 	setShareDirectCallbacks(svc)
-	// 可写分享档（P-20261106-8）：WS 上行桥的落点/风险预检/事件三面接线。
-	// 风险预检复用 commandrisk 模式表（按键级不审批的诚实边界与粘贴级
-	// danger 审批的分层见 server/share/writable.go 头注）；事件回调只做
-	// opschannel 非阻塞投递（审批卡的批准/拒绝动作回调在 handlers_writable.go）
+	// 访客输入申请到达广播（P-20261121-2）：回调体只做 opschannel 非阻塞
+	// 投递——通知的攒批在 server/share 侧 GuestNoteBuffer 既有缓冲（与素材
+	// 到达通知同节奏，share-flush tick 批量入账）
+	svc = svc.WithDirectRequestEvents(func(ev share.DirectRequestEvent) {
+		opschannel.BroadcastEvent(opschannel.EventShareDirectRequest, ev)
+	})
+	// WS 上行桥（P-20261106-8，统一后双授权模式单一传输面）：落点/风险预检/
+	// 事件三面接线。风险预检复用 commandrisk 模式表（按键级不审批的诚实边界
+	// 与粘贴级 danger 审批的分层见 server/share/writable.go 头注）；事件回调
+	// 只做 opschannel 非阻塞投递（审批卡的批准/拒绝动作回调在 handlers_writable.go）
 	svc = svc.WithWritableSink(writableAdapter{})
+	svc = svc.WithWritableResizer(writableAdapter{})
 	svc = svc.WithWritableRiskCheck(pasteRiskCheck)
 	svc = svc.WithWritableEvents(func(ev share.WritableTypingEvent) {
 		opschannel.BroadcastEvent(opschannel.EventShareWritableTyping, ev)
 	})
 	svc = svc.WithPasteReviewEvents(func(ev share.PasteReviewEvent) {
 		opschannel.BroadcastEvent(opschannel.EventSharePasteReview, ev)
+	})
+	svc = svc.WithWritableResizeEvents(func(ev share.WritableResizeEvent) {
+		opschannel.BroadcastEvent(opschannel.EventShareWritableResize, ev)
 	})
 	// 管理面协作端点（handlers_collab.go）经包级引用触达持权状态机
 	//（liveWire 同款装配契约：Stop 必须摘除，防停机后旧服务被管理端点命中）
@@ -523,57 +534,18 @@ func (snapshotResolver) DirOf(sh *store.Share) (string, error) {
 	return dir, nil
 }
 
-// directAdapter 直通输入档落点适配（P-20261024-1）：share.DirectSink 的
-// terminal.DefaultManager 桥——访客批次写会话/agent 限定判定/会话侧只读
-// 闸三面在同一处收口（server/share 不 import terminal 的接口注入先例，
-// liveAdapter 同款装配桥）
-type directAdapter struct{}
+// directAdapter 退役（P-20261121-1 统一收编）：直通档的 DirectWrite（4KB/
+// sanitize POST 批次）/agent 限定判定/SetDirectGate 三面随键入通道统一走
+// WS 上行桥与 gateLedger 账本一并退役——会话输入闸的唯一落点收敛为
+// writableAdapter.SetWritableGate（share.Service 账本单点调用）。
 
-// DirectWrite 把一批访客文本写入锚定会话（语义 = 键入而非执行，无尾部
-// \r——agent 从对话读到；仅 kind=agent 会话放行，普通终端直通 = 匿名
-// 远程 shell 等价，明确不做）。owner 侧只读闸不拦本路径：持权访客的输入
-// 是本闸的授权方向（闸拦的是 owner 的 WS 键盘）
-func (directAdapter) DirectWrite(sessionID, text string) error {
-	sess := terminal.DefaultManager.GetSession(sessionID)
-	if sess == nil {
-		return fmt.Errorf("terminal session not found: %s", sessionID)
-	}
-	if sess.Kind != terminal.KindAgent {
-		return errDirectNotAgent
-	}
-	return sess.WriteInput([]byte(text))
-}
-
-// DirectSessionInfo 会话元数据（kind 与存活态）——批准前的限定判定与
-// 管理面状态投影共用
-func (directAdapter) DirectSessionInfo(sessionID string) (kind string, alive bool) {
-	sess := terminal.DefaultManager.GetSession(sessionID)
-	if sess == nil {
-		return "", false
-	}
-	return sess.Kind, true
-}
-
-// SetDirectGate 会话侧只读闸（直通持权联动面）：授予置位、回收/超时/级联
-// 解除；会话已关 = 闸随会话消亡，幂等直通
-func (directAdapter) SetDirectGate(sessionID string, locked bool) {
-	if sessionID == "" {
-		return
-	}
-	if sess := terminal.DefaultManager.GetSession(sessionID); sess != nil {
-		sess.SetDirectInputHold(locked)
-	}
-}
-
-// errDirectNotAgent 非 agent 会话的直通写拒绝（DirectWrite 的稳定错误——
-// 访客面映射 410 target_gone 的判定输入；不暴露会话形态细节）
-var errDirectNotAgent = fmt.Errorf("direct input is limited to agent sessions")
-
-// writableAdapter 可写分享的输入落点适配（P-20261106-8）：share.WritableSink
-// 的 terminal.DefaultManager 桥（directAdapter 同款装配桥）。与 DirectWrite
-// 刻意分叉的一点：**不做 agent 会话限定**——可写档对普通终端开放正是本提案
-// 对 P-20261024-1 红线的显式推翻（远程协助语义；五重补偿控制见
-// server/share/writable.go 头注，审批分层沿 commandrisk 诚实边界）
+// writableAdapter 访客输入的落点适配（P-20261106-8 可写分享，P-20261121-1
+// 统一双授权模式后为唯一键入落点）：share.WritableSink 的
+// terminal.DefaultManager 桥（装配桥先例）。开放直入与申请批准（持权）两
+// 模式的键入统一走本落点直写会话 PTY——**不做会话形态限定**（可写档对
+// 普通终端开放正是 P-20261106-8 对 P-20261024-1 红线的显式推翻，P-20261121-1
+// 统一收编后申请批准路径同享；五重补偿控制见 server/share/writable.go
+// 头注，审批分层沿 commandrisk 诚实边界）
 type writableAdapter struct{}
 
 // WritableWrite 把一批访客键入写入锚定会话（字节原样——控制字符是合法
@@ -587,8 +559,10 @@ func (writableAdapter) WritableWrite(sessionID, text string) error {
 	return sess.WriteInput([]byte(text))
 }
 
-// SetWritableGate 会话侧输入互斥闸（复用直通持权闸同一服务端强制面——
-// 首条上行连接置位、末条断开/清场解除；会话已关幂等直通）
+// SetWritableGate 会话侧输入互斥闸（gateLedger 合并账本的单点落闸——
+// share.Service 经本方法落 terminal.Session.directInputHold 同一服务端强制
+// 面：开放直入「连接在场」与申请批准「持权在场」两来源统一记账后翻转置位/
+// 解除；会话已关幂等直通）
 func (writableAdapter) SetWritableGate(sessionID string, held bool) {
 	if sessionID == "" {
 		return
@@ -596,6 +570,33 @@ func (writableAdapter) SetWritableGate(sessionID string, held bool) {
 	if sess := terminal.DefaultManager.GetSession(sessionID); sess != nil {
 		sess.SetDirectInputHold(held)
 	}
+}
+
+// WritableResizeAllowed 视口 resize 的会话准入（share.WritableResizer 面，
+// P-20261120-8）：TmuxExternal 外部接管会话禁用（评审必改4——真机 tmux 客户端
+// 的 window-size 交互未定义，访客改格会与用户本机 tmux 客户端互相踩踏）；
+// 会话不在同禁（fire 路径 Resize 报错收场）
+func (writableAdapter) WritableResizeAllowed(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	sess := terminal.DefaultManager.GetSession(sessionID)
+	if sess == nil {
+		return false
+	}
+	return sess.Origin != terminal.OriginExternal
+}
+
+// WritableResize 把访客视口尺寸应用到锚定会话 PTY（share.WritableResizer 面）：
+// 复用主人侧 PUT resize 同一 Session.Resize 链（同尺寸去重防 PSReadLine banner
+// 重发；tmux/POSIX/ConPTY 三平台承接零新分支）。不判 directInputHold——闸拦的
+// 是键入方向，画布尺寸随可写让渡
+func (writableAdapter) WritableResize(sessionID string, cols, rows uint16) error {
+	sess := terminal.DefaultManager.GetSession(sessionID)
+	if sess == nil {
+		return fmt.Errorf("terminal session not found: %s", sessionID)
+	}
+	return sess.Resize(rows, cols)
 }
 
 // pasteRiskCheck 粘贴级风险预检（装配层桥 commandrisk 模式表——share 包

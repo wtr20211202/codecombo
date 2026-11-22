@@ -1,9 +1,9 @@
-package share
+package filepreview
 
 // csv/tsv → 净化 HTML 表格：encoding/csv 解析（容忍脏行/不齐列），首行作
-// 表头，超行数截断——分享页 render 管道与 md/docx 同链路（页内注入 +
-// enhanceArticle 表格横滚/复制等增强自动生效）。单元格经 html.EscapeString
-// 转义后进输出，结构完全由本文件生成——注入面为零
+// 表头，超行数截断——分享访客面 render 管道与主应用预览 API 同链路（P-20261119-4
+// 抽包下沉）。单元格经 html.EscapeString 转义后进输出，结构完全由本文件
+// 生成——注入面为零
 
 import (
 	"encoding/csv"
@@ -13,13 +13,13 @@ import (
 	"strings"
 )
 
-// csvMaxDataRows 渲染行数上限（数据行，不含表头）：万行级 DOM 会拖垮
+// CSVMaxDataRows 渲染行数上限（数据行，不含表头）：万行级 DOM 会拖垮
 // 渲染与滚动，截断后由页面补"仅渲染前 N 行"提示
-const csvMaxDataRows = 2000
+const CSVMaxDataRows = 2000
 
-// renderCSVHTML 解析 csv/tsv（comma 为字段分隔符）并输出净化表格片段。
+// RenderCSVHTML 解析 csv/tsv（comma 为字段分隔符）并输出净化表格片段。
 // 解析出错按脏行跳过继续（best-effort 预览，下载始终可用）
-func renderCSVHTML(content []byte, comma rune) string {
+func RenderCSVHTML(content []byte, comma rune) string {
 	r := csv.NewReader(strings.NewReader(string(content)))
 	r.Comma = comma
 	r.FieldsPerRecord = -1 // 列数不齐不报错：预览尽力呈现
@@ -36,7 +36,7 @@ func renderCSVHTML(content []byte, comma rune) string {
 		if err != nil {
 			continue // 脏行跳过
 		}
-		if rows >= csvMaxDataRows {
+		if rows >= CSVMaxDataRows {
 			truncated = true
 			break
 		}

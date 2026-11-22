@@ -2,6 +2,7 @@ package opschannel
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,17 +39,69 @@ type Event struct {
 	Payload interface{} `json:"payload,omitempty"` // 事件载荷
 	Source  string      `json:"source,omitempty"`  // 来源：system / external
 	TS      int64       `json:"ts"`
+	// TargetBrowserId 设备定向收件面（P-20261117-4，可选）：非空 = 本事件只投递
+	// 到该浏览器实例的 WS 连接（frontend.* 设备效应原语的「单一浏览器效应」语义
+	// ——详见 IsDeviceEffectEvent）；空 = 全广播（向后兼容：旧客户端 JSON 未知
+	// 字段忽略，行为零变化）。只过滤 hub.broadcast 的 WS 收件面——观察者链
+	// （BroadcastEvent/AddObserver）/通知中心/录制联动保持全量可见（评审必改②）
+	TargetBrowserId string `json:"targetBrowserId,omitempty"`
+}
+
+// deviceEffectEvents 设备效应事件白名单（P-20261117-4 评审必改⑥）：TargetBrowserId
+// 只允许填在这四个 frontend 动词族事件上——它们的语义本就是「单一浏览器效应」
+// （capabilities.go 注册表自述）。白名单钉死在此（与常量同文件同源，加新原子
+// 时显式登记）：其余事件族（approval.pending/resolved、input.request 等注意力类）
+// 一律空 Target 全广播——定向审批卡会让他端窗口期漏卡，补账两路（挂载
+// seedPending/重连 refetch）都不覆盖实时窗口。
+// IsDeviceEffectEvent 供发布口判定：true = 允许定向（发布口解析会话绑定后填
+// Target）；false = 全广播（Target 恒空）。未在册事件（agent 自定义 type）恒 false
+func IsDeviceEffectEvent(eventType string) bool {
+	switch eventType {
+	case EventFrontendDownload, EventFrontendClipboard, EventFrontendOpen, EventFrontendReload:
+		return true
+	}
+	return false
+}
+
+// browserIdMax 握手携带的 browserId 形态上限：与 clipRelay 自生成 id 同量级
+// （时间戳 base36 + 随机段），64 字节充裕；超限/非法字符即视为未携带——
+// browserId 是路由标签非安全边界，放宽只会退化为广播（宁可多广播不误丢）
+const browserIdMax = 64
+
+// SanitizeBrowserId 握手/请求携带的 browserId 形态守卫：trim + 白名单字符集
+// [A-Za-z0-9._-] + 64 字节上限，非法/超限返回空串（= 未携带，该连接只收全广播
+// 事件、不参与定向路由与单浏览器启发式）。前端生成走 opsBrowserId（clipRelay
+// 自生成 id 同款复合形态，禁 crypto.randomUUID——LAN http 非安全上下文 undefined）
+func SanitizeBrowserId(raw string) string {
+	id := strings.TrimSpace(raw)
+	if id == "" || len(id) > browserIdMax {
+		return ""
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+			return ""
+		}
+	}
+	return id
 }
 
 type hub struct {
-	mu      sync.Mutex
-	clients map[*wssafe.Conn]struct{}
-	queue   chan Event
+	mu sync.Mutex
+	// clients 已注册连接集；browsers 连接 → 浏览器实例 id（握手 query 携带，
+	// 经 SanitizeBrowserId 守卫；空串 = 未携带，收不到定向事件）。两 map 同锁
+	// 同生命周期：register 成对写入、remove 成对清——设备定向的收件面与
+	// 单浏览器启发式的依据面（评审必改⑤：conn→browserId 索引随 remove/
+	// lock closer 关闭路径统一清，后者经 defer h.remove(conn) 汇合）
+	clients  map[*wssafe.Conn]struct{}
+	browsers map[*wssafe.Conn]string
+	queue    chan Event
 }
 
 var h = &hub{
-	clients: make(map[*wssafe.Conn]struct{}),
-	queue:   make(chan Event, broadcastQueueDepth),
+	clients:  make(map[*wssafe.Conn]struct{}),
+	browsers: make(map[*wssafe.Conn]string),
+	queue:    make(chan Event, broadcastQueueDepth),
 }
 
 func init() {
@@ -66,9 +119,10 @@ func (x *hub) dispatchLoop() {
 	}
 }
 
-func (x *hub) register(c *wssafe.Conn) {
+func (x *hub) register(c *wssafe.Conn, browserId string) {
 	x.mu.Lock()
 	x.clients[c] = struct{}{}
+	x.browsers[c] = browserId
 	x.mu.Unlock()
 	metrics.AddGauge("sc_ws_connections", 1, "endpoint", "ops-channel")
 }
@@ -79,6 +133,7 @@ func (x *hub) remove(c *wssafe.Conn) {
 	x.mu.Lock()
 	_, ok := x.clients[c]
 	delete(x.clients, c)
+	delete(x.browsers, c)
 	x.mu.Unlock()
 	if !ok {
 		return
@@ -92,12 +147,7 @@ func (x *hub) broadcast(ev Event) {
 	if err != nil {
 		return
 	}
-	x.mu.Lock()
-	snapshot := make([]*wssafe.Conn, 0, len(x.clients))
-	for c := range x.clients {
-		snapshot = append(snapshot, c)
-	}
-	x.mu.Unlock()
+	snapshot := x.recipients(ev)
 
 	// 锁外写：单个停滞客户端最多阻塞本 loop 至 writeTimeout，不拖累 register/unregister；
 	// 写失败的连接立即剔除，防止死连接滞留 map 长期占用广播预算。
@@ -109,6 +159,86 @@ func (x *hub) broadcast(ev Event) {
 			x.remove(c)
 		}
 	}
+}
+
+// recipients 收件面快照（设备定向的过滤点，P-20261117-4）：TargetBrowserId
+// 非空只收该浏览器的连接（含未携带 browserId 的连接在内一律跳过——路由键
+// 不匹配即不投递，旧客户端行为可预期：收不到定向事件，全广播面零变化）；
+// 空 Target = 全量（既有行为）。独立成法便于单测钉路由决策（不必起真连接）
+func (x *hub) recipients(ev Event) []*wssafe.Conn {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	snapshot := make([]*wssafe.Conn, 0, len(x.clients))
+	for c := range x.clients {
+		if ev.TargetBrowserId != "" && x.browsers[c] != ev.TargetBrowserId {
+			continue
+		}
+		snapshot = append(snapshot, c)
+	}
+	return snapshot
+}
+
+// BrowserOnline 查询某浏览器实例当前是否有 WS 连接在册（设备效应定向前的
+// 在线判定：绑定指向的浏览器不在线 → 发布口降级通知化，P-20261117-4）
+func BrowserOnline(browserId string) bool {
+	if browserId == "" {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, b := range h.browsers {
+		if b == browserId {
+			return true
+		}
+	}
+	return false
+}
+
+// SoleConnectedBrowser 单浏览器启发式（P-20261117-4 评审必改③）：当前全部已连
+// WS 共属同一（非空）browserId 时返回该 id，否则返回空串。发布口对「无绑定的
+// 会话」以此兜底定向——覆盖「更新重启后 tmux 会话恢复绑定丢失」与「纯脚本
+// 会话」两大常见态，单浏览器用户零回退；多浏览器并存或存在未携带 browserId
+// 的连接（旧客户端）时不猜（无法判定作用面即不定向），交给降级通知化。
+// 连接量为个位数~几十（浏览器数），全扫可忽略
+func SoleConnectedBrowser() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	sole := ""
+	for _, b := range h.browsers {
+		if b == "" {
+			return "" // 未携带身份的连接在册：作用面不可判定，不猜
+		}
+		if sole == "" {
+			sole = b
+		} else if b != sole {
+			return "" // 多浏览器并存
+		}
+	}
+	return sole
+}
+
+// DeviceRoute 设备效应路由判定结果（P-20261117-4）：Target 非空 = 定向广播；
+// 空 = 不定向（发布方降级通知化），Reason 如实区分两种成因供通知文案
+type DeviceRoute struct {
+	Target string // 定向收件浏览器（空 = 不定向）
+	Reason string // 降级成因：unbound=多浏览器并存且会话无绑定 / offline=绑定浏览器不在场
+}
+
+// RouteDeviceEffect 设备效应的路由决策（判定与 hub 在线状态同源同文件，发布口
+// 只做适配）：绑定在案且浏览器在线 → 定向；绑定在案但浏览器不在场 → 降级
+// offline；无绑定 → 单浏览器启发式命中即定向（命中值必在线），否则降级 unbound。
+// 决策只读 hub 簿记态，纯查询可单测全矩阵
+func RouteDeviceEffect(binding string) DeviceRoute {
+	if binding != "" {
+		if BrowserOnline(binding) {
+			return DeviceRoute{Target: binding}
+		}
+		return DeviceRoute{Reason: "offline"}
+	}
+	if sole := SoleConnectedBrowser(); sole != "" {
+		return DeviceRoute{Target: sole}
+	}
+	return DeviceRoute{Reason: "unbound"}
 }
 
 // BroadcastEvent 系统内部发布入口（handler / store 层调用，异步不阻塞请求）
@@ -162,8 +292,11 @@ func SetObserver(fn func(Event)) {
 	obsMu.Unlock()
 }
 
-func BroadcastEvent(eventType string, payload interface{}) {
-	ev := Event{Type: eventType, Payload: payload, Source: "system", TS: time.Now().UnixMilli()}
+// publish 入队 + 观察者分发的公共路径（BroadcastEvent/BroadcastEventTargeted
+// 同一出口）：入队承载 WS 广播面（定向与否由 ev.TargetBrowserId 在 broadcast
+// 内过滤），观察者在发布方 goroutine 内同步执行且与定向无关——设备效应的
+// 定向只收 WS 收件面，观察者链/通知中心/录制联动保持全量可见（评审必改②）
+func publish(ev Event) {
 	select {
 	case h.queue <- ev:
 		// 风暴自愈检查（P-20261004-70）：常态走 atomic 快速路径零开销，
@@ -190,8 +323,37 @@ func BroadcastEvent(eventType string, payload interface{}) {
 	}
 }
 
-// HandleWS 前端订阅端点。路由：GET /ws/ops-channel（WithWSLockAuth 校验 token）
+func BroadcastEvent(eventType string, payload interface{}) {
+	publish(Event{Type: eventType, Payload: payload, Source: "system", TS: time.Now().UnixMilli()})
+}
+
+// BroadcastEventTargeted 设备定向发布入口（P-20261117-4）：仅 frontend.* 设备效应
+// 事件经此发布（调用方负责 IsDeviceEffectEvent 白名单判定与 targetBrowserId
+// 非空校验——此处的守卫是最后防线，白名单外/空 target 一律回落全广播）。
+// targetBrowserId 是路由标签非安全边界：同实例信任域内伪造 browserId 只能
+// 收到本就发给同实例某浏览器的设备效应，无越权面
+func BroadcastEventTargeted(eventType string, payload interface{}, targetBrowserId string) {
+	targetBrowserId = SanitizeBrowserId(targetBrowserId)
+	if targetBrowserId == "" || !IsDeviceEffectEvent(eventType) {
+		BroadcastEvent(eventType, payload)
+		return
+	}
+	publish(Event{
+		Type:            eventType,
+		Payload:         payload,
+		Source:          "system",
+		TS:              time.Now().UnixMilli(),
+		TargetBrowserId: targetBrowserId,
+	})
+}
+
+// HandleWS 前端订阅端点。路由：GET /ws/ops-channel（WithWSLockAuth 校验 token）。
+// browserId 走握手 query 参数（P-20261117-4 评审必改⑤：hello 帧违反「客户端
+// 不应发送消息」契约 :225-231，query 是升级期一次性携带的单处注入点）——
+// 设备定向的路由键；缺省/非法 = 未携带（只收全广播，不参与定向与单浏览器
+// 启发式，向后兼容旧客户端零影响）
 func HandleWS(c *gin.Context) {
+	browserId := SanitizeBrowserId(c.Query("browserId"))
 	rawConn, err := shared.WSUpgrader.Upgrade(c.Writer, c.Request, shared.EchoSubprotocols(c.Request))
 	if err != nil {
 		return
@@ -216,7 +378,7 @@ func HandleWS(c *gin.Context) {
 		return nil
 	})
 
-	h.register(conn)
+	h.register(conn, browserId)
 	defer h.remove(conn)
 
 	_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))

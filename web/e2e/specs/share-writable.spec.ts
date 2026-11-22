@@ -225,9 +225,17 @@ test.describe('share-writable', () => {
     await page.locator('.field button').click()
     await page.waitForURL(`${shareBase}/s/${token}`)
     // 页面自身可写位接通（writablepage 挂载 + WS hello；文案双语容错——
-    // e2e 运行环境的浏览器语言不定）
+    // e2e 运行环境的浏览器语言不定）。状态条为合并横幅右段（P-20261119-3：
+    // #maskBanner 内胶囊，wr-strip/wr-text testid 保持）
     await expect(page.getByTestId('wr-strip')).toBeVisible({ timeout: 10_000 })
     await expect(page.getByTestId('wr-text')).toContainText(/可写模式|Writable mode/)
+    // sub 三态之「可写」（P-20261119-3 所有权二分）：WS hello 后头部副标题
+    // 翻可写文案——不再与下方可写横幅同屏矛盾（原缺陷=ES hello 无条件写
+    // 只读文案钉住头部）
+    await expect(page.locator('#sub')).toContainText(/可写直播|Writable live/)
+    // 合并形态：状态条确在横幅内（旧独立卡顶条 DOM 退役）
+    const stripInBanner = await page.locator('#maskBanner [data-testid="wr-strip"]').count()
+    expect(stripInBanner).toBe(1)
 
     // WS 在场：owner 侧列表行 wtyping 投影（「访客输入中」徽标数据面）
     let wtypingSeen = false
@@ -239,6 +247,28 @@ test.describe('share-writable', () => {
       if (!wtypingSeen) await new Promise(r => setTimeout(r, 400))
     }
     expect(wtypingSeen, 'wtyping projection must appear while WS open').toBeTruthy()
+
+    // wait 态（P-20261119-3 新增断言面）：页面自身连接的危险粘贴——paste_review
+    // 单播发往发送连接（writable.go writeControl），只有页面 UI 粘贴才能观测到
+    // 横幅右段的 wait 形态（脚本第二连接的粘贴对页面不可见）。xterm 的 paste
+    // 处理器在 .xterm-helper-textarea 上收 paste 事件（vendored build 实勘在
+    // 场）——合成 ClipboardEvent 直达该监听（无头环境确定形态，免剪贴板权限）。
+    // 块判定走 ≥64B 档（WritablePasteReviewBytes）：xterm 粘贴把 \n 归一成 \r
+    // （实勘：含 \n 的短块经 UI 粘贴后帧内无 \n=按键路径直接注入），长危险块
+    // 是 UI 路径唯一可靠的待批形态
+    const PAGE_PASTE = 'rm -rf /tmp/e2e-wr-page-x' + 'x'.repeat(64)
+    await page.locator('.xterm-screen').click()
+    await page.evaluate((block) => {
+      const dt = new DataTransfer()
+      dt.setData('text/plain', block)
+      const ta = document.querySelector('.xterm-helper-textarea')
+      ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    }, PAGE_PASTE)
+    await expect(page.getByTestId('wr-strip')).toHaveClass(/wait/, { timeout: 10_000 })
+    await expect(page.getByTestId('wr-text')).toContainText(/审批|approval/i)
+    // 待批块未批不注入：scrollback 不出现页面粘贴目标
+    const pagePasteMid = await request.get(`${BASE}/api/terminals/${sessionId}/scrollback`, { headers })
+    expect(await pagePasteMid.text()).not.toContain('/tmp/e2e-wr-page-x')
 
     // 协议面（页内原生 WS 第二条连接）：hello → 按键注入 → 危险粘贴待批
     const frames = await runWsScript(page, token, {
@@ -281,11 +311,17 @@ test.describe('share-writable', () => {
       headers, data: { approve: false },
     })
     expect(again.status()).toBe(404, 'paste decision must be single-shot')
+    // err 态（P-20261119-3 新增断言面）：paste_denied 全体广播——页面自身
+    // 连接收到后横幅右段翻 err + 拒绝文案（wrDenied 双语容错）
+    await expect(page.getByTestId('wr-strip')).toHaveClass(/err/, { timeout: 10_000 })
+    await expect(page.getByTestId('wr-text')).toContainText(/未批准|did not approve/i)
 
     // 关闭可写：访客页回落只读（页面自身连接收 writable_off 后隐藏状态条 +
-    // 轮询状态端点回落 false）+ wtyping 投影清零
+    // 轮询状态端点回落 false）+ wtyping 投影清零；sub 同步恢复只读文案
+    //（P-20261119-3 teardown 面——「收回恢复」态，与横幅右段一并归位）
     expect((await request.post(`${BASE}/api/share/${token}/writable`, { headers, data: { on: false } })).ok()).toBeTruthy()
     await expect(page.getByTestId('wr-strip')).toBeHidden({ timeout: 10_000 })
+    await expect(page.locator('#sub')).toContainText(/只读直播|read-only/i)
     const stateAfter = await page.evaluate(async (tok) => {
       const res = await fetch(`/s/${tok}/writable/state`)
       return (await res.json()) as { writable?: boolean }
@@ -347,5 +383,110 @@ test.describe('share-writable', () => {
     expect(mixed.ok()).toBeTruthy()
     const mixedRows = ((await mixed.json()) as { data?: Array<{ token: string; ok: boolean; reason?: string }> }).data || []
     expect(mixedRows[0]?.reason).toBe('not_found')
+  })
+
+  test('视口反喂 resize 全链（P-20261120-8）：视口→PTY 改格 → 回声对账 → 主人抢回跟随 → 只读页跟随零上行', async ({ request, page }) => {
+    // 评审必改7 断言面：①访客视口宽度反喂主机 PTY（hello 帧读到新 cols=全链
+    // 证据）+ 本地栅格铺满零留白 + 诚实回执（wr-text 翻「视口同步」）；②主人
+    // PUT 抢回后访客跟随主人栅格且抑制窗内不回踩（SSE resize 帧 ≤1s 对账）；
+    // ③审计 share.writableResize 入账（元数据口径）；④关闭可写后重载为只读页
+    // ——只读页无 resize 上行，但显示栅格跟随主机变化（必改2 定案语义）。
+    // 须 fresh-build 实例（embed 模板随二进制分发，旧实例无本链路）。
+    test.setTimeout(150_000)
+    const headers = await unlockHeaders(request)
+    const shareBase = await getShareBase(request, headers)
+    const { token, sessionId } = await createTerminalShare(request, headers, 'vp')
+    createdSessions.push(sessionId)
+    expect((await request.post(`${BASE}/api/share/${token}/writable`, {
+      headers, data: { on: true, confirm: true, passphrase: WRITABLE_PASS },
+    })).ok()).toBeTruthy()
+    // 钉主机栅格 80×24：访客视口驱动的改格效果可与主机值对照
+    expect((await request.put(`${BASE}/api/terminals/${sessionId}/resize`, {
+      headers, data: { rows: 24, cols: 80 },
+    })).ok()).toBeTruthy()
+
+    // 访客浏览器 1920×1080：gate 解锁 → 访客页（可写位在场 + 视口驱动开通）
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await page.goto(`${shareBase}/s/${token}`)
+    await page.locator('input[name="passphrase"]').fill(WRITABLE_PASS)
+    await page.locator('.field button').click()
+    await page.waitForURL(`${shareBase}/s/${token}`)
+    await expect(page.locator('.xterm-screen')).toBeVisible({ timeout: 20_000 })
+
+    const box = page.locator('#termBox')
+    // 视口驱动：栅格从主机 80 列翻到视口宽档（1920 视口 ≥150 列）——本地乐观
+    // 先行 + 服务端合并窗应用
+    await expect.poll(async () => {
+      const raw = await box.evaluate((el) => (el as HTMLElement).dataset.cols || '0')
+      return parseInt(raw, 10)
+    }, { timeout: 20_000, intervals: [500] }).toBeGreaterThanOrEqual(150)
+    const vpCols = parseInt(await box.evaluate((el) => (el as HTMLElement).dataset.cols || '0'), 10)
+
+    // 诚实回执（必改6）：resize_applied 到达 = 服务端合并窗已应用（本断言同时
+    // 是 hello 全链证据的前置——500ms 合并窗未到期时 PTY 尺寸还没变）
+    await expect(page.getByTestId('wr-text')).toContainText(/视口同步|viewport/i, { timeout: 10_000 })
+
+    // 全链证据：hello 帧的 cols = 视口值（服务端 PTY 尺寸真的变了——SSE 流
+    // 的 hello 实时读会话尺寸，sub.Size 取 lastCols/lastRows）
+    const hello = await page.evaluate(async (u) => {
+      return await new Promise<{ cols?: number }>((resolve, reject) => {
+        const es = new EventSource(u)
+        const timer = setTimeout(() => { es.close(); reject(new Error('hello timeout')) }, 8000)
+        es.addEventListener('hello', (ev) => {
+          clearTimeout(timer)
+          es.close()
+          resolve(JSON.parse(ev.data))
+        })
+        es.onerror = () => {}
+      })
+    }, `${shareBase}/s/${token}/stream`)
+    expect(hello.cols).toBe(vpCols)
+
+    // 宽度填充：原生 14px 字号铺满容器（零结构性留白——本提案的核心断言）
+    const fill = await box.evaluate((el) => {
+      const b = el as HTMLElement
+      const term = b.querySelector('.xterm') as HTMLElement | null
+      if (!term) return 0
+      const cs = getComputedStyle(b)
+      const avail = b.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 14
+      return term.getBoundingClientRect().width / avail
+    })
+    expect(fill).toBeGreaterThan(0.8)
+    const fs = parseFloat(await box.evaluate((el) => (el as HTMLElement).dataset.fontSize || '0'))
+    expect(fs).toBe(14)
+
+    // 主人抢回（PUT resize）：SSE resize 帧到达 → 访客跟随主人栅格 80×24，
+    // 且抑制窗内不回踩（等待 2s 后仍为主人值——10s 抑制窗外才重新反喂）
+    expect((await request.put(`${BASE}/api/terminals/${sessionId}/resize`, {
+      headers, data: { rows: 24, cols: 80 },
+    })).ok()).toBeTruthy()
+    await expect(box).toHaveAttribute('data-cols', '80', { timeout: 10_000 })
+    await page.waitForTimeout(2000)
+    expect(await box.evaluate((el) => (el as HTMLElement).dataset.cols)).toBe('80')
+
+    // 审计入账（必改5，元数据口径）：访客视口驱动的改格批次在账（尺寸=视口值；
+    // 主人 PUT 抢回走主人 API 不入本动作）
+    const audits = await waitAudit(request, headers, 'share.writableResize', token)
+    expect(audits.length).toBeGreaterThanOrEqual(1)
+    expect(JSON.stringify(audits)).toContain(`${vpCols}x`)
+
+    // 关闭可写 → 重载为只读页：wr-strip 隐藏（无开放直入键入）、申请入口
+    // 在场（P-20261121-1 申请通道缺省开——只读页出「申请输入」入口，无
+    // resize 上行：主人 API 改格后只读栅格仍跟随，必改2 定案——只读显示
+    // 跟随主机，键入资格未授予前页面不驱动视口反喂）
+    expect((await request.post(`${BASE}/api/share/${token}/writable`, {
+      headers, data: { on: false },
+    })).ok()).toBeTruthy()
+    await page.goto(`${shareBase}/s/${token}`)
+    await expect(page.locator('.xterm-screen')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByTestId('wr-strip')).toBeHidden()
+    // 申请批准入口默认在场（统一收编定案：无 owner 预开步骤）
+    await expect(page.getByTestId('wr-request')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('#sub')).toContainText(/只读|read-only/i)
+    expect((await request.put(`${BASE}/api/terminals/${sessionId}/resize`, {
+      headers, data: { rows: 30, cols: 100 },
+    })).ok()).toBeTruthy()
+    await expect(box).toHaveAttribute('data-cols', '100', { timeout: 10_000 })
+    await expect(box).toHaveAttribute('data-rows', '30')
   })
 })

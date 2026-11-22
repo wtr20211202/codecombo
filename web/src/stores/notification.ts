@@ -10,6 +10,7 @@ import {
 } from '../api/client'
 import { OPS_SYNC_PROGRESS, OPS_WATCH_FALLBACK } from '../utils/opsEvents'
 import { openVersionPanel } from '../utils/openSettings'
+import { projectFileDownloadUrl, triggerDirectDownload } from '../utils/directDownload'
 import { useWebSocketBase, registerWsLongBackoffNotifier, WS_CLOSE_MESSAGE_TOO_BIG } from '../composables/useWebSocketBase'
 import { registerReconnectRefetch, runReconnectRefetches } from '../composables/reconnectRefetch'
 import { useLockStore, getUnlockToken } from './lock'
@@ -315,6 +316,28 @@ export const useNotificationStore = defineStore('notification', () => {
       if (!n.read) void markRead(n.id)
       showPanel.value = false
       window.open(String(n.actionPayload), '_blank', 'noopener')
+      return
+    }
+    // download 型动作（P-20261117-4 设备效应降级链）：payload = {"projectId",
+    // "path"} 复合 JSON，点击直接触发既有文件下载链（浏览器下载框即用户手势
+    // 反馈，无 toast 不走效应面预算/标签选举——选举是 agent 事件的浏览器级
+    // 一次效应裁决，用户点击语义本就落在当前标签）。同 url 型与项目页无涉：
+    // 下载端点按 projectId 寻址，不必先切项目。载荷做 JSON 形状防御即可不重复
+    // 路径校验（服务端 isNotifyPersistAction 入账时已守形态，下载端点消费侧
+    // SafeJoinProject 再守一道——两道服务端闸之间的本地重复校验是死重），
+    // 非法载荷静默忽略
+    if (n.action === 'download' && n.actionPayload) {
+      if (!n.read) void markRead(n.id)
+      showPanel.value = false
+      try {
+        const d = JSON.parse(String(n.actionPayload)) as { projectId?: unknown; path?: unknown }
+        const projectId = typeof d.projectId === 'string' ? d.projectId : ''
+        const path = typeof d.path === 'string' ? d.path : ''
+        if (projectId && path) {
+          const name = path.split('/').pop() || 'download'
+          triggerDirectDownload(projectFileDownloadUrl(projectId, path), name)
+        }
+      } catch { /* 非 JSON 载荷静默忽略 */ }
       return
     }
     // 版本面板（P-20261109-10 自更新开始/失败/回滚通知「查看详情」）：设置弹窗

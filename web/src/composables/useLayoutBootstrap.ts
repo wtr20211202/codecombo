@@ -332,6 +332,12 @@ export function useLayoutBootstrap(deps: BootstrapDeps) {
       /** 直通输入持权卡「收回」（P-20261024-1）：payload=token，一键收回访客
        *  输入权（幂等；会话只读闸同步解除） */
       shdirectRevoke: (n: { actionPayload?: unknown }) => void
+      /** 直通输入申请卡「批准」（P-20261121-2）：payload=token，批准唯一在途
+       *  申请（服务端 409=申请已过期如实提示） */
+      shdirectApprove: (n: { actionPayload?: unknown }) => void
+      /** 直通输入申请卡「拒绝」（P-20261121-2）：payload=token，落点同收回
+       *  端点（幂等清 pending+持权），反馈按「拒绝」分流 */
+      shdirectDeny: (n: { actionPayload?: unknown }) => void
       /** autoStash「恢复」（P-20261006-48）：payload=JSON {projectId,branch,message}，
        *  重定位条目后走既有 stash pop 链（收口 useStashRecover） */
       stashRecover: (payload: string) => void
@@ -408,6 +414,15 @@ export function useLayoutBootstrap(deps: BootstrapDeps) {
           // 直通输入持权卡「收回」（P-20261024-1）：payload=token——回收在
           // useLayoutShell 收口（revokeDirect + 徽标对账）
           handlers.shdirectRevoke(n)
+        } else if (n.action === 'shdirect-approve') {
+          // 直通输入申请卡「批准」（P-20261121-2）：payload=token——批准在
+          // useLayoutShell 收口（approveDirect + 锚点表对账；第二动作「拒绝」
+          // 经 handleSecondAction 换槽复用同链走 shdirect-deny 分支）
+          handlers.shdirectApprove(n)
+        } else if (n.action === 'shdirect-deny') {
+          // 直通输入申请卡「拒绝」（P-20261121-2）：payload=token——落点同
+          // 收回端点（幂等清 pending+持权），反馈文案按「拒绝申请」分流
+          handlers.shdirectDeny(n)
         } else if (n.action === 'stash-recover' && n.actionPayload) {
           // autoStash「恢复」（P-20261006-48）：payload=JSON {projectId,branch,
           // message}——按双键重定位条目后走既有 stash pop 链（收口 useStashRecover；

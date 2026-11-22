@@ -2103,6 +2103,7 @@ export default {
     upDone: 'Upgrade complete — dsh restarted on the new version',
     upInstallFailed: 'Install failed — npm output: {output}',
     upRestartFailedHint: 'New version failed to start (plugin incompatibility or new requirements?) — you can roll back to the pre-upgrade version',
+    upRestartExternalOwner: 'Restart did not take effect: the upstream port is held by an externally running dsh (this system never kills processes it did not start), so the new version is not loaded — stop that instance manually and retry the upgrade restart',
     rollbackHint: 'Pre-upgrade version v{version} was recorded as the rollback point; rolling back restarts dsh automatically.',
     rollbackTo: 'Roll back to v{version}',
     rollbackPointLabel: 'Pre-upgrade version: v{version}',
@@ -2148,14 +2149,25 @@ export default {
     launch: 'Start dsh',
     launching: 'Starting…',
     launchingHint: 'Starting dsh and capturing the access token automatically (no manual setup)…',
-    launchFailed: 'Launch unsuccessful: make sure dsh is installed and the command works. See the log for details: {path}',
+    launchingWaitHint: 'Still waiting for dsh to become ready (a cold start loads the plugin tree; may take up to a minute)…',
+    launchFailed: 'Launch unsuccessful: the address being waited on ({base}) never became ready (full log: {path})',
     launchFailedReason: 'Launch unsuccessful: {reason} (full log: {path})',
     installHint: 'dsh command not found: install it on that machine first (npm install -g @deepseek-ai/dsh), or set the launch command to the full path in Settings → Terminal → dsh Web UI',
     launchNoCommand: 'Launch failed: configure a launch command in Settings → Terminal → dsh Web UI (e.g. wsl.exe dsh web --no-open)',
+    launchPortBusy: 'Port in use: an existing instance is listening on {base} — if it is an externally managed dsh, stop it manually and retry, or adjust the upstream URL in Settings',
+    launchExternalDetected: 'An existing dsh instance is already running (not started by this system; this system will not kill it) — stop it manually to take over with one-click launch, or fill in the access token directly in Settings',
+    // Empty-state diagnostics (P-20261118-4): actually probed base/target and failure classification
+    probeDiagLine: 'Probed {base} (target {target}): {reason}',
+    probeErrTimeout: 'probe timed out',
+    probeErrRefused: 'connection refused (nothing listening on that port?)',
+    probeErrTls: 'TLS/certificate error',
+    probeErrOther: 'probe failed',
+    probeErrRaw: '{cls} ({raw})',
     tokenUnset: 'dsh needs authorization: no access token configured, so the embedded page cannot pass the dsh auth gate',
     tokenStale: 'dsh needs re-authorization: the token is stale (dsh rotates its token on every start, so a token saved before a dsh restart no longer works)',
-    launchAlreadyRunning: 'dsh is already running; no new token was captured this time — restart dsh first and launch again, or update the token manually in Settings',
     openDshSettings: 'Open Settings',
+    // External-target token entry (P-20261118-6): external tokens live in the target manager
+    openTargetManager: 'Open target manager',
     restartBtn: 'Restart & recapture token',
     clTitle: 'v{version} release notes',
     clOpenPage: 'Open release page',
@@ -2171,7 +2183,17 @@ export default {
     restarting: 'Restarting dsh and capturing the new token…',
     restartFailed: 'Restart unsuccessful: make sure the launch command works (see Settings → Terminal → dsh Web UI and dsh-web.log)',
     restartPortBusy: 'New token captured, but the probe still reports unauthorized: the upstream port seems occupied by an old dsh process (this system never kills processes it did not start) — stop the old dsh manually and retry',
-    notRunningHint: 'Make sure dsh is running locally (default port 3080), or adjust the upstream URL in Settings → Terminal → dsh Web UI. You can also open it directly in a new tab.',
+    restartExternalOwner: 'Restart did not take effect: the upstream port is held by an externally running dsh (this system never kills processes it did not start) — stop that instance manually and retry',
+    // Dual-layer readiness (P-20261118-6): dial up but HTTP never answered → explicit notReady state
+    launchNotReady: 'The dsh port is listening but HTTP is not ready yet (slow host?) — please wait; refresh manually if it does not recover',
+    notRunningHint: 'Make sure dsh is running locally, or check the upstream URL in Settings → Terminal → dsh Web UI. You can also open it directly in a new tab.',
+    // External-target empty state (P-20261118-6): target host ≠ local machine, base ≠ default 3080
+    notRunningHintTarget: 'Make sure dsh is running on the target host {host}, or check the target address and token in the target manager. You can also open it directly in a new tab.',
+    // External target + proxy off warning (P-20261118-6)
+    externalTargetProxyOff: 'External targets need the reverse-proxy channel for embedding (direct links lack frame-header stripping and token auto-issuance, and http links are hard-blocked as mixed content on https sites): enable the dsh proxy port in Settings → Terminal → dsh Web UI',
+    // Version face local annotation & read-only mode (P-20261118-6)
+    versionsLocalNote: 'version data comes from the local dsh',
+    versionsLocalOnlyNote: 'Version and update data come from the local dsh: upgrade/rollback only affect this machine; the dsh version on the target host cannot be changed from here (upgrade it on the target host).',
     retry: 'Retry',
     closeEsc: 'Close (Esc)',
     maximize: 'Maximize',
@@ -2533,6 +2555,18 @@ export default {
     revokeConfirm: 'Revoke the share of "{name}"? The short link will stop working immediately.',
     revoked: 'Share of {name} revoked',
     linkCopied: 'Share link copied',
+    // Copy reachability warning (P-20261119-7; P-20261120-4 adds the loopbackSelf
+    // tier): loopback-entry links cannot promise recipient reachability —
+    // judgment lives in utils/shareAddress.shouldWarnCopy, text varies by source
+    // (loopbackSelf = recipient can never open it; candidate = possibly a
+    // different network; legacy fallback is local-only; an explicitly configured
+    // base URL is left alone)
+    copyWarn: {
+      loopbackSelf: 'This link was generated from the local loopback address, which others cannot open; it works for testing on this machine — to share it, switch to a LAN address in the QR panel (or configure a share base URL) and copy again',
+      candidate: 'This link uses the selected LAN address and may not be reachable for the recipient — if it fails, switch addresses in the QR panel and copy again',
+      legacy: 'This link is only reachable on this machine and will likely fail for others; configure a share base URL or external access URL in Settings · General',
+      quickdropLoopback: 'This page is open on the loopback address (localhost), so the copied drop link will not be reachable for others; open the page via a LAN or external address and copy again',
+    },
     rotate: {
       action: 'Rotate',
       title: 'Rotate Share Link',
@@ -2567,7 +2601,8 @@ export default {
         external: 'Using the configured external access URL — reachable from any network',
         public: 'Using the current public address — reachable from any network (firewall must allow it)',
         lan: 'The link uses a LAN address; the recipient must be on the same network as the server',
-        candidate: 'Opened via localhost, so the link was switched to a LAN address; the recipient must be on the same network. If not, configure a share public base URL in Settings · General',
+        loopbackSelf: 'This link was generated from the local loopback address and only opens on this machine; to share it, switch to a LAN address in the QR panel, or configure a share public base URL in Settings · General',
+        candidate: 'The link uses the selected LAN address; the recipient must be on the same network. If not, configure a share public base URL in Settings · General',
         legacy: 'This link is only reachable on this machine — configure a share public base URL in Settings · General (Tailscale / Cloudflare Tunnel / public reverse proxy) or an external access URL',
         unreachable: 'The share service is not ready or no reachable address is available; the link is temporarily unavailable',
       },
@@ -2701,6 +2736,9 @@ export default {
     // guests watch a masked read-only output stream
     terminal: {
       resultDesc: 'Visitors can watch this terminal\'s live output read-only via the link (sensitive values are masked as ***, heuristically — not absolute). It expires automatically after 30 minutes and can be revoked anytime',
+      // Permanent tier (P-20261119-5): no expiresAt = link/record never expires;
+      // the live state itself still follows the session (guest page shows "Ended")
+      resultDescPermanent: 'Visitors can watch this terminal\'s live output read-only via the link (sensitive values are masked as ***, heuristically — not absolute). The link never expires (revoke it anytime in Share Manager); the live state still follows the session — the guest page shows "Ended" once the session closes',
       typeBadge: 'Live',
       pathEmpty: '(terminal live)',
     },
@@ -2709,6 +2747,8 @@ export default {
     // and the link outlives the session (bug-report / ask-for-help flow)
     termFrozen: {
       resultDesc: 'Visitors can view a snapshot of this terminal\'s output frozen at creation time (sensitive values masked as ***; the content does not update with later output). It expires after 30 days by default, remains accessible after the session closes, and can be revoked anytime',
+      // Permanent tier (P-20261119-5): same zero-value (never expires) semantics
+      resultDescPermanent: 'Visitors can view a snapshot of this terminal\'s output frozen at creation time (sensitive values masked as ***; the content does not update with later output). The link never expires (revoke it anytime in Share Manager) and stays accessible after the session closes',
       typeBadge: 'Snapshot',
       pathEmpty: '(terminal output snapshot)',
     },
@@ -2789,6 +2829,10 @@ export default {
       badgeTip: 'Unfiltered share: sensitive-value masking was turned off at creation — visitors see verbatim output (possibly tokens / passwords / keys). Distribute the link with care',
       resultNote: 'Sensitive-value masking is off: visitors will see verbatim output (unfiltered) — make sure the recipient environment is trusted before sharing the link',
       resultDescLive: 'Visitors can watch this terminal’s live output read-only via the link (unfiltered: verbatim output, sensitive values are not masked). Expires after 30 minutes by default; revoke anytime',
+      // Permanent tier (P-20261119-5, user-directed revision: unfiltered +
+      // permanent is legal): no expiresAt = link never expires (revoke in
+      // Share Manager); the live state still follows the session
+      resultDescLivePermanent: 'Visitors can watch this terminal’s live output read-only via the link (unfiltered: verbatim output, sensitive values are not masked). The link never expires (revoke it anytime in Share Manager); the live state still follows the session — the guest page shows “Ended” once the session closes',
       resultDescFrozen: 'Visitors can view a frozen snapshot of this terminal’s output at creation time via the link (unfiltered: verbatim output, sensitive values are not masked; content does not follow later output). Force-expires within 24 hours; revoke anytime',
       ttlCapNote: 'Unfiltered shares are capped at 24 hours: longer choices (including permanent) are clamped to 24 hours on save',
     },
@@ -2811,7 +2855,14 @@ export default {
       maskNote: 'Tokens / password assignments / cloud keys in the output are replaced with *** (pattern heuristics, not absolute)',
       maskOffWarn: 'With masking off, output is exposed verbatim to visitors (possibly tokens / passwords / keys) — recommended only for trusted intranet collaboration',
       maskOffFrozenTtl: 'Unfiltered snapshots contain raw sensitive text; the link is force-expired within 24 hours and cannot be extended',
+      maskOffLiveTtl: 'Unfiltered live views are capped at 24 hours for timed options; choosing “Permanent” keeps verbatim output exposed indefinitely — revoke it anytime in Share Manager',
       maskFixedNote: 'Masking is fixed at creation: it cannot be toggled while the share is live — to change it, revoke and re-share (a new link is generated)',
+      // Open direct input quick-select (P-20261121-1 create dialog, live only;
+      // default off — keyboard authorization is explicit opt-in, passphrase
+      // gate same as the row switch)
+      writableLabel: 'Visitor input (open direct)',
+      writableNote: 'Once on, visitors holding the link (+passphrase) can type into and submit to the terminal directly; default off — visitors can still request input (approval-based)',
+      writablePassWarn: 'Open direct input requires a passphrase: set one below, then confirm',
       confirm: 'Create share',
       confirmUnfiltered: 'Create anyway (unfiltered)',
       egressTitle: 'Turn off sensitive-value masking?',
@@ -2819,12 +2870,19 @@ export default {
       egressIntroFrozen: 'The output snapshot of “{name}” will no longer mask sensitive values: raw text is written into the snapshot and shown verbatim; the link is force-expired within 24 hours. Continue only for trusted intranet collaboration.',
       egressConfirm: 'I understand the risk, continue',
       modeMismatch: 'This session already has a live share; its existing masking setting was kept. To change it, “End live” first and re-share',
+      // Permanent tier (P-20261119-5, user-directed revision: unfiltered +
+      // permanent is legal, no server 400) — inline warning when the combo is
+      // selected (informed consent kept, action left to the user, revoke as
+      // the fallback)
+      permanentUnfiltered: 'Unfiltered output will be exposed permanently (revoke it anytime in Share Manager) — pick a timed option or turn masking back on to keep it time-bounded',
       // TTL / passphrase exposure in the terminal options dialog (P-20261107-4);
       // live vs snapshot tier semantics: see TERM_LIVE_TTL_OPTIONS note in utils/shareTtl
       ttlLiveDefault: 'Default (30 minutes)',
       ttlSixHours: '6 hours',
       ttlTwentyFourHours: '24 hours (max)',
-      ttlLiveNote: 'Live views are temporary: they end automatically after 30 minutes by default, up to 24 hours; re-sharing the same session does not extend the countdown',
+      ttlLiveNote: 'Live views end automatically after 30 minutes by default, up to 24 hours; choosing “Permanent” keeps the link and record forever (the live state still follows the session); re-sharing the same session does not extend the countdown',
+      ttlLivePermanentNote: 'The link never expires; revoke it anytime in Share Manager. The live state itself still follows the session (the guest page shows “Ended” once the session closes)',
+      ttlLiveUnfilteredNote: 'Unfiltered live views are capped at 24 hours for timed options; choosing “Permanent” keeps the link alive forever — revoke it anytime in Share Manager',
       ttlFrozenNote: 'Snapshots are kept 30 days by default; pick a different window here (takes effect right after creation). Unfiltered snapshots are capped at 24 hours',
     },
     // Guest message board owner side (P-20261006-13): "messages N" badge + read-only list panel —
@@ -2887,50 +2945,82 @@ export default {
     // Direct input tier (P-20261024-1, second independent switch, decoupled
     // from collab): visitors request-then-owner-approves typing into the
     // anchored agent session; enabling requires explicit confirmation
-    direct: {
-      menuOn: 'Direct input: on',
-      menuOff: 'Direct input: off',
-      enable: 'Enable direct input',
-      enableTitle: 'Enable direct input',
-      enableConfirm: 'Once enabled, visitors may request permission to type directly into the agent session anchored to "{name}" (single holder, auto-revoked after 10 min idle, every batch ≤4KB fully audited). Regular terminals are never exposed. Enable now?',
-      notify: {
-        title: 'Visitor direct input granted',
-        body: '"{name}": {nick} is typing into the session (auto-revoked after 10 min idle)',
-      },
-      on: 'Direct input enabled — waiting for visitor requests (your keyboard yields while a visitor holds input)',
-      off: 'Direct input disabled — held permissions revoked immediately, session input returned to you',
+    // Guest input · request channel (P-20261121-1 unification: the
+    // request-approve handshake is present by default; the owner keeps a
+    // single on/off switch — a request is an inert ask, the approval gate
+    // stays with the owner; the old standalone direct-input switch retires).
+    // Honest upgrade wording: once approved, the visitor types into and
+    // submits to the session over the unified WS bridge (can actually drive
+    // the terminal). notify.* are server-side notification templates (keys
+    // carried over from the retired direct section — stored notifications
+    // reference the keys; copy changed, keys kept)
+    guestInput: {
+      menuOn: 'Request channel: on',
+      menuOff: 'Request channel: off',
+      on: 'Request channel enabled — visitors can ask for input on the share page (once approved they can type into and submit to the session; your keyboard yields while they do)',
+      off: 'Request channel disabled — visitors can no longer ask; pending requests and held permissions revoked together',
+      offTitle: 'Disable request channel',
+      offConfirm: 'Once disabled, the "Request input" entry disappears from the visitor page of "{name}", pending requests and granted input are revoked together (a typing visitor will be disconnected). Disable now?',
+      // offAction is the short label for the disable-confirm dialog's positive
+      // button; `off` is the long status toast shown after closing succeeds.
+      // Never interchange them — reusing `off` as a button label once stretched
+      // the amber warning button across the whole footer (P-20261121-3)
+      offAction: 'Disable channel',
       granted: 'Approved input request from "{nick}" (auto-revoked after 10 min idle)',
       revoked: 'Visitor input access revoked, session input returned to you',
       approveAction: 'Approve visitor input request ({nick})',
       revokeAction: 'Revoke visitor input ({nick})',
+      deny: 'Deny request',
+      denied: 'Request denied (the channel stays open — the visitor can ask again)',
+      requestArrived: '"{name}" received an input request from {nick}',
     },
-    // Writable share (P-20261106-8 "visitor can type" mode): visitor keystrokes
-    // reach the terminal PTY through the WS upstream bridge — remote assistance
-    // semantics. Enabling = egress warning + forced passphrase + confirm; off /
-    // revoke tears down every upstream connection (revocation is always safe)
+    // Server-side notification template keys (share.direct.notify.* — key
+    // names carried over from the retired direct section; stored notifications
+    // reference the keys, upgrade-compat keeps keys and updates copy only;
+    // UI-facing vocab lives in the guestInput block above)
+    direct: {
+      notify: {
+        title: 'Visitor input granted',
+        body: '"{name}": {nick} is typing into the session (auto-revoked after 10 min idle)',
+        request: {
+          title: 'Visitor requests input',
+          body: '"{name}": {nick} asked to type into the session (valid for 10 minutes; once approved they can actually submit)',
+        },
+      },
+    },
+    // Open direct input (P-20261106-8 writable share, semantics carried
+    // forward by the P-20261121-1 unification): visitors holding the link
+    // (+passphrase) type straight into the anchored terminal PTY over the
+    // unified WS bridge — remote assistance semantics (honest upgrade
+    // wording: visitors can actually submit and drive the terminal).
+    // Enabling = egress warning + forced passphrase + confirm; off / revoke
+    // tears down open-direct connections (request-approve grants unaffected
+    // — the two switches are independent; revocation is always safe)
     writable: {
-      menuOn: 'Writable input: on',
-      menuOff: 'Writable input: off',
-      enable: 'Enable writable',
-      enableTitle: 'Enable writable input (remote assistance)',
-      enableConfirm: 'Once enabled, visitors holding the link (+passphrase) can type straight into the terminal behind "{name}" — equivalent to handing over your keyboard. Output-side masking stays on; your keyboard yields while a visitor types; you can revoke anytime. Enable now?',
-      passTitle: 'Writable share requires a passphrase',
+      menuOn: 'Open direct input: on',
+      menuOff: 'Open direct input: off',
+      enable: 'Enable open direct input',
+      enableTitle: 'Enable open direct input (remote assistance)',
+      enableConfirm: 'Once enabled, visitors holding the link (+passphrase) can type straight into the terminal behind "{name}" and actually submit commands — equivalent to handing over your keyboard. Output-side masking stays on; your keyboard yields while a visitor types; you can revoke anytime. With open direct input on, visitors can type without requesting (it covers the request path). Enable now?',
+      passTitle: 'Open direct input requires a passphrase',
       passLabel: 'Set an access passphrase (visitors must verify before opening)',
       passPh: 'Enter a passphrase (≤64 bytes)',
-      passHint: 'The short link is a bearer credential that gets forwarded in chats — in writable mode the blast radius is "shell access", and a passphrase is the proportionate compensation.',
+      passHint: 'The short link is a bearer credential that gets forwarded in chats — with open direct input the blast radius is "shell access", and a passphrase is the proportionate compensation.',
       passRequired: 'Passphrase cannot be empty',
-      on: 'Writable input enabled — visitors can type (your keyboard yields while they do)',
-      off: 'Writable input disabled — upstream connections closed, visitor page falls back to read-only',
+      passRequiredCreate: 'Open direct input requires a passphrase — set one below first',
+      coversRequests: 'Open direct input enabled — visitors with the link can type without requesting (covers the request path; the request channel can still be disabled separately)',
+      on: 'Open direct input enabled — visitors can type and submit (your keyboard yields while they do)',
+      off: 'Open direct input disabled — open-direct connections closed, visitor page falls back to read-only (request-approve grants unaffected)',
       ttlHint: 'Consider shortening this share\'s TTL — exposure window and authorization surface grow together',
       revokeAction: 'Revoke visitor input ({n} connection(s))',
       bulkOn: 'Enable writable',
-      bulkOnTitle: 'Batch-enable writable input',
-      bulkOnConfirm: 'Enable writable input on {n} selected share(s): {names}. Entries without a passphrase will be skipped (set one first). Continue?',
-      bulkDoneOn: 'Writable input enabled on {n} share(s)',
+      bulkOnTitle: 'Batch-enable open direct input',
+      bulkOnConfirm: 'Enable open direct input on {n} selected share(s): {names}. Entries without a passphrase will be skipped (set one first). Continue?',
+      bulkDoneOn: 'Open direct input enabled on {n} share(s)',
       bulkOff: 'Disable writable',
-      bulkOffTitle: 'Batch-disable writable input',
-      bulkOffConfirm: 'Disable writable input on {n} selected share(s): {names}. Ongoing visitor input connections will close immediately. Continue?',
-      bulkDoneOff: 'Writable input disabled on {n} share(s)',
+      bulkOffTitle: 'Batch-disable open direct input',
+      bulkOffConfirm: 'Disable open direct input on {n} selected share(s): {names}. Open-direct visitor connections will close immediately. Continue?',
+      bulkDoneOff: 'Open direct input disabled on {n} share(s)',
       bulkPartial: '{ok} succeeded, {fail} failed — per-item details in the notification center',
       pasteReviewTitle: 'Visitor paste pending approval — "{name}"',
       pasteReviewMeta: 'Visitor {visitor} pasted a block (auto-denied after 60 seconds)',
@@ -2938,6 +3028,8 @@ export default {
       deny: 'Deny',
       pasteApproved: 'Approved — the pasted block was injected into the terminal',
       pasteDenied: 'Denied — the pasted block was not injected',
+      // Viewport-fed resize (P-20261120-8): toast for sc-ops:share.wresize
+      resized: 'Visitor resized the "{name}" terminal to {cols}×{rows} (viewport sync)',
     },
     // Retired-link leak watch (P-20261008-2): alert + badge for retired links
     // still being accessed after rotation — a zero-false-positive leak signal;
@@ -2965,7 +3057,21 @@ export default {
       created: 'Drop link created (the plain token is shown only this once — copy it now)',
       revoked: 'Revoked — links are dead',
       copied: 'Copied',
+      // Locally cached link (P-20261117-1): plain token is shown once server-side; the owner's browser caches it to restore the copy exit
+      copyCached: 'Copy full link',
+      cacheMissingHint: 'No cached link on this device — create or rotate once to get a fresh one',
+      cacheRotatedHint: 'Credential was rotated elsewhere; the cached link on this device is stale',
       noneHint: 'No drop link yet — create one, then open it in your phone browser to deliver (content expires in 24h)',
+      // Delivery records (P-20261117-3 owner receive surface): inbox projection + per-file download + delete reclaiming quota
+      records: 'Delivery records',
+      recordsHint: 'Valid for 24 hours',
+      badgeText: 'Text',
+      badgeFiles: '{n} file(s)',
+      download: 'Save',
+      recordDelete: 'Remove',
+      recordDeleteTitle: 'Remove delivery record',
+      recordDeleteConfirm: 'The record and its delivered files will be deleted together (quota reclaimed immediately). This cannot be undone.',
+      recordDeleted: 'Removed',
     },
     // Access passphrase gate (P-20261006-25): link + passphrase two-factor, one guard for all share kinds
     pass: {
@@ -3034,9 +3140,12 @@ export default {
       title: 'Share QR Code',
       desc: 'Scan with a phone to open the visitor page for "{name}", or copy the link to send it manually',
       // Address plan and reachability badge (P-20261020-6; reuses P-20261019-10
-      // three-form address selection)
+      // three-form address selection; P-20261120-4: loopback entry defaults to
+      // the browser address + synthesized self candidates + auto pseudo-option)
       loading: 'Choosing a reachable address…',
       addressLabel: 'QR address',
+      addressAuto: 'Auto (current browser address)',
+      selfLoopback: 'This machine',
       unreachablePlaceholder: 'No phone-reachable share address found — check the share service or the external access URL setting',
       status: {
         external: 'External address',
@@ -3049,7 +3158,8 @@ export default {
         external: 'Using the external access URL from settings — reachable from any network',
         public: 'Using a public address — reachable from any network (allow the share service port)',
         lan: 'The link points to a LAN address: the recipient must be on the same Wi-Fi / LAN',
-        loopback: 'Switched to LAN address {ip}: the recipient must be on the same Wi-Fi / LAN',
+        loopbackSelf: 'Using the browser address bar (local loopback): works for testing on this machine, but phones and other devices cannot open it — to share, switch to a LAN address below',
+        loopback: 'Using the selected LAN address {ip}: the recipient must be on the same Wi-Fi / LAN',
         unreachable: 'Opened via loopback and no LAN address was detected; configure an external access URL in Settings · General',
         networkFailed: 'Failed to read local network addresses; refresh and retry, or configure an external access URL in Settings · General',
       },
@@ -3310,8 +3420,11 @@ export default {
     endLiveShareDone: 'Live stopped, visitors disconnected',
     // Direct-input badge & one-click revoke (P-20261024-1): tab amber dot title
     // carries the holding visitor and remaining window; the context-menu item
-    // sits next to "stop live" (same expose-surface revocation family)
+    // sits next to "stop live" (same expose-surface revocation family).
+    // P-20261121-2 adds the pending-request badge title (hollow amber dot —
+    // "someone is knocking" reads apart from "typing now")
     directInputBadgeTitle: 'Visitor typing: {nick} (right-click to revoke)',
+    directPendingBadgeTitle: 'Visitor input request pending: {nick} (approve or deny in the share manager)',
     revokeDirectInput: 'Revoke visitor input',
     revokeDirectInputDone: 'Visitor input revoked, session input returned to you',
     frozenShare: 'Share output snapshot',
@@ -4459,8 +4572,25 @@ export default {
     saveFile: 'Save File',
     metaTooLargeTitle: 'File too large to preview',
     metaTooLargeHint: 'This file is {size}, above the full-preview limit (10 MB). Content was not loaded into the editor. Use command-line tools (e.g. less / tail) in the terminal to inspect it.',
+    // Unified dual view (P-20261119-4): "Source | Preview" switch + preview-state copy
+    pvSwitchLabel: 'View switch',
+    pvSource: 'Source',
+    pvPreview: 'Preview',
+    pvDownload: 'Download',
+    pvLoading: 'Loading preview…',
+    pvFailed: "Preview isn't available — download to view",
+    pvHtmlNote: "Scripts are disabled — dynamic content may look incomplete (isolated sandbox: no access to this app's session)",
+    pvHtmlRunScripts: 'Run scripts (isolated)',
+    pvHtmlStopScripts: 'Stop scripts',
+    pvHtmlScriptsOn: "Scripts running isolated: no access to this app's session, but network requests are possible; never enter real credentials here",
+    pvHtmlConfirmTitle: "Run this page's scripts?",
+    pvHtmlConfirmBody: "Scripts will run in an isolated sandbox: no access to this app's session or local storage, but the page can still make network requests. Only enable for content you trust.",
     metaBinaryTitle: 'Binary file',
     metaBinaryHint: 'This is a binary or otherwise non-previewable file; its content is not rendered in the frontend.',
+    // Binary file whose preview Kind is supported: "Source" state has no editor
+    // body — point at Preview / download (no more "not previewable" copy next
+    // to a visible Preview switch)
+    metaBinaryViewHint: 'This is a binary file the editor cannot edit directly. Use the Preview view to inspect it, or download the original.',
     // Remote file editing (P-20261003-15): offline degrade banner + sensitive path write confirm
     remote: {
       offlineBanner: 'Remote host unreachable — switched to read-only; retry once the connection recovers',
@@ -6415,9 +6545,12 @@ export default {
     },
     // Quickdrop (P-20261006-51): delivery-arrived notice — arrived is the
     // server-side titleKey template (msgParams.from/size); actionActive /
-    // actionNew are the inline dual-exit labels; rest feed useQuickdrop toasts
+    // actionNew are the inline dual-exit labels; rest feed useQuickdrop toasts.
+    // filesArrived is the multi-file delivery template (P-20261117-2-S1,
+    // msgParams.from/count/size — size is a server-side FmtSize string)
     quickdrop: {
       arrived: 'Quickdrop received ({size} bytes)',
+      filesArrived: 'Quickdrop files received ({count} · {size})',
       actionActive: 'Send to current session',
       actionNew: 'New agent session',
     },
@@ -6428,9 +6561,31 @@ export default {
       actionNew: 'Handle in new session',
     },
     // Direct-input hold card (P-20261024-1): "revoke" inline action on the
-    // hold notice created at grant time
+    // hold notice created at grant time; P-20261121-2 adds request-card actions
+    // (approve primary + deny second)
     shdirect: {
       actionRevoke: 'Revoke visitor input',
+      actionApprove: 'Approve visitor input',
+      actionDeny: 'Deny request',
+    },
+    // frontend device-effect fallback notices (P-20261117-4): when the targeted
+    // browser is offline / multi-browser cannot be resolved, frontend.* effects
+    // land as notification-center entries instead of broadcast effects — title
+    // says which effect was converted; body has two cause variants
+    // (offline = bound browser not connected / unbound = multiple browsers and
+    // no session binding); clipboard entries carry the masked preview in the
+    // body so the cause gets its own key; actionDownload is the inline button
+    // label that triggers the existing download chain
+    frontendFallback: {
+      downloadTitle: 'Agent requested a file download (converted to notice)',
+      openTitle: 'Agent requested to open a link (converted to notice)',
+      clipboardTitle: 'Agent requested clipboard write (converted to notice)',
+      reloadTitle: 'Agent requested a page reload (converted to notice)',
+      bodyOffline: 'The browser that started this session is currently offline',
+      bodyUnbound: 'Multiple browsers are connected and the session has no browser binding; cannot target one',
+      clipOffline: 'Preview: {preview} — the browser that started this session is currently offline',
+      clipUnbound: 'Preview: {preview} — multiple browsers connected, cannot target one',
+      actionDownload: 'Download file',
     },
   },
   // Quickdrop consumption chain (P-20261006-51, useQuickdrop): inline action
@@ -7322,8 +7477,8 @@ export default {
     conflictCrossFocusTerm: 'Layers with global action "{name}": this action only fires while the terminal is focused',
     conflictCrossFocusEditor: 'Editor action "{name}" only wins while the editor is focused; this action fires elsewhere',
     conflictCrossFocusEditorSelf: 'Layers with "{name}": this action only fires while the editor is focused',
-conflictCrossFocusNotesSelf: 'Layers with "{name}": this action only fires while the notes panel is focused',
-conflictCrossFocusNotes: 'Notes-panel action "{name}" only wins while the notes panel is focused; this action fires elsewhere',
+    conflictCrossFocusNotesSelf: 'Layers with "{name}": this action only fires while the notes panel is focused',
+    conflictCrossFocusNotes: 'Notes-panel action "{name}" only wins while the notes panel is focused; this action fires elsewhere',
     // Save-time conflict warning (P-20261003-106): per-entry hint lines + scope/static key labels
     conflictTitle: 'Keybinding conflict',
     conflictSaveAnyway: 'Save anyway',
@@ -8312,15 +8467,17 @@ conflictCrossFocusNotes: 'Notes-panel action "{name}" only wins while the notes 
         drop: 'Visitor collab material received',
         drop_consume: 'Collab material marked consumed',
         collab: 'Collab channel toggled',
+        guestInput: 'Request channel toggle',
         direct: {
-          grant: 'Visitor direct input approved',
-          revoke: 'Visitor direct input revoked',
-          input: 'Visitor direct input batch',
+          request: 'Visitor input request',
+          grant: 'Visitor input approved',
+          revoke: 'Visitor input revoked',
         },
-        // Writable share (P-20261106-8): toggle / input batch / paste review audit verbs
+        // Writable share (P-20261106-8): toggle / input batch / paste review / viewport resize audit verbs
         writable: 'Writable share toggled',
-        writableInput: 'Visitor writable input batch',
+        writableInput: 'Visitor typing batch (mode-tagged)',
         writablePaste: 'Writable paste review',
+        writableResize: 'Visitor viewport resize',
       },
       workspace: {
         export: 'Export workspace backup',
@@ -8574,11 +8731,14 @@ conflictCrossFocusNotes: 'Notes-panel action "{name}" only wins while the notes 
         external: 'Using the external access URL from settings; reachable from any network',
         public: 'Using a public address; reachable from any network (server firewall/port must allow it)',
         lan: 'The phone must be on the same Wi-Fi / LAN as the server',
-        loopback: 'Opened via local loopback, which phones cannot reach; automatically switched to LAN address {ip}. If the phone is not on the same Wi-Fi, configure an external access URL under Settings · General',
+        loopbackSelf: 'Using the browser address bar (local loopback): phones cannot reach it, but it works for testing on this machine; to share it, switch to a LAN address below',
+        loopback: 'Using the selected LAN address {ip}: the phone must be on the same Wi-Fi / LAN. If it is not, configure an external access URL under Settings · General',
         unreachable: 'Opened via local loopback and no usable LAN address was detected, so phones cannot reach it. Configure an external access URL (Tailscale / Cloudflare Tunnel / public reverse proxy) under Settings · General',
         networkFailed: 'Could not load local network addresses; refresh and retry, or configure an external access URL under Settings · General',
       },
       addressLabel: 'QR address',
+      addressAuto: 'Auto (current browser address)',
+      selfLoopback: 'This machine',
       loading: 'Selecting an access address…',
       unreachablePlaceholder: 'No phone-reachable address',
     },

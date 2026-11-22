@@ -23,6 +23,8 @@ interface ShareRow {
   kind: string
   expiresAt?: string
   hasPassphrase?: boolean
+  /** 未过滤标记（P-20261106-9 投影；组合创建断言用） */
+  unfiltered?: boolean
   /** 锚定的终端会话（shareResponse 投影，terminal 形态恒带） */
   terminalId?: string
 }
@@ -203,5 +205,55 @@ test.describe('share-term-options', () => {
     expect(remain2).toBeGreaterThan(29 * DAY)
     expect(remain2).toBeLessThan(31 * DAY)
     expect(plain!.hasPassphrase).toBeFalsy()
+  })
+
+  test('直播永久挡（P-20261119-5）：选「永久」→ 记录无到期时点；永久×未过滤组合合法（就地警示可提交）；列表显「永久」', async ({ page, request }) => {
+    test.setTimeout(180_000)
+    const headers = await unlockHeaders(request)
+    await fixedLocale(page)
+
+    await openTermOptionsDialog(page, 'terminal-live-share')
+    const ttlSelect = page.getByTestId('share-term-ttl-select')
+    await ttlSelect.locator('.n-base-selection').click()
+    await page.locator('.n-base-select-option').filter({ hasText: '永久' }).click()
+    // 永久语义就地说明（链接不过期 + 仍随会话）
+    await expect(page.getByTestId('share-term-ttl-hint')).toContainText('永不过期')
+
+    // 关闭遮蔽 → 永久 × 未过滤组合合法（【用户定向修订】2026-11-19：不再禁用
+    // 创建）——警示面就位（mask-off 子注 + ttl-hint 组合警示），确认钮保持可用
+    await page.getByTestId('share-term-mask').click()
+    await expect(page.getByTestId('share-term-mask-off-live-ttl')).toContainText('长期公开')
+    await expect(page.getByTestId('share-term-ttl-hint')).toContainText('永久公开')
+    await expect(page.getByTestId('share-term-confirm')).toBeEnabled()
+    await page.locator('[data-testid="share-term-confirm"]').click()
+
+    // 出域警示确认（组合照常走既有未过滤确认流；标题+确认钮文案与
+    // share-unfiltered.spec 同源——confirmUnfilteredEgress 的 confirmText
+    // 是 egressConfirm「我知道风险，继续创建」，非文件分享流的 confirmUnfiltered）
+    const egress = page.locator('.n-dialog').filter({ hasText: '确认关闭敏感值遮蔽' })
+    await egress.getByRole('button', { name: '我知道风险，继续创建' }).click()
+
+    const dialog = page.locator('.share-result-modal')
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+    // 结果卡描述走永久口径（防「默认 30 分钟后过期」矛盾文案；未过滤永久同口径）
+    await expect(dialog).toContainText('链接永久有效')
+    await dialog.locator('.result-footer').getByRole('button', { name: '关闭' }).click()
+
+    // 记录面：无 expiresAt = 永久记录（组合落库零值、不被静默钳 24h；列表投影同口径）
+    const rows = await listShares(request, headers)
+    const live = rows.find(s => s.kind === 'terminal')
+    expect(live?.token).toBeTruthy()
+    expect(live?.unfiltered).toBe(true)
+    expect(live?.expiresAt).toBeUndefined()
+
+    // 管理列表：有效期列显「永久」弱标（全形态统一口径），行菜单可改期
+    await page.goto(`${BASE}/project?view=shares`)
+    await expect(page.locator('.sm-card').first()).toBeVisible({ timeout: 15_000 })
+    const permLabel = page.locator('[data-testid="sm-permanent"]')
+    await expect(permLabel).toHaveCount(1)
+    await expect(permLabel).toContainText('永久')
+    // terminal 行的「更多」菜单出现「有效期」入口（P-20261119-5 新增可改期面）
+    await page.locator('[data-testid="sm-more-btn"]').first().click()
+    await expect(page.locator('.n-dropdown-option').filter({ hasText: '有效期' })).toBeVisible()
   })
 })

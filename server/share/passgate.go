@@ -146,7 +146,8 @@ func gateFailKey(token string, r *http.Request) string {
 }
 
 // gateGuard 访客面内容守卫中间件：凡带 {token} 的内容子资源（meta/list/
-// render/raw/html/f/download/dl/stream）统一经此——防绕过口令页直取子资源
+// render/raw/docx-media/docx-embed/html/f/download/dl/stream）统一经此——
+// 防绕过口令页直取子资源
 // （口令页只是访客 UI，真正的门在每一个取数端点上）。四形态（file/frozen/
 // snippet/terminal）按记录字段统一把门，frozen 快照路径在守卫之后才解析
 // （同门核对）。无口令记录零开销直通（存量语义零变化）；记录不存在/过期时

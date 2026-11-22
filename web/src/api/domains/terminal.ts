@@ -2,6 +2,14 @@
 import type { AxiosRequestConfig } from 'axios'
 import api from '../http'
 import { getCurrentInstanceContext } from '../http'
+import { opsBrowserId } from '../../utils/opsBrowserId'
+
+// 浏览器亲和头（P-20261117-4）：会话创建类请求携 X-Browser-Id（与 ops-channel
+// WS 握手同一 browserId）——frontend.* 设备效应「落在发起会话的浏览器」的
+// 初绑依据；接管迁移在 /ws/terminal WS attach 点（getTerminalWsUrl 同携 query）
+function withBrowserHeader(config?: AxiosRequestConfig): AxiosRequestConfig {
+  return { ...config, headers: { ...config?.headers, 'X-Browser-Id': opsBrowserId() } }
+}
 
 // 终端
 export const terminalApi = {
@@ -9,7 +17,7 @@ export const terminalApi = {
   //（相对/绝对均可，缺省 = 项目根）。须已存在且在项目根内——越界/缺失服务端
   // 400 稳定原文（KNOWN_ERROR_I18N 既有映射），调用方无需自行校验
   create: (projectId: string, name?: string, config?: AxiosRequestConfig, extra?: { dir?: string }) =>
-    api.post(`/terminals`, { projectId, name, ...(extra?.dir ? { dir: extra.dir } : {}) }, config),
+    api.post(`/terminals`, { projectId, name, ...(extra?.dir ? { dir: extra.dir } : {}) }, withBrowserHeader(config)),
   // 全局终端（kind=agent）：免项目绑定，后端注入回调环境变量并拉起底层运行时
   //（runtime 空 = 设置默认/自动按可用性；claude/codex/dsh）
   // extra.dir = 工作目录（Claude 会话恢复场景传会话 cwd）；
@@ -17,7 +25,7 @@ export const terminalApi = {
   // extra.shell = 会话级 shell 覆盖（P-20261004-57，仅纯终端 runtime=shell 生效，
   // 空缺省 = 跟随设置 terminal.defaultShell / 平台缺省）
   createAgent: (name?: string, runtime?: string, config?: AxiosRequestConfig, extra?: { dir?: string; launchArgs?: string; shell?: string }) =>
-    api.post(`/terminals`, { kind: 'agent', name, runtime, ...(extra ?? {}) }, config),
+    api.post(`/terminals`, { kind: 'agent', name, runtime, ...(extra ?? {}) }, withBrowserHeader(config)),
   // 运行时选项清单（会话创建对话框用）：注册顺序 {name, displayName, available, version, defaultCommand, customCommand}
   // displayName 为自定义智能体的展示名（内置运行时为空，展示回落 name）
   listAgentRuntimes: (config?: AxiosRequestConfig) => api.get('/agent-runtimes', config),
@@ -64,7 +72,7 @@ export const terminalApi = {
   // 既有会话，产物 origin=external（close 语义分流：关闭=解除接管不杀会话）。
   // 响应 data.attached = 接管时刻的外部客户端数（≥1 多端同屏提示面）
   attachExternal: (tmuxName: string, name?: string, config?: AxiosRequestConfig) =>
-    api.post('/terminals', { attachTmux: tmuxName, name }, config),
+    api.post('/terminals', { attachTmux: tmuxName, name }, withBrowserHeader(config)),
   // 多终端广播输入（P-20261003-288 舰队式批量输入）：同一段输入逐个写入多个
   // 会话。data 为原始 PTY 输入——执行命令须自带尾部换行（UI 广播条回车自动
   // 补 \r，API 直调方自行携带）；missing/failed 为跳过与失败的 id 回告
@@ -416,8 +424,12 @@ export interface TerminalCommandPreviewResult {
 export const getTerminalWsUrl = (id: string) => {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   const { instanceId, isRemote } = getCurrentInstanceContext()
+  // browserId 随 attach 携带（P-20261117-4 接管即迁移，last-attach-wins）：
+  // 本浏览器打开该会话的终端 pane = 会话的设备效应作用面迁移到本浏览器。
+  // 远程代理形态同参数透传（远端实例按其自身状态处理，不识别即忽略零影响）
+  const browserQuery = `?browserId=${encodeURIComponent(opsBrowserId())}`
   if (isRemote && instanceId) {
-    return `${proto}//${location.host}/ws/proxy/${instanceId}/terminal/${id}`
+    return `${proto}//${location.host}/ws/proxy/${instanceId}/terminal/${id}${browserQuery}`
   }
-  return `${proto}//${location.host}/ws/terminal/${id}`
+  return `${proto}//${location.host}/ws/terminal/${id}${browserQuery}`
 }

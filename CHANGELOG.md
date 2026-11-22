@@ -9,6 +9,75 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.9] - 2026-11-22
+
+### Added
+
+- **In-app file preview** — preview documents right in the editor without
+  creating a share link first: a breadcrumb "Original ↔ Preview" toggle
+  renders markdown, CSV, spreadsheets, Word documents (images and embedded
+  attachments included), PDFs, images and sandboxed HTML, with per-format
+  preference remembered. The share-preview pipeline was extracted into a
+  shared package, so fixes and features land on both sides at once.
+- **Terminal share "Permanent" tier** — live terminal shares can now be
+  truly permanent (a deliberate overturn of the earlier "no permanent live
+  shares" decision): an explicit server-side channel, a "permanent" badge
+  across the management UI, an expiry editor on each share row, and a
+  warning-instead-of-error combination with the unfiltered mode.
+- **Guest keyboard input, unified** — the two guest-typing modes
+  (application+approval and open direct input) are consolidated into one
+  state machine: the switches no longer race over the owner's keyboard,
+  arrival of an application is always visible to the owner (notification +
+  10-minute validity + pending projection), the old direct-input endpoints
+  are retired, and auditing is unified under a single event.
+- **docx embedded attachments** — embedded objects (OLE packages) in shared
+  Word documents are visible with a 📎 download link and correct original
+  filenames (GBK decoding supported); previewable types open in a dedicated
+  viewer page; and the extraction chain now works against real Word files,
+  where it previously failed systematically.
+- **Quickdrop multi-file delivery** — guests stage files (drag / paste /
+  multi-select) with thumbnails and upload progress, and get a local
+  delivery history; owners get a delivery log with per-file listing,
+  sensitive-file marking, direct browser downloads and one-click revoke;
+  the share link can be re-copied across days.
+- **`frontend.reload` device targeting** — agents driving a page refresh
+  can target a specific device/browser binding, with session affinity and
+  a graceful notification fallback.
+
+### Changed
+
+- **Share visitor pages, polished** — the terminal view scales up on wide
+  screens (font up to ~3×, filling the viewport instead of leaving large
+  empty margins) with the view pinned to the latest output; all visitor
+  pages follow the light/dark theme switch; embedded-attachment shells gain
+  a full-screen mode and an auto-collapsing options block; the writable
+  banner and entry bars were merged; and the terminal canvas stays dark
+  for readable input in light theme.
+- **Quickdrop visitor page visual pass** — branded two-column layout,
+  background ambience matching the document-share page, equal-height
+  columns, and honest "text or files — at least one" wording.
+- **Install script mirror fallback** — when the official download fails,
+  install.sh retries via a mirror prefix (override or disable via
+  `CODECOMBO_MIRROR`); root installs register the service directly instead
+  of misrouting through sudo.
+- **Share link picking** — loopback candidates are included, the browser
+  address is preferred for loopback entries, and low-quality interface
+  candidates are warned about at copy time.
+
+### Fixed
+
+- **Self-update no longer false-rolls-back** — the post-swap health wait is
+  liveness-driven instead of a 15-second deadline, so slow machines are no
+  longer rolled back mid-startup; the rollback path itself is hardened
+  against losing the backup, and failures snapshot the ExecStart path for
+  diagnosis.
+- **Markdown preview** — wide images fit their column and open in a
+  lightbox; the unified preview layout no longer leaks over the git panel
+  or loses the toolbar on deep scroll.
+- **dsh external targets** — the management surface works with non-loopback
+  tokens, liveness checks dial TCP with an explicit not-ready state, and
+  empty states explain what to do next.
+
 ## [0.0.1-beta.8] - 2026-11-15
 
 ### Added
@@ -431,7 +500,8 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.8...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.9...HEAD
+[0.0.1-beta.9]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.9
 [0.0.1-beta.8]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.8
 [0.0.1-beta.7]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.7
 [0.0.1-beta.6]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.6

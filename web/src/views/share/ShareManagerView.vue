@@ -6,24 +6,24 @@
 // 风格与主应用面板体系一致（bg-surface 卡片 + 主题变量，无独立渐变皮肤）
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  NButton, NCheckbox, NDataTable, NDropdown, NEmpty, NIcon, NInput, NModal, NPagination, NQrCode, NSpin, NTag, NTooltip, useDialog, useMessage,
+  NButton, NCheckbox, NDataTable, NDropdown, NEmpty, NIcon, NInput, NModal, NPagination, NSpin, NTag, NTooltip, useDialog, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, DropdownDividerOption, DropdownOption } from 'naive-ui'
 import {
-  CheckboxOutline, CopyOutline, EllipsisHorizontalOutline, OpenOutline, QrCodeOutline, RefreshOutline, ShareSocialOutline, SearchOutline, KeyOutline,
+  CheckboxOutline, CopyOutline, DownloadOutline, EllipsisHorizontalOutline, OpenOutline, QrCodeOutline, RefreshOutline, ShareSocialOutline, SearchOutline, KeyOutline,
   FolderOutline, DocumentOutline, TextOutline, TrashOutline, TerminalOutline, TimeOutline, PlayCircleOutline, LockClosedOutline,
   ChatbubbleEllipsesOutline, ChatbubblesOutline, PaperPlaneOutline, AddOutline, LocateOutline, RepeatOutline,
   CloudCircleOutline, CloudUploadOutline, HandLeftOutline, CreateOutline,
 } from '@vicons/ionicons5'
 import {
   shareApi, quickdropApi, buildDropUrl,
-  type ShareInfo, type ShareKind, type ShareMessage, type ShareServiceStatus, type QuickdropTokenMeta, type ShareDropItem,
+  type ShareInfo, type ShareMessage, type ShareServiceStatus, type QuickdropTokenMeta, type QuickdropItem, type QuickdropDropFile, type ShareDropItem,
 } from '../../api/domains/share'
 import ShareReachBadge from '../../components/share/ShareReachBadge.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useShareAddressPlan } from '../../composables/useShareAddressPlan'
 import { bumpTerminalLiveShares } from '../../composables/useTerminalLiveShares'
-import { bumpDirectInputShares } from '../../composables/useDirectInputShares'
+import { bumpDirectInputShares, useDirectInputShares } from '../../composables/useDirectInputShares'
 import { confirmDialog, promptDialog } from '../../composables/useDialog'
 import { confirmSensitiveFiles } from '../../composables/useShareDialog'
 import { useShareNewShare } from '../../composables/useShareNewShare'
@@ -41,6 +41,9 @@ import { formatBytes, usageExceeds } from '../../utils/bytes'
 import { formatDateTime } from '../../utils/git'
 import { relativeTimeParts } from '../../utils/relative-time'
 import { copyText } from '../../utils/clipboard'
+import { isLoopbackHostname } from '../../utils/networkAddress'
+import { shouldWarnCopy } from '../../utils/shareAddress'
+import { clearQuickdropUrlCache, readQuickdropUrlCache, writeQuickdropUrlCache, type QuickdropUrlCache } from '../../utils/quickdropCache'
 import { buildShareInviteText } from '../../utils/shareInvite'
 import ShareQrPanel from '../../components/share/ShareQrPanel.vue'
 
@@ -100,6 +103,19 @@ const {
   isFiltering, visibleShares, paged, pageCount, abnormalCount,
   onSorter, sortOrderFor, onKindChecked, onStatusChecked, filterAbnormal,
 } = useShareManagerList(shares, now, pageSize)
+
+// ── 直通待批申请投影（P-20261121-2）：pendingByToken 锚点表是行内「批准」
+// 升格钮的数据源——申请到达（sc-ops:share.direct-request 广播 bump 即现，
+// 15s 轮询断线兜底）行内即亮，脱「更多」下拉+手动刷新双重动作（此前的
+// 唯一可见面，用户实测「owner 没收到申请」的投影半边）。本视图挂载轮询
+// 宿主（AgentTerminalView 同款单例 start/stop——路由互斥视图间交接）
+const directInputs = useDirectInputShares()
+onMounted(directInputs.start)
+onBeforeUnmount(directInputs.stop)
+/** 行内批准钮的在途申请投影（tooltip 携申请访客昵称） */
+function pendingOf(r: ShareInfo) {
+  return directInputs.pendingByToken.value[r.token]
+}
 
 // ── 健康投影（P-20261020-10）：异常行徽标 + 行样式 + 行操作可用性 ──
 const projectStore = useProjectStore()
@@ -176,6 +192,24 @@ function urlOf(s: ShareInfo): string {
   return sharePlan.urlOf(s.token)
 }
 
+/** 复制成功后的可达性警示（P-20261119-7）：回环入口下按候选网卡自动改写的
+ *  链接不能承诺对端可达（多网卡机器默认首项也可能选错网卡）——判定单一
+ *  事实源 shareAddress.shouldWarnCopy，与二维码面板/交接包各复制面共用，
+ *  防 N 处条件漂移。链接本身不动：下拉切换机制已有，这里只做知情提示 */
+function warnCopyReachability(): void {
+  const level = shouldWarnCopy(sharePlan.plan.value)
+  if (level) message.warning(t(`share.copyWarn.${level}`))
+}
+
+/** 快投递链接按 window.location.origin 直拼（buildDropUrl）、不经分享选址
+ *  链——分享基址/外部地址配置不参与该链路，故独立以回环判定兜「本机地址
+ *  发给对方必失败」（P-20261119-7 评审必改1 的独立立面） */
+function warnQuickdropCopy(url: string): void {
+  try {
+    if (isLoopbackHostname(new URL(url).hostname)) message.warning(t('share.copyWarn.quickdropLoopback'))
+  } catch { /* URL 不可解析不警示：复制动作本身已成功，文本照旧 */ }
+}
+
 async function fetchAll() {
   loading.value = true
   try {
@@ -225,6 +259,7 @@ function onReshareConfirm(submit: ReshareSubmit): void {
 onMounted(() => {
   void fetchAll()
   void fetchQuickdropToken()
+  void fetchQdDrops()
   void sharePlan.load()
 })
 
@@ -235,6 +270,7 @@ async function onCopy(s: ShareInfo) {
   const ok = await copyText(url)
   if (ok) message.success(t('share.linkCopied'))
   else message.error(t('common.copyFailed'))
+  if (ok) warnCopyReachability()
 }
 
 function onOpen(s: ShareInfo) {
@@ -366,6 +402,7 @@ function onRotate(s: ShareInfo) {
         const url = next ? sharePlan.urlOf(next.token) : ''
         if (url && await copyText(url)) {
           message.success(t('share.rotate.doneCopied', { name: next?.name ?? s.name }))
+          warnCopyReachability()
         } else {
           message.success(t('share.rotate.done', { name: next?.name ?? s.name }))
         }
@@ -404,8 +441,8 @@ function onRefresh(s: ShareInfo) {
 }
 
 // ── 行内 QR 快捷（P-20261003-282 / P-20261020-6）：访客短链转二维码，发
-// 手机扫码即达——码内容走 useShareAddressPlan 的同一份 URL（回环入口下
-// 自动改用局域网候选），面板内附三色可达性徽标与链接手动兜底
+// 手机扫码即达——码内容走 useShareAddressPlan 的同一份 URL（回环入口默认
+// 浏览器地址、下拉显式切换，P-20261120-4），附三色可达徽标与链接兜底
 const showQr = ref(false)
 const qrTarget = ref<ShareInfo | null>(null)
 
@@ -507,6 +544,7 @@ async function onCopyPassInvite() {
   const ok = await copyText(passInviteText.value)
   if (ok) message.success(t('share.invite.copied'))
   else message.error(t('common.copyFailed'))
+  if (ok) warnCopyReachability()
 }
 
 function onPassRemove() {
@@ -672,32 +710,28 @@ async function onCollabToggle(s: ShareInfo) {
   } catch { /* 拦截器处理 */ }
 }
 
-/** 直通输入档开关（第二档独立开关）：开启走确认弹层（管理面摩擦——
- *  访客将可申请向锚定 agent 会话直接输入）；关闭即回收（确认不需要——
- *  回收永远是安全方向）。dialog.warning 返回 DialogReactive 非 Promise，
- *  结果分流走 onPositive/onNegativeClick 回调（GitBranchesSection 同款） */
-function onDirectInputToggle(s: ShareInfo) {
-  if (!s.directInput) {
-    dialog.warning({
-      title: t('share.direct.enableTitle'),
-      content: t('share.direct.enableConfirm', { name: s.name }),
-      positiveText: t('share.direct.enable'),
-      negativeText: t('common.cancel'),
-      onPositiveClick: () => { void applyDirectInput(s, true) },
-    })
-    return
-  }
-  void applyDirectInput(s, false)
+/** 申请通道开关（P-20261121-1 统一收编，访客输入·申请批准路径的 owner 面）：
+ *  通道缺省开（申请是惰性请求，批准闸始终在 owner，开启方向零摩擦）；关闭
+ *  走确认弹层（在途申请与持权一并回收 + 该访客 WS 断开——「有人正等批准」
+ *  需要一次知情确认；dialog.warning 结果分流走 onPositiveClick 回调） */
+function onGuestInputToggle(s: ShareInfo) {
+  if (!s.guestInput) { void applyGuestInput(s, true); return }
+  dialog.warning({
+    title: t('share.guestInput.offTitle'),
+    content: t('share.guestInput.offConfirm', { name: s.name }),
+    positiveText: t('share.guestInput.offAction'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: () => { void applyGuestInput(s, false) },
+  })
 }
 
-/** applyDirectInput 直通开关落盘（on=true 携 confirm——服务端硬闸的前端对应
- *  摩擦；false 回收方向不需要）；成功后徽标与列表投影即时对账 */
-async function applyDirectInput(s: ShareInfo, on: boolean) {
+/** applyGuestInput 申请通道开关落盘；成功后徽标与列表投影即时对账 */
+async function applyGuestInput(s: ShareInfo, on: boolean) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res: any = await shareApi.setDirectInput(s.token, on, on)
+    const res: any = await shareApi.setGuestInput(s.token, on)
     applyRow(res?.data)
-    message.success(t(on ? 'share.direct.on' : 'share.direct.off'))
+    message.success(t(on ? 'share.guestInput.on' : 'share.guestInput.off'))
     bumpDirectInputShares()
     void fetchAll()
   } catch { /* 拦截器处理 */ }
@@ -741,7 +775,9 @@ async function onWritableToggle(s: ShareInfo) {
 }
 
 /** applyWritable 单条开关落盘：on=true 携 confirm+passphrase（服务端三闸
- *  对应面）；ttlHint=true 提示缩短 TTL（响应级约定，提示非强制） */
+ *  对应面）；ttlHint=true 提示缩短 TTL（提示非强制）。开启时若申请通道在场
+ *  → 「已覆盖申请路径」知情提示（P-20261121-1 建议采纳2：两开关独立不自动
+ *  互斥——开放直入在场时任何访客已可直接键入，申请批准形同虚设由告知承担） */
 async function applyWritable(s: ShareInfo, on: boolean, passphrase = '') {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -749,6 +785,7 @@ async function applyWritable(s: ShareInfo, on: boolean, passphrase = '') {
     applyRow(res?.data)
     message.success(t(on ? 'share.writable.on' : 'share.writable.off'))
     if (on && res?.ttlHint) message.warning(t('share.writable.ttlHint'), { duration: 5000 })
+    if (on && s.guestInput) message.info(t('share.writable.coversRequests'), { duration: 6000 })
     bumpDirectInputShares()
     void fetchAll()
   } catch { /* 拦截器处理 */ }
@@ -805,7 +842,7 @@ async function onApproveDirect(s: ShareInfo) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res: any = await shareApi.approveDirect(s.token)
-    message.success(t('share.direct.granted', { nick: res?.data?.nick || '' }))
+    message.success(t('share.guestInput.granted', { nick: res?.data?.nick || '' }))
     bumpDirectInputShares()
     void fetchAll()
   } catch { /* 拦截器处理 */ }
@@ -816,7 +853,20 @@ async function onApproveDirect(s: ShareInfo) {
 async function onRevokeDirect(s: ShareInfo) {
   try {
     await shareApi.revokeDirect(s.token)
-    message.success(t('share.direct.revoked'))
+    message.success(t('share.guestInput.revoked'))
+    bumpDirectInputShares()
+    void fetchAll()
+  } catch { /* 拦截器处理 */ }
+}
+
+/** 拒绝在途申请（P-20261121-2 owner 显式拒绝入口；通知中心申请卡第二动作
+ *  同一落点）：申请 10min 时效内 owner 不想批即可拒绝清位——落点同收回
+ *  端点（幂等清 pending+持权），反馈按「拒绝」分流（「已收回」对未授予的
+ *  申请是误导） */
+async function onDenyDirect(s: ShareInfo) {
+  try {
+    await shareApi.revokeDirect(s.token)
+    message.success(t('share.guestInput.denied'))
     bumpDirectInputShares()
     void fetchAll()
   } catch { /* 拦截器处理 */ }
@@ -838,12 +888,34 @@ const qdToken = ref<QuickdropTokenMeta>({ exists: false, prefix: '', createdAt: 
 // 明文只在轮换响应出现一次：回显完整链接（含 scd_ 明文）供复制，关闭即不再可读
 const qdPlainUrl = ref('')
 const qdBusy = ref(false)
+// 主人侧本机缓存（P-20261117-1，util 注释详述安全边界）：生成/轮换成功回调那一刻
+// 把完整链接写进 localStorage——「明文仅显示一次」不等于「此后再无出口」，缓存面
+// = 已见过明文的同一浏览器，零新增暴露面。setup 读一次；随后全靠 rotatedAt 与
+// 服务端 Meta 比对（他处轮换/撤销即失配置灰），缓存本身不参与真源判定
+const qdCachedUrl = ref<QuickdropUrlCache | null>(readQuickdropUrlCache())
+
+// 常驻「复制完整链接」可用态三合一：凭据在 + 缓存在 + rotatedAt 等值——
+// rotatedAt 失配 = 他处轮换过的死链，宁可置灰也不供出可能失效的链接
+const qdCopyUsable = computed(() =>
+  qdToken.value.exists && !!qdCachedUrl.value && qdCachedUrl.value.rotatedAt === qdToken.value.rotatedAt)
+
+// 置灰原因如实提示（明文回显在场时不提示——完整链接本身可见，无需解释）；
+// 两态互斥：缓存缺失 = 换浏览器/清存储（生成或轮换一次即可重获），失配 = 他处轮换
+const qdCacheHint = computed(() => {
+  if (!qdToken.value.exists || qdPlainUrl.value || qdCopyUsable.value) return ''
+  return qdCachedUrl.value
+    ? t('share.quickdrop.cacheRotatedHint')
+    : t('share.quickdrop.cacheMissingHint')
+})
 
 async function fetchQuickdropToken() {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res: any = await quickdropApi.getToken()
     qdToken.value = (res?.data || { exists: false, prefix: '', createdAt: '', rotatedAt: '' }) as QuickdropTokenMeta
+    // 凭据已不存在（他处撤销/未生成）：缓存链接必然已死，防御性清除
+    // （与卡片撤销按钮同语义；拉取失败走 catch 不清，不因网络抖动误伤）
+    if (!qdToken.value.exists) clearQuickdropUrlCache()
   } catch { /* 拦截器处理 */ }
 }
 
@@ -855,6 +927,9 @@ async function onCreateQdToken() {
     const plain = (res?.data?.token as string) || ''
     qdToken.value = (res?.data?.meta || qdToken.value) as QuickdropTokenMeta
     qdPlainUrl.value = plain ? buildDropUrl(plain) : ''
+    // 缓存写点（P-20261117-1）：生成与轮换共用本回调，后写覆盖前值（轮换覆盖
+    // 语义）；rotatedAt 随行记录供 Meta 比对——缺 rotatedAt（异常形态）宁可不缓存
+    if (qdPlainUrl.value) writeQuickdropUrlCache(qdPlainUrl.value, qdToken.value.rotatedAt)
     message.success(t('share.quickdrop.created'))
   } catch { /* 拦截器处理 */ } finally {
     qdBusy.value = false
@@ -872,6 +947,8 @@ async function onRevokeQdToken() {
         await quickdropApi.revokeToken()
         qdToken.value = { exists: false, prefix: '', createdAt: '', rotatedAt: '' }
         qdPlainUrl.value = ''
+        // 缓存清除点（P-20261117-1）：凭据已撤销，本机缓存链接随之作废
+        clearQuickdropUrlCache()
         message.success(t('share.quickdrop.revoked'))
       } catch { /* 拦截器处理 */ }
     },
@@ -881,9 +958,83 @@ async function onRevokeQdToken() {
 async function onCopyQd(text: string) {
   if (await copyText(text)) {
     message.success(t('share.quickdrop.copied'))
+    warnQuickdropCopy(text)
   } else {
     message.error(t('common.copyFailed'))
   }
+}
+
+/** 复制本机缓存的完整链接（P-20261117-1）：刷新/换天后找回投递链接的常驻出口，
+ *  可用态由 qdCopyUsable 守卫（按钮置灰时点不动） */
+async function onCopyCachedQd() {
+  const url = qdCachedUrl.value?.url || ''
+  if (url) await onCopyQd(url)
+}
+
+// ── 投递记录区（P-20261117-3 主人侧接收面）：收件箱清单投影（时间/来源/
+// 形态/逐文件清单/动作行）——「收得出去」的管理面闭环。数据全来自
+// GET /api/quickdrop（文件投影由服务端按 sidecar 批次链归组，磁盘 sidecar
+// 是机器元数据单一事实源）；下载走 dropfile 直链（大文件流式直落浏览器，
+// blob 中转是反模式）；摘除联动删落盘文件（即时回收 2GB token 配额），
+// 不可恢复故带确认
+const qdDrops = ref<QuickdropItem[]>([])
+const qdRecordsLoading = ref(false)
+const qdRecordBusy = ref('')
+
+async function fetchQdDrops() {
+  qdRecordsLoading.value = true
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res: any = await quickdropApi.list()
+    qdDrops.value = (res?.data || []) as QuickdropItem[]
+  } catch {
+    qdDrops.value = []
+  } finally {
+    qdRecordsLoading.value = false
+  }
+}
+
+/** 逐文件下载直链：服务端 attachment 头是保存名权威（download 属性只兜头
+ *  缺失形态）；文件缺失（GC 竞态）失败只体现在浏览器下载条——记录区数据
+ *  本就来自存活投影，窗口极窄。utils/directDownload 走点击时动态 import——
+ *  本视图经 Layout.vue 静态引入主包，静态边会把 directDownload+api/http 拉
+ *  进首屏 chunk 初始化序（循环初始化 TDZ 的放大面，实勘在案）；点击后异步
+ *  载入微秒级完成且 chunk 常驻，功能等价 */
+async function onDownloadQdFile(d: QuickdropItem, f: QuickdropDropFile) {
+  const { triggerDirectDownload, quickdropDropFileUrl } = await import('../../utils/directDownload')
+  triggerDirectDownload(quickdropDropFileUrl(d.id, f.id), f.name)
+}
+
+/** 摘除记录（落盘文件一并删除——即时回收配额；不可恢复，确认后执行） */
+function onDeleteQdRecord(d: QuickdropItem) {
+  dialog.warning({
+    title: t('share.quickdrop.recordDeleteTitle'),
+    content: t('share.quickdrop.recordDeleteConfirm'),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      qdRecordBusy.value = d.id
+      try {
+        await quickdropApi.remove(d.id)
+        qdDrops.value = qdDrops.value.filter(x => x.id !== d.id)
+        message.success(t('share.quickdrop.recordDeleted'))
+      } catch { /* 拦截器处理 */ } finally {
+        qdRecordBusy.value = ''
+      }
+    },
+  })
+}
+
+/** 记录形态徽标：文件投递 N 文件 / 文本投递（文件投递在文件清盘后回落文本
+ *  徽标——投影即真相，残留 Content 明细行不作数） */
+function qdFormLabel(d: QuickdropItem): string {
+  const n = d.files?.length ?? 0
+  return n > 0 ? t('share.quickdrop.badgeFiles', { n }) : t('share.quickdrop.badgeText')
+}
+
+/** 记录预览行：内容首个非空行（文本载荷原文/文件投递头部行，ellipsis 收敛） */
+function qdPreview(d: QuickdropItem): string {
+  return (d.content || '').split('\n').map(s => s.trim()).find(s => s !== '') || ''
 }
 
 
@@ -931,8 +1082,9 @@ const SHARE_COL_WIDTH = {
   hits: 84,
   lastAccess: 104,
   // 复制/打开/二维码 3 个 tiny 图标 + 「更多」（留言计数角标可能两位数）留足；
-  // 陈旧行另有快捷刷新钮（P-20261114-3-S2，仅 stale frozen 行渲染）按 4 枚计
-  actions: 176,
+  // 陈旧行另有快捷刷新钮（P-20261114-3-S2，仅 stale frozen 行渲染）、待批行
+  // 另有行内批准钮（P-20261121-2，仅 direct.pending 行渲染）按 5 枚计
+  actions: 204,
 } as const
 // 勾选列仅批量模式渲染，naive-ui 内建宽度约 48px——滚动宽度随之增量
 const BULK_SELECTION_WIDTH = 48
@@ -1035,15 +1187,15 @@ const columns = computed<DataTableColumns<ShareInfo>>(() => [
       return h('div', { class: 'sc-share-type-col' }, [badge, ...extra])
     },
   },
-  // 有效期列（P-20261020-10 从类型列拆出）：倒计时是独立检索维度，拆列后
-  // 可排序；无有效期行显「—」（缺省值排序恒末位）
+  // 有效期列（P-20261020-10 从类型列拆出）：倒计时是独立检索维度，拆列后可排序；
+  // 无有效期行显「永久」弱标（P-20261119-5 零值=永不过期，全形态同口径），排序恒末位
   {
     title: t('share.colExpires'), key: 'expiresAt', width: 132,
     sortOrder: sortOrderFor('expiresAt'),
     sorter: preSorted,
     render: (r) => r.expiresAt
       ? h('span', { class: 'sc-share-countdown', 'data-testid': 'sm-countdown' }, countdownText(r))
-      : h('span', { class: 'sc-share-never' }, '—'),
+      : h('span', { class: 'sc-share-never', 'data-testid': 'sm-permanent' }, t('share.ttl.permanent')),
   },
   // 快照体积列（P-20261005-176）：有快照在盘的行显该份目录字节量（冻结文件
   // 分享/终端输出快照），可排序找大头；无快照行弱化「—」
@@ -1101,6 +1253,15 @@ const columns = computed<DataTableColumns<ShareInfo>>(() => [
       ...(r.frozen && isStale(r)
         ? [actionBtn(t('share.stale.refreshQuickTip'), RefreshOutline, false, () => onRefresh(r), undefined, 'sm-refresh-quick')]
         : []),
+      // 直通待批行内批准钮（P-20261121-2）：申请到达即现（pendingByToken
+      // 锚点表），脱「更多」下拉+手动刷新双重动作；「拒绝」走菜单项（低频
+      // 反向动作不占行内宽度，(b) 定案口径）
+      ...(pendingOf(r)
+        ? [actionBtn(
+            t('share.guestInput.approveAction', { nick: pendingOf(r)!.nick || '' }),
+            HandLeftOutline, false, () => onApproveDirect(r), undefined, 'sm-direct-approve',
+          )]
+        : []),
       moreBtn(r),
     ]),
   },
@@ -1130,9 +1291,9 @@ function moreOptionsFor(r: ShareInfo): Array<DropdownOption | DropdownDividerOpt
     { label: t('share.pass.action'), key: 'pass', icon: icon(LockClosedOutline) },
     { label: msgMenuLabel(r), key: 'msg', icon: icon(ChatbubbleEllipsesOutline) },
   ]
-  // 有效期（P-20261020-5）：仅 file 形态提供；snippet/terminal/cast/session
-  // 各自固定窗口，产品口径不提供选择
-  if (r.kind === 'file') {
+  // 有效期（P-20261020-5；P-20261119-5 扩 terminal 直播）：file/terminal 提供改期；
+  // terminal 双向（限时方向服务端钳 24h）；snippet/cast/session 固定窗口不提供
+  if (r.kind === 'file' || r.kind === 'terminal') {
     options.push({ label: t('share.ttl.action'), key: 'ttl', icon: icon(TimeOutline) })
   }
   if (canLocate(r)) {
@@ -1145,8 +1306,8 @@ function moreOptionsFor(r: ShareInfo): Array<DropdownOption | DropdownDividerOpt
     options.push({ label: t('share.frozen.refreshAction'), key: 'refresh', icon: icon(RefreshOutline) })
   }
   // 协作通道（P-20261024-1）：开关全形态可开（素材上行不依赖分享形态）；
-  // 直通输入档仅 terminal 直播行（锚定会话语义）；收件箱入口在 collab 开启
-  // 后出现；持权在场挂「收回」危险项，待批申请挂「批准」项
+  // 访客输入两开关仅 terminal 直播行（键入锚定会话语义）；收件箱入口在
+  // collab 开启后出现；持权在场挂「收回」危险项，待批申请挂「批准」项
   options.push({
     label: r.collab ? t('share.collab.menuOn') : t('share.collab.menuOff'),
     key: 'collab',
@@ -1154,15 +1315,16 @@ function moreOptionsFor(r: ShareInfo): Array<DropdownOption | DropdownDividerOpt
     props: r.collab ? { style: 'color: var(--accent)' } : undefined,
   })
   if (r.kind === 'terminal') {
+    // 申请通道（P-20261121-1 统一收编：缺省开，关闭即收申请）
     options.push({
-      label: r.directInput ? t('share.direct.menuOn') : t('share.direct.menuOff'),
-      key: 'directInput',
+      label: r.guestInput ? t('share.guestInput.menuOn') : t('share.guestInput.menuOff'),
+      key: 'guestInput',
       icon: icon(CloudUploadOutline),
-      props: r.directInput ? { style: 'color: var(--accent)' } : undefined,
+      props: r.guestInput ? { style: 'color: var(--accent)' } : undefined,
     })
-    // 可写分享（P-20261106-8）：仅 terminal 直播行（组合语义——frozen/cast/
-    // session 天然只读）；wtyping 在场行挂「收回访客输入」危险项（与直通
-    // 持权卡同族的一键收回面）
+    // 开放直入（P-20261106-8 可写分享语义转正）：仅 terminal 直播行（组合
+    // 语义——frozen/cast/session 天然只读）；wtyping 在场行挂「收回访客输入」
+    // 危险项（与持权卡同族的一键收回面）
     options.push({
       label: r.writable ? t('share.writable.menuOn') : t('share.writable.menuOff'),
       key: 'writable',
@@ -1173,16 +1335,28 @@ function moreOptionsFor(r: ShareInfo): Array<DropdownOption | DropdownDividerOpt
   if (r.collab) {
     options.push({ label: t('share.drop.menu'), key: 'drops', icon: icon(FolderOutline) })
   }
-  if (r.direct?.pending) {
+  // 直通待批项（P-20261121-2）：批准/拒绝双菜单项。数据源 = 行内批准钮同款
+  // pendingByToken 锚点表（广播/轮询即现）→ 行投影兜底（fetchAll 后的行字段，
+  // 两源同形）——菜单与行内面不各持一套真值
+  const pend = pendingOf(r) || (r.direct?.pending ? { nick: r.direct.nick } : undefined)
+  if (pend) {
     options.push({
-      label: t('share.direct.approveAction', { nick: r.direct.nick || '' }),
+      label: t('share.guestInput.approveAction', { nick: pend.nick || '' }),
       key: 'approveDirect',
       icon: icon(HandLeftOutline),
+    })
+    // 拒绝申请（P-20261121-2 owner 显式拒绝入口）：落点同收回端点（幂等清
+    // pending+持权）；申请时效 10min 内不批即可拒绝清位，访客可重新申请
+    options.push({
+      label: t('share.guestInput.deny'),
+      key: 'denyDirect',
+      icon: icon(HandLeftOutline),
+      props: { style: 'color: var(--accent-red)' },
     })
   }
   if (r.direct?.held) {
     options.push({
-      label: t('share.direct.revokeAction', { nick: r.direct.nick || '' }),
+      label: t('share.guestInput.revokeAction', { nick: r.direct.nick || '' }),
       key: 'revokeDirect',
       icon: icon(HandLeftOutline),
       props: { style: 'color: var(--accent-red)' },
@@ -1220,10 +1394,11 @@ function onMoreSelect(r: ShareInfo, key: string | number) {
     case 'rotate': onRotate(r); break
     case 'revoke': onRevoke(r); break
     case 'collab': void onCollabToggle(r); break
-    case 'directInput': void onDirectInputToggle(r); break
+    case 'guestInput': onGuestInputToggle(r); break
     case 'writable': void onWritableToggle(r); break
     case 'drops': void onDrops(r); break
     case 'approveDirect': void onApproveDirect(r); break
+    case 'denyDirect': void onDenyDirect(r); break
     case 'revokeDirect': void onRevokeDirect(r); break
     case 'revokeWritable': void onRevokeWritable(r); break
   }
@@ -1410,6 +1585,21 @@ function actionBtn(tooltip: string, icon: typeof CopyOutline, disabled: boolean,
             </template>
             {{ t('share.quickdrop.copyUrl') }}
           </NButton>
+          <!-- 常驻「复制完整链接」（P-20261117-1）：明文回显在场时隐藏（同址重复
+               出口是噪声），刷新/换天后凭本机缓存复原复制能力；置灰态配 body 提示
+               如实说明原因（缓存缺失/他处轮换），不做服务端明文找回 -->
+          <NButton
+            v-if="qdToken.exists && !qdPlainUrl"
+            size="small"
+            :disabled="!qdCopyUsable"
+            data-testid="qd-copy-cached"
+            @click="onCopyCachedQd"
+          >
+            <template #icon>
+              <NIcon><CopyOutline /></NIcon>
+            </template>
+            {{ t('share.quickdrop.copyCached') }}
+          </NButton>
           <NButton
             size="small"
             :loading="qdBusy"
@@ -1450,10 +1640,107 @@ function actionBtn(tooltip: string, icon: typeof CopyOutline, disabled: boolean,
           v-else-if="qdToken.exists"
           class="sm-qd-url sm-qd-masked"
         >…/drop/&lt;scd_{{ qdToken.prefix }}***&gt;</code>
+        <!-- 置灰原因提示（P-20261117-1）：明文回显在场/缓存可用时不显示 -->
         <span
-          v-else
+          v-if="qdCacheHint"
+          class="sm-qd-hint sm-qd-cache-hint"
+          data-testid="qd-cache-hint"
+        >{{ qdCacheHint }}</span>
+        <span
+          v-if="!qdToken.exists && !qdPlainUrl"
           class="sm-qd-hint"
         >{{ t('share.quickdrop.noneHint') }}</span>
+      </div>
+      <!-- 投递记录区（P-20261117-3 主人侧接收面）：收件箱清单投影 + 逐文件
+           下载直链 + 摘除联动回收。空清单不渲染区块（首条投递到达即显形） -->
+      <div
+        v-if="qdDrops.length"
+        class="sm-qd-records"
+        data-testid="qd-records"
+      >
+        <div class="sm-qd-records-head">
+          <span class="sm-qd-records-title">{{ t('share.quickdrop.records') }}</span>
+          <span class="sm-qd-records-hint">{{ t('share.quickdrop.recordsHint') }}</span>
+          <span style="flex: 1" />
+          <NButton
+            size="tiny"
+            quaternary
+            :loading="qdRecordsLoading"
+            data-testid="qd-records-refresh"
+            @click="fetchQdDrops"
+          >
+            <template #icon>
+              <NIcon><RefreshOutline /></NIcon>
+            </template>
+            {{ t('common.refresh') }}
+          </NButton>
+        </div>
+        <div
+          v-for="d in qdDrops"
+          :key="d.id"
+          class="sm-qd-record"
+          data-testid="qd-record"
+        >
+          <div class="sm-qd-record-meta">
+            <span
+              class="sm-qd-form"
+              :data-form="d.files?.length ? 'files' : 'text'"
+            >{{ qdFormLabel(d) }}</span>
+            <span
+              class="sm-qd-preview"
+              :title="d.content"
+            >{{ qdPreview(d) }}</span>
+            <span class="sm-qd-when">{{ formatDateTime(d.createdAt) }}<template v-if="d.from"> · {{ d.from }}</template></span>
+            <NButton
+              size="tiny"
+              quaternary
+              type="error"
+              :loading="qdRecordBusy === d.id"
+              data-testid="qd-record-del"
+              @click="onDeleteQdRecord(d)"
+            >
+              {{ t('share.quickdrop.recordDelete') }}
+            </NButton>
+          </div>
+          <div
+            v-for="f in d.files"
+            :key="f.id"
+            class="sm-qd-file"
+            data-testid="qd-file-row"
+          >
+            <NIcon
+              size="14"
+              color="var(--text-muted)"
+            >
+              <DocumentOutline />
+            </NIcon>
+            <span
+              class="sm-qd-file-name"
+              :title="f.absPath"
+            >{{ f.name }}</span>
+            <span class="sm-qd-file-size">{{ formatBytes(f.size) }}</span>
+            <NTag
+              v-if="f.sensitive"
+              size="tiny"
+              type="warning"
+              class="sm-drop-tag"
+            >
+              {{ t('share.drop.sensitive') }}
+            </NTag>
+            <span style="flex: 1" />
+            <NButton
+              size="tiny"
+              quaternary
+              data-testid="qd-file-download"
+              @click="onDownloadQdFile(d, f)"
+            >
+              <template #icon>
+                <NIcon><DownloadOutline /></NIcon>
+              </template>
+              {{ t('share.quickdrop.download') }}
+            </NButton>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2309,4 +2596,29 @@ function actionBtn(tooltip: string, icon: typeof CopyOutline, disabled: boolean,
 }
 .sm-qd-masked { color: var(--text-muted); }
 .sm-qd-hint { font-size: 12px; color: var(--text-muted); }
+/* 置灰原因提示与掩码链接同行展示（sm-qd-body 无 gap，补间距防贴字） */
+.sm-qd-cache-hint { margin-left: 8px; }
+/* 投递记录区（P-20261117-3 主人侧接收面）：清单行 + 逐文件行——协作收件
+   面板（sm-msg-list/sm-msg-item）同族的紧凑行形态，ellipsis 收敛长名 */
+.sm-qd-records { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.sm-qd-records-head { display: flex; align-items: center; gap: 8px; }
+.sm-qd-records-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.sm-qd-records-hint { font-size: 12px; color: var(--text-muted); }
+.sm-qd-record {
+  display: flex; flex-direction: column; gap: 4px;
+  border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px 8px;
+}
+.sm-qd-record-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sm-qd-form {
+  flex-shrink: 0; font-size: 11px; padding: 0 6px; border-radius: 4px;
+  background: var(--bg-canvas); color: var(--text-secondary);
+}
+.sm-qd-preview {
+  flex: 1; min-width: 0; font-size: 12px; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sm-qd-when { flex-shrink: 0; font-size: 12px; color: var(--text-muted); }
+.sm-qd-file { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+.sm-qd-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-qd-file-size { flex-shrink: 0; color: var(--text-muted); }
 </style>

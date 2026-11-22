@@ -35,8 +35,11 @@ const hintKey = computed(() => {
   }
   if (props.state === 'loopback') {
     // 显式配置成回环基址与「自动选址失败」是两种处境：前者改配置即可，
-    // 后者先要配置——分开给指引，避免对已配置用户重复「请配置」
+    // 后者先要配置——分开给指引，避免对已配置用户重复「请配置」。
+    // loopbackSelf（P-20261120-4：默认=浏览器地址/显式选回环合成项）与
+    // candidate（显式选局域网候选）、legacy（旧端口回退）三档文案分形
     if (props.source === 'publicBase') return 'share.reach.hint.publicBaseLoopback'
+    if (props.source === 'loopbackSelf') return 'share.reach.hint.loopbackSelf'
     return props.source === 'candidate' ? 'share.reach.hint.candidate' : 'share.reach.hint.legacy'
   }
   return `share.reach.hint.${props.state}`

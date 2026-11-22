@@ -57,6 +57,7 @@ func createAttachedTerminal(c *gin.Context, tmuxName, name string) {
 		shared.Error(c, http.StatusBadRequest, err.Error(), err)
 		return
 	}
+	bindSessionBrowser(session, c) // 浏览器亲和初绑（P-20261117-4，接管会话同口径）
 	auditTakeover(c, session, tmuxName)
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{

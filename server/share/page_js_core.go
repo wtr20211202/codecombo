@@ -15,18 +15,10 @@ let initialPath = '';
 try { initialPath = new URLSearchParams(location.search).get('path') || ''; } catch (e) { initialPath = ''; }
 let state = { path: initialPath, share: null, expiresAt: '', wide: false };
 
-// ── 主题切换（与主应用 themes/ 同款调色板；选择持久化，auto 跟随系统） ──
-const THEME_KEY = 'sc.share.theme';
-const THEMES = ['auto', 'light', 'dark', 'one-dark', 'dracula'];
-function applyTheme(name){
-  if (!THEMES.includes(name)) name = 'auto';
-  document.documentElement.dataset.theme = name;
-}
-(function initTheme(){
-  let saved = null;
-  try { saved = localStorage.getItem(THEME_KEY); } catch (e) { /* 无存储环境走默认 */ }
-  applyTheme(saved || 'auto');
-})();
+// 主题切换段已切出为访客页族共享注入件（P-20261120-1，theme.go 单一事实源
+// guestThemeJS：THEME_KEY/THEMES/applyTheme/initTheme + makeThemeSelect），
+// 经 page.go 拼接装配回本页原位（段间拼接与拆分前逐字节语义一致——终端系/
+// 会话/快投递六页同源同一份，THEME_KEY 跨页共享偏好）
 
 // 顶部加载进度条（替代原地转圈的等待观感）
 const topbar = document.createElement('div');
@@ -169,6 +161,11 @@ function enhanceArticle(root){
     const n = p.getAttribute('data-rows') || '0';
     p.textContent = t('csvTruncated').replace('{n}', n);
   });
+  // docx 嵌入块的预览动作已全部服务端化（P-20261118-3）：可预览类型是
+  // 新标签 <a target=_blank rel=noopener>（html/htm 进预览器壳页 &ui=1，
+  // 其余直连 preview=1），零 JS 挂点——原「页内 iframe+两级开关」
+  // enhanceArticle 分支整体退役（页内 iframe 撑乱阅读列的用户实测主诉），
+  // 开关/风险提示语义迁入服务端壳页（embedshell.go）
   root.querySelectorAll('img').forEach(img => {
     img.style.cursor = 'zoom-in';
     img.onclick = () => openLightbox(img.src);
@@ -475,6 +472,7 @@ const ICONS = {
   image: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3fa96f" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M3 17l5-4 4 3 4-3 5 4"/></svg>',
   markdown: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4f7cff" stroke-width="1.8"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><path d="M6 15v-6l2.5 3L11 9v6M16.5 9v4M14.5 11.5l2 2 2-2"/></svg>',
   docx: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2b6fd4" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5"/><path d="M8.5 12l1.2 5 2.3-4 2.3 4 1.2-5" stroke-linejoin="round"/></svg>',
+  sheet: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2e9e5b" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5"/><path d="M8.5 12.5h7M8.5 16h7M12 12.5V19" stroke-linejoin="round"/></svg>',
   html: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e0803d" stroke-width="1.8"><path d="M9 8l-4 4 4 4M15 8l4 4-4 4M13 6l-2 12"/></svg>',
   text: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7d8aa5" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>',
   snippet: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8a63d2" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5M10 12l-2 2.5L10 17M14 12l2 2.5L14 17"/></svg>',

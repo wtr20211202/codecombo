@@ -373,6 +373,11 @@ func createAgentTerminal(c *gin.Context, name, reqRuntime, dir, launchArgs, shel
 		shared.Error(c, http.StatusInternalServerError, "Terminal operation failed", err)
 		return
 	}
+	// 浏览器亲和初绑（P-20261117-4）：frontend.* 设备效应定向的创建侧写点
+	//（res.ID 反查——LaunchAgentSessionWithShell 返回的是启动结果快照非会话指针）
+	if s := terminal.DefaultManager.GetSession(res.ID); s != nil {
+		bindSessionBrowser(s, c)
+	}
 	c.JSON(http.StatusOK, gin.H{"data": agentLaunchResponse(res, launchArgs)})
 	broadcastTerminalsChanged()
 }

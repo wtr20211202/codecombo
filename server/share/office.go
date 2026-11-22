@@ -1,347 +1,189 @@
 package share
 
 import (
-	"archive/zip"
 	"bytes"
-	"encoding/xml"
-	"errors"
-	"html"
-	"io"
-	"strings"
+	"net/http"
+	"path"
 
-	"github.com/EndFirstCorp/doc2txt"
+	preview "codecombo/server/filepreview"
+	"codecombo/server/store"
 )
 
-// Word 文档（docx/doc）→ HTML 片段的抽取边界：
-// 目标是"文本级排版预览"（标题/段落/列表/表格/粗斜体），不做样式与图片
-// 还原——那些交给下载。docx 用 stdlib zip+xml 流式解析（零新依赖）；
-// doc 老格式经 doc2txt best-effort 抽纯文本（OLE 复合文档解析失败时
-// 上层降级为错误卡 + 下载）。所有文本经 html.EscapeString 转义后才进
-// 输出，输出结构完全由本文件生成——注入面为零。
+// ── docx-media / docx-embed 端点（P-20261119-4 渲染半边抽包下沉后本文件
+// 只剩端点形态：源解析（share resolve 双源）/访客门禁/响应协议在 share，
+// zip 簿构建/白名单匹配/解压闸/名字还原/预览分型响应全部调 filepreview
+// 单一事实源——archguard 红利：本文件自 1349 行瘦身为端点半边，远离
+// 1500 行体量闸） ──
 
-const (
-	// docxZipMaxBytes document.xml 解压侧上限（防 zip 炸弹）
-	docxZipMaxBytes = 64 << 20
-	// officeHTMLMaxBytes 生成 HTML 的字节上限
-	officeHTMLMaxBytes = 4 << 20
-)
-
-// isDocx 嗅探 zip 魔数（部分 .doc 实为 docx 改名）
-func isDocx(b []byte) bool { return len(b) > 1 && b[0] == 'P' && b[1] == 'K' }
-
-// renderDocHTML Word 文档入口：按魔数分流 docx/doc，失败返回错误
-func renderDocHTML(content []byte) (string, error) {
-	if isDocx(content) {
-		return renderDocxHTML(content)
-	}
-	return renderLegacyDocHTML(content)
-}
-
-// renderLegacyDocHTML 老 .doc（OLE 复合文档）best-effort 抽纯文本
-func renderLegacyDocHTML(content []byte) (string, error) {
-	text, err := doc2txt.ParseDoc(bytes.NewReader(content))
-	if err != nil {
-		return "", err
-	}
-	raw, err := io.ReadAll(text)
-	if err != nil {
-		return "", err
-	}
-	var b strings.Builder
-	b.WriteString(`<div class="sc-doc-text">`)
-	writeEscapedParagraphs(&b, string(raw))
-	return b.String(), nil
-}
-
-// renderDocxHTML 解析 word/document.xml 抽文本结构
-func renderDocxHTML(content []byte) (string, error) {
-	zr, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
-	if err != nil {
-		return "", err
-	}
-	var docXML *zip.File
-	for _, f := range zr.File {
-		if f.Name == "word/document.xml" {
-			docXML = f
-			break
-		}
-	}
-	if docXML == nil {
-		return "", errDocxNoDocument
-	}
-	rc, err := docXML.Open()
-	if err != nil {
-		return "", err
-	}
-	defer rc.Close()
-
-	p := newDocxBuilder()
-	if err := p.parse(io.LimitReader(rc, docxZipMaxBytes)); err != nil {
-		return "", err
-	}
-	return p.html(), nil
-}
-
-// errDocxNoDocument docx 包内缺主文档部件
-var errDocxNoDocument = errors.New("share: word/document.xml not found")
-
-// ── docx 流式解析 ──
-// 事件模型（只关心呈现所需的最小子集）：
-//   w:p 段落（pPr/pStyle 判标题、pPr/numPr 判列表项；w:br/w:tab 换行缩进）
-//   w:tbl 表格（w:tr 行 / w:tc 单元格，单元格内段落只保内容）
-//   w:r 内 w:t 文本、w:b/w:i 粗斜体
-
-type docxBuilder struct {
-	b strings.Builder
-
-	para      strings.Builder // 当前段落累积
-	inP       bool
-	inT       bool // 当前位于 w:t 文本内
-	inCell    bool
-	inList    bool // 当前段落带 numPr
-	listOpen  bool
-	tableOpen bool
-	styleID   string
-	bold      bool
-	italic    bool
-
-	outLen int
-}
-
-func newDocxBuilder() *docxBuilder { return &docxBuilder{} }
-
-func (p *docxBuilder) write(s string) {
-	if p.outLen >= officeHTMLMaxBytes {
+// handleDocxMedia docx 预览图片供给。
+//
+// GET /s/{token}/docx-media?path=<分享内 docx 路径>&m=<media 部件名>：
+// docx 预览 HTML 的 img src 取数端点。路由与 /raw 同款 gateGuard（口令门/
+// 一次性确认自动继承）；源解析复用 resolve（frozen 快照目录/live os.Root
+// 锚定双源天然同轨）。安全面：m= 只认渲染面映射簿产出（rels 源自包内
+// word/_rels/document.xml.rels、Target 强制落 word/media/* 且条目在包内
+// 存在——等值匹配天然免疫注入），端点可达面 ⊆ 访客本可经 /raw 全量下载
+// 的同一 docx = 零新增泄露面；每请求现开 zip（os.File 是 io.ReaderAt，
+// zip.Reader 构造只读 central directory），不建缓存（token+path 缓存有
+// live 改写/逐出/清理失效面，live 源逐请求见新字节）；per-media 解压闸
+// 施加在解压流上 + 魔数嗅探仅放行 image/*（非图 404）。no-store 入口
+// 中间件下多引用同图 N 次拉取与 md 预览图片同口径；nosniff 全局中间件
+// 已带，Content-Type 只出嗅探结果。
+func (s *Service) handleDocxMedia(w http.ResponseWriter, r *http.Request) {
+	res, herr := s.resolve(r)
+	if herr != nil {
+		writeJSONError(w, herr)
 		return
 	}
-	p.b.WriteString(s)
-	p.outLen += len(s)
-}
-
-// parse 流式消费 document.xml。XML 局部损坏时返回已抽取内容
-//（预览语义优先于完整性）
-func (p *docxBuilder) parse(r io.Reader) error {
-	dec := xml.NewDecoder(r)
-	for {
-		tok, err := dec.Token()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil
-		}
-		switch t := tok.(type) {
-		case xml.StartElement:
-			p.start(t)
-		case xml.EndElement:
-			p.end(t.Name.Local)
-		case xml.CharData:
-			if p.inT {
-				p.charData(string(t))
-			}
-		}
-	}
-	p.flushParagraph()
-	p.closeList()
-	p.closeTable()
-	return nil
-}
-
-func (p *docxBuilder) start(t xml.StartElement) {
-	switch t.Name.Local {
-	case "p":
-		p.flushParagraph()
-		p.inP = true
-		p.styleID = ""
-	case "tbl":
-		p.flushParagraph()
-		p.closeList()
-		p.tableOpen = true
-		p.write("<table>")
-	case "tr":
-		p.write("<tr>")
-	case "tc":
-		p.inCell = true
-		p.write("<td>")
-	case "pStyle":
-		p.styleID = attrVal(t)
-	case "numPr":
-		p.inList = true
-	case "r":
-		// 新运行：重置上一运行的粗斜体。w:b/w:i 是自闭合属性标记，
-		// 只能在 run 边界复位——靠自身的 EndElement 复位会在文本
-		// 到达前就被清掉
-		p.bold = false
-		p.italic = false
-	case "b":
-		p.bold = flagOn(t)
-	case "i":
-		p.italic = flagOn(t)
-	case "br":
-		if p.inP {
-			p.para.WriteString("<br>")
-		}
-	case "tab":
-		if p.inP {
-			p.para.WriteString("  ")
-		}
-	case "t":
-		p.inT = true
-	}
-}
-
-func (p *docxBuilder) end(name string) {
-	switch name {
-	case "p":
-		p.flushParagraph()
-	case "tbl":
-		p.closeTable()
-	case "tr":
-		p.write("</tr>")
-	case "tc":
-		p.flushParagraph()
-		p.write("</td>")
-		p.inCell = false
-	case "t":
-		p.inT = false
-	}
-}
-
-// charData 累积 w:t 文本（转义在此处完成）
-func (p *docxBuilder) charData(text string) {
-	seg := html.EscapeString(text)
-	if p.bold {
-		seg = "<strong>" + seg + "</strong>"
-	}
-	if p.italic {
-		seg = "<em>" + seg + "</em>"
-	}
-	p.para.WriteString(seg)
-}
-
-// flushParagraph 段落收口：按样式/列表语境映射为 h1-h6/li/p
-func (p *docxBuilder) flushParagraph() {
-	body := p.para.String()
-	p.para.Reset()
-	p.inP = false
-	p.inT = false
-	if p.inCell {
-		// 单元格内段落不套 p（td 已有盒模型），仅保内容
-		p.write(body)
+	defer s.closeRes(res)
+	// 片段/直播/回放（cast/session）无文件锚定（info 零值须先短路再探测，
+	// handleHTMLDoc 同款守卫形态）；目录与非 docx 目标不在图片供给面
+	//（本端点只被 docx 预览 HTML 引用）
+	if res.share.Kind == store.ShareKindSnippet || res.share.Kind == store.ShareKindTerminal ||
+		res.share.Kind == store.ShareKindCast || res.share.Kind == store.ShareKindSession ||
+		res.info.IsDir() || preview.ForFile(res.info.Name()).Kind != preview.KindDocx {
+		writeJSONError(w, errUnrenderable)
 		return
 	}
-	trimmed := strings.TrimSpace(strings.ReplaceAll(body, "<br>", ""))
-	if trimmed == "" {
-		p.closeList()
+	f, err := res.root.Open(res.rel)
+	if err != nil {
+		writeJSONError(w, errTargetMissing)
 		return
 	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		writeJSONError(w, errTargetMissing)
+		return
+	}
+	part, perr := preview.DocxMediaData(f, info.Size(), r.URL.Query().Get("m"))
+	switch perr {
+	case nil:
+	case preview.ErrDocxPartTooLarge:
+		// 超单部件解压上限（解压炸弹面）：413 与 md 渲染超限同族语义
+		writeJSONError(w, errTooLarge)
+		return
+	default: // ErrDocxPartMissing（含坏 zip/悬空映射/非图字节伪装条目）
+		// 绝不透传，404 让 <img> 自然呈加载失败
+		writeJSONError(w, errTargetMissing)
+		return
+	}
+	// CSP sandbox 与 raw 同口径（直开该 URL 呈图片文档且脚本全禁）
+	w.Header().Set("Content-Type", part.ContentType)
+	w.Header().Set("Content-Security-Policy", "sandbox")
+	// ServeContent 提供 Range/HEAD 支持（bytes.Reader 满足 ReadSeeker）
+	http.ServeContent(w, r, path.Base(part.Entry), part.ModTime, bytes.NewReader(part.Data))
+}
 
-	level := headingLevel(p.styleID)
-	switch {
-	case level > 0:
-		p.closeList()
-		if level > 6 {
-			level = 6
+// handleDocxEmbed docx 预览嵌入对象下载/预览。
+//
+// GET /s/{token}/docx-embed?path=<分享内 docx 路径>&e=<embeddings 部件名>：
+// docx 预览嵌入对象（附件）的下载端点。路由/gateGuard/resolve 双源与
+// docx-media 同轨；e= 只认渲染面映射簿产出 embeddings 映射（等值匹配
+// 天然免疫注入，同 m= 先例），端点可达面 ⊆ 访客本可经 /raw 全量下载的
+// 同一 docx = 零新增泄露面。供给头恒 attachment + Content-Type 固定
+// application/octet-stream：嵌入字节任意且真实嵌入物就是 .html——
+// inline + 嗅探 MIME 即访客 XSS 面，serveRaw 的 inline+扩展名推断形态
+// 绝不作本端点模板；Content-Disposition 一律经 contentDisposition()
+// （mime.FormatMediaType 按 RFC 2231 编码非 ASCII，安全出口）。文件名
+// best-effort：legacy OLE 容器（.bin）里 Ole10Native 流的原始文件名
+// 抽取链（P-20261118-1 起簿构建期抽名+GB18030 解码）已下沉 filepreview
+// 簿构建侧，任何疑点回落 .bin 直供名。
+//
+// P-20261118-1 preview=1 分型：&preview=1 走显式扩展名白名单（filepreview
+// EmbedPreviewFor），命中才 inline 出预览形态（CSP sandbox + XFO
+// SAMEORIGIN 覆写，html 档带 scripts/forms/popups 受限能力参数映射）；
+// 白名单外/降级一律忽略参数回归 attachment。威胁模型与三根支柱见
+// filepreview.ServeEmbedPreview 注释。
+func (s *Service) handleDocxEmbed(w http.ResponseWriter, r *http.Request) {
+	res, herr := s.resolve(r)
+	if herr != nil {
+		writeJSONError(w, herr)
+		return
+	}
+	defer s.closeRes(res)
+	// 片段/直播/回放零值 info 须先短路再探测；目录与非 docx 目标不在
+	// 嵌入供给面（本端点只被 docx 预览 HTML 引用）——docx-media 同款守卫
+	if res.share.Kind == store.ShareKindSnippet || res.share.Kind == store.ShareKindTerminal ||
+		res.share.Kind == store.ShareKindCast || res.share.Kind == store.ShareKindSession ||
+		res.info.IsDir() || preview.ForFile(res.info.Name()).Kind != preview.KindDocx {
+		writeJSONError(w, errUnrenderable)
+		return
+	}
+	f, err := res.root.Open(res.rel)
+	if err != nil {
+		writeJSONError(w, errTargetMissing)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		writeJSONError(w, errTargetMissing)
+		return
+	}
+	part, perr := preview.DocxEmbedData(f, info.Size(), r.URL.Query().Get("e"))
+	switch perr {
+	case nil:
+	case preview.ErrDocxPartTooLarge:
+		// 超单部件解压上限（解压炸弹面）：413 与 media 端点同族语义
+		writeJSONError(w, errTooLarge)
+		return
+	default: // ErrDocxPartMissing（含坏 zip/悬空映射）
+		writeJSONError(w, errTargetMissing)
+		return
+	}
+	// 统一抽取判定（P-20261118-7 评审必改2）：ui=1 壳页准入与 preview=1
+	// 供给面走同一条 EmbedPreviewPayload 链（payload 预算一次，两侧判定
+	// 天然一致防漂移）；诊断枚举（评审建议b）在此收口——响应头只出粗粒度
+	// 枚举码，容器内部结构细节（路径/名字节）只进服务端日志
+	_, ext, pvOK := preview.EmbedPreviewFor(part.Name)
+	ui, pv := r.URL.Query().Get("ui") == "1", r.URL.Query().Get("preview") == "1"
+	var payload []byte
+	if pvOK && (ui || pv) {
+		var diag preview.EmbedExtractDiag
+		payload, diag = preview.EmbedPreviewPayload(part.Data, ext)
+		if payload == nil {
+			w.Header().Set(preview.EmbedDiagHeader, string(diag))
+			s.logger.Warn("share: docx embed extract failed",
+				"diag", string(diag), "token", TokenSummary(res.share.Token),
+				"entry", part.Entry, "ext", ext)
 		}
-		p.write("<h" + digit(level) + ">" + body + "</h" + digit(level) + ">")
-	case p.inList:
-		if !p.listOpen {
-			p.write("<ul>")
-			p.listOpen = true
-		}
-		p.write("<li>" + body + "</li>")
-	default:
-		p.closeList()
-		p.write("<p>" + body + "</p>")
 	}
-	p.inList = false
+	// ui=1 壳页分型（P-20261118-3）：html/htm 档预览进新标签预览器壳页
+	//（开关/风险提示/全幅 iframe 各自就位，文档阅读列不再页内 iframe 撑列）。
+	// 路由定 &ui=1（评审建议a）：单端点单 URL 词表，gate/resolve/白名单链
+	// 全复用；白名单未命中 ui 忽略回归 attachment（与 preview=1 同语义）。
+	// P-20261118-7 起抽取失败不再整页回落 attachment 弹下载框（用户实测
+	// 主诉）——壳页转诚实回落模式（标题+「暂不支持自动预览」提示+下载
+	// 按钮，见 filepreview.ServeEmbedShell）
+	if ui && preview.ServeEmbedShell(w, r, part.Name, part.Size, payload, preview.EmbedShellCfg{
+		Endpoint: "/s/" + res.share.Token + "/docx-embed",
+		Path:     r.URL.Query().Get("path"),
+		Entry:    r.URL.Query().Get("e"),
+	}) {
+		return
+	}
+	// preview=1 分型（P-20261118-1）：显式白名单命中才 inline 出预览形态；
+	// 未命中/降级（伪装图字节/md 超限）preview 参数忽略回归 attachment
+	if pv && preview.ServeEmbedPreview(w, r, payload, part.Name, part.ModTime) {
+		return
+	}
+	// 恒 attachment + 固定 octet-stream：绝不按扩展名/字节推断内联形态
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", contentDisposition(part.Name, false))
+	// ServeContent 提供 Range/HEAD 支持（Content-Type 已显式置定，name
+	// 参数不再参与类型推断）
+	http.ServeContent(w, r, part.Name, part.ModTime, bytes.NewReader(part.Data))
 }
 
-func (p *docxBuilder) closeList() {
-	if p.listOpen {
-		p.write("</ul>")
-		p.listOpen = false
-	}
+// docxMediaURL 分享侧 media 端点 URL（渲染面 MediaURLs 构造器的 /s/{token}
+// 形态包装；docPath = 该 docx 在分享根内的访客路径，原样透传给端点的
+// path= 参数）
+func docxMediaURL(token, docPath, media string) string {
+	return preview.DocxMediaURL("/s/"+token+"/docx-media", docPath, media)
 }
 
-func (p *docxBuilder) closeTable() {
-	if p.tableOpen {
-		p.write("</table>")
-		p.tableOpen = false
-	}
-}
-
-func (p *docxBuilder) html() string { return p.b.String() }
-
-// attrVal 取 w:val 属性（命名空间 URI 不统一，按 local name 匹配）
-func attrVal(t xml.StartElement) string {
-	for _, a := range t.Attr {
-		if a.Name.Local == "val" {
-			return a.Value
-		}
-	}
-	return ""
-}
-
-// flagOn 布尔属性语义：无 val = 开（<w:b/>）；val="0"/"false"/"off" = 关
-func flagOn(t xml.StartElement) bool {
-	switch strings.ToLower(attrVal(t)) {
-	case "0", "false", "off":
-		return false
-	}
-	return true
-}
-
-// headingLevel 样式 ID → 标题级别（Title/Subtitle/Heading1..9；docx 模板
-// 的样式 ID 与界面语言无关，中文模板同样使用这些英文 ID）
-func headingLevel(styleID string) int {
-	s := strings.ToLower(styleID)
-	switch {
-	case s == "title":
-		return 1
-	case s == "subtitle":
-		return 2
-	case len(s) > 7 && strings.HasPrefix(s, "heading"):
-		if n := atoi(s[7:]); n > 0 {
-			return clamp(n, 1, 9)
-		}
-	}
-	return 0
-}
-
-func clamp(n, lo, hi int) int {
-	if n < lo {
-		return lo
-	}
-	if n > hi {
-		return hi
-	}
-	return n
-}
-
-func digit(n int) string { return string(rune('0' + n)) }
-
-func atoi(s string) int {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n
-}
-
-// writeEscapedParagraphs 纯文本按行分段输出（doc 老格式抽取路径）
-func writeEscapedParagraphs(b *strings.Builder, text string) {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	for _, para := range strings.Split(text, "\n") {
-		trimmed := strings.TrimSpace(para)
-		if trimmed == "" {
-			continue
-		}
-		b.WriteString("<p>" + html.EscapeString(trimmed) + "</p>")
-	}
-	b.WriteString("</div>")
+// docxEmbedURL 分享侧 embed 端点 URL（语义与 docxMediaURL 同轨）
+func docxEmbedURL(token, docPath, entry string) string {
+	return preview.DocxEmbedURL("/s/"+token+"/docx-embed", docPath, entry)
 }

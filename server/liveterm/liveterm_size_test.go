@@ -16,6 +16,7 @@ type sizedSession struct {
 	*fakeSession
 	smu        sync.Mutex
 	cols, rows uint16
+	name       string
 }
 
 func (s *sizedSession) Size() (uint16, uint16) {
@@ -24,9 +25,21 @@ func (s *sizedSession) Size() (uint16, uint16) {
 	return s.cols, s.rows
 }
 
+func (s *sizedSession) DisplayName() string {
+	s.smu.Lock()
+	defer s.smu.Unlock()
+	return s.name
+}
+
 func (s *sizedSession) resize(cols, rows uint16) {
 	s.smu.Lock()
 	s.cols, s.rows = cols, rows
+	s.smu.Unlock()
+}
+
+func (s *sizedSession) rename(n string) {
+	s.smu.Lock()
+	s.name = n
 	s.smu.Unlock()
 }
 
@@ -69,6 +82,42 @@ func TestSubscriptionSizeTracksSessionResize(t *testing.T) {
 	h.Unwire("tok")
 	if c, r := sub.Size(); c != 100 || r != 30 {
 		t.Fatalf("ended feed size = %dx%d, want wire-time 100x30", c, r)
+	}
+}
+
+// 显示名实时面（P-20261118-9 rename 帧数据源）：订阅期间读会话「当前」名
+// （主人侧改名即反映——SSE syncName 对账据此补帧）；接线时刻值作回落；
+// 馈线终结后不再读会话
+func TestSubscriptionNameTracksSessionRename(t *testing.T) {
+	sess := &sizedSession{fakeSession: newFakeSession(nil), cols: 100, rows: 30, name: "初始名"}
+	SetSessionLookup(func(string) LiveSession { return sess })
+	t.Cleanup(func() { SetSessionLookup(nil) })
+	h := &Hub{feeds: map[string]*feed{}}
+	h.Wire("tok-name", "s1", false)
+
+	sub, err := h.Subscribe("tok-name", "s1", false)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Release()
+	if n := sub.Name(); n != "初始名" {
+		t.Fatalf("initial name = %q, want 初始名", n)
+	}
+	// 主人改名：订阅读取跟随（不是接线/订阅时刻快照）
+	sess.rename("新名")
+	if n := sub.Name(); n != "新名" {
+		t.Fatalf("name after rename = %q, want 新名", n)
+	}
+	// 会话报空名：回落接线时刻值，不下发空
+	sess.rename("")
+	if n := sub.Name(); n != "初始名" {
+		t.Fatalf("empty-name fallback = %q, want wire-time 初始名", n)
+	}
+	// 馈线终结后释放会话引用：回落接线时刻值
+	sess.rename("终名")
+	h.Unwire("tok-name")
+	if n := sub.Name(); n != "初始名" {
+		t.Fatalf("ended feed name = %q, want wire-time 初始名", n)
 	}
 }
 

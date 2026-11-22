@@ -252,31 +252,12 @@ async function openExportPreview(cv){
 }
 
 // ── 顶栏动作与 reader 骨架（P-20261020-7）──
-// 主题选择器在桌面顶栏与「⋯」菜单各有一份（同 THEME_KEY / THEMES 表，
-// 任一处改动即时同步另一处）。桌面全量可见，≤700px 由 CSS 把
-// .desktop-only 收进菜单（下载常驻一级，菜单项 40px 热区）。
+// 主题选择器在桌面顶栏与「⋯」菜单各有一份（构造函数 makeThemeSelect 已切出
+// 为访客页族共享注入件 theme.go guestThemeJS——经主题选择器登记表即时同步
+// 两份，桌面全量可见，≤700px 由 CSS 把 .desktop-only 收进菜单（下载常驻
+// 一级，菜单项 40px 热区）。
 const FS_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
 const NEWTAB_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>';
-function makeThemeSelect(cls){
-  const sel = el('select', 'theme-select' + (cls ? ' ' + cls : ''));
-  sel.title = t('theme');
-  sel.setAttribute('aria-label', t('theme'));
-  [['auto', t('themeAuto')], ['light', t('themeLight')], ['dark', t('themeDark')],
-   ['one-dark', t('themeOneDark')], ['dracula', t('themeDracula')]].forEach(pair => {
-    const opt = document.createElement('option');
-    opt.value = pair[0]; opt.textContent = pair[1];
-    sel.appendChild(opt);
-  });
-  try { sel.value = localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) { sel.value = 'auto'; }
-  sel.onchange = () => {
-    applyTheme(sel.value);
-    try { localStorage.setItem(THEME_KEY, sel.value); } catch (e) { /* ignore */ }
-    [themeDesktop, themeMenuSel].forEach(other => {
-      if (other && other !== sel && other.value !== sel.value) other.value = sel.value;
-    });
-  };
-  return sel;
-}
 function iconButton(svg, label){
   const b = el('button', 'icon-btn desktop-only');
   b.type = 'button';

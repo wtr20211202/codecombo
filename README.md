@@ -71,6 +71,27 @@ keeps older .NET able to reach GitHub), then removes the file — the installer
 refuses to run when the trailing sentinel is missing (truncated download) or
 when it is executed from a string (`iex`) instead of a file.
 
+**If `raw.githubusercontent.com` is unreachable** — on CN networks connections
+to it are reset or drop mid-transfer routinely — the same install command
+works through a community mirror prefix (`https://ghproxy.net/` in front of
+the raw URL; same command shape, only the URL prefix changes):
+
+```bash
+# Linux / macOS — mirror fallback
+p=$(mktemp) && curl -fsSL --retry 3 https://ghproxy.net/https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && sh "$p"; rm -f "$p"
+```
+
+**Trust boundary, stated plainly:** the trailing-sentinel self-check plus
+SHA256 verification protects against truncated or corrupted transfers — not
+against malicious rewriting by the mirror or anything on the path in between
+(a rewritten script body that keeps the trailing sentinel passes the check;
+when the `SHA256SUMS` manifest travels through the same mirror as the binary,
+the verification baseline can be swapped along with them). If integrity
+matters more than availability on your network, prefer the official direct
+link or the npm channel (`npm i -g codecombo@next` — the npm registry has
+integrity mechanisms built in). The Windows one-liner has no mirror variant
+documented yet (planned follow-up).
+
 Then open **http://localhost:9999** and set your lock password on first start.
 Version selection is automatic: the latest stable release when one exists;
 until then the newest rc, falling back to the newest beta. Port, bind

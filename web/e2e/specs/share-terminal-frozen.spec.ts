@@ -67,9 +67,35 @@ async function waitForScrollback(request: APIRequestContext, headers: Record<str
   throw new Error(`marker ${marker} not in scrollback in time`)
 }
 
+/** 轮询 scrollback 直到连续两读相同（截稳）：echo 的尾随 prompt 行异步落账，
+ *  冻结快照的内容 sha256 参与短链派生——幂等断言要求两次定格捕获同内容，
+ *  创建间隙 prompt 落账即两哈希分叉两链不同（间歇红：P-20261119-2 定向门禁
+ *  复跑暴露，HEAD 二进制同型复现=既有测试竞态非产品回归），先等静默再定格 */
+async function waitForScrollbackSettled(request: APIRequestContext, headers: Record<string, string>, sessionId: string): Promise<void> {
+  let prev = ''
+  for (let i = 0; i < 40; i++) {
+    const res = await request.get(`${BASE}/api/terminals/${sessionId}/scrollback`, { headers })
+    const cur = res.ok() ? await res.text() : ''
+    if (cur !== '' && cur === prev) return
+    prev = cur
+    await new Promise(r => setTimeout(r, 500))
+  }
+  throw new Error('scrollback never settled')
+}
+
 test.describe('share-terminal-frozen', () => {
   test.beforeEach(async ({ request }) => {
     await cleanupShares(request)
+    // 归零分享管理视图持久化开关（P-20261112-6-S3 shareManager.open，服务端
+    // uiState 按实例持久化、boot 经 doRestoreShareManager 恢复）：管理全部分享
+    // 按钮在项目路由走 toggle 语义（ShareResultDialog.onManage）——上轮运行遗留
+    // open=true 时 boot 复原出已开态，本用例点击会把已开态关掉，.share-manager
+    // 断言恒 hidden（repeat/连跑间歇红，P-20261119-2 定向门禁复跑暴露）。先归零
+    // 保证「点击=打开」确定性；activity-bar-drag 同款 PUT/PATCH uiState 先例
+    const headers = await unlockHeaders(request)
+    await request.patch(`${BASE}/api/ui-state`, {
+      headers, data: { local: { shareManager: { open: false } } },
+    })
   })
 
   // 礼貌清场：测试开的终端会话
@@ -156,6 +182,9 @@ test.describe('share-terminal-frozen', () => {
     })
     expect(wr.ok()).toBeTruthy()
     await waitForScrollback(request, headers, sessionId, 'GATE_READY')
+    // 截稳再进创建链（幂等断言的前提）：尾随 prompt 行若落在两次定格之间，
+    // 内容哈希分叉即两链不同——连续两读相同才定格
+    await waitForScrollbackSettled(request, headers, sessionId)
 
     const mark = await request.post(`${BASE}/api/terminals/${sessionId}/sensitive`, {
       headers, data: { sensitive: true },

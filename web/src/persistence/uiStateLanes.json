@@ -10,6 +10,7 @@
       "collectNs": "可选。该行状态项经 collectCurrentUIState 收集面携带的 uiState 顶层命名空间——门禁与 useLayoutState.ts collect 面双向集合对账",
       "writerNs": "可选。该行状态项经 saveXxx→patchNamespaces 专用写端携带的 uiState 顶层命名空间——门禁与 uiState.ts patchNamespaces 键面双向集合对账（agentTaskTemplates.items 特例整更新无此字段，由 writerFn 钉住）",
       "keys": "可选。lane=localStorage 的新键登记键面（exact 键或尾随 * 前缀模式）——门禁与 web/src 生产面 sc.* 字面量对账。存量键一律不入此字段（走 legacyScKeys 豁免基线）",
+      "externalKey": "可选。lane=localStorage 且键面字面量在 web/src 提取面之外（Go embed 的独立访客页脚本等）时的显式键名声明——check:uistate-lanes 的悬空检查只对账 web/src 字面量，键在此处不可入 keys（会假红悬空）；一致性单测按本字段放行「无 keys/无豁免」的 localStorage 行",
       "writerFn": "可选。该行在 stores/uiState.ts 暴露的专用写函数名——一致性单测与 store 返回面双向集合对账",
       "readerFn": "可选。同上读函数名",
       "refresh": "矩阵「刷新」列：浏览器 reload 后是否恢复与恢复时机",
@@ -788,6 +789,58 @@
       "clear": "手动清（调试后门，注释在案）"
     },
     {
+      "id": "ls.quickdrop.url",
+      "item": "sc.quickdrop.url（快投递完整链接主人侧缓存，单键 JSON 载荷 { url, rotatedAt }）",
+      "lane": "localStorage",
+      "keys": ["sc.quickdrop.url"],
+      "refresh": "✓ 管理面 setup 读（readQuickdropUrlCache）",
+      "routeTrip": "✓ 保持",
+      "multiTab": "同设备共享（后写赢）",
+      "crossBrowser": "✗（设备本地——缓存面=已见过明文的同一浏览器，零新增暴露面）",
+      "crossMachine": "✗（设备本地）",
+      "clear": "撤销成功/他处撤销（fetch Meta exists=false）/轮换覆盖",
+      "note": "P-20261117-1：服务端仅哈希落盘（store/quickdrop.go），明文仅生成/轮换响应显示一次——本机缓存复原「复制完整链接」出口；rotatedAt 与 Meta 比对防他处轮换死链，失配置灰（web/src/utils/quickdropCache.ts）"
+    },
+    {
+      "id": "ls.drop.history",
+      "item": "sc.drop.history（快投递访客页投递历史，单键 JSON 数组上限 20）",
+      "lane": "localStorage",
+      "externalKey": "sc.drop.history",
+      "refresh": "✓ 访客页加载读（右上角历史角标+面板）",
+      "routeTrip": "✓ 保持（同一访客链接重开）",
+      "multiTab": "同设备共享（后写赢）",
+      "crossBrowser": "✗（设备本地——纯访客本机面，多访客互不可见）",
+      "crossMachine": "✗（设备本地）",
+      "clear": "访客「清空」按钮 / 清浏览器缓存即消（无服务端账本）",
+      "note": "P-20261117-2-S2：键面在 Go embed 访客页脚本（server/api/quickdrop/assets/app.js），web/src 提取面之外——注册表以 externalKey 显式登记，键名由 Go 侧 TestDropAssetRoute 标记断言钉住；单键 JSON 数组形状防御损坏回落空态（sc.quickdrop.url 单键载荷先例）；上限 20 FIFO；safeStorage 通道不在访客页可用（独立静态脚本，本地 try/catch 同防御）"
+    },
+    {
+      "id": "ls.share.theme",
+      "item": "sc.share.theme（访客页族主题偏好：文件分享/终端直播/定格/回放/快投递页跨页共享）",
+      "lane": "localStorage",
+      "externalKey": "sc.share.theme",
+      "refresh": "✓ 访客页加载读（各页 head/init 期 initTheme 先设 data-theme 防闪白）",
+      "routeTrip": "✓ 保持（同一访客链接重开）",
+      "multiTab": "同设备共享（后写赢；跨页切换器各自写同键）",
+      "crossBrowser": "✗（设备本地——纯访客本机偏好面）",
+      "crossMachine": "✗（设备本地）",
+      "clear": "清浏览器缓存即消（无服务端账本）",
+      "note": "P-20261120-1：键面在 Go 访客页模板/注入件（server/share/theme.go guestThemeJS+server/api/quickdrop/assets/app.js），web/src 提取面之外——注册表以 externalKey 显式登记（ls.drop.history 先例同形）；键值五档枚举 auto/light/dark/one-dark/dracula，auto 缺省；键名由 Go 侧主题渲染断言钉住"
+    },
+    {
+      "id": "ls.ops.browserId",
+      "item": "sc.ops.browserId（ops 通道浏览器实例 id，frontend 设备定向路由键）",
+      "lane": "localStorage",
+      "keys": ["sc.ops.browserId"],
+      "refresh": "✓ 模块读（opsBrowserId——WS 握手 query + 会话创建请求头携带）",
+      "routeTrip": "✓ 保持",
+      "multiTab": "同浏览器共享（设备定向的亲和粒度=每浏览器，标签选举在其上裁决唯一执行标签）",
+      "crossBrowser": "✗（设备本地——路由标签非安全边界，丢失代价=绑定/启发式暂时失准，服务端降级通知兜底）",
+      "crossMachine": "✗（设备本地）",
+      "clear": "—（设备标识，非 UI 偏好；脏值超服务端形态守卫即重生成）",
+      "note": "P-20261117-4：随机 id 不含机器指纹（clipRelay ownClipDeviceId 同款每浏览器粒度先例，与 notesOriginNonce 每窗粒度两级互补）；禁 crypto.randomUUID（LAN http 非安全上下文 undefined——clipRelay 同款坑）；生成形态与 sc.clip-relay.device 同族（时间戳 base36 + 随机段）"
+    },
+    {
       "id": "mem.terminalMaximized",
       "item": "terminalMaximized（终端临时最大化）",
       "lane": "temporary",
@@ -869,6 +922,19 @@
       "crossMachine": "✗",
       "clear": "项目切换",
       "note": "会话性记忆定案维持"
+    },
+    {
+      "id": "ls.filePreview.mode",
+      "item": "sc.filePreview.mode.<ext>（统一双视图上次选择，per 扩展名偏好）",
+      "lane": "localStorage",
+      "refresh": "✓ 打开文件恢复（defaultViewMode 读 utils/filePreviewMode）",
+      "routeTrip": "✓ 保持",
+      "multiTab": "同设备共享（后写赢）",
+      "crossBrowser": "✗（设备本地）",
+      "crossMachine": "✗（设备本地偏好，remotePathMemory 同族口径不进车道 1）",
+      "clear": "—（无清除点：用户策展偏好，useLayoutReset 不波及）",
+      "note": "P-20261119-4 统一双视图「原文件↔预览」：切换即写（toggleFileViewMode），打开链按 kind 缺省+偏好覆盖——GitHub/VS Code 记住上次选择惯例",
+      "keys": ["sc.filePreview.mode."]
     }
   ],
   "legacyScKeys": [

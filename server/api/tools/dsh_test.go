@@ -3,6 +3,7 @@ package tools
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,8 @@ import (
 	"codecombo/server/config"
 	"codecombo/server/filestore"
 	"codecombo/server/store"
+
+	"github.com/gin-gonic/gin"
 )
 
 // TestMain 隔离令牌自动回收的副作用：真实用户设置（saveDshToken 落盘）与
@@ -1123,4 +1126,402 @@ func TestDshProxyBehaviorSnapshot(t *testing.T) {
 			t.Fatalf("iframe embed must passthrough, code=%d body=%q", rec3.Code, rec3.Body.String())
 		}
 	})
+}
+
+// ============== P-20261118-4 探测诊断 / 外部占用判读 / stopDsh 守卫收窄 ==============
+
+// TestProbeAvailableBaseTCPDialAndDiag：TCP 拨号判活（监听在即活，与状态码
+// 无关——原实现本就不关心状态码）+ 失败归因分类（refused）+ err 原文截断
+func TestProbeAvailableBaseTCPDialAndDiag(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden) // 状态码语义不变：401/403 也算活着
+	}))
+	defer srv.Close()
+
+	ok, diag := probeAvailableBase(srv.URL)
+	if !ok {
+		t.Fatalf("probeAvailableBase(%s) = false, want true (listener alive, status irrelevant)", srv.URL)
+	}
+	if diag.Base != srv.URL || diag.ErrClass != "" {
+		t.Errorf("diag = %+v, want base=%s empty class", diag, srv.URL)
+	}
+	if diag.LatencyMs < 0 {
+		t.Errorf("latency = %d, want >= 0", diag.LatencyMs)
+	}
+
+	// 必然无监听的回环端口：connection refused
+	dead, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadAddr := dead.Addr().String()
+	dead.Close()
+	ok, diag = probeAvailableBase("http://" + deadAddr)
+	if ok {
+		t.Fatalf("probeAvailableBase(%s) = true, want false (nothing listening)", deadAddr)
+	}
+	if diag.ErrClass != "refused" {
+		t.Errorf("errClass = %q, want refused", diag.ErrClass)
+	}
+	if diag.ErrText == "" {
+		t.Errorf("errText should carry the raw error excerpt")
+	}
+
+	// 病态 base：不拨号直接归 other
+	ok, diag = probeAvailableBase("not-a-url")
+	if ok || diag.ErrClass != "other" {
+		t.Errorf("invalid base: ok=%v class=%q, want false/other", ok, diag.ErrClass)
+	}
+
+	// err 原文截断 ≤200 字符（防代理环境 err 夹带内部主机名 + 超长）
+	if got := truncateProbeErrText(strings.Repeat("x", 500)); len(got) != 200 {
+		t.Errorf("truncateProbeErrText len = %d, want 200", len(got))
+	}
+	if got := truncateProbeErrText("short"); got != "short" {
+		t.Errorf("truncateProbeErrText(short) = %q, want unchanged", got)
+	}
+}
+
+// TestProbeWithRetry：可用上游单发命中（无重试开销）；死端口重试一次后仍
+// 失败（总耗时 ≥ 重试间隔证明重试发生过，分类保持 refused）
+func TestProbeWithRetry(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer srv.Close()
+	ok, diag := probeWithRetry(srv.URL)
+	if !ok || diag.ErrClass != "" {
+		t.Fatalf("probeWithRetry(alive) = %v %+v, want ok/no-error", ok, diag)
+	}
+
+	dead, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadAddr := dead.Addr().String()
+	dead.Close()
+	start := time.Now()
+	ok, diag = probeWithRetry("http://" + deadAddr)
+	elapsed := time.Since(start)
+	if ok || diag.ErrClass != "refused" {
+		t.Fatalf("probeWithRetry(dead) = %v class=%q, want false/refused", ok, diag.ErrClass)
+	}
+	if elapsed < probeRetryDelay {
+		t.Errorf("probeWithRetry(dead) took %v, want >= retry delay %v (one retry before giving up)", elapsed, probeRetryDelay)
+	}
+}
+
+// TestLaunchAndWaitExternalOwner：外部实例占端口（listener 模拟外部运行 dsh
+// 的 LISTEN 态）+ 启动命令秒退 → 探活探到外部进程 + 日志无新令牌 →
+// externalOwner=true 且远快于 launchReadyTimeout（EADDRINUSE 秒退即刻收口，
+// 不烧满 60s deadline）
+func TestLaunchAndWaitExternalOwner(t *testing.T) {
+	doc := filestore.New(t.TempDir())
+	store.SetDefault(store.New(doc))
+	t.Cleanup(func() { store.SetDefault(nil) })
+	sc := store.Get().Settings.Get()
+	ext, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ext.Close()
+	sc.Server.DshWebBase = "http://" + ext.Addr().String()
+	// 秒退命令：无 token 行、包装器随进程退出（EADDRINUSE 秒退形态）
+	if runtime.GOOS == "windows" {
+		sc.Server.DshLaunchCommand = "cmd /C exit 0"
+	} else {
+		sc.Server.DshLaunchCommand = "exit 0"
+	}
+	// pid 文件写入 DataDir：env 隔离防触碰真实用户数据目录
+	t.Setenv("CC_DATA_DIR", t.TempDir())
+
+	start := time.Now()
+	out := launchAndWait()
+	elapsed := time.Since(start)
+	if !out.Available {
+		t.Fatalf("Available = false, want true (external listener answers the probe)")
+	}
+	if !out.ExternalOwner {
+		t.Fatalf("ExternalOwner = false, want true (wrapper exited + no token captured = port held by external instance)")
+	}
+	if out.TokenCaptured {
+		t.Fatalf("TokenCaptured = true, want false (instant-exit command prints no token)")
+	}
+	if elapsed >= launchReadyTimeout {
+		t.Errorf("launchAndWait took %v, want << %v (instant-exit + alive probe must short-circuit, not burn the deadline)", elapsed, launchReadyTimeout)
+	}
+	if out.ProbeBase != sc.Server.DshWebBase {
+		t.Errorf("ProbeBase = %q, want %q (response must carry the actually probed base)", out.ProbeBase, sc.Server.DshWebBase)
+	}
+}
+
+// TestStopDshGuardSkipsExternal：pid 文件缺失 = 无归属证据 → pkill 兜底被
+// 守卫跳过（外部进程不被杀）且端口等待环短路（不白烧 10s 等外部进程死亡）
+func TestStopDshGuardSkipsExternal(t *testing.T) {
+	doc := filestore.New(t.TempDir())
+	store.SetDefault(store.New(doc))
+	t.Cleanup(func() { store.SetDefault(nil) })
+	sc := store.Get().Settings.Get()
+	ext, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ext.Close()
+	sc.Server.DshWebBase = "http://" + ext.Addr().String()
+	sc.Server.DshLaunchCommand = "dsh web --no-open" // pkill 兜底的标准匹配形态：被放行即误杀
+	t.Setenv("CC_DATA_DIR", t.TempDir())             // 无 pid 文件 = 无归属证据
+
+	start := time.Now()
+	owned := stopDsh()
+	elapsed := time.Since(start)
+	if owned {
+		t.Fatalf("owned = true, want false (missing pid file = no ownership evidence)")
+	}
+	if conn, derr := net.Dial("tcp", ext.Addr().String()); derr != nil {
+		t.Fatalf("external listener was killed: dial %s: %v (stopDsh must not kill processes it did not start)", ext.Addr().String(), derr)
+	} else {
+		_ = conn.Close()
+	}
+	if elapsed >= 10*time.Second {
+		t.Errorf("stopDsh took %v, want << 10s (guard skip must short-circuit the port wait loop)", elapsed)
+	}
+}
+
+// TestRestartDshProcessExternalOwner：重启响应显式携带占用信号（评审必改1：
+// restartPortBusy 提示的既有条件 tokenCaptured&&!valid 在 tokenCaptured=false
+// 时不成立——externalOwner 字段是前端「重启未生效」提示的事实源）
+func TestRestartDshProcessExternalOwner(t *testing.T) {
+	doc := filestore.New(t.TempDir())
+	store.SetDefault(store.New(doc))
+	t.Cleanup(func() { store.SetDefault(nil) })
+	sc := store.Get().Settings.Get()
+	ext, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ext.Close()
+	sc.Server.DshWebBase = "http://" + ext.Addr().String()
+	if runtime.GOOS == "windows" {
+		sc.Server.DshLaunchCommand = "cmd /C exit 0"
+	} else {
+		sc.Server.DshLaunchCommand = "exit 0"
+	}
+	t.Setenv("CC_DATA_DIR", t.TempDir()) // 无 pid 文件：stopDsh 守卫收窄
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/restart", DshRestart)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/restart", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d body=%s, want 200", w.Code, w.Body.String())
+	}
+	var body struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Data["externalOwner"] != true {
+		t.Fatalf("externalOwner = %v, want true (external listener holds the port; restart silently no-ops without it)", body.Data["externalOwner"])
+	}
+	if body.Data["available"] != true {
+		t.Fatalf("available = %v, want true (probe answers via external listener)", body.Data["available"])
+	}
+	if body.Data["spawned"] != true {
+		t.Fatalf("spawned = %v, want true (restart relaunches via launchAndWait)", body.Data["spawned"])
+	}
+	if base, _ := body.Data["probeBase"].(string); base != sc.Server.DshWebBase {
+		t.Errorf("probeBase = %v, want %v", body.Data["probeBase"], sc.Server.DshWebBase)
+	}
+}
+
+// ============== P-20261118-6 外部目标管理面收口：令牌注入矩阵 / 双层判活 /
+// https 分类 / 探测通道无代理 ==============
+
+// TestDshEmbedTargetURLTokenMatrix：LAN 浏览器（开放模式）令牌注入随目标取
+// ——外部目标注入其自身令牌而非本机 DshWebToken（非回环分支与直连分支此前
+// 不一致：LAN 浏览器看外部目标必 401 鉴权页）；回环浏览器不注入（302 签发
+// 门发放）；反代关闭走上游直连同注入
+func TestDshEmbedTargetURLTokenMatrix(t *testing.T) {
+	cfg := dshConfig{
+		Base:         "http://127.0.0.1:3080",
+		Token:        "local-tok",
+		ProxyPort:    3081,
+		ProxyEnabled: true,
+		ExposeAll:    true,
+		Targets: []config.DshTarget{
+			{ID: "t1", Name: "gpu-box", Base: "http://192.168.1.10:3080", Token: "t1-tok"},
+			{ID: "t2", Name: "no-token-box", Base: "http://192.168.1.11:3080"},
+		},
+	}
+	const lanHost = "192.168.1.5:9999"
+	const loopHost = "localhost:5173"
+
+	cases := []struct {
+		name        string
+		proxy       bool
+		host        string
+		tid         string
+		wantContain string
+		wantAbsent  string
+	}{
+		{"LAN 浏览器外部目标注入目标自身令牌（本提案实锚修复）", true, lanHost, "t1", "token=t1-tok", "token=local-tok"},
+		{"LAN 浏览器本机目标注入本机令牌", true, lanHost, "", "token=local-tok", "token=t1-tok"},
+		{"LAN 浏览器无令牌目标不拼 token", true, lanHost, "t2", "scDshTarget=t2", "token="},
+		{"回环浏览器不注入（302 签发门发放）", true, loopHost, "t1", "scDshTarget=t1", "token="},
+		{"反代关闭直连上游注入目标令牌", false, lanHost, "t1", "192.168.1.10:3080?token=t1-tok", "token=local-tok"},
+	}
+	for _, tc := range cases {
+		c := cfg
+		c.ProxyEnabled = tc.proxy
+		got := dshEmbedTargetURL(c, tc.host, tc.tid)
+		if !strings.Contains(got, tc.wantContain) {
+			t.Errorf("%s: url = %q, want contain %q", tc.name, got, tc.wantContain)
+		}
+		if tc.wantAbsent != "" && strings.Contains(got, tc.wantAbsent) {
+			t.Errorf("%s: url = %q, want NOT contain %q", tc.name, got, tc.wantAbsent)
+		}
+	}
+
+	// 回环浏览器 Host 沿用：代理地址用浏览器实际使用的回环名（schemeful 同站）
+	if got := dshEmbedTargetURL(cfg, loopHost, ""); !strings.HasPrefix(got, "http://localhost:3081/") {
+		t.Errorf("loopback host = %q, want proxy url on localhost", got)
+	}
+	// LAN Host 沿用（开放模式）
+	if got := dshEmbedTargetURL(cfg, lanHost, "t1"); !strings.HasPrefix(got, "http://192.168.1.5:3081/") {
+		t.Errorf("lan host = %q, want proxy url on request host", got)
+	}
+	// 未知目标不拼路由参数（令牌回落本机语义不变）
+	if got := dshEmbedTargetURL(cfg, lanHost, "gone"); strings.Contains(got, "scDshTarget=") {
+		t.Errorf("unknown target url = %q, want no scDshTarget param", got)
+	}
+}
+
+// TestLaunchAndWaitNotReadyDualLayer：双层判活 notReady 显式态——拨号通
+//（裸 TCP 监听无 HTTP）而 HTTP 持续不通、包装进程存活（前台拉起形态）→
+// deadline 收口 available=true + NotReady=true（不谎报就绪也不假阴性），
+// ExternalOwner 不误判（包装活着 ≠ 外部占用）
+func TestLaunchAndWaitNotReadyDualLayer(t *testing.T) {
+	doc := filestore.New(t.TempDir())
+	store.SetDefault(store.New(doc))
+	t.Cleanup(func() { store.SetDefault(nil) })
+	sc := store.Get().Settings.Get()
+	// 裸 TCP 监听：拨号恒通、HTTP 层恒无响应（node 事件循环被拖慢的模拟）
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	sc.Server.DshWebBase = "http://" + l.Addr().String()
+	// 包装进程存活超过整个收缩后的 deadline（前台拉起形态）
+	if runtime.GOOS == "windows" {
+		sc.Server.DshLaunchCommand = "cmd /C ping -n 30 127.0.0.1 > nul"
+	} else {
+		sc.Server.DshLaunchCommand = "sleep 30"
+	}
+	t.Setenv("CC_DATA_DIR", t.TempDir())
+	// 收缩 deadline：notReady 收口分支须等满 deadline，用例才能秒级走完
+	oldTimeout := launchReadyTimeout
+	launchReadyTimeout = 3 * time.Second
+	t.Cleanup(func() { launchReadyTimeout = oldTimeout })
+
+	start := time.Now()
+	out := launchAndWait()
+	elapsed := time.Since(start)
+	if !out.Available {
+		t.Fatalf("Available = false, want true (dial answers: listener alive)")
+	}
+	if !out.NotReady {
+		t.Fatalf("NotReady = false, want true (deadline reached with dial up but HTTP never answered)")
+	}
+	if out.ExternalOwner {
+		t.Fatalf("ExternalOwner = true, want false (wrapper stayed alive: foreground launch, not external owner)")
+	}
+	if out.TokenCaptured {
+		t.Fatalf("TokenCaptured = true, want false (bare listener prints no token)")
+	}
+	if elapsed < 2500*time.Millisecond {
+		t.Errorf("launchAndWait returned in %v, want >= ~deadline (dual-layer must keep waiting while dial is up, not fail fast)", elapsed)
+	}
+	if elapsed >= oldTimeout {
+		t.Errorf("launchAndWait took %v, want << production deadline %v (shrunk deadline must govern)", elapsed, oldTimeout)
+	}
+}
+
+// TestProbeAvailableBaseHTTPSClassify：https base 探测的 TLS 步——端口在听
+// 但不是 TLS 服务（plain http）→ 拨号通、握手败 → available=false + class=tls
+//（浏览器同样进不去，如实归因）；自签 https（httptest TLS 证书）→
+// InsecureSkipVerify 握手可成 → available=true（自签外部目标合法形态）
+func TestProbeAvailableBaseHTTPSClassify(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer plain.Close()
+	ok, diag := probeAvailableBase("https://" + strings.TrimPrefix(plain.URL, "http://"))
+	if ok {
+		t.Fatalf("https probe against plain-http port = true, want false (no TLS handshake possible)")
+	}
+	if diag.ErrClass != "tls" {
+		t.Errorf("errClass = %q, want tls", diag.ErrClass)
+	}
+
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer tlsSrv.Close()
+	ok, diag = probeAvailableBase(tlsSrv.URL)
+	if !ok {
+		t.Fatalf("https probe against self-signed TLS = false (class=%q err=%q), want true (InsecureSkipVerify)", diag.ErrClass, diag.ErrText)
+	}
+	if diag.ErrClass != "" {
+		t.Errorf("errClass = %q, want empty on success", diag.ErrClass)
+	}
+}
+
+// TestProbeDialAddr：拨号地址构造——端口缺省按 scheme 补 80/443；IPv6 保
+// 括号形态（显式端口 u.Host 自带括号；无端口经 JoinHostPort 复原）
+func TestProbeDialAddr(t *testing.T) {
+	cases := []struct {
+		base string
+		want string
+	}{
+		{"http://127.0.0.1:3080", "127.0.0.1:3080"},
+		{"https://example.com", "example.com:443"},
+		{"http://example.com", "example.com:80"},
+		{"http://[::1]:3080", "[::1]:3080"},
+		{"http://[::1]", "[::1]:80"},
+		{"https://[2001:db8::1]", "[2001:db8::1]:443"},
+	}
+	for _, tc := range cases {
+		u, err := url.Parse(tc.base)
+		if err != nil {
+			t.Fatalf("parse %s: %v", tc.base, err)
+		}
+		if got := probeDialAddr(u); got != tc.want {
+			t.Errorf("probeDialAddr(%s) = %q, want %q", tc.base, got, tc.want)
+		}
+	}
+}
+
+// TestProbeHTTPChannel：探测通道专用 HTTP 客户端（Proxy:nil + InsecureSkipVerify）
+// ——ambient HTTP(S)_PROXY 部署面会劫持外部 LAN 目标的 HTTP 层探测（Go 仅豁免
+// 回环），令牌判定/就绪判据须显式无代理 transport；自签 https 外部目标是合法
+// 形态（证书信任在浏览器侧），x509 校验恒败会让令牌判定恒 unknown
+func TestProbeHTTPChannel(t *testing.T) {
+	tr, ok := probeHTTP.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("probeHTTP transport = %T, want *http.Transport", probeHTTP.Transport)
+	}
+	if tr.Proxy != nil {
+		t.Errorf("probeHTTP Proxy is non-nil, want nil (ambient HTTP_PROXY must not hijack LAN target probing)")
+	}
+	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
+		t.Errorf("probeHTTP TLSClientConfig.InsecureSkipVerify = false, want true (self-signed https targets are a legal form)")
+	}
+	if probeHTTP.Timeout != probeTimeout {
+		t.Errorf("probeHTTP timeout = %v, want %v", probeHTTP.Timeout, probeTimeout)
+	}
+	// 行为面：令牌判定走同一通道仍判 stale（transport 换装不破坏既有语义）
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "dsh web authentication required")
+	}))
+	defer srv.Close()
+	if state := probeTokenState(srv.URL, "tok"); state != "stale" {
+		t.Errorf("probeTokenState via no-proxy transport = %q, want stale", state)
+	}
 }

@@ -8,10 +8,13 @@ import type { DshVersionsApi } from '../../../composables/useDshVersions'
  * 检查更新 / 选择新版本升级 / 回退（失败态醒目块 + P-20261010-2 常驻兜底行）/
  * 预发布分档开关 / changelog 渲染。
  * 状态与动作全部来自宿主传入的 useDshVersions 实例（ctrl），本组件零逻辑。
+ * 外部目标只读化（P-20261118-6 ⑦，用户定向修订一）：外部目标激活时版本与
+ * changelog 照常可看（只读视图），升级/回退动作隐藏——升级链只管本机 npm 包，
+ * 不做远程升级（目标机安装形态各异且无远程执行通道，留扩展注记）。
  */
 const { t } = useI18n()
 
-const props = defineProps<{ ctrl: DshVersionsApi }>()
+const props = defineProps<{ ctrl: DshVersionsApi; targetExternal?: boolean }>()
 
 // ctrl 为稳定的单例对象（宿主 setup 创建），解构出的 ref 在模板自动解包
 const {
@@ -72,10 +75,20 @@ const {
         fixed: currentKnownIssue.fixed,
       }) }}
     </div>
-    <!-- 常驻回退入口（P-20261010-2）：config 有回退点即呈现——升级流程成功但
-         新版功能性损坏时也有逃生通道；失败态的醒目回退块保留，此行是静默兜底 -->
+    <!-- 外部目标只读注记（P-20261118-6 ⑦）：版本与变更内容取自本机 dsh，
+         升级/回退不作用于目标机——只读视图的就地说明 -->
     <div
-      v-if="showRollbackRow"
+      v-if="targetExternal"
+      class="ver-known-issue"
+      data-test="dsh-versions-local-only"
+    >
+      {{ t('dshConsole.versionsLocalOnlyNote') }}
+    </div>
+    <!-- 常驻回退入口（P-20261010-2）：config 有回退点即呈现——升级流程成功但
+         新版功能性损坏时也有逃生通道；失败态的醒目回退块保留，此行是静默兜底。
+         外部目标激活时隐藏（回退只作用于本机，见上注记） -->
+    <div
+      v-if="showRollbackRow && !targetExternal"
       class="ver-rollback-row"
       data-test="dsh-rollback-row"
     >
@@ -203,8 +216,9 @@ const {
         >{{ changelogExpanded ? t('dshConsole.clCollapse') : t('dshConsole.clExpand') }}</a>
       </template>
     </div>
+    <!-- 升级动作（外部目标激活时隐藏：升级只作用于本机 npm 包，P-20261118-6 ⑦） -->
     <div
-      v-if="newerVersions.length > 0"
+      v-if="newerVersions.length > 0 && !targetExternal"
       class="ver-actions"
     >
       <n-button
@@ -218,7 +232,7 @@ const {
       </n-button>
     </div>
     <div
-      v-if="upState === 'failed' && canRollback"
+      v-if="upState === 'failed' && canRollback && !targetExternal"
       class="ver-rollback"
     >
       <span>{{ t('dshConsole.rollbackHint', { version: rollbackVersion }) }}</span>

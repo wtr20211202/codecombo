@@ -2,6 +2,7 @@
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import type { EditorMdMode } from '../../stores/uiState'
 import { enhanceMdTables } from './mdTableResize'
+import { closeMdLightbox } from '../../utils/mdLightbox'
 
 /**
  * Markdown 预览面板（P-20261003-301 拆分、run15 修复落位）：
@@ -66,6 +67,9 @@ function printPreview() {
 // 打印标记类/兜底定时器随卸载清掉（打印窗开着时卸载编辑器组的极端时序，
 // 残留标记会让之后的 Ctrl+P 误入预览打印形态）
 onBeforeUnmount(cleanupMdPrintMarkers)
+// 灯箱挂 body 不随本面板 v-if（随 md 模式切换挂摘）摘除，卸载时主动收口
+//（P-20261120-3：切回源码态/关编辑器组时灯箱残留会盖住全应用）
+onBeforeUnmount(closeMdLightbox)
 
 defineExpose({ printPreview })
 </script>
@@ -95,41 +99,6 @@ defineExpose({ printPreview })
   border-left: 1px solid var(--border-default);
   background: var(--bg-primary);
 }
-.md-preview-content {
-  padding: 16px 24px;
-  color: var(--text-primary);
-  font-size: 14px;
-  line-height: 1.6;
-  max-width: 800px;
-}
-.md-preview-content :deep(h1) { font-size: 1.8em; border-bottom: 1px solid var(--border-default); padding-bottom: 8px; margin: 16px 0 12px; color: var(--text-primary); }
-.md-preview-content :deep(h2) { font-size: 1.4em; border-bottom: 1px solid var(--border-default); padding-bottom: 6px; margin: 14px 0 10px; color: var(--text-primary); }
-.md-preview-content :deep(h3) { font-size: 1.2em; margin: 12px 0 8px; color: var(--text-primary); }
-.md-preview-content :deep(h4) { font-size: 1.1em; margin: 10px 0 6px; color: var(--text-primary); }
-.md-preview-content :deep(p) { margin: 8px 0; }
-.md-preview-content :deep(a) { color: var(--accent-blue); text-decoration: none; }
-.md-preview-content :deep(a:hover) { text-decoration: underline; }
-.md-preview-content :deep(code) { background: var(--bg-panel); padding: 2px 6px; border-radius: 3px; font-family: var(--font-mono); font-size: 0.9em; color: var(--accent-orange); }
-.md-preview-content :deep(pre) { background: var(--bg-panel); padding: 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; border: 1px solid var(--border-default); }
-.md-preview-content :deep(pre code) { background: none; padding: 0; color: var(--text-primary); }
-.md-preview-content :deep(blockquote) { border-left: 3px solid var(--accent-blue); padding: 4px 12px; color: var(--text-secondary); margin: 8px 0; background: color-mix(in srgb, var(--accent-blue) 6%, transparent); border-radius: 0 4px 4px 0; }
-.md-preview-content :deep(blockquote p) { margin: 4px 0; }
-.md-preview-content :deep(ul), .md-preview-content :deep(ol) { padding-left: 24px; margin: 8px 0; }
-.md-preview-content :deep(li) { margin: 4px 0; }
-.md-preview-content :deep(li input[type="checkbox"]) { margin-right: 6px; vertical-align: middle; accent-color: var(--brand-accent); }
-.md-preview-content :deep(table) { border-collapse: collapse; width: 100%; margin: 8px 0; }
-.md-preview-content :deep(th), .md-preview-content :deep(td) { border: 1px solid var(--border-default); padding: 6px 12px; text-align: left; }
-.md-preview-content :deep(th) { background: var(--bg-panel); font-weight: 500; }
-/* ── md 表格列宽（P-20261010-1）：自动布局按内容分配，长文本列贪婪扩张会把
-   短列压到内容最小宽以下（中文无空格可断 →「待回复」逐字竖排）。
-   ① min-width 短列下限：四字以内短词（待回复/已完成等）在挤压下保证单行
-   （base.css 全局 border-box，calc 补回单元格 padding/边框壳——内容区 4em
-   才是短词单行的语义基准）；
-   ② overflow-wrap:anywhere 长列上限兜底：窄屏下长列仍可断行不撑破容器
-   （下限/上限正交——前者保短词单行，后者保容器不横溢）；拖拽手柄交互逻辑
-   在 mdTableResize.ts（分享访客页同形态独立实现，语义保持一致） ── */
-.md-preview-content :deep(th), .md-preview-content :deep(td) { min-width: calc(4em + 26px); overflow-wrap: anywhere; }
-.md-preview-content :deep(th) { position: relative; }
 .md-preview-content :deep(.col-handle) { position: absolute; top: 0; right: 0; width: 4px; height: 100%; cursor: col-resize; touch-action: none; user-select: none; z-index: 1; }
 .md-preview-content :deep(.col-handle:hover), .md-preview-content :deep(.col-handle.dragging) { background: var(--brand-accent); opacity: .55; }
 /* 切 fixed 后超长内容单元格按管理列表同款纪律收敛（ellipsis + title 悬浮全文，

@@ -1,8 +1,9 @@
 package shareapi
 
-// 协作通道管理面测试（P-20261024-1）：开关动作端点（collab/direct-input）、
-// 收件清单与消费语义（drops/consume/delete）、直通握手 owner 半边的拒绝面。
-// 复用 handlers_test.go 的 newAdminRouter 装配（临时 store + 种子项目）。
+// 协作通道管理面测试（P-20261024-1，P-20261121-1 统一收编适配）：开关动作
+// 端点（collab/guest-input）、收件清单与消费语义（drops/consume/delete）、
+// 申请批准握手 owner 半边的拒绝面。复用 handlers_test.go 的 newAdminRouter
+// 装配（临时 store + 种子项目）。
 
 import (
 	"encoding/json"
@@ -23,7 +24,7 @@ func newCollabRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 	r := newAdminRouter(t)
 	r.POST("/api/share/:token/collab", SetShareCollab)
-	r.POST("/api/share/:token/direct-input", SetShareDirectInput)
+	r.POST("/api/share/:token/guest-input", SetShareGuestInput)
 	r.GET("/api/share/:token/drops", ListShareDrops)
 	r.POST("/api/share/:token/drops/:id/consume", ConsumeShareDrop)
 	r.DELETE("/api/share/:token/drops/:id", DeleteShareDrop)
@@ -94,40 +95,33 @@ func TestSetShareCollabEndpoint(t *testing.T) {
 	}
 }
 
-func TestSetShareDirectInputEndpoint(t *testing.T) {
+func TestSetShareGuestInputEndpoint(t *testing.T) {
 	r := newCollabRouter(t)
 	code, out := doJSON(r, http.MethodPost, "/api/share", `{"projectId":"p1","path":"note.txt"}`)
 	if code != http.StatusOK {
 		t.Fatalf("create = %d", code)
 	}
 	token := out["data"].(map[string]any)["token"].(string)
-
-	// 开启缺 confirm → 400（管理面摩擦是硬闸，agent/脚本不可静默开启）
-	if code, _ := doJSON(r, http.MethodPost, "/api/share/"+token+"/direct-input", `{"on":true}`); code != http.StatusBadRequest {
-		t.Fatalf("missing confirm = %d, want 400", code)
-	}
-	// file 形态（无会话锚点）→ 400（直通输入只对 terminal 直播可开）
-	if code, _ := doJSON(r, http.MethodPost, "/api/share/"+token+"/direct-input", `{"on":true,"confirm":true}`); code != http.StatusBadRequest {
-		t.Fatalf("non-terminal share = %d, want 400", code)
+	// 新记录投影缺省开（反向极性：guestInput=true=申请通道在场，默认在场定案）
+	if out["data"].(map[string]any)["guestInput"] != true {
+		t.Fatalf("new share must project guestInput on: %v", out)
 	}
 
-	// terminal 形态（直通锚定会话）：经 store 直建记录（CreateTerminalLive
-	// 需要存活会话，本测试只验开关面）
-	created, err := store.Get().Share.Create(store.Share{
-		Kind: store.ShareKindTerminal, TerminalID: "agent-x", Name: "live",
-	})
-	if err != nil {
-		t.Fatalf("seed terminal share: %v", err)
+	// 关闭（回收方向零摩擦——回收永远是安全方向）：投影翻假 + 落库反向字段
+	if code, out = doJSON(r, http.MethodPost, "/api/share/"+token+"/guest-input", `{"on":false}`); code != http.StatusOK || out["data"].(map[string]any)["guestInput"] != false {
+		t.Fatalf("guest-input off = %d %v", code, out)
 	}
-	tok2 := created.Token
-	code, out = doJSON(r, http.MethodPost, "/api/share/"+tok2+"/direct-input", `{"on":true,"confirm":true}`)
-	if code != http.StatusOK || out["data"].(map[string]any)["directInput"] != true {
-		t.Fatalf("direct on = %d %v", code, out)
+	rec, err := store.Get().Share.Get(token)
+	if err != nil || !rec.GuestInputOff {
+		t.Fatalf("guestInputOff not persisted: %+v err=%v", rec, err)
 	}
-	// 关闭（回收方向不需要 confirm）
-	code, out = doJSON(r, http.MethodPost, "/api/share/"+tok2+"/direct-input", `{"on":false}`)
-	if code != http.StatusOK || out["data"].(map[string]any)["directInput"] != false {
-		t.Fatalf("direct off = %d %v", code, out)
+	// 回开
+	if code, out = doJSON(r, http.MethodPost, "/api/share/"+token+"/guest-input", `{"on":true}`); code != http.StatusOK || out["data"].(map[string]any)["guestInput"] != true {
+		t.Fatalf("guest-input on = %d %v", code, out)
+	}
+	// 未知 token → 404
+	if code, _ := doJSON(r, http.MethodPost, "/api/share/nope0123456789ab/guest-input", `{"on":false}`); code != http.StatusNotFound {
+		t.Fatalf("unknown token = %d, want 404", code)
 	}
 }
 
@@ -191,34 +185,39 @@ func TestShareDropsManagement(t *testing.T) {
 
 func TestDirectApproveRejections(t *testing.T) {
 	r := newCollabRouter(t)
-	// 直通未开启的分享：批准 → 400
+	// file 分享（无会话锚点）：批准 → 400（申请批准路径仅 terminal 直播）
 	code, out := doJSON(r, http.MethodPost, "/api/share", `{"projectId":"p1","path":"note.txt"}`)
 	if code != http.StatusOK {
 		t.Fatalf("create = %d", code)
 	}
 	token := out["data"].(map[string]any)["token"].(string)
 	if code, _ := doJSON(r, http.MethodPost, "/api/share/"+token+"/direct/approve", `{}`); code != http.StatusBadRequest {
-		t.Fatalf("approve on non-direct share = %d, want 400", code)
+		t.Fatalf("approve on non-terminal share = %d, want 400", code)
 	}
 	// 未知分享 → 404
 	if code, _ := doJSON(r, http.MethodPost, "/api/share/nope0123456789ab/direct/approve", `{}`); code != http.StatusNotFound {
 		t.Fatalf("approve unknown = %d, want 404", code)
 	}
-	// terminal 分享 + 直通开启，但会话不存在 → 404（无可授权的源）
+	// 通道显式关（GuestInputOff=true）的 terminal 分享：批准 → 400（通道关
+	// ——申请端点已 404，批准面同步拒）
 	created, err := store.Get().Share.Create(store.Share{
-		Kind: store.ShareKindTerminal, TerminalID: "ghost", Name: "live2",
+		Kind: store.ShareKindTerminal, TerminalID: "ghost", Name: "live2", GuestInputOff: true,
 	})
 	if err != nil {
 		t.Fatalf("seed terminal share: %v", err)
 	}
 	tok2 := created.Token
-	if code, _ := doJSON(r, http.MethodPost, "/api/share/"+tok2+"/direct-input", `{"on":true,"confirm":true}`); code != http.StatusOK {
-		t.Fatalf("direct on = %d", code)
+	if code, _ := doJSON(r, http.MethodPost, "/api/share/"+tok2+"/direct/approve", `{}`); code != http.StatusBadRequest {
+		t.Fatalf("approve with channel off = %d, want 400", code)
+	}
+	// 回开通道 + 会话不存在 → 404（无可授权的源）
+	if _, err := store.Get().Share.SetGuestInput(tok2, true); err != nil {
+		t.Fatalf("channel on: %v", err)
 	}
 	if code, _ := doJSON(r, http.MethodPost, "/api/share/"+tok2+"/direct/approve", `{}`); code != http.StatusNotFound {
 		t.Fatalf("approve with dead session = %d, want 404", code)
 	}
-	// 状态投影：enabled=true，session.alive=false
+	// 状态投影：enabled=true（通道开），session.alive=false
 	code, out = doJSON(r, http.MethodGet, "/api/share/"+tok2+"/direct", "")
 	if code != http.StatusOK {
 		t.Fatalf("direct status = %d", code)

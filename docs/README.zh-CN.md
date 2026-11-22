@@ -57,6 +57,21 @@ Ubuntu 20.04 7.68 / Debian 11 7.74 / RHEL 8 7.61 全可跑）；curl ≥ 7.71 �
 删——安装器在尾部哨兵缺失（下载不完整）或被以字符串形态（`iex`）执行时
 直接拒绝运行。
 
+**官方直连不可达时**——CN 网络到 `raw.githubusercontent.com` 连接重置/传输
+中断是常态——同款安装命令可走社区镜像前缀（raw URL 前面加
+`https://ghproxy.net/`；与官方命令同形态、只换 URL 前缀）：
+
+```bash
+# Linux / macOS —— 镜像回退
+p=$(mktemp) && curl -fsSL --retry 3 https://ghproxy.net/https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" && sh "$p"; rm -f "$p"
+```
+
+**信任边界如实说：** 尾哨兵自检 + SHA256 校验防的是传输截断/损坏，不防镜像
+或链路上的恶意改写（脚本正文被改写但保留尾部哨兵即可通过校验；`SHA256SUMS`
+清单与二进制同走镜像时，校验基准可被一并调包）。完整性比可用性更要紧的场
+景首选官方直连或 npm 渠道（`npm i -g codecombo@next`——npm registry 自带
+完整性机制）。Windows 一键命令暂无对等镜像形态（已登记跟进项）。
+
 浏览器打开 **http://localhost:9999**，首启设置锁密码。版本全自动决策：
 有正式版装最新正式版；当前没有正式版时装最新 rc，没有 rc 才装最新 beta。
 端口、绑定地址、安装目录与数据目录均可指定——见下方[可选参数](#可选参数)。
@@ -196,9 +211,10 @@ GitHub 拉取新版本、失败自动回滚。两个注意点：早于 v0.0.1-be
   `sc.exe start Codecombo` 拉回，无需人工干预；健康检查失败自动回滚（先
   优雅停服再恢复旧二进制重拉，服务随即回到旧版本继续运行）；
 - **macOS launchd**（install.sh 装）：换包完成后不另起进程，由 launchd
-  KeepAlive 自动拉起新版本；更新健康检查轮询容忍重拉竞态（15s 超时自动
-  回滚：先恢复旧二进制再按 PID 文件结束重拉进程，KeepAlive 随即拉回旧
-  版本）；
+  KeepAlive 自动拉起新版本；更新健康等待为活性驱动（P-20261116-1，恢复再
+  慢都等、不设时间死线：PID 基线播种防起点死旧 PID 误判、PID 连续变化 ≥2
+  判崩溃循环秒级回滚、稳定存活持续探测、10 分钟失控兜底）——回滚时先恢复
+  旧二进制再按 PID 文件结束重拉进程，KeepAlive 随即拉回旧版本；
 - **`start` 后台守护 / `--serve` 前台**（手动启动、远程部署「直接进程」
   方式）：更新完成后以**原启动参数**重新拉起并转后台守护——`--host`/
   `--data-dir`/TLS 等旗标原样保留（不再静默丢失），且脱离原终端会话：

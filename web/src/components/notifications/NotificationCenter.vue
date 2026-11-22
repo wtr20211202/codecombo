@@ -9,7 +9,7 @@
 // 按域落文件，不再共用单文件串行。壳内保留的是跨域装配（组合根）、头部
 // 动作、批量操作域（P-281 状态机 + 动作执行）、未读分界线（P-259）与
 // Esc/开合生命周期。
-import { computed, nextTick, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, nextTick, ref, shallowRef, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
 import { NIcon, NEmpty, createDiscreteApi } from 'naive-ui'
 import { CheckmarkDoneOutline, TrashOutline, CloseOutline, NotificationsOutline, SettingsOutline, CalendarOutline, MoonOutline, CheckboxOutline, Checkbox, Remove, SwapHorizontalOutline } from '@vicons/ionicons5'
@@ -72,10 +72,19 @@ const { downloadLog: downloadDeployLog } = useDeployLogDownload(message)
 // （state 走 Ref、动作走函数）——Pinia 解包后的 store.state 是裸数组，
 // 经 storeToRefs 还原 Ref 形态供给
 const { items: storeItems, showPanel: storeShowPanel } = storeToRefs(store)
+// 两域互引装配（dnd 需 filters 的条目流 / filters 需 dnd 的窗口判定）——
+// baseItems 经 filtersRef 单元格延迟取域（P-20261007-23 原版裸 const 晚绑声明
+// 的「TDZ 安全」不成立：useNotifyDnd 内 watch 注册期 Vue 即跑初始 effect 求值
+// sources，baseItems()彼时解引用未初始化的 filtersDomain 必炸 TDZ——dnd 偏好
+// 有在窗/近窗时段的实例上 NotificationCenter 整域挂载失败、铃铛消失。修复=
+// shallowRef 单元格：getter 读 cell.value 本身就是被追踪的响应式依赖，装配
+// 赋值瞬间 watch 初始 effect 自动重跑拿到真域（无「初始空跑零依赖致 watch
+// 永不再触发」的退化），setup 同步序内完成、渲染前就绪零中间态可见）
+const filtersRef = shallowRef<ReturnType<typeof useNotifyFilters> | undefined>(undefined)
 const dndDomain = useNotifyDnd({
   store,
   prefs: () => dndStore.prefs,
-  baseItems: () => filtersDomain.runtimeFilteredItems.value,
+  baseItems: () => filtersRef.value?.runtimeFilteredItems.value ?? [],
 })
 const filtersDomain = useNotifyFilters({
   store: {
@@ -86,6 +95,7 @@ const filtersDomain = useNotifyFilters({
   },
   dnd: { dndOnly: dndDomain.dndOnly, inDndWindow: dndDomain.inDndWindow },
 })
+filtersRef.value = filtersDomain
 const {
   filters, activeFilter, activeProject, activeRuntime,
   projectOptions, runtimeOptions, projectSelectTitle,

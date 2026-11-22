@@ -69,6 +69,11 @@ const props = defineProps<{
    *  useDirectInputShares 15s 轮询）：会话行橙点徽标 + 右键「收回访客输入」
    *  项的数据面——「谁在输入」的 owner 侧常驻可见性 */
   directHolds?: Record<string, { nick?: string; visitorTail?: string }>
+  /** 直通输入待批申请的会话 id → 申请投影（P-20261121-2，宿主投影自
+   *  useDirectInputShares.pendingBySession 同表轮询）：会话行 amber 待批点
+   *  的数据面——「有人在敲门」与「正在输入」两态扫读可辨；处置入口在
+   *  分享管理器行内批准钮/通知中心申请卡 */
+  directPends?: Record<string, { nick?: string }>
   /** 直播中会话 id → 徽标 title（P-20261106-7，宿主投影自
    *  useTerminalShareActions.liveTitles——与底部终端 tab 红点同数据源同文案）：
    *  会话行红点呼吸徽标 + 右键「直播分享/结束直播」文案翻转的数据面；缺条目
@@ -643,6 +648,15 @@ function emitBatchDestroy() {
               :title="t('terminal.directInputBadgeTitle', { nick: props.directHolds![s.id]!.nick || props.directHolds![s.id]!.visitorTail || '' })"
               data-test="session-direct-badge"
             />
+            <!-- 直通输入待批徽标（P-20261121-2）：访客申请待批——amber 空心点
+                 与 held 橙点扫读可辨（敲门 vs 输入中）；处置入口在分享管理器
+                 行内批准钮/通知中心申请卡 -->
+            <span
+              v-if="!props.directHolds?.[s.id] && props.directPends?.[s.id]"
+              class="ats-item-direct-pending"
+              :title="t('terminal.directPendingBadgeTitle', { nick: props.directPends![s.id]!.nick || '' })"
+              data-test="session-direct-pending"
+            />
             <!-- 项目硬锁徽标（P-20261004-143）：agent 会话 dir 落锁内项目——
                  API 写族已 403 但本会话 shell 命令不受锁约束（诚实边界提示） -->
             <n-icon
@@ -814,6 +828,13 @@ function emitBatchDestroy() {
             class="ats-item-direct"
             :title="t('terminal.directInputBadgeTitle', { nick: props.directHolds![s.id]!.nick || props.directHolds![s.id]!.visitorTail || '' })"
             data-test="session-direct-badge"
+          />
+          <!-- 直通输入待批徽标（P-20261121-2）：同 runtime 视图行 -->
+          <span
+            v-if="!props.directHolds?.[s.id] && props.directPends?.[s.id]"
+            class="ats-item-direct-pending"
+            :title="t('terminal.directPendingBadgeTitle', { nick: props.directPends![s.id]!.nick || '' })"
+            data-test="session-direct-pending"
           />
           <!-- 项目硬锁徽标（P-20261004-143）：同 runtime 视图行 -->
           <n-icon
@@ -1028,6 +1049,13 @@ function emitBatchDestroy() {
               class="ats-item-direct"
               :title="t('terminal.directInputBadgeTitle', { nick: props.directHolds![s.id]!.nick || props.directHolds![s.id]!.visitorTail || '' })"
               data-test="session-direct-badge"
+            />
+            <!-- 直通输入待批徽标（P-20261121-2）：同未分组行 -->
+            <span
+              v-if="!props.directHolds?.[s.id] && props.directPends?.[s.id]"
+              class="ats-item-direct-pending"
+              :title="t('terminal.directPendingBadgeTitle', { nick: props.directPends![s.id]!.nick || '' })"
+              data-test="session-direct-pending"
             />
             <!-- 项目硬锁徽标（P-20261004-143）：同未分组行 -->
             <n-icon
@@ -1273,6 +1301,17 @@ function emitBatchDestroy() {
 @keyframes ats-direct-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
+}
+/* 直通输入待批徽标（P-20261121-2）：amber 空心点静态——「有人在敲门」与
+ * held 的橙点呼吸（正在输入）扫读可辨：空心=待批（无权无输入流），实心
+ * 呼吸=持权输入中。同位异形，不与未读/直播红点争语义 */
+.ats-item-direct-pending {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid var(--accent-orange);
+  background: transparent;
 }
 /* 敏感角标（P-20261003-155）：警示档语义色小图标，常显（安全标注不 hover 才见
    ——出域前一眼可辨），tooltip 交代后果 */

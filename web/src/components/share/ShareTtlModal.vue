@@ -50,7 +50,13 @@ watch([choice, date], () => {
 }, { immediate: true })
 
 const hint = () => {
-  if (choice.value === 'permanent') return t('share.ttl.permanentLine')
+  if (choice.value === 'permanent') {
+    // 直播行（P-20261119-5）：永久只覆盖「链接/记录不过期」，直播态仍随会话
+    // ——通用文案（默认永久有效）不足以说明这层语义，用直播专属句
+    return props.share?.kind === 'terminal'
+      ? t('share.termOptions.ttlLivePermanentNote')
+      : t('share.ttl.permanentLine')
+  }
   if (choice.value === 'custom') {
     const iso = shareTtlExpiresAt('custom', date.value)
     return iso ? t('share.ttl.expiresAtLine', { date: formatDateTime(iso) }) : t('share.create.ttlPickDate')
@@ -107,14 +113,24 @@ async function onSave() {
       >
         {{ hint() }}
       </div>
-      <!-- 未过滤分享（P-20261106-9）：服务端强制 24h 上限——更长档位（含永久）
-           保存后收敛到 24h，先讲清楚免得「选了 7 天却变 24 小时」的意外 -->
+      <!-- 未过滤分享（P-20261106-9）的时长说明：快照含敏感原文，服务端强制
+           24h 上限——更长档位（含永久）保存后收敛到 24h，先讲清楚免得「选了
+           7 天却变 24 小时」的意外；直播行（P-20261119-5【用户定向修订】）的
+           显式永久合法不钳——零值清窗如实落库，改用直播专属说明（限时档上限
+           24h + 永久撤销兜底），不再宣称「永久会收敛」 -->
       <div
-        v-if="props.share?.unfiltered"
+        v-if="props.share?.unfiltered && props.share?.kind !== 'terminal'"
         class="ttl-hint ttl-cap"
         data-testid="sm-ttl-unfiltered-cap"
       >
         {{ t('share.unfiltered.ttlCapNote') }}
+      </div>
+      <div
+        v-else-if="props.share?.unfiltered && props.share?.kind === 'terminal'"
+        class="ttl-hint"
+        data-testid="sm-ttl-unfiltered-live-note"
+      >
+        {{ t('share.termOptions.ttlLiveUnfilteredNote') }}
       </div>
     </div>
     <template #footer>

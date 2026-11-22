@@ -315,6 +315,49 @@ export interface SharePasteReviewDetail {
   at?: number
 }
 
+// 可写分享视口 resize（P-20261120-8）：访客经可写 WS 控制面把视口尺寸反喂
+// 主机 PTY（「客户端窗口=终端宽度」语义）应用成功即服务端广播。前端消费 =
+// toast 即时感知（「终端被无形改格」的最小可见性面——wtyping 徽标给出访客
+// 在场，本事件给出改成了什么格）。直通分发语义同 share.drop
+// （sc-ops:share.wresize）
+export const OPS_SHARE_WRESIZE = 'sc-ops:share.wresize'
+
+/** OPS_SHARE_WRESIZE 事件 detail（服务端 share.WritableResizeEvent 广播载荷） */
+export interface ShareWritableResizeDetail {
+  token?: string
+  shareName?: string
+  terminalId?: string
+  /** 应用后的终端列数（服务端钳制域 20..500） */
+  cols?: number
+  /** 应用后的终端行数（服务端钳制域 2..300） */
+  rows?: number
+  /** 访客摘要（visitorId 前 8 位） */
+  visitorTail?: string
+  /** 时刻（epoch ms） */
+  at?: number
+}
+
+// 直通输入申请到达（P-20261121-2）：访客经直通档握手提交申请登记成功即
+// 服务端广播。前端消费 = toast 即时感知（「有访客在敲门」——申请-批准握手
+// 此前 owner 侧零通知，用户实测「访客申请 owner 没收到」的即时面）+
+// bumpDirectInputShares 待批锚点表即时对账（管理器行内批准/拒绝钮即现）。
+// 通知中心另有带「批准/收回」行内动作的入账条目，两路消费面独立。
+// 直通分发语义同 share.drop（sc-ops:share.direct-request）
+export const OPS_SHARE_DIRECT_REQUEST = 'sc-ops:share.direct-request'
+
+/** OPS_SHARE_DIRECT_REQUEST 事件 detail（服务端 share.DirectRequestEvent 广播载荷） */
+export interface ShareDirectRequestDetail {
+  token?: string
+  shareName?: string
+  terminalId?: string
+  /** 访客自报昵称（缺省 = 匿名） */
+  nick?: string
+  /** 访客摘要（visitorId 前 8 位——全串不上广播面） */
+  visitorTail?: string
+  /** 时刻（epoch ms） */
+  at?: number
+}
+
 // frontend 动词族（P-20261023-4 首批三原子 + P-20261111-3 整页·视图重载）：
 // 协议从「引导注意力」升维「替用户执行浏览器动作」——下载框弹出 / 剪贴板
 // 直写 / 新标签开外链 / 整页·当前视图重载。族内原子都是用户设备上的即时

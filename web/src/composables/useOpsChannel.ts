@@ -1,5 +1,6 @@
 import { ref, watch } from 'vue'
 import { applyLockRejection, getUnlockToken, LOCK_REJECTED_CLOSE_CODE, useLockStore } from '../stores/lock'
+import { opsBrowserIdQuery } from '../utils/opsBrowserId'
 import { OPS_AGENT_GROUPS_CHANGED, OPS_NAVIGATE, OPS_NOTIFY, OPS_PANEL, OPS_PROJECTS_CHANGED, OPS_SETTINGS_CHANGED, OPS_TASK_PROGRESS } from '../utils/opsEvents'
 
 /**
@@ -12,6 +13,8 @@ import { OPS_AGENT_GROUPS_CHANGED, OPS_NAVIGATE, OPS_NOTIFY, OPS_PANEL, OPS_PROJ
  *     agent.groups.changed → 会话分组结构就地跟随（agent 分组操作面写端广播）
  *     navigate         → 前端路由跳转（外部 Agent 可驱动界面）
  *     notify           → 前端 toast
+ * - 握手 query 携带 browserId（P-20261117-4 设备定向的路由键；hello 帧违反
+ *   「客户端不应发送消息」契约故走升级期 query，服务端 SanitizeBrowserId 守卫）
  * - 锁定态下服务端拒绝升级（无 token）：解锁 watch 立即重连；常态断线 5s 退避重连
  */
 
@@ -60,7 +63,9 @@ function connect(): void {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
   const token = getUnlockToken() || ''
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const url = `${proto}//${location.host}/ws/ops-channel`
+  // browserId 是设备定向的路由键（P-20261117-4）：frontend.* 设备效应只投递
+  // 到发起会话的浏览器；缺省/非法值服务端按「未携带」处理，向后兼容零影响
+  const url = `${proto}//${location.host}/ws/ops-channel?${opsBrowserIdQuery()}`
   // 内存令牌缺省（刷新后会话在 HttpOnly cookie）时握手不带子协议，
   // 由浏览器自动携带的同源 cookie 兜底（P-20261019-2）
   ws = token ? new WebSocket(url, [token]) : new WebSocket(url)

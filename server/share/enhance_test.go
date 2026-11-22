@@ -3,6 +3,8 @@ package share
 // 分享预览增强的回归测试：md 相对资源重写、CSV 表格渲染、html base 注入
 
 import (
+	preview "codecombo/server/filepreview"
+
 	"io"
 	"net/http/httptest"
 	"os"
@@ -48,7 +50,7 @@ func TestRewriteRelativeAssets(t *testing.T) {
 
 func TestRenderCSVHTML(t *testing.T) {
 	csvData := "name,note\na,\"x,y\"\nb,<script>alert(1)</script>\n"
-	out := renderCSVHTML([]byte(csvData), ',')
+	out := preview.RenderCSVHTML([]byte(csvData), ',')
 	for _, want := range []string{
 		"<thead><tr><th>name</th><th>note</th></tr></thead>",
 		"<td>a</td>", "<td>x,y</td>", // 引号是 CSV 语法，值本身不含引号
@@ -64,10 +66,10 @@ func TestRenderCSVHTML(t *testing.T) {
 	// 超行数截断：落 data-rows 标记，文案由前端字典补
 	var b strings.Builder
 	b.WriteString("h\n")
-	for i := 0; i < csvMaxDataRows+100; i++ {
+	for i := 0; i < preview.CSVMaxDataRows+100; i++ {
 		b.WriteString("row\n")
 	}
-	trunc := renderCSVHTML([]byte(b.String()), ',')
+	trunc := preview.RenderCSVHTML([]byte(b.String()), ',')
 	if !strings.Contains(trunc, `class="doc-note sc-csv-trunc" data-rows="`) {
 		t.Fatalf("truncated csv should carry marker: %s", trunc[len(trunc)-200:])
 	}

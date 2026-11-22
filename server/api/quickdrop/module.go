@@ -27,7 +27,9 @@ func (m *Module) DependsOn() []string { return nil }
 func (m *Module) Init(_ context.Context, _ kernel.Kernel) error { return nil }
 
 // Start 注册过期清理 ticker + 启动即先清一轮（重启不残留已过期投递——
-// share/agentask 模块同款收口）
+// share/agentask 模块同款收口）。收件箱 doc 清账与文件隔离区清账（P-
+// 20261117-2-S1：TTL 对齐 + 孤儿目录对账兜底）同 ticker 同批——不必进 share
+// ticker，快投递自有节律够用
 func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 	st := store.Get()
 	if st == nil {
@@ -40,6 +42,7 @@ func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 		} else if n > 0 {
 			k.Logger().Info("quickdrop cleanup", "removed", n)
 		}
+		gcQuickdropFiles(st, time.Now(), k.Logger())
 	}
 	if sch := k.Scheduler(); sch != nil {
 		sch.AddTicker("quickdrop-cleanup", quickdropCleanupInterval, func(context.Context) {

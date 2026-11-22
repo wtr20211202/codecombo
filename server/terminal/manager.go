@@ -122,6 +122,12 @@ type Session struct {
 	// 为「被遗忘」判据之一，在用会话绝不动。recording/liveterm 等旁路输出
 	// tap 不经此计数（它们不代表人在线）
 	clients int
+	// originBrowser 会话的浏览器亲和绑定（P-20261117-4）：frontend.* 设备效应
+	// 原语的定向路由键——效应落在发起会话的浏览器（创建请求 X-Browser-Id 头
+	// 初绑 + attach 点 query browserId 接管即迁移，last-attach-wins）。内存态
+	// 不落盘（重启恢复绑定丢失由发布口单浏览器启发式兜底），读写走
+	// BindBrowser/BrowserID（s.mu 同锁）
+	originBrowser string
 	// lastActivity 最近一次 PTY 活动（unix nano，atomic）：WriteInput（输入）
 	// 与 readLoop 输出双面刷新。空闲超时判定（P-192）的事实源——服务端自有
 	// 口径，不依赖前端 activityMap（浏览器内存态，浏览器一关即失效，而「被
@@ -1212,6 +1218,29 @@ func (s *Session) OscFramesSeen() bool {
 	return d != nil && d.FramesSeen()
 }
 
+// BindBrowser 绑定/迁移会话的浏览器亲和（P-20261117-4）：frontend.* 设备效应
+// 原语（下载框/剪贴板/开标签/重载）的「效应落在发起会话的浏览器」语义依据。
+// 两路写点：①创建请求（POST /api/terminals 携 X-Browser-Id 头）= 初绑；
+// ②/ws/terminal/:id attach 点（携 query browserId）= 接管即迁移，tie-break
+// last-attach-wins（评审建议b）——另一浏览器接管会话后，效应跟着人走。
+// browserId 是路由标签非安全边界（同实例信任域内可伪造，伪造只能让效应落在
+// 自己声明的浏览器上）。内存态不落盘：重启恢复的会话绑定丢失由发布口的
+// 单浏览器启发式兜底（opschannel.SoleConnectedBrowser）。空串 = 清除/未绑定。
+// s.mu 同锁纪律：临界区仅 map/字段读写，量级可忽略
+func (s *Session) BindBrowser(browserId string) {
+	s.mu.Lock()
+	s.originBrowser = browserId
+	s.mu.Unlock()
+}
+
+// BrowserID 当前绑定的浏览器实例 id（未绑定/已清空返回空串——发布口据此走
+// 单浏览器启发式或降级通知化）
+func (s *Session) BrowserID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.originBrowser
+}
+
 // AttachClient 交互 WS 客户端附着计数 +1（HandleTerminalWS 建连时调用）。
 // recording tap / liveterm 馈线等旁路输出消费者不计数——它们不代表人在线
 func (s *Session) AttachClient() {
@@ -1286,6 +1315,15 @@ func (s *Session) Size() (cols, rows uint16) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastCols, s.lastRows
+}
+
+// DisplayName 返回会话显示名（P-20261118-9：终端直播访客页 rename 帧源）。
+// Name 是字段不能充当接口方法（liveterm.LiveSession 面需要方法形态），锁内
+// 读与 Size 同款纪律——Rename 写侧同锁无竞态
+func (s *Session) DisplayName() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Name
 }
 
 // GetSession 获取终端会话

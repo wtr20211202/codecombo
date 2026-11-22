@@ -220,13 +220,14 @@ function renderFile(entry){
   updateWideBtn(kind);
   const pv = el('div', 'preview');
 
-  if (kind === 'markdown' || kind === 'docx' || kind === 'csv' || kind === 'snippet') {
+  if (kind === 'markdown' || kind === 'docx' || kind === 'csv' || kind === 'sheet' || kind === 'snippet') {
     // 服务端渲染净化片段：页内注入到 .md-article，reader 的 .scroll 是唯一
     // 滚动区（原 .preview 自滚会造成双滚动，锚点滚动/阅读列也不稳）。
     // 注入后跑通用增强管道（表格包裹/代码复制/标题锚点/图片灯箱）——
-    // 对未来新片段类型同样自动生效。CSV 全宽横滚（.csv 解除阅读列上限）；
-    // md/docx 保留 860px 阅读列，全宽切换只改 .wide 类（state 会话内记忆）
-    const art = el('div', 'md-article' + (kind === 'csv' ? ' csv' : '') +
+    // 对未来新片段类型同样自动生效。CSV/xlsx 表格全宽横滚（.csv 解除阅读
+    // 列上限）；md/docx 保留 860px 阅读列，全宽切换只改 .wide 类（state
+    // 会话内记忆）
+    const art = el('div', 'md-article' + (kind === 'csv' || kind === 'sheet' ? ' csv' : '') +
       (state.wide && (kind === 'markdown' || kind === 'docx') ? ' wide' : ''));
     pv.className = 'preview doc';
     pv.appendChild(art);
@@ -374,12 +375,15 @@ function renderFile(entry){
       });
     return;
   } else {
-    // 信息卡：不支持内联预览的格式
+    // 信息卡：不支持内联预览的格式。显性化分层（P-20261116-5-S2）：known=
+    // registry 已注册的已知格式（xls/ppt/odt/字体…）出「暂不支持在线预览，
+    // 可下载查看」显性提示；未知后缀（.xyz 兜底）保持中性卡——不替访客
+    // 猜测格式家族，只给名称/大小/时间与下载
     const info = el('div', 'info');
     const big = el('div', 'big'); big.innerHTML = BIG(kind === 'info' ? 'info' : kind);
     info.appendChild(big);
     info.appendChild(el('h2', '', entry.name));
-    info.appendChild(el('div', 'tip', t('unsupportedTip')));
+    if (entry.known) info.appendChild(el('div', 'tip', t('unsupportedTip')));
     const kv = el('div', 'kv');
     const k1 = el('div'); k1.append(t('kindLabel'), el('b', '', (entry.name.split('.').pop() || '').toUpperCase()));
     const k2 = el('div'); k2.append(t('sizeLabel'), el('b', '', fmtSize(entry.size)));
@@ -469,8 +473,11 @@ async function refresh(){
       renderDir(lst.entries);
     } else if (meta.entry.kind === 'text' && meta.entry.size > 20 * 1024 * 1024) {
       // 文本预览上限与服务端 markdown 渲染上限同源（20MB）：再大的文本
-      // 浏览器整段读入体验变差，信息卡 + 下载更合适
+      // 浏览器整段读入体验变差，信息卡 + 下载更合适。known 置位让 .tip
+      // 有落点（info 卡只对已知格式渲染提示行，见 renderFile）——此处要
+      // 换成 textTooLarge 专属文案
       meta.entry.kind = 'info';
+      meta.entry.known = true;
       renderFile(meta.entry);
       const tip = document.querySelector('.info .tip');
       if (tip) tip.textContent = t('textTooLarge');

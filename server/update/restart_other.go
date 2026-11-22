@@ -4,11 +4,27 @@ package update
 
 import (
 	"errors"
+	"os"
 	"syscall"
 )
 
 // 非 Windows 平台的分支实现（与 restart_windows.go 构建标签成对，两分支都
 // 必须可编译——门禁含 GOOS=darwin/linux 交叉编译）。
+
+// processAlive 进程存活探测（waitForHealthy 活性判据用）：Signal(0) 可发送
+// 即存活。EPERM（进程存在但属主不同）保守判存活——误判死会引发误回滚；
+// 更新子进程与服务同用户起，正常不会走到该分支
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, os.ErrPermission)
+}
 
 // scStartService / stopWindowsService 非 Windows 无 SCM。生产路径不可达：
 // 主进程侧 servicectx.IsService 非 Windows 恒否，env 提示不会是

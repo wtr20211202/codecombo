@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NButton, NIcon, NSelect, NSpin, NTag } from 'naive-ui'
 import {
   ArrowRedoOutline, ContractOutline, ExpandOutline, OpenOutline, RefreshOutline, SettingsOutline,
@@ -10,23 +11,26 @@ import { useI18n } from '../../../composables/useI18n'
  * dsh 控制台顶部紧凑 chrome（P-20261001-20 从 DshConsoleView 拆出的渲染层）：
  * 品牌 + 状态点 + 标题 + 目标切换 + 版本标签 + 刷新/新标签/最大化/关闭。
  * 状态与动作全部来自宿主（props 入 / emits 出），本组件不持有逻辑。
+ * 版本标签本机标注（P-20261118-6 ⑦）：版本号与升级徽标恒取自本机 dsh
+ * （目标机版本本侧不可获取），外部目标激活时 title 补「本机」标注防误读。
  */
 const { t } = useI18n()
 
-defineProps<{
+const props = defineProps<{
   /** 工具栏 tooltip 展示的上游地址（token 已掩去） */
   displayUrl: string
   activeTargetId: string
   targetOptions: { label: string; value: string }[]
   /** null = 探测中 */
   available: boolean | null
-  latencyMs: number | null
   /** 升级徽标（空串 = 无新版本） */
   upgradeBadge: string
   headerVersionLabel: string
   /** 当前 dsh 版本命中已知缺陷登记（P-20261111-2-S2）：标签转警示态并提示——
    *  嵌入页可能因该缺陷打不开，工具栏标签是用户唯一可见的自救入口 */
   knownIssue?: boolean
+  /** 外部目标激活：版本标签内容取自本机 dsh，title 补本机标注（P-20261118-6 ⑦） */
+  versionLocalOnly?: boolean
   maximizable: boolean
   maximized: boolean
   processRestarting: boolean
@@ -42,6 +46,15 @@ const emit = defineEmits<{
   (e: 'toggle-maximized'): void
   (e: 'close'): void
 }>()
+
+const versionTagTitle = computed(() => {
+  const base = props.knownIssue
+    ? t('dshConsole.knownDefectTitle')
+    : props.upgradeBadge
+      ? t('dshConsole.upgradableTitle')
+      : t('dshConsole.versionsTitle')
+  return props.versionLocalOnly ? `${base} · ${t('dshConsole.versionsLocalNote')}` : base
+})
 </script>
 
 <template>
@@ -81,18 +94,13 @@ const emit = defineEmits<{
       :class="{ ok: available === true, off: available === false }"
       :title="available === true ? t('dshConsole.statusOk') : t('dshConsole.notRunning')"
     />
-    <span
-      v-if="latencyMs !== null && available"
-      class="dsh-latency"
-    >{{ latencyMs }}ms</span>
+    <!-- 版本标签：内容恒取自本机 dsh（外部目标激活时 title 补本机标注防误读） -->
     <n-tag
       size="tiny"
       :type="knownIssue ? 'error' : upgradeBadge ? 'success' : 'default'"
       round
       class="dsh-upgrade-tag"
-      :title="knownIssue
-        ? t('dshConsole.knownDefectTitle')
-        : upgradeBadge ? t('dshConsole.upgradableTitle') : t('dshConsole.versionsTitle')"
+      :title="versionTagTitle"
       @click="emit('open-versions')"
     >
       {{ headerVersionLabel }}
@@ -197,7 +205,6 @@ const emit = defineEmits<{
 }
 .dsh-status.ok { background: var(--accent-green); }
 .dsh-status.off { background: var(--accent-red); }
-.dsh-latency { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
 .dsh-upgrade-tag { cursor: pointer; flex-shrink: 0; }
 .dsh-actions { display: flex; gap: 2px; flex-shrink: 0; }
 </style>

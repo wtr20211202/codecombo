@@ -227,12 +227,14 @@ func restartBare(binary string, port int, dd string) (int, error) {
 }
 
 // daemonStdout bare spawn 的 stdout/stderr 落盘文件（数据目录 logs/
-// update-restart.log，O_APPEND 串接多轮更新）。打开失败回落继承更新子进程
-// 自身 stdio（best-effort 不阻断 spawn——spawn 失败/不健康由回滚链兜底）
+// update-restart.log，O_APPEND 串接多轮更新；职责头注仅首次创建时写，
+// openAppendLog——双文件防混淆面见 do_update.go 头注常量块）。打开失败回落
+// 继承更新子进程自身 stdio（best-effort 不阻断 spawn——spawn 失败/不健康由
+// 回滚链兜底）
 func daemonStdout(dd string) *os.File {
 	logDir := filepath.Join(dd, "logs")
 	_ = os.MkdirAll(logDir, 0755)
-	f, err := os.OpenFile(filepath.Join(logDir, "update-restart.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := openAppendLog(filepath.Join(logDir, "update-restart.log"), restartLogHeader)
 	if err != nil {
 		updateLogf("open restart stdout log failed (%v) — inheriting update subprocess stdio", err)
 		return os.Stdout
@@ -295,16 +297,58 @@ func killByPID(pid int) error {
 // PID 文件/本子进程 spawn（回滚链同构断言），不真实杀进程
 var killByPIDFn = killByPID
 
-// waitForHealthy 等待新版本进程健康：
-//  1. 读 PID 文件（新进程启动即重写）派生本机明文地址——
-//     第三行回环辅助端口 > 0（TLS 模式）则探测回环口，否则探测主端口（明文模式）。
-//     历史缺陷：固定探测主端口明文 /api/health，TLS 默认开启后自签 https 握手
-//     必失败 → 更新健康检查必挂 → 误回滚
-//  2. PID 文件不可读时回退主端口明文探测（旧文件同端口，语义不变）
-func (c *updateContext) waitForHealthy(timeout time.Duration) error {
+// 健康等待的节奏与兜底（包级变量仅为测试压缩时长——生产恒默认值，包测试
+// 无 t.Parallel 包级插桩安全，stallTimeout 同款纪律）
+var (
+	healthPollInterval = 1 * time.Second
+	healthReportEvery  = 10 * time.Second
+	healthRunawayGuard = 10 * time.Minute
+	// crashLoopPidChanges 基线确立后 PID 文件值变化达到该次数即判 crash-loop。
+	// 阈值 2：一次变化可能是服务形态正常单次重启（SCM failure-recovery 等），
+	// 连续两次 = 新二进制起一次崩一次的循环，继续等只会循环下去
+	crashLoopPidChanges = 2
+)
+
+// waitForHealthy 等待新版本进程健康（P-20261116-1-S1 活性驱动等待，替代
+// 15s 硬编码死线）：恢复时间是用户环境的函数（会话数/机器性能/磁盘），不能
+// 预设时间预算；误判代价极端不对称——多等无害、误回滚致命，故判据全部取
+// 进程活性证据：
+//  1. PID 基线播种：先确立「新 PID 基线」（PID 文件读到 ≠ 换包前旧 PID 且
+//     存活的值）才启用 crash-loop 失败判据。基线未立前读到旧 PID/0/不可读
+//     一律视为「新进程未起」只继续轮询不判死——起点等待时旧进程已退出且其
+//     PID 文件无退出清理（更新交接走 shutdownFn 钩子优雅退出，不删 PID 文件
+//     〔app.go 仅监听失败/serve 收尾两路径删除〕），朴素活性循环会在 t≈0 读到
+//     死旧 PID 而误回滚（beta.7→beta.8 事故形态）
+//  2. /api/health 1s 轮询照旧，地址派生同前：读 PID 文件（新进程启动即重写）
+//     第三行回环辅助端口 > 0（TLS 模式）则探测回环口，否则探测主端口明文
+//     （历史缺陷见 git 历史：固定明文主端口在 TLS 默认开启后必挂）；PID 文件
+//     不可读时回退主端口明文探测。进程稳定存活即持续等待，恢复再慢都等
+//  3. crash-loop 计数：基线确立后 PID 文件值变化 ≥ crashLoopPidChanges 次即
+//     判 crash-loop 立即失败走回滚——unit Restart=on-failure 约 100ms 重拉使
+//     「活性」永真（install.sh 的 unit 未设 StartLimit*，慢崩溃循环 systemd
+//     拦不住），且把崩溃循环检测从 10 分钟兜底压回秒级。变化观察排除换包前
+//     旧 PID（防陈旧文件在新进程首次改写前被计为一次重启）；不要求新值存活
+//     （服务形态两次崩溃可短于轮询间隔，死后落盘的 PID 值同样是重启证据）
+//  4. 失控兜底 healthRunawayGuard 仅作 runaway 防护，语义=超时兜底、原因未定
+//     （慢恢复或死锁均可——23 会话慢盘恢复可合法超 10 分钟，触发不代表真
+//     死锁），触发后恢复旧版本是正确动作
+//  5. 诊断行证据化：每 healthReportEvery 落一行真实进展（基线存活态 + 已等
+//     时长 + 数据目录日志字节增量，logsSize）；会话恢复计数在新进程内部，
+//     更新子进程不可见，不以臆测值冒充该指标
+func (c *updateContext) waitForHealthy(oldPID int) error {
 	client := &http.Client{Timeout: 3 * time.Second}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	start := time.Now()
+	var (
+		baseline     int // 已确立的新 PID 基线；0=未播种（不启用失败判据）
+		pidChanges   int
+		lastReportAt time.Time
+		lastLogSize  int64
+	)
+	for {
+		if time.Since(start) >= healthRunawayGuard {
+			return fmt.Errorf("health wait abandoned after runaway guard %v (cause undetermined: slow recovery or hang — progress log above tells which)", healthRunawayGuard)
+		}
+
 		url := fmt.Sprintf("http://localhost:%d/api/health", c.port)
 		if loopback := readPIDLoopbackPort(c.dd); loopback > 0 {
 			url = fmt.Sprintf("http://localhost:%d/api/health", loopback)
@@ -316,9 +360,61 @@ func (c *updateContext) waitForHealthy(timeout time.Duration) error {
 				return nil
 			}
 		}
-		time.Sleep(1 * time.Second)
+
+		if pid := readRunningPid(c.dd); pid > 0 {
+			switch {
+			case baseline == 0:
+				if pid != oldPID && processAlive(pid) {
+					baseline = pid
+					updateLogf("health wait: baseline seeded pid=%d after %s", pid, time.Since(start).Round(time.Second))
+				}
+			case pid != baseline && pid != oldPID:
+				pidChanges++
+				updateLogf("health wait: pid changed %d -> %d (change %d)", baseline, pid, pidChanges)
+				if pidChanges >= crashLoopPidChanges {
+					return fmt.Errorf("new process crash-loop: pid changed %d times during health wait (last %d -> %d)", pidChanges, baseline, pid)
+				}
+				baseline = pid
+			}
+		}
+
+		now := time.Now()
+		if lastReportAt.IsZero() {
+			lastReportAt = start
+			lastLogSize = logsSize(c.dd)
+		} else if now.Sub(lastReportAt) >= healthReportEvery {
+			size := logsSize(c.dd)
+			progress := "no new pid yet (baseline unseeded)"
+			if baseline > 0 {
+				progress = fmt.Sprintf("pid %d alive=%v", baseline, processAlive(baseline))
+			}
+			updateLogf("health wait: %s, waited %s, dd logs %+d bytes since last report", progress, now.Sub(start).Round(time.Second), size-lastLogSize)
+			lastReportAt = now
+			lastLogSize = size
+		}
+
+		time.Sleep(healthPollInterval)
 	}
-	return fmt.Errorf("health check timeout after %v", timeout)
+}
+
+// logsSize 数据目录日志字节数合计（诊断行证据：增量 > 0 = 新进程在写日志 =
+// 启动在推进）。排除本子进程自有 update.log——诊断行本身写它，不排除则增量
+// 自证恒真。目录缺失/条目不可读按 0 计（best-effort 证据面，绝不影响判定）
+func logsSize(dd string) int64 {
+	entries, err := os.ReadDir(filepath.Join(dd, "logs"))
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".log") || e.Name() == "update.log" {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
 }
 
 // pidFileCandidates 更新链 PID 文件候选（按序），readPIDLoopbackPort /

@@ -12,6 +12,29 @@ import (
 // 两分支都可编译）。服务名常量 windowsServiceName 定义在 restart.go（平台
 // 无关——路由失败留痕引用它）
 
+// processAlive 进程存活探测（waitForHealthy 活性判据用）。Windows 上
+// os.FindProcess 对任意 PID 都成功且 Signal(0) 不可用（proc_windows.go 实证
+// 同款历史），走既有 waitForProcess 平台实现同源机制——OpenProcess(SYNCHRONIZE)
+// + WaitForSingleObject(0)：句柄打不开（含 PID 不存在/权限不足）一律判死
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	const SYNCHRONIZE = 0x00100000
+	h, err := syscall.OpenProcess(SYNCHRONIZE, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer func() { _ = syscall.CloseHandle(h) }()
+	event, err := syscall.WaitForSingleObject(h, 0)
+	if err != nil {
+		// 句柄有效但等待失败：保守判存活（对正在退出的进程误判死会引发误回滚）
+		return true
+	}
+	// WAIT_OBJECT_0（已触发）= 已退出；WAIT_TIMEOUT = 仍在运行
+	return event == syscall.WAIT_TIMEOUT
+}
+
 // scStartService 换包完成后交还 SCM：binPath 钉着与换包目标同一路径，磁盘上
 // 已是新二进制，start 即以新版本拉起（restartService windows-service 分支）
 func scStartService() error {

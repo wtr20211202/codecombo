@@ -572,6 +572,102 @@
           </div>
         </details>
         <details class="faq-item">
+          <!-- 图片占位与嵌入对象口径（P-20261116-6/P-20261116-7/P-20261118-1/P-20261118-3/P-20261118-7，
+               源=server/share/office.go 与 embedshell.go：
+               img src 指向同源 /docx-media 端点流式供给，嵌入对象（附件）产 /docx-embed 下载链接
+               （恒 attachment + octet-stream，legacy OLE 容器抽 Ole10Native 原始文件名——GBK/ANSI
+               名经 GB18030 解码还原；正文抽取=扫描式数据长度定位（真实 Word 写入器字段变体鲁棒）
+               +内容锚点回退，四级序编码规范化后文本族转码 UTF-8，抽不出正文的容器在壳页显性提示
+               「该附件结构暂不支持自动预览，可下载查看」不再静默弹下载），preview=1 显式白名单
+               分型（html/pdf/图片/text 族/md 直览），html/htm 预览走新标签预览器壳页 &ui=1
+               （scripts/forms/popups 受限能力
+               参数映射在壳页 iframe 的 preview 直连上，任何组合绝不 allow-same-origin 与
+               allow-top-navigation），白名单外忽略参数回归 attachment，EMF/WMF 图元与悬空/越界
+               引用渲染侧降级占位、端点拒收（超限/非图字节）404；改先改源） -->
+          <summary><span data-lang-en>Some images in a shared Word document show as placeholders</span><span data-lang-zh>分享的 Word 文档里部分图片显示为占位块</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>The in-browser preview renders a Word (<code>.docx</code>)
+              document's text layout and loads its embedded images from a same-origin endpoint
+              as the page renders — photos no longer compete for a tiny preview budget, so
+              image-heavy documents render in full. References that cannot be resolved —
+              missing from the file, escaping the package, or not an image relationship —
+              degrade to a placeholder showing the file name and a hint; media the endpoint
+              refuses (over the per-image size cap or not real picture bytes) simply does not
+              load. Neither breaks the page, and the download always contains the original
+              document with every image. Embedded objects (attachments, e.g. files pasted
+              into Word) appear as 📎 blocks carrying the original file name recovered from
+              the document — including Chinese Windows documents whose names are stored in
+              the legacy ANSI (GBK) encoding, which are decoded back to readable text.
+              Previewable types (HTML/PDF/images/plain text/Markdown) get a preview action
+              that opens in a new tab so the reading column stays clean: HTML prototypes open
+              in a dedicated previewer page — title, a scripts risk-ack checkbox plus an
+              optional forms-and-popups switch applied via a plain form resubmit (no
+              JavaScript), and a full-height sandboxed iframe. Embedded text bodies are first
+              extracted out of OLE containers and transcoded to UTF-8 (UTF-16/GBK legacy
+              text stops rendering as mojibake; this extraction is the actual mojibake fix —
+              encoding normalization only hardens the text family). Extraction locates the
+              body by scanning for the declared-length field, so real-world Word writers
+              that store extra header fields are handled, with content anchors as a second
+              line of defense; containers that yield no extractable body open an explicit
+              "this attachment's structure can't be auto-previewed yet — download it to
+              view" page instead of silently triggering a download. Everything stays
+              sandboxed, so prototypes can never read this app's
+              sessions, and neither <code>allow-same-origin</code> nor top-level navigation
+              is ever granted. Anything outside the preview
+              whitelist keeps the plain download. Images stored as EMF/WMF metafiles, which
+              browsers cannot render (a common Windows paste artifact), show an honest
+              placeholder instead of a broken image.</span>
+              <span data-lang-zh>浏览器内预览渲染 Word（<code>.docx</code>）文档的文本排版，
+              并从同源端点按需加载其内嵌图片——照片不再挤占很小的预览预算，图片型文档也能整份
+              渲染。无法解析的引用——文件里缺失、越出包外或不是图片关系——降级为占位块
+              （文件名+提示语）；端点拒收的媒体（超单图上限或不是真实图片字节）则不加载。
+              两者都不影响整页预览；下载拿到的始终是含全部图片的原始文档。嵌入对象（附件，
+              例如粘贴进 Word 的文件）在预览中以单行 📎 块呈现，块上带有从文档中还原的原始文件名
+              ——中文 Windows 时代以 ANSI（GBK）编码存放的名字也会解码还原成可读文本。可预览
+              类型（HTML/PDF/图片/纯文本/Markdown）获得「预览」动作、新标签打开，阅读列保持
+              干净：HTML 原型进专门的预览器壳页——标题、脚本风险确认勾选与可选的「允许表单
+              与弹窗」开关（普通表单重提交生效，零 JavaScript）、全幅沙箱 iframe。嵌入的文本
+              正文先从 OLE 容器里抽取出来并转码 UTF-8（UTF-16/GBK 老文本不再乱码；乱码
+              根除靠正文抽取，编码规范化只是文本族供给的健壮性补强）。抽取按扫描式定位数据
+              长度字段，真实 Word 写入器多出的头字段变体也能抽全，内容锚点回退兜底第二道；
+              抽不出正文的容器会打开显性提示页「该附件结构暂不支持自动预览，可下载查看」，
+              不再静默弹下载框——一切都在沙箱内，原型读不到本应用登录态，任何组合都不授予
+              <code>allow-same-origin</code> 与顶层导航；白名单外的
+              类型维持纯下载。以 EMF/WMF 图元格式存储、浏览器无法渲染的图片（Windows 粘贴
+              图的常见产物）则显示诚实占位块，不再破图。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <!-- 无预览格式显性化口径（P-20261116-5-S2，源=server/share/preview/preview.go registry：
+               已注册 KindInfo=已知格式出显性提示，未注册后缀中性信息卡兜底；改先改源） -->
+          <summary><span data-lang-en>Why does a shared Excel or PowerPoint file open as just an info card?</span><span data-lang-zh>分享的 Excel/PPT 等文件打开只有一张信息卡？</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>In-browser preview currently covers Markdown, Word
+              (<code>.docx</code>) with loaded images, tabular data
+              (<code>.csv</code>/<code>.tsv</code>/<code>.xlsx</code>), PDF, HTML, images,
+              audio/video and plain text/code. Formats without a preview renderer yet —
+              legacy office files (<code>.xls</code>/<code>.ppt</code>/<code>.pptx</code>),
+              OpenDocument (<code>.odt</code>/<code>.ods</code>/<code>.odp</code>),
+              <code>.epub</code>, fonts — are known formats, so the share page says so
+              explicitly: “preview is not available for this format, you can download it
+              instead”, along with the file's name, size and modification time.
+              Unrecognized extensions show the same info card without that note. Either
+              way, downloading always delivers the original file.</span>
+              <span data-lang-zh>浏览器内预览目前覆盖 Markdown、Word（<code>.docx</code>）与
+              加载内嵌图片、表格（<code>.csv</code>/<code>.tsv</code>/<code>.xlsx</code>）、PDF、
+              HTML、图片、音视频与纯文本/代码。暂无预览渲染的格式——老办公格式
+              （<code>.xls</code>/<code>.ppt</code>/<code>.pptx</code>）、OpenDocument
+              （<code>.odt</code>/<code>.ods</code>/<code>.odp</code>）、<code>.epub</code>
+              与字体——都是已知格式，分享页会显性提示「该格式暂不支持在线预览，可下载后查看」，
+              并附文件名/大小/修改时间；未识别的后缀则给同一张信息卡但不带这句提示。
+              无论哪种，下载拿到的都是原始文件。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
           <summary><span data-lang-en>Agent CLIs (claude etc.) suddenly “not found” inside the service</span><span data-lang-zh>智能体 CLI（claude 等）在服务里突然 not found</span></summary>
           <div class="faq-body">
             <p>
@@ -597,6 +693,43 @@
               <span data-lang-zh>拿到的是 <code>.sha256</code>/<code>.sig</code> 伴随小文件而非二进制
               ——Releases 页上最高发的「资产拿错」。二进制约 50MB；重新下载并用
               <code>sha256sum -c --ignore-missing SHA256SUMS.txt</code> 校验（须见 <code>OK</code>）。</span>
+            </p>
+          </div>
+        </details>
+        <!-- 网络受限回退（P-20261116-2-S1）：源=README §Quickstart 镜像回退段+install.sh 哨兵失败提示（改先改源）；
+             npm 渠道并列回退指引+信任边界两级如实（防损坏≠防恶意改写）与 README 同款措辞 -->
+        <details class="faq-item">
+          <summary><span data-lang-en>Install fails — “connection reset”, or the download never completes</span><span data-lang-zh>安装失败——连接重置，或下载怎么都下不完</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>On CN networks the one-liner's source
+              (<code>raw.githubusercontent.com</code>) and GitHub Releases are routinely
+              unreachable or reset mid-transfer. Two fallbacks, most-trusted first: the npm channel
+              (<code>npm i -g codecombo@next</code> — the registry has integrity mechanisms built
+              in), or the same install command through a mirror prefix:</span>
+              <span data-lang-zh>CN 网络到一键命令的源（<code>raw.githubusercontent.com</code>）
+              与 GitHub Releases 常态性不可达或传输中途被重置。两条回退路，按可信度排序：npm 渠道
+              （<code>npm i -g codecombo@next</code>——registry 自带完整性机制），或走镜像前缀的
+              同款安装命令：</span>
+            </p>
+            <div class="cmd-lines">
+              <div class="cmd-row">
+                <code class="cmd-text">p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://ghproxy.net/https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" &amp;&amp; sh "$p"; rm -f "$p"</code><span class="qs-cmt" data-lang-en># mirror fallback — Linux / macOS</span><span class="qs-cmt" data-lang-zh># 镜像回退——Linux / macOS</span>
+                <button class="copy-btn" type="button" data-copy="p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://ghproxy.net/https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o &quot;$p&quot; &amp;&amp; sh &quot;$p&quot;; rm -f &quot;$p&quot;" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+              </div>
+            </div>
+            <p>
+              <span data-lang-en>Trust boundary, stated plainly: the sentinel check + SHA256
+              verification protect against truncated or corrupted transfers — not against a
+              malicious mirror rewriting the content (an altered script that keeps the trailing
+              sentinel still passes; when the <code>SHA256SUMS</code> manifest travels through the
+              same mirror as the binary, the verification baseline can be swapped along with them).
+              For integrity-sensitive setups prefer the official direct link or npm. The Windows
+              one-liner (<code>install.ps1</code>) has no mirror variant documented yet.</span>
+              <span data-lang-zh>信任边界如实说：哨兵自检 + SHA256 校验防的是传输截断/损坏——不防
+              镜像恶意改写内容（正文被改但保留尾部哨兵仍可通过校验；<code>SHA256SUMS</code> 清单与
+              二进制同走镜像时，校验基准可被一并调包）。完整性敏感场景首选官方直连或 npm。
+              Windows 一键命令（<code>install.ps1</code>）暂无对等镜像形态。</span>
             </p>
           </div>
         </details>

@@ -26,10 +26,17 @@
     "/s/": "分享访客面同源入口（P-20261020-2）——访客浏览器/手机直开的零依赖页面与子资源（页面/SSE/口令/留言），不经前端 api 层；分享链接由 utils/shareAddress 地址计划拼装（不调 api.*）",
     "/api/sync/units": "多实例同步对端面（P-20261023-1）：对端实例间 zip 打包/落位传输通道——本端前端经 /sync/pull|push 编排端点间接消费，不经 domains 直调",
     "/api/projects/:id/file/download": "文件下载直链消费面（P-20261030-2 blob 反模式直链化）：utils/directDownload 构造同源 <a href download> 程序化点击 + frontendAtomActions ops 原子同款——浏览器原生 GET 自动携带锁 cookie 载体（P-20261019-2），不经 axios domains",
+    "/api/quickdrop/dropfile/:id": "快投递逐文件下载直链（P-20261117-3 主人侧接收面）：管理卡记录区经 utils/directDownload quickdropDropFileUrl 构造同源 <a download> 直链（同款鉴权语义——锁 cookie 载体），不经 axios domains；fid 取件键",
     "/api/terminals/session-groups": "终端会话自定义分组 agent 操作面（P-20261111-1-S3）——agent 可编程建组/改名/删组/会话归组移动，写 uiState 本地实例 agentTerminal.groups 后广播 agent.groups.changed 走前端既有重读链；浏览器前端零调用（分组全走页面内交互持久化）"
   },
   "routes": {
     "POST /api/audit/archive": "审计保留巡更手动触发（P-20261003-277）——运维/agent 维护面（归档自动进行，UI 无按钮；e2e 窗口翻转用例直打 API）",
+    "GET /api/projects/:id/file/preview": "项目文件预览 payload 端点（P-20261119-4 统一双视图）——FilePreviewView 组件层 fetch（docx/csv/xlsx 净化 HTML），浏览器同源 GET 自动携带锁 cookie，不经 axios domains",
+    "GET /api/projects/:id/file/raw": "项目文件字节内联端点（P-20261119-4）——<img>/<video>/<audio>/pdf iframe 的 src 子资源直连，同上",
+    "GET /api/projects/:id/file/rel/*rel": "项目文件相对子资源回源端点（P-20261119-4）——htmlview <base href> 落点，sandbox iframe 内相对引用按层级直连，同上",
+    "GET /api/projects/:id/file/media": "docx 预览图片供给端点（P-20261119-4）——src 由服务端渲染产物注入（payload.html 内），不经前端调用面",
+    "GET /api/projects/:id/file/embed": "docx 嵌入对象端点（P-20261119-4）——链接由服务端渲染产物注入（preview/ui 双形态），不经前端调用面",
+    "GET /api/projects/:id/file/htmlview": "html 沙箱预览端点（P-20261119-4）——FilePreviewView iframe 的 src 直连（scripts opt-in 由 URL 参数承载），同上",
     "GET /drop/:token": "访客投递页（P-20261006-51）——手机浏览器直开的零依赖单页，不经前端应用",
     "POST /drop/:token": "访客投递页表单提交——同上，页面自包含",
     "GET /assets/xterm.js": "分享访客页 vendored 资产（P-20261020-2）——访客页 <script> 直载，不经前端 api 层",
@@ -37,6 +44,7 @@
     "GET /assets/xterm.css": "分享访客页 vendored 资产（P-20261020-2）——访客页 <link> 直载，同上",
     "GET /assets/addon-unicode11.js": "分享访客页 vendored 资产（P-20261107-4 渲染保真）——xterm unicode11 宽度表，访客页 <script> 直载，同上",
     "GET /assets/JetBrainsMono-Regular.woff2": "分享访客页 vendored 终端字体（P-20261107-4，OFL）——访客页 @font-face 直载，同上",
-    "GET /assets/JetBrainsMono-Bold.woff2": "分享访客页 vendored 终端字体粗体（P-20261107-4，OFL）——同上"
+    "GET /assets/JetBrainsMono-Bold.woff2": "分享访客页 vendored 终端字体粗体（P-20261107-4，OFL）——同上",
+    "GET /api/share/:token/direct": "申请批准路径状态投影（P-20261024-1，P-20261121-1 统一收编后语义=申请通道在场/在途申请/持权）——agent 可编程消费面（管理面轮询走 GET /api/share 行 direct.* 投影，shareApi.getDirect 客户端方法已删）"
   }
 }

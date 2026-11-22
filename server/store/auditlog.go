@@ -59,12 +59,14 @@ const (
 	AuditShareDrop           = "share.drop"               // 访客协作素材上行（P-20261024-1；Detail 记分享/文件名/大小/昵称元数据，内容不入账）
 	AuditShareCollab         = "share.collab"             // 协作通道开关（P-20261024-1 行内动作；Detail 记 on/off）
 	AuditShareDropConsume    = "share.drop_consume"       // 协作素材标记已消费（交给会话即标，TTL 消费语义的落盘点）
-	AuditShareDirectGrant    = "share.direct.grant"       // 直通输入权授予（P-20261024-1 握手批准；Detail 记 visitorId 摘要/会话/时效元数据）
-	AuditShareDirectRevoke   = "share.direct.revoke"      // 直通输入权收回（owner 一键/超时/关闭级联共用；Detail 记缘由元数据）
-	AuditShareDirectInput    = "share.direct.input"       // 直通输入批次（P-20261024-1；全量批次入账只记长度/visitorId 摘要元数据，文本不入账）
+	AuditShareGuestInput     = "share.guestInput"         // 访客输入·申请通道开关（P-20261121-1 统一收编行内动作；Detail 记 on/off；camelCase 扁平键沿 writableInput 先例）
+	AuditShareDirectRequest  = "share.direct.request"     // 访客输入申请到达（P-20261121-1 由 share.direct.input 分键——申请与键入批次语义分账；Detail 记分享/visitorId 摘要元数据）
+	AuditShareDirectGrant    = "share.direct.grant"       // 访客输入权授予（P-20261024-1 握手批准，P-20261121-1 统一后为申请批准路径授权动作；Detail 记 visitorId 摘要/会话/时效元数据）
+	AuditShareDirectRevoke   = "share.direct.revoke"      // 访客输入权收回（owner 一键/超时/关闭级联共用；Detail 记缘由元数据）
 	AuditShareWritable       = "share.writable"           // 可写分享开关（P-20261106-8 单条/批量动作；Detail 记 on/off/批量摘要——泄露半径抬升到 shell 面，开/关全程留痕）
-	AuditShareWritableInput  = "share.writableInput"      // 可写分享访客输入批次（P-20261106-8；quickdrop 同口径只记长度/visitorId 摘要/IP 元数据，文本不入账；camelCase 扁平键沿 retiredHit 先例——嵌套点分键会与可写开关动作的 locale 树冲突）
+	AuditShareWritableInput  = "share.writableInput"      // 访客输入键入批次·统一单事件（P-20261106-8，P-20261121-1 起 share.direct.input 批次并入本键：Detail 加 mode=open|hold 分档授权模式；quickdrop 同口径只记长度/visitorId 摘要/IP 元数据，文本不入账；camelCase 扁平键沿 retiredHit 先例——嵌套点分键会与可写开关动作的 locale 树冲突）
 	AuditShareWritablePaste  = "share.writablePaste"      // 可写分享粘贴审批（P-20261106-8；Detail 记批准/拒绝/超时决策与模式摘要元数据，粘贴块不入账）
+	AuditShareWritableResize = "share.writableResize"     // 可写分享访客视口 resize（P-20261120-8；Detail 记目标尺寸/visitor 摘要/IP 元数据——与可写输入同口径不入敏感账，camelCase 扁平键同款理由）
 	AuditWorkspaceExport     = "workspace.export"         // 工作区状态备份导出
 	AuditClaudeExport        = "claude.export"            // Claude 会话导出 Markdown（数据出域）
 	AuditClaudeBatchZip      = "claude.export_batch"      // Claude 会话批量导出 zip（多选归档，数据出域）

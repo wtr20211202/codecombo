@@ -39,9 +39,9 @@ export const SCALAR_COLLECT_KEYS = ['instanceId', 'projectId']
 /** 数量下限守卫（防提取失明空转全绿，check-errmarkers/check-api-routes MIN_* 先例）：
  *  取当前存量留余量——提取器与书写惯例脱钩（如引号形态漏提取）时在此先红 */
 export const MIN_GUARDS = {
-  registryRows: 65, // 登记行数（当前 68）
+  registryRows: 65, // 登记行数（当前 71）
   legacyKeys: 42, // 存量豁免条目数（当前 47）
-  uniqueLiterals: 40, // 生产面 sc.* 唯一字面量数（当前 43：exact 键 + 模板/拼接前缀形态）
+  uniqueLiterals: 40, // 生产面 sc.* 唯一字面量数（当前 52：exact 键 + 模板/拼接前缀形态）
   writerNamespaces: 19, // patchNamespaces 命名空间键面（当前 19）
   collectNamespaces: 3, // collect 面命名空间键面（当前 3）
 }

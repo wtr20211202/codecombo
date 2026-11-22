@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -58,9 +59,46 @@ func enumerateNetworkAddresses() ([]NetworkAddress, error) {
 		}
 		out = append(out, collectNetworkAddresses(iface.Name, addrs, seen)...)
 	}
-	// 稳定序：v4 优先（手机/局域网最常见），再按接口名与地址字典序——
-	// 前端默认取第一项，顺序不可随 net.Interfaces 返回顺序漂移
+	// 稳定序：物理网卡优先（虚拟/内部网卡降权），同档内 v4 优先（手机/局域网
+	// 最常见），再按接口名与地址字典序。注意：本顺序是 API 消费者的默认参考序
+	// （agent 诊断「本实例对局域网/外网暴露哪些地址」）；分享链接/二维码的默认
+	// 首项由前端 sortRelayCandidates 对候选全量去重重排决定（P-20261119-7），
+	// 不是直接取本清单第一项
+	sortNetworkAddresses(out)
+	return out, nil
+}
+
+// virtualIfacePatterns 虚拟/内部网卡名模式表（P-20261119-7，与前端
+// web/src/utils/networkAddress.ts 同表，大小写不敏感子串匹配）：Windows
+// vEthernet/WSL、docker0、libvirt virbr、VMware/VirtualBox host-only 等
+// 接口的地址通常是 NAT/宿主侧虚拟网段，对端往往不可达；纯数值序会让
+// 172.16/12 段虚拟网卡恰好排到 192.168 物理网卡之前。Tailscale/utun 刻意
+// 不入表（代码自述的典型外部可达入口形态），`br-` 前缀不入表（OpenWrt
+// br-lan/br-wan 物理网桥会被误伤）。命中者仅降权不剔除——保留「不做接口名
+// 启发式过滤」的既有决策语义（vEthernet 等可能正是用户可达入口），消费方
+// 仍可在候选中选到。
+var virtualIfacePatterns = []string{"vethernet", "wsl", "docker", "virbr", "vmnet", "vmware", "virtualbox", "loopback"}
+
+// isVirtualIfaceName 接口名是否命中虚拟/内部网卡模式（排序降权用，非过滤）
+func isVirtualIfaceName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, p := range virtualIfacePatterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// sortNetworkAddresses 枚举序稳定排序（纯函数便于单测注入候选）：虚拟/内部
+// 网卡名命中模式表者整体排物理网卡之后，同档内 v4 优先，再按接口名与地址
+// 字典序（中文系统「以太网」>ASCII「vEthernet」的字典序不再决定默认首项）
+func sortNetworkAddresses(out []NetworkAddress) {
 	sort.SliceStable(out, func(i, j int) bool {
+		vi, vj := isVirtualIfaceName(out[i].Iface), isVirtualIfaceName(out[j].Iface)
+		if vi != vj {
+			return !vi // 物理网卡档在前
+		}
 		if out[i].Family != out[j].Family {
 			return out[i].Family == "v4"
 		}
@@ -69,7 +107,6 @@ func enumerateNetworkAddresses() ([]NetworkAddress, error) {
 		}
 		return out[i].IP < out[j].IP
 	})
-	return out, nil
 }
 
 // collectNetworkAddresses 单接口地址过滤（纯函数，单测注入伪 net.Addr 用）：

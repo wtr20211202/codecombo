@@ -75,6 +75,46 @@ func TestCollectNetworkAddresses_DedupesSameIPAcrossInterfaces(t *testing.T) {
 	}
 }
 
+// P-20261119-7：两种排序层各自锚定同表——模式表命中/不命中集合 + 枚举序
+// 降权（用户实测：WSL 的 vEthernet 172.26.144.1 数值上小于物理网卡
+// 192.168.x，纯数值序会把不可达地址排成默认首项）
+func TestIsVirtualIfaceName(t *testing.T) {
+	for _, name := range []string{
+		"vEthernet (Default Switch)", "vEthernet (WSL)", "WSL", "docker0",
+		"virbr0", "vmnet8", "VMware Network Adapter VMnet1",
+		"VirtualBox Host-Only Network", "Loopback Pseudo-Interface 1",
+	} {
+		if !isVirtualIfaceName(name) {
+			t.Errorf("%q should be treated as virtual/internal iface", name)
+		}
+	}
+	// Tailscale CGNAT / macOS utun / OpenWrt 物理网桥 / 常规物理网卡一律不降权
+	for _, name := range []string{"eth0", "wlan0", "以太网", "tailscale0", "utun3", "br-lan", "en0", "Wi-Fi"} {
+		if isVirtualIfaceName(name) {
+			t.Errorf("%q should NOT be treated as virtual/internal iface", name)
+		}
+	}
+}
+
+func TestSortNetworkAddresses_VirtualIfaceDemoted(t *testing.T) {
+	addrs := []NetworkAddress{
+		{IP: "172.26.144.1", Family: "v4", Iface: "vEthernet (WSL (Hyper-V firewall))", Private: true},
+		{IP: "172.17.0.1", Family: "v4", Iface: "docker0", Private: true},
+		{IP: "192.168.1.50", Family: "v4", Iface: "以太网", Private: true},
+		{IP: "fd00::10", Family: "v6", Iface: "以太网", Private: true},
+	}
+	sortNetworkAddresses(addrs)
+	got := make([]string, len(addrs))
+	for i, a := range addrs {
+		got[i] = a.IP
+	}
+	// 物理档（v4 先于 v6）整体在前；虚拟档内维持接口名字典序（docker0 < vEthernet）
+	want := []string{"192.168.1.50", "fd00::10", "172.17.0.1", "172.26.144.1"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("sorted = %v, want %v (降权不剔除，候选须全部保留)", got, want)
+	}
+}
+
 func TestNetworkAddresses_ResponseShape(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -110,13 +150,29 @@ func TestNetworkAddresses_ResponseShape(t *testing.T) {
 			t.Errorf("entry must be a usable non-loopback address: %+v", a)
 		}
 	}
-	// 排序：v4 全部在 v6 之前（前端默认取第一项）
-	seenV6 := false
+	// 排序：虚拟/内部网卡名整体降权排后；同档内 v4 全部在 v6 之前（API 消费者
+	// 参考序；分享链接首项由前端 sortRelayCandidates 全量重排决定，本清单不直接
+	// 提供默认首项）。注意：虚拟 v4 排在物理 v6 之后是预期形态——降权层优先级
+	// 高于族序（P-20261119-7）
+	seenVirtual := false
 	for _, a := range resp.Data {
-		if a.Family == "v6" {
-			seenV6 = true
-		} else if seenV6 {
-			t.Errorf("v4 address %s appeared after v6; ordering must be v4 first", a.IP)
+		if isVirtualIfaceName(a.Iface) {
+			seenVirtual = true
+		} else if seenVirtual {
+			t.Errorf("physical iface %q appeared after a virtual one; virtual must be demoted as a block", a.Iface)
+		}
+	}
+	for _, virtual := range []bool{false, true} {
+		seenV6 := false
+		for _, a := range resp.Data {
+			if isVirtualIfaceName(a.Iface) != virtual {
+				continue
+			}
+			if a.Family == "v6" {
+				seenV6 = true
+			} else if seenV6 {
+				t.Errorf("v4 address %s (iface %q, virtual=%v) appeared after v6; v4 must come first within each rank", a.IP, a.Iface, virtual)
+			}
 		}
 	}
 }

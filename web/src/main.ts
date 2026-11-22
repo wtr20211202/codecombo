@@ -3,6 +3,7 @@ import './styles/terminal-effects.css'
 // md 预览打印 / 导出 PDF（P-20261003-244）：@media print 规则经 html.md-printing
 // 标记类门控（打印按钮挂载），常态零生效
 import './styles/md-print.css'
+import './styles/md-preview.css'
 // 编辑器选区拖拽到 agent 侧栏（P-20261003-162）：拖影挂 body 无组件 scope，
 // 落点高亮是跨组件全局类，样式集中在此
 import './styles/selection-drag.css'

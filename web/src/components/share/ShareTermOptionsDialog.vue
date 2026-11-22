@@ -8,9 +8,12 @@
 // 确认发生在「创建」点击时（confirmTermOptions → confirmUnfilteredEgress）。
 // 遮蔽是服务端源头参数（直播 feeder / 快照净化链），访客侧不存在渲染过滤；
 // 设置创建时定死——进行中分享不可切，改配置须撤销重建（就地说明）。
-// 有效期：直播 = ttlMinutes 分钟档（服务端默认 30 分钟、上限 24h、无永久档——
+// 有效期：直播 = ttlMinutes 分钟档（服务端默认 30 分钟、上限 24h；P-20261119-5
+// 起增「永久」挡 → permanent:true，记录与 token 不过期、直播态仍随会话）。
+// 永久 × 关闭遮蔽合法（【用户定向修订】2026-11-19：服务端不再 400 硬禁，撤销
+// 兜底即可）——组合选中时就地警示「未过滤输出将永久公开」，行动自由交给用户。
 // 档位语义与通用 ShareTtlPicker 不匹配，用独立档位下拉 utils/shareTtl
-// TERM_LIVE_TTL_OPTIONS）；快照 = 复用 ShareTtlPicker 全档（创建面无 TTL 字段，
+// TERM_LIVE_TTL_OPTIONS；快照 = 复用 ShareTtlPicker 全档（创建面无 TTL 字段，
 // 显式选择经既有 /share/:token/expiry 在创建后立即生效）。
 // 命中该会话既有直播（沿用既有遮蔽设置）时 toast 如实回告
 import { computed } from 'vue'
@@ -20,7 +23,7 @@ import { LockClosedOutline, ShareSocialOutline, WarningOutline } from '@vicons/i
 import { useI18n } from '../../composables/useI18n'
 import { useTermShareDialog } from '../../composables/useTermShareDialog'
 import { formatDateTime } from '../../utils/git'
-import { shareTtlExpiresAt, shareTtlLabelKey, TERM_LIVE_TTL_OPTIONS } from '../../utils/shareTtl'
+import { shareTtlExpiresAt, shareTtlLabelKey, TERM_LIVE_TTL_OPTIONS, TERM_LIVE_TTL_PERMANENT } from '../../utils/shareTtl'
 import type { ShareTtlChoice } from '../../utils/shareTtl'
 import ShareTtlPicker from './ShareTtlPicker.vue'
 
@@ -30,19 +33,33 @@ const {
   showTermOptions: show, termOptionsTarget: target, termMask: mask, termWatermark: watermark,
   termPassphrase: passphrase, termLiveTtlMinutes: liveTtlMinutes,
   termFrozenTtlChoice: frozenChoice, termFrozenTtlDate: frozenDate, termFrozenTtlTouched: frozenTouched,
-  termSubmitting: submitting, confirmTermOptions, cancelTermOptions,
+  termWritable: writable, termSubmitting: submitting, confirmTermOptions, cancelTermOptions,
 } = useTermShareDialog()
 
 const isFrozen = computed(() => target.value?.kind === 'frozen')
 const title = computed(() => t(isFrozen.value ? 'terminal.frozenShare' : 'terminal.liveShare'))
 const kindDesc = computed(() => t(isFrozen.value ? 'share.termOptions.frozenDesc' : 'share.termOptions.liveDesc'))
 
-// 直播档位（minutes 为值；0 = 跟随服务端默认 30 分钟，不发字段）
+// 直播档位（minutes 为值；0 = 跟随服务端默认 30 分钟，不发字段；
+// TERM_LIVE_TTL_PERMANENT = 永久挡）。永久 × 关闭遮蔽合法（【用户定向修订】
+// 2026-11-19：服务端不再 400 硬禁）——选项不禁用，组合选中时就地警示
+const livePermanentSelected = computed(() => liveTtlMinutes.value === TERM_LIVE_TTL_PERMANENT)
 const liveTtlOptions = computed<SelectOption[]>(() =>
   TERM_LIVE_TTL_OPTIONS.map(p => ({ label: t(p.i18nKey), value: p.minutes })))
 
 // 快照档位（ShareTtlPicker 全档）；custom 缺日期 = 无效提交（文件创建弹层同款）
 const frozenInvalid = computed(() => isFrozen.value && frozenTouched.value && frozenChoice.value === 'custom' && frozenDate.value == null)
+// 直播警示组合：已选永久且遮蔽被关（合法但原样输出将长期公开——知情面保留，
+// 行动自由交给用户；撤销兜底在分享管理）
+const livePermanentUnfiltered = computed(() => !isFrozen.value && livePermanentSelected.value && !mask.value)
+
+/** 直播有效期提示：永久×未过滤组合 → 就地警示；永久选中 → 永久语义；
+ *  遮蔽关 → 上限说明；否则默认档说明 */
+const liveTtlHint = computed(() => {
+  if (livePermanentUnfiltered.value) return t('share.termOptions.permanentUnfiltered')
+  if (livePermanentSelected.value) return t('share.termOptions.ttlLivePermanentNote')
+  return mask.value ? t('share.termOptions.ttlLiveNote') : t('share.termOptions.ttlLiveUnfilteredNote')
+})
 
 /** 快照有效期提示：未动过 = 说明默认档；动过 = 具体时点/永久 */
 const frozenTtlHint = computed(() => {
@@ -69,6 +86,11 @@ function onFrozenDate(v: number | null) {
 async function onConfirm() {
   const res = await confirmTermOptions()
   if (res === 'modeMismatch') message.warning(t('share.termOptions.modeMismatch'))
+  // 开放直入口令门缺位（P-20261121-1）：就地提示（口令输入框聚焦——入口
+  // 可发现、失败可恢复；提交侧 fail-fast 于请求前）
+  if (res === 'passphraseRequired') {
+    message.warning(t('share.writable.passRequiredCreate'))
+  }
 }
 </script>
 
@@ -123,11 +145,21 @@ async function onConfirm() {
         </NIcon>
         <div class="warn-text">
           <div>{{ t('share.termOptions.maskOffWarn') }}</div>
+          <!-- 关闭遮蔽后的时长语义（两形态不同）：快照强制 24h（原文落盘）、
+               直播限时档最长 24h（选「永久」则原样输出长期公开——就地警示见
+               ttl-hint，撤销兜底在分享管理） -->
           <div
             v-if="isFrozen"
             class="warn-sub"
           >
             {{ t('share.termOptions.maskOffFrozenTtl') }}
+          </div>
+          <div
+            v-else
+            class="warn-sub"
+            data-testid="share-term-mask-off-live-ttl"
+          >
+            {{ t('share.termOptions.maskOffLiveTtl') }}
           </div>
         </div>
       </div>
@@ -144,6 +176,43 @@ async function onConfirm() {
         <span class="option-name">{{ t('share.create.watermarkLabel') }}</span>
         <span class="option-note">{{ t('share.create.watermarkNote') }}</span>
       </NCheckbox>
+
+      <!-- 访客输入快捷选择（P-20261121-1，仅直播形态）：开放直入 = 持链接
+           （+口令）访客可直接键入；缺省关（安全基线）。申请-批准路径无需
+           选择（申请通道缺省在场，分享管理可关）。仅 live 出开关（frozen/
+           快照天然只读） -->
+      <div
+        v-if="!isFrozen"
+        class="option-row"
+        data-testid="share-term-writable-row"
+      >
+        <div class="option-text">
+          <span class="option-name">{{ t('share.termOptions.writableLabel') }}</span>
+          <span class="option-note">{{ t('share.termOptions.writableNote') }}</span>
+        </div>
+        <NSwitch
+          v-model:value="writable"
+          :disabled="submitting"
+          :aria-label="t('share.termOptions.writableLabel')"
+          data-testid="share-term-writable"
+        />
+      </div>
+      <div
+        v-if="!isFrozen && writable && !passphrase"
+        class="unfiltered-warn"
+        role="alert"
+        data-testid="share-term-writable-pass-warn"
+      >
+        <NIcon
+          :size="15"
+          class="warn-icon"
+        >
+          <WarningOutline />
+        </NIcon>
+        <div class="warn-text">
+          {{ t('share.termOptions.writablePassWarn') }}
+        </div>
+      </div>
 
       <!-- 访问口令（⑤）：可选，空 = 不设门（安全基线）；文案复用文件创建弹层的口令件 -->
       <div class="option-label pass-label">
@@ -171,7 +240,7 @@ async function onConfirm() {
         {{ t('share.pass.createNote') }}
       </div>
 
-      <!-- 有效期（①）：直播 = 分钟档（默认 30 分钟 / 1h / 6h / 24h）；
+      <!-- 有效期（①）：直播 = 分钟档（默认 30 分钟 / 1h / 6h / 24h / 永久）；
            快照 = ShareTtlPicker 全档（创建后经既有 expiry 端点立即生效） -->
       <div class="option-label ttl-label">
         {{ t('share.ttl.label') }}
@@ -213,9 +282,10 @@ async function onConfirm() {
         </div>
         <div
           class="option-note ttl-hint"
+          :class="{ 'ttl-invalid': livePermanentUnfiltered }"
           data-testid="share-term-ttl-hint"
         >
-          {{ t('share.termOptions.ttlLiveNote') }}
+          {{ liveTtlHint }}
         </div>
       </template>
     </div>
@@ -294,5 +364,7 @@ async function onConfirm() {
 .ttl-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .ttl-select { flex: 0 0 180px; }
 .ttl-hint { margin-top: 6px; }
+/* 警示组合说明（永久 × 关闭遮蔽，合法可提交）：用出域警示同色保持可感知 */
+.ttl-invalid { color: var(--accent-red); }
 .options-footer { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

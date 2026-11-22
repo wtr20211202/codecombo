@@ -23,10 +23,10 @@
 
 ```
 server/store/share.go        ShareStore（docstore 仓储，幂等 get-or-create）
-server/share/preview/        预览能力注册表（唯一判定源，运行期可覆盖注册）
+server/filepreview/          预览能力注册表+渲染管线（唯一判定源，分享/主应用两侧复用，运行期可覆盖注册）
 server/share/service.go      访客面：路由/路径安全/meta/list/render/raw/download
 server/share/gateway.go      同源入口（P-20261020-2）：Handler 发布/收回 + 访客 IP 上下文注入
-server/share/render.go       gomarkdown 渲染 + bluemonday 净化
+server/share/render.go       片段直出 + /s/{token} 相对资源重写（md/docx/csv 渲染在 filepreview）
 server/share/page.go         内嵌分享页/404 页（零外部依赖）
 server/share/zip.go          目录流式打包
 server/api/share/            kernel Module（监听生命周期）+ gin 管理接口 + store 适配
@@ -112,7 +112,7 @@ web/src/views/share/         分享管理主区视图（usePanelLayout 第三主
 ## 5. 测试与验证
 
 - 后端：`server/store/share_test.go`（派生稳定性/同名隔离/幂等/撤销）、
-  `server/share/preview/preview_test.go`（内置表/运行期扩展）、
+  `server/filepreview/filepreview_test.go`（内置表/运行期扩展）、
   `server/share/service_test.go`（友好 404/meta/子目录列表/分享根越界拒绝/
   raw MIME/CSP/markdown 净化/单文件与目录 zip 下载/目标消失 404/项目消失 410）、
   `server/api/share/module_test.go`（监听起停/状态上报/端口回写/同源 Handler

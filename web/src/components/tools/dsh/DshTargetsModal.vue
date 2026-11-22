@@ -9,7 +9,8 @@ import type { DshTarget } from './types'
 /**
  * 外部 dsh 目标管理弹层（P-20261001-20 从 DshConsoleView 拆出）：
  * 列表 + 添加/编辑/删除表单。目标列表本体由宿主持有（工具栏下拉同源），
- * 增删改完成后经 changed 通知宿主重载；删除的是当前激活目标时经
+ * 增删改完成后经 changed 通知宿主重载（携保存目标 id，编辑当前激活目标时
+ * 宿主立即重探测——P-20261118-6 ⑧）；删除的是当前激活目标时经
  * active-removed 通知宿主回落本机目标并重新探测。
  */
 const props = defineProps<{
@@ -20,8 +21,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:show', v: boolean): void
-  /** 目标列表发生变化：宿主重载 targets */
-  (e: 'changed'): void
+  /** 目标列表发生变化：宿主重载 targets；savedId = 本次保存的目标 id
+   *  （新建为空串，删除不发）——宿主据此判断被编辑的是否当前激活目标并
+   *  立即重探测（P-20261118-6 ⑧：available/tokenState/iframe 旧会话滞留
+   *  至 30s 轮询的收口） */
+  (e: 'changed', savedId?: string): void
   /** 被删除的是当前激活目标：宿主回落本机目标并重新探测 */
   (e: 'active-removed'): void
 }>()
@@ -46,12 +50,13 @@ async function saveTarget() {
       base: targetForm.value.base,
       token: targetForm.value.token,
     }
-    if (targetForm.value.id) {
-      await settingsApi.dshTargetUpdate(targetForm.value.id, payload)
+    const savedId = targetForm.value.id
+    if (savedId) {
+      await settingsApi.dshTargetUpdate(savedId, payload)
     } else {
       await settingsApi.dshTargetCreate(payload)
     }
-    emit('changed')
+    emit('changed', savedId || undefined)
     targetForm.value = { id: '', name: '', base: '', token: '' }
   } catch { /* 拦截器统一处理 */ } finally {
     targetSaving.value = false

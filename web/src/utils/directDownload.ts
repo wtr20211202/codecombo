@@ -38,6 +38,14 @@ export function fileDownloadUrl(projectId: string, path: string): string {
   return `${instanceApiBase()}/projects/${encodeURIComponent(projectId)}/file/download?path=${encodeURIComponent(path)}`
 }
 
+/** frontend 动词族设备效应的下载落点（P-20261023-4 / P-20261117-4 降级通知
+ * 的 download 动作同用）：恒本机同源 /api——ops 事件的目标就是本实例的浏览器，
+ * 不走 instanceApiBase（远程实例上下文里效应仍落本机实例的项目域）。与
+ * frontendAtomActions.handleFrontendDownload 既有落点逐字一致 */
+export function projectFileDownloadUrl(projectId: string, path: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/file/download?path=${encodeURIComponent(path)}`
+}
+
 /** 目录打包直链（GET /projects/:id/dir-archive?path=[&override=1]）；
  *  响应恒 application/zip + 附件头（敏感拦回走 409，不落假包） */
 export function dirArchiveUrl(projectId: string, path: string, override = false): string {
@@ -50,6 +58,15 @@ export function dirArchiveUrl(projectId: string, path: string, override = false)
 export function filesArchiveUrl(projectId: string, paths: string[], override = false): string {
   const suffix = override ? '&override=1' : ''
   return `${instanceApiBase()}/projects/${encodeURIComponent(projectId)}/files-archive?${filesArchivePathsQuery(paths)}${suffix}`
+}
+
+/** 快投递逐文件下载直链（GET /api/quickdrop/dropfile/:id?fid=，P-20261117-3）：
+ *  管理卡记录区消费——服务端 attachment + octet-stream 附件头是保存名权威，
+ *  fid 是取件键（sidecar 元数据等值匹配，同批同名消歧）；不经 axios——大文件
+ *  流式直落浏览器，blob 中转是反模式（本文件头注同判）。构造器与
+ *  fileDownloadUrl 同族落位在本模块（domains/share 只收 axios 调用面） */
+export function quickdropDropFileUrl(dropId: string, fid: string): string {
+  return `${instanceApiBase()}/quickdrop/dropfile/${encodeURIComponent(dropId)}?fid=${encodeURIComponent(fid)}`
 }
 
 /** 程序化点击直链（frontendAtomActions 同款形态：先入 DOM 再 click——Firefox

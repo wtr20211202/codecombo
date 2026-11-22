@@ -96,6 +96,12 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 	r.POST("/drop/:token", mw.RateLimitMiddleware(30, func(c *gin.Context) string {
 		return c.ClientIP()
 	}), quickdrop.PostDropForm)
+	// 访客页自持静态资产（P-20261117-2-S2）：enforcing CSP script-src 'self'
+	// 下唯一脚本面——按白名单精确名逐条挂载（share vendored 资产同款约定，
+	// 绝不整段挂 /drop/assets/*；gin 静态段与上方 :token 参数段同树共存）
+	for _, name := range quickdrop.AssetNames() {
+		r.GET("/drop/assets/"+name, quickdrop.GetDropAsset)
+	}
 
 	// CSP 违规报告收集（P-20261007-6）：浏览器按 CSP 规范自动 POST 报告，不带
 	// 任何应用凭据（锁屏页同样产生报告），故必须公开——与 /api/quickdrop 同级
@@ -587,12 +593,12 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 			shareGroup.DELETE("/:token/messages", shareapi.ClearShareMessages)
 			shareGroup.DELETE("/:token/messages/:mid", shareapi.DeleteShareMessage)
 			// 协作通道管理面（P-20261024-1，动作化行内端点——分享无编辑面）：
-			// 开关族（collab/direct-input）+ 收件清单与消费语义（drops/consume）
-			// + 直通握手 owner 半边（approve/revoke/status）。写入面在访客
-			// 子服务 /s/{token}/drop 与 /s/{token}/direct/*（开关缺省关，
-			// 关闭恒 404）
+			// 开关族（collab/guest-input）+ 收件清单与消费语义（drops/consume）
+			// + 申请批准握手 owner 半边（approve/revoke/status）。写入面在
+			// 访客子服务 /s/{token}/drop、/s/{token}/direct/request 与
+			// /s/{token}/termws（申请通道缺省开，关闭恒 404）
 			shareGroup.POST("/:token/collab", shareapi.SetShareCollab)
-			shareGroup.POST("/:token/direct-input", shareapi.SetShareDirectInput)
+			shareGroup.POST("/:token/guest-input", shareapi.SetShareGuestInput)
 			shareGroup.GET("/:token/drops", shareapi.ListShareDrops)
 			shareGroup.POST("/:token/drops/:id/consume", shareapi.ConsumeShareDrop)
 			shareGroup.DELETE("/:token/drops/:id", shareapi.DeleteShareDrop)
@@ -610,13 +616,17 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 
 		// 快投递管理面（P-20261006-51）：收件箱清单/摘除 + 投递凭据生命周期
 		//（生成即轮换/撤销）。静态段 /token 先于 :id 动态段登记（gin 静态优先，
-		// fleet/export 同款先例）；前端消费面在 设置·分享区快投递卡 + 通知行内动作
+		// fleet/export 同款先例）；前端消费面在 设置·分享区快投递卡 + 通知行内动作。
+		// 逐文件下载 dropfile（P-20261117-3，主人侧接收面）：fid 取件键（sidecar
+		// 元数据等值匹配，同批同名消歧）；attachment+octet-stream 附件红线，
+		// agent 取件走清单投影的落盘绝对路径不经本端点
 		qd := api.Group("/quickdrop")
 		{
 			qd.GET("", quickdrop.ListDrops)
 			qd.POST("/token", quickdrop.CreateDropToken)
 			qd.GET("/token", quickdrop.GetDropToken)
 			qd.DELETE("/token", quickdrop.RevokeDropToken)
+			qd.GET("/dropfile/:id", quickdrop.DownloadDropFile)
 			qd.DELETE("/:id", quickdrop.DeleteDrop)
 		}
 
@@ -848,6 +858,20 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 		api.GET("/projects/:id/file-policy", mw.NoStore(), files.GetFilePolicy)
 		api.GET("/projects/:id/file", mw.NoStore(), files.ReadFile)
 		api.GET("/projects/:id/file/download", mw.NoStore(), files.DownloadFile)
+		// 项目文件直接预览（P-20261119-4 S2）：编辑器复用分享预览管线的
+		// auth 门控端点族——渲染/供给判定全在 server/filepreview 单一事实源，
+		// 本组路由只做源解析与响应协议；读取面随文件族挂 no-store。
+		//   preview=元数据+渲染类 payload / raw=字节内联（Range/304）/
+		//   rel=路径形态回源（htmlview 的 <base href> 落点，query 型做不了
+		//   base）/ media+embed=docx 图片与嵌入对象（映射簿白名单）/
+		//   htmlview=html 沙箱预览（CSP sandbox+opt-in scripts，绝不
+		//   allow-same-origin）。六端点全过敏感读取审计（见 files/preview.go）
+		api.GET("/projects/:id/file/preview", mw.NoStore(), files.GetFilePreview)
+		api.GET("/projects/:id/file/raw", mw.NoStore(), files.GetFileRaw)
+		api.GET("/projects/:id/file/rel/*rel", mw.NoStore(), files.GetFileRel)
+		api.GET("/projects/:id/file/media", mw.NoStore(), files.GetFileMedia)
+		api.GET("/projects/:id/file/embed", mw.NoStore(), files.GetFileEmbed)
+		api.GET("/projects/:id/file/htmlview", mw.NoStore(), files.GetFileHtmlView)
 		// 本地目录打包下载（P-20261002-115）：目录流式 zip（护栏对齐远程归档端点），
 		// 私有内容成包外发，与下载/规模同族读取面挂 no-store；probe=1 返回 JSON
 		api.GET("/projects/:id/dir-archive", mw.NoStore(), files.DownloadDirArchive)

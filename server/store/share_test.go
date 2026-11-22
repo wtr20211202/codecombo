@@ -871,3 +871,75 @@ func TestShareStorePassphraseGate(t *testing.T) {
 		t.Fatalf("snippet idempotent must apply new passphrase: %v %+v", err, renew)
 	}
 }
+
+// TestShareStoreRenameTerminalShares 终端会话重命名的分享侧级联
+// （P-20261118-9）：并存多形态（live+frozen+cast+session）时只级联 kind=terminal
+// 的直播记录（定格语义不碰）；无分享/无匹配是 no-op 不报错；记录撤销后的
+// 级联是良性跳过（不因写面竞态报错）
+func TestShareStoreRenameTerminalShares(t *testing.T) {
+	st := newShareStoreForTest(t)
+
+	// 无分享：no-op 不报错
+	if err := st.RenameTerminalShares("sess-x", "新名"); err != nil {
+		t.Fatalf("rename with no shares must be a no-op: %v", err)
+	}
+
+	// 同会话四形态并存：live + frozen + cast + session
+	live, err := st.Create(store.Share{Kind: store.ShareKindTerminal, TerminalID: "sess-1", Name: "旧名"})
+	if err != nil {
+		t.Fatalf("create live: %v", err)
+	}
+	frozen, err := st.Create(store.Share{Kind: store.ShareKindTermFrozen, TerminalID: "sess-1", ContentHash: "hash-1", Name: "旧名"})
+	if err != nil {
+		t.Fatalf("create frozen: %v", err)
+	}
+	cast, err := st.Create(store.Share{Kind: store.ShareKindCast, RecordingID: "rec-1", Name: "旧名"})
+	if err != nil {
+		t.Fatalf("create cast: %v", err)
+	}
+	session, err := st.Create(store.Share{Kind: store.ShareKindSession, SessionID: "sess-1", Name: "旧名"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	if err := st.RenameTerminalShares("sess-1", "新名"); err != nil {
+		t.Fatalf("rename cascade: %v", err)
+	}
+	liveAfter, _ := st.Get(live.Token)
+	if liveAfter == nil || liveAfter.Name != "新名" {
+		t.Fatalf("live share must be cascaded to the new name: %+v", liveAfter)
+	}
+	for _, tc := range map[string]string{
+		"frozen": frozen.Token, "cast": cast.Token, "session": session.Token,
+	} {
+		after, _ := st.Get(tc)
+		if after == nil || after.Name != "旧名" {
+			t.Fatalf("%s snapshot must keep the frozen-at-creation name: %+v", tc, after)
+		}
+	}
+
+	// 其它会话的直播不受波及
+	other, err := st.Create(store.Share{Kind: store.ShareKindTerminal, TerminalID: "sess-2", Name: "他人会话"})
+	if err != nil {
+		t.Fatalf("create other live: %v", err)
+	}
+	if err := st.RenameTerminalShares("sess-1", "新名二"); err != nil {
+		t.Fatalf("rename cascade 2: %v", err)
+	}
+	otherAfter, _ := st.Get(other.Token)
+	if otherAfter == nil || otherAfter.Name != "他人会话" {
+		t.Fatalf("other session's live must not be touched: %+v", otherAfter)
+	}
+	live2, _ := st.Get(live.Token)
+	if live2 == nil || live2.Name != "新名二" {
+		t.Fatalf("live share must follow the second rename: %+v", live2)
+	}
+
+	// 撤销后级联 = 良性跳过（rename 瞬间记录被撤销，不报错）
+	if err := st.Delete(live.Token); err != nil {
+		t.Fatalf("delete live: %v", err)
+	}
+	if err := st.RenameTerminalShares("sess-1", "终名"); err != nil {
+		t.Fatalf("rename after revoke must skip silently: %v", err)
+	}
+}

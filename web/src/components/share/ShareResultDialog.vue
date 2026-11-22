@@ -11,8 +11,7 @@
 // 口令只在本次创建会话内存里，关闭结果卡即丢弃，绝不进 URL/二维码。
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NModal, NButton, NIcon, NInput, NSelect, NDatePicker, useMessage } from 'naive-ui'
-import type { SelectOption } from 'naive-ui'
+import { NModal, NButton, NIcon, useMessage } from 'naive-ui'
 import { CopyOutline, OpenOutline, ShareSocialOutline } from '@vicons/ionicons5'
 import { useI18n } from '../../composables/useI18n'
 import { useShareDialog } from '../../composables/useShareDialog'
@@ -21,6 +20,7 @@ import { shareApi } from '../../api/domains/share'
 import { formatDateTime } from '../../utils/git'
 import { relativeTimeParts } from '../../utils/relative-time'
 import { copyText } from '../../utils/clipboard'
+import { shouldWarnCopy } from '../../utils/shareAddress'
 import { buildShareInviteText } from '../../utils/shareInvite'
 import ShareQrPanel from './ShareQrPanel.vue'
 import ShareReachBadge from './ShareReachBadge.vue'
@@ -48,16 +48,24 @@ watch(show, (v) => {
 // 各形态共用结果卡：描述按形态区分（片段强调公开文本 + 24h 过期；终端直播
 // 强调只读遮蔽 + 默认 30 分钟过期——访客看得见、改不了；冻结快照强调内容
 // 定格不可变 + 30 天保留，P-20261003-320；终端输出快照强调时点定格 + 会话
-// 关闭后仍可访问，P-20261005-205）
+// 关闭后仍可访问，P-20261005-205）。永久记录（无 expiresAt）走专属键，见下
 // 关闭过滤的分享（P-20261106-9）描述走专属键：通用描述写死「敏感值已遮蔽 + 默认
-// 窗口」，与未过滤语义直接矛盾，不能只靠下方警示条对冲
+// 窗口」，与未过滤语义直接矛盾，不能只靠下方警示条对冲。
+// 永久挡（P-20261119-5）同款：terminal / terminal-frozen 无 expiresAt = 永久
+// 记录（零值语义），通用描述写死的「默认 30 分钟/30 天后过期」会与永久语义
+// 矛盾，改走永久专属键；未过滤直播的永久（【用户定向修订】2026-11-19 合法）
+// 同口径——resultDescLive 的「默认 30 分钟后自动过期」与永久矛盾，走专属键
 const desc = computed(() => {
   if (share.value?.kind === 'snippet') return t('share.snippet.resultDesc')
   if (share.value?.kind === 'terminal') {
-    return t(share.value.unfiltered ? 'share.unfiltered.resultDescLive' : 'share.terminal.resultDesc')
+    if (share.value.unfiltered) {
+      return t(share.value.expiresAt ? 'share.unfiltered.resultDescLive' : 'share.unfiltered.resultDescLivePermanent')
+    }
+    return t(share.value.expiresAt ? 'share.terminal.resultDesc' : 'share.terminal.resultDescPermanent')
   }
   if (share.value?.kind === 'terminal-frozen') {
-    return t(share.value.unfiltered ? 'share.unfiltered.resultDescFrozen' : 'share.termFrozen.resultDesc')
+    if (share.value.unfiltered) return t('share.unfiltered.resultDescFrozen')
+    return t(share.value.expiresAt ? 'share.termFrozen.resultDesc' : 'share.termFrozen.resultDescPermanent')
   }
   if (share.value?.kind === 'cast') return t('share.cast.resultDesc')
   if (share.value?.kind === 'session') return t('share.session.resultDesc')
@@ -82,9 +90,10 @@ const hitsLine = computed(() => {
 const ttlChoice = ref<ShareTtlChoice>('permanent')
 const ttlDate = ref<number | null>(null)
 // TTL 行可调形态（P-20261020-5 文件 opt-in TTL；P-20261107-4 扩终端输出快照）：
-// snippet 24h 固定（服务端拒绝调整）；terminal 默认 30 分钟固定（直播是临时暴露
-// 面，弹层档位上限 24h）；terminal-frozen 默认 30 天、创建后经既有 expiry 端点
-// 即可调整（关闭遮蔽的快照服务端钳 24h）——过期时点直接展示
+// snippet 24h 固定（服务端拒绝调整）；terminal（直播）的档位在创建弹层选定、
+// 本卡只展示到期/永久说明（P-20261119-5 起服务端同端点可改期，改期入口在分享
+// 管理行菜单——本卡不重复提供档位件）；terminal-frozen 默认 30 天、创建后经
+// 既有 expiry 端点即可调整（关闭遮蔽的快照服务端钳 24h）——过期时点直接展示
 const canAdjustTtl = computed(() => share.value?.kind === 'file' || share.value?.kind === 'terminal-frozen')
 
 /** 从记录当前状态回填选择器（弹窗打开 / 失败回落共用） */
@@ -164,6 +173,14 @@ async function onCopyInvite() {
   const ok = await copyText(inviteText.value)
   if (ok) message.success(t('share.invite.copied'))
   else message.error(t('common.copyFailed'))
+  // 可达性警示（P-20261119-7）：创建成功即复制邀请信息是最常见的分发路径，
+  // 回环入口下自动改写的候选链接不能承诺对端可达——判定/文案单点复用
+  // shareAddress.shouldWarnCopy（resultPlan 创建时定格；面板切网卡后来源仍
+  // 是 candidate，警示语义不变）
+  if (ok && plan.value) {
+    const level = shouldWarnCopy(plan.value)
+    if (level) message.warning(t(`share.copyWarn.${level}`))
+  }
 }
 
 function onOpen(target: string) {

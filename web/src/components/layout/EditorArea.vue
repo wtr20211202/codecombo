@@ -36,7 +36,6 @@ const props = defineProps<{
   /** 分屏方向（P-20261005-230 正交拆分）：horizontal=左右（缺省，既有形态）/
    *  vertical=上下。只切本容器排列轴，两组内容零重建 */
   splitDirection?: 'horizontal' | 'vertical'
-  showCommitPanel: boolean
   canReopenClosed: boolean
   /** 待决草稿恢复提示（队首；null = 无草稿，提示条不渲染） */
   draftOffer?: DraftOffer | null
@@ -87,6 +86,8 @@ const emit = defineEmits<{
   draftDiscard: [projectId: string, path: string]
   /** 远程文件离线横幅「重试」（P-20261003-15）：分组上抛转调 useOpenFiles */
   remoteRetry: [path: string]
+  /** 统一双视图切换（P-20261119-4）：分组上抛转调 useOpenFiles.toggleFileViewMode */
+  toggleViewMode: [path: string]
 }>()
 
 function groupAt(gi: number): EditorGroup {
@@ -214,7 +215,6 @@ function startSplitResize(e: MouseEvent) {
         :files="groupAt(0).files"
         :active-index="groupAt(0).activeIndex"
         :can-reopen-closed="canReopenClosed"
-        :show-commit-panel="showCommitPanel"
         :allow-split-open="true"
         @toggle-maximize="layout.toggleEditorGroupMaximized(0)"
         @activate="emit('activateGroup', 0)"
@@ -245,6 +245,7 @@ function startSplitResize(e: MouseEvent) {
         @tab-move-in="(fg, p) => emit('tabMove', fg, p, 0)"
         @open-in-split="(p, d) => emit('openInSplit', p, d)"
         @remote-retry="(p) => emit('remoteRetry', p)"
+        @toggle-view-mode="(p) => emit('toggleViewMode', p)"
       />
 
       <!-- 分隔条：拖拽调宽/调高（20%~80% 钳制），双击复位对半。方向随
@@ -312,6 +313,7 @@ function startSplitResize(e: MouseEvent) {
         @tab-move-in="(fg, p) => emit('tabMove', fg, p, 1)"
         @close-split="emit('closeSplit')"
         @remote-retry="(p) => emit('remoteRetry', p)"
+        @toggle-view-mode="(p) => emit('toggleViewMode', p)"
       >
         <template #empty>
           <div class="split-empty">

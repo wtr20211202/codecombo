@@ -83,21 +83,31 @@ export function shareTtlDateDisabled(ts: number): boolean {
 }
 
 /**
- * 终端直播 TTL 档位（P-20261107-4）：直播是临时暴露面——服务端只收分钟数
- * （POST /api/share/terminal 的 ttlMinutes；0/缺省 = 默认 30 分钟）、钳 24h
- * 上限、无永久档，与 SHARE_TTL_PRESETS 的「永久 + 自定义日期」语义不匹配，
- * 故直播侧用独立档位表。minutes=0 表示「跟随默认」→ 请求不发 ttlMinutes 字段
- * （服务端默认值变更不需要前端跟随发版）；360/1440 对齐评审定的 6h/24h 实用档。
+ * 终端直播 TTL 档位（P-20261107-4；P-20261119-5 增永久挡）：直播档位与
+ * SHARE_TTL_PRESETS 的「永久 + 自定义日期」语义不匹配（服务端只收分钟数或
+ * 显式永久标记，且不接受自定义日期），故直播侧用独立档位表。minutes=0 表示
+ * 「跟随默认」→ 请求不发 ttlMinutes 字段（服务端默认值变更不需要前端跟随
+ * 发版）；360/1440 对齐评审定的 6h/24h 实用档；TERM_LIVE_TTL_PERMANENT =
+ * 永久挡 → 请求发 permanent:true（记录与 token 不过期，直播态仍随会话）。
+ * 永久 × 「关闭遮蔽」组合合法（【用户定向修订】2026-11-19：服务端不再 400
+ * 硬禁）——弹层就地警示「未过滤输出将永久公开」，撤销兜底在分享管理。
  */
 export interface TermLiveTtlOption {
-  /** 0 = 跟随服务端默认（30 分钟）；其余为分钟数 */
+  /** 0 = 跟随服务端默认（30 分钟）；TERM_LIVE_TTL_PERMANENT = 永久；其余为分钟数 */
   minutes: number
   i18nKey: string
 }
+
+/**
+ * 永久挡哨兵值（P-20261119-5）：负数在服务端 ttlMinutes 校验里本就是非法值，
+ * 不会与分钟档撞号；选择它时前端发 permanent:true 而非 ttlMinutes
+ */
+export const TERM_LIVE_TTL_PERMANENT = -1
 
 export const TERM_LIVE_TTL_OPTIONS: ReadonlyArray<TermLiveTtlOption> = [
   { minutes: 0, i18nKey: 'share.termOptions.ttlLiveDefault' },
   { minutes: 60, i18nKey: 'share.ttl.oneHour' },
   { minutes: 360, i18nKey: 'share.termOptions.ttlSixHours' },
   { minutes: 1440, i18nKey: 'share.termOptions.ttlTwentyFourHours' },
+  { minutes: TERM_LIVE_TTL_PERMANENT, i18nKey: 'share.ttl.permanent' },
 ]

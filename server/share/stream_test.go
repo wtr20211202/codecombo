@@ -30,6 +30,9 @@ type stubLive struct {
 	unfiltered []bool
 	// sizeFn 可变尺寸源（P-20261107-4 resize 帧用例；nil = 固定 cols/rows）
 	sizeFn func() (uint16, uint16)
+	// nameFn 可变显示名源（P-20261118-9 rename 帧用例；nil = 固定 name）
+	nameFn func() string
+	name   string
 }
 
 func (s *stubLive) Subscribe(token, sessionID string, unfiltered bool) (LiveSubscription, error) {
@@ -50,7 +53,7 @@ func (s *stubLive) Subscribe(token, sessionID string, unfiltered bool) (LiveSubs
 	if done == nil {
 		done = make(chan struct{})
 	}
-	return &stubSub{tail: s.tail, data: data, done: done, ended: s.ended, cols: s.cols, rows: s.rows, sizeFn: s.sizeFn, live: s}, nil
+	return &stubSub{tail: s.tail, data: data, done: done, ended: s.ended, cols: s.cols, rows: s.rows, sizeFn: s.sizeFn, nameFn: s.nameFn, name: s.name, live: s}, nil
 }
 
 func (s *stubLive) Unwire(token string) {
@@ -67,6 +70,8 @@ type stubSub struct {
 	cols   uint16
 	rows   uint16
 	sizeFn func() (uint16, uint16)
+	nameFn func() string
+	name   string
 	live   *stubLive
 }
 
@@ -79,6 +84,12 @@ func (s *stubSub) Size() (uint16, uint16) {
 		return s.sizeFn()
 	}
 	return s.cols, s.rows
+}
+func (s *stubSub) Name() string {
+	if s.nameFn != nil {
+		return s.nameFn()
+	}
+	return s.name
 }
 func (s *stubSub) Release() {
 	s.live.mu.Lock()
@@ -207,6 +218,88 @@ func TestStreamResizeFrameBeforeData(t *testing.T) {
 	}
 }
 
+// 会话改名跟随（P-20261118-9）：主人侧改名后，rename 帧携带新名送达（与
+// resize 同一 1s 对账 tick——syncName 挂 sizePoll，时延界与 resize 兜底轮询
+// 同构；数据帧路径不附带 rename 对账，改名无输出时也随 tick 可达）；同名
+// 不发、空名不发、含换行名的载荷必须单行（json.Marshal 强制转义，SSE 帧结构
+// 恒完整）
+func TestStreamRenameFrame(t *testing.T) {
+	shares := seedTerminalShare(t, fixedToken("rename"), "sess-rn")
+	data := make(chan []byte, 4)
+	done := make(chan struct{})
+	var mu sync.Mutex
+	cur := "直播会话"
+	live := &stubLive{data: data, done: done, nameFn: func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return cur
+	}}
+	svc := NewService(shares, fakeRoots{}, nil).WithTerminalLive(live)
+
+	req := httptest.NewRequest("GET", "/s/"+fixedToken("rename")+"/stream", nil)
+	rec := httptest.NewRecorder()
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		svc.Handler().ServeHTTP(rec, req)
+	}()
+
+	// rename 对账挂在 1s sizePoll tick（评审定案，与 syncSize 同 tick 同构）：
+	// 每个变更态之间隔 >2 个 tick，帧序列逐态可达
+	data <- []byte("same-name")
+	time.Sleep(1300 * time.Millisecond)
+	mu.Lock()
+	cur = "" // 会话名不可读：不发
+	mu.Unlock()
+	time.Sleep(1300 * time.Millisecond)
+	mu.Lock()
+	cur = "改名会话" // 主人侧改名
+	mu.Unlock()
+	time.Sleep(1300 * time.Millisecond)
+	mu.Lock()
+	cur = "改名会话" // 同名：不再发
+	mu.Unlock()
+	time.Sleep(1300 * time.Millisecond)
+	mu.Lock()
+	cur = "带\n换行的名字" // 控制字符名：载荷必须转义单行
+	mu.Unlock()
+	time.Sleep(1300 * time.Millisecond)
+	close(done)
+	select {
+	case <-handlerDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stream handler did not return after feed end")
+	}
+
+	body := rec.Body.String()
+	// hello 帧带订阅时刻名
+	if !strings.Contains(body, `data: {"ended":false,"name":"直播会话"}`) {
+		t.Fatalf("hello must carry subscribe-time name: %q", body)
+	}
+	// rename 恰两帧：空名与同名都不发
+	if n := strings.Count(body, "event: rename"); n != 2 {
+		t.Fatalf("rename frames = %d, want exactly 2 (empty/unchanged names are not sent): %q", n, body)
+	}
+	// 两帧按变更顺序到达：新名帧先于换行名帧
+	newNameAt := strings.Index(body, `event: rename`+"\n"+`data: {"name":"改名会话"}`)
+	nlNameAt := strings.Index(body, `data: {"name":"带\n换行的名字"}`)
+	if newNameAt < 0 || nlNameAt < 0 || newNameAt > nlNameAt {
+		t.Fatalf("rename frames must follow the change order (new=%d newline=%d): %q", newNameAt, nlNameAt, body)
+	}
+	// 换行名载荷单行：裸 \n 必不存在于该帧 data 行内（转义形态 \n 两字符）
+	if !strings.Contains(body, `data: {"name":"带\n换行的名字"}`) {
+		t.Fatalf("newline name must be escaped to a single SSE line: %q", body)
+	}
+	// 帧结构完整性：每个 data 行后都有空行收尾（裸换行撕裂会打破此形态）
+	for _, frame := range strings.Split(body, "\n\n") {
+		for _, line := range strings.Split(frame, "\n") {
+			if strings.HasPrefix(line, "data: ") && strings.Contains(line[len("data: "):], "\n") {
+				t.Fatalf("SSE data line torn by raw newline: %q", line)
+			}
+		}
+	}
+}
+
 func TestStreamEndedImmediately(t *testing.T) {
 	shares := seedTerminalShare(t, fixedToken("ended"), "sess-gone")
 	doneCh := make(chan struct{})
@@ -321,6 +414,37 @@ func TestTerminalGuestPage(t *testing.T) {
 		if !strings.Contains(body, marker) {
 			t.Fatalf("term page missing marker %q", marker)
 		}
+	}
+	// 标题语义（P-20261118-9）：h1/标签页 = 纯分享名，无品牌前缀；泛称只作
+	// 字典键存在（document.title 不再指向它）
+	if !strings.Contains(body, "<title>直播会话</title>") {
+		t.Fatalf("page title must be the bare share name: %q", body)
+	}
+	if strings.Contains(body, "<title>Codecombo ") {
+		t.Fatalf("page title must not carry the brand prefix: %q", body)
+	}
+	if !strings.Contains(body, `<h1 id="pageTitle">直播会话</h1>`) {
+		t.Fatalf("h1 must be the bare share name: %q", body)
+	}
+	if strings.Contains(body, `document.title = t('appTitle')`) {
+		t.Fatalf("document.title must follow the share name, not the generic app title: %q", body)
+	}
+	if !strings.Contains(body, `"name":"直播会话"`) {
+		t.Fatalf("boot state must carry the share name: %q", body)
+	}
+	// 双滚动条收敛面（P-20261118-9）：overset 标记/滚轮路由/viewport 死槽
+	// 收敛的注入件在页面在场
+	for _, marker := range []string{
+		"data-overset", "scWheelRoute", "scrollbar-width:none",
+	} {
+		if !strings.Contains(body, marker) {
+			t.Fatalf("term page missing scroll-convergence marker %q", marker)
+		}
+	}
+	// foot-note 并入 footer 单行（P-20261118-9）：单行形态在场（roTip 左 /
+	// powered 右），独立版权行不再存在
+	if !strings.Contains(body, `class="footer foot-note"`) {
+		t.Fatalf("foot-note must be merged into the footer single line: %q", body)
 	}
 }
 

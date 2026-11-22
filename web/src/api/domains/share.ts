@@ -76,10 +76,13 @@ export interface ShareInfo {
   /** 协作通道开关（P-20261024-1）：true = 访客面暴露上传位 + 受限留言档（500→2000）。
    *  旧服务端缺字段 → 按关解读（升级兼容，纯增量字段） */
   collab?: boolean
-  /** 直通输入档开关（P-20261024-1 第二档独立开关，与 collab 互不联动） */
-  directInput?: boolean
-  /** 可写分享开关（P-20261106-8「对方可直接输入」模式）：true = 访客经 WS 上行桥
-   *  把键入直注锚定终端（仅 kind=terminal 可开；旧服务端缺字段 → 按关解读） */
+  /** 访客输入·申请通道开关（P-20261121-1 统一收编，反向极性投影）：
+   *  true = 申请-批准握手入口默认在场（缺省）；false = owner 显式关闭
+   *  （访客页申请入口不渲染 + 申请端点 404 + 在途回收） */
+  guestInput?: boolean
+  /** 开放直入开关（P-20261106-8 可写分享，P-20261121-1 语义转正）：true = 访客经
+   *  WS 上行桥把键入直注锚定终端（仅 kind=terminal 可开；与申请通道独立不互斥，
+   *  并开时开放直入覆盖申请路径；旧服务端缺字段 → 按关解读） */
   writable?: boolean
   /** 直通持权/申请态（P-20261024-1，服务端 shareSvc 投影）：held=true 有人持权
    *  （会话徽标/行内收回的数据源）；pending=true 有待批申请（缺省 = 无态） */
@@ -110,6 +113,16 @@ export interface TermShareOptions {
    *  非空 = 创建面直接设门（live 幂等命中带新口令=改门、不带=保持既有；
    *  frozen 服务端 P-20261107-4 起创建面同收）。空串缺省不发字段 = 无门 */
   passphrase?: string
+  /** true = 显式永久挡（P-20261119-5，仅 live 创建消费）：记录与 token 不过期，
+   *  直播态本身仍随会话。与 ttlMinutes 互斥（服务端 400）；与 unfiltered 组合
+   *  合法（【用户定向修订】2026-11-19：不再硬禁，警示面在弹层、撤销兜底在
+   *  分享管理）；frozen 的永久走创建后 /expiry 清窗，不走本字段 */
+  permanent?: boolean
+  /** true = 开放直入快捷选择（P-20261121-1，仅 live 创建消费）：创建即开
+   *  访客键入直入（与行内开关同闸——服务端强制口令门，无门记录必携
+   *  passphrase 补设 400）；缺省不发字段 = 关（安全基线）。幂等命中既有
+   *  直播时服务端以既有记录为准（改输入授权须结束直播后重开） */
+  writable?: boolean
 }
 
 /** ShareWritableTyping 可写分享上行在场投影（GET /api/share 行字段） */
@@ -265,7 +278,10 @@ export const shareApi = {
   // 响应不带 data 只带 warnings，确认后带 true 二次请求才创建（文件分享同流）。
   // opts（P-20261106-9）：unfiltered 关闭源头遮蔽 / watermark 关闭水印；opts.passphrase
   // 可选访问口令（P-20261107-4 弹层透出）——缺省均不发字段（服务端安全基线）；
-  // 同会话已有直播时服务端沿用既有记录配置（口令带新=改门）
+  // opts.permanent（P-20261119-5）显式永久挡（与 ttlMinutes 互斥——前端档位
+  // 语义保证不并发；与 unfiltered 组合合法（【用户定向修订】2026-11-19），警示
+  // 在弹层就地说明）；同会话已有直播时服务端沿用既有记录配置（口令带新=改门；
+  // 永久挡经 /expiry 清窗对账）
   createTerminal: (sessionId: string, ttlMinutes?: number, override = false, opts: TermShareOptions = {}) =>
     api.post<{ data: ShareInfo }>('/share/terminal', {
       sessionId,
@@ -274,6 +290,8 @@ export const shareApi = {
       ...(opts.unfiltered ? { unfiltered: true } : {}),
       ...(opts.watermark === false ? { watermark: false } : {}),
       ...(opts.passphrase ? { passphrase: opts.passphrase } : {}),
+      ...(opts.permanent ? { permanent: true } : {}),
+      ...(opts.writable ? { writable: true } : {}),
     }),
   // createTerminalFrozen 终端输出时点冻结快照分享（P-20261005-205）：创建
   // 时刻的 scrollback 定格链接——服务端净化（剥 ANSI + 敏感值遮蔽）后落单
@@ -326,7 +344,11 @@ export const shareApi = {
   refresh: (token: string, override = false) =>
     api.post<CreateShareResult>(`/share/${token}/refresh`, override ? { override: true } : {}),
   // setExpiry 调整有效期（opt-in TTL）：expiresAt 为 RFC3339 绝对时点，
-  // null = 恢复永久；snippet 的 24h 固定窗口服务端拒绝调整（400）
+  // null = 恢复永久；snippet 的 24h 固定窗口服务端拒绝调整（400）。
+  // terminal 直播（P-20261119-5）双向可改：null 清窗=永久（未过滤记录同样
+  // 放行——【用户定向修订】2026-11-19 对称豁免）；显式时点由服务端钳
+  // TerminalLiveTTLMax 24h（未过滤记录仍钳 UnfilteredTTLMax）——响应
+  // 回传生效值，调用方以响应为准
   setExpiry: (token: string, expiresAt: string | null) =>
     api.post<{ data: ShareInfo }>(`/share/${token}/expiry`, { expiresAt }),
   // setPassphrase 访问口令门设置/更换/移除（P-20261006-25）：passphrase 空
@@ -348,11 +370,12 @@ export const shareApi = {
   //（端点恢复 404，存量素材保留可读）。响应 data 为最终记录
   setCollab: (token: string, collab: boolean) =>
     api.post<{ data: ShareInfo }>(`/share/${token}/collab`, { collab }),
-  // setDirectInput 直通输入档开关（第二档独立开关）：on=true 需 confirm 显式
-  // 确认（管理面摩擦硬闸，服务端 400 拦截缺标记的调用）；on=false 回收方向
-  // 不需要 confirm（持权立刻失效 + 会话只读闸解除）
-  setDirectInput: (token: string, on: boolean, confirm = false) =>
-    api.post<{ data: ShareInfo }>(`/share/${token}/direct-input`, { on, confirm }),
+  // setGuestInput 访客输入·申请通道开关（P-20261121-1 统一收编）：通道缺省
+  // 在场，on=false 关闭即回收（在途申请+持权级联清 + 该访客 WS 断开），
+  // on=true 回开；无 confirm 摩擦（申请是惰性请求，批准闸始终在 owner；
+  // 键盘暴露面变更语义已归开放直入开关的三闸）
+  setGuestInput: (token: string, on: boolean) =>
+    api.post<{ data: ShareInfo }>(`/share/${token}/guest-input`, { on }),
   // ── 可写分享管理面（P-20261106-8「对方可直接输入」模式，动作化行内端点） ──
   // setWritable 可写开关：on=true 需 confirm 显式确认 + 口令门就位（记录无
   // 口令时必携 passphrase 补设，服务端 400 "writable requires a passphrase"
@@ -388,27 +411,20 @@ export const shareApi = {
     api.post<{ data: { ok: boolean } }>(`/share/${token}/drops/${id}/consume`),
   // deleteDrop 单删素材（未知 id 幂等成功）
   deleteDrop: (token: string, id: string) => api.delete<{ data: { ok: boolean } }>(`/share/${token}/drops/${id}`),
-  // approveDirect 批准访客的直通输入申请（单持有者握手 owner 半边；无在途
-  // 申请 → 409、非 agent 会话 → 400）
+  // approveDirect 批准访客的输入申请（申请批准路径单持有者握手 owner 半边；
+  // 无在途申请 → 409、通道关/无会话锚点 → 400；agent 会话限定已随 P-20261121-1
+  // 统一收编退役）
   approveDirect: (token: string, visitorId = '', nickname = '') =>
     api.post<{ data: { granted: boolean; visitorId: string; nick?: string; sessionId: string } }>(
       `/share/${token}/direct/approve`,
       { ...(visitorId ? { visitorId } : {}), ...(nickname ? { nickname } : {}) },
     ),
-  // revokeDirect 一键收回直通输入权（管理器行内/通知中心持权卡/会话侧徽标
+  // revokeDirect 一键收回访客输入权（管理器行内/通知中心持权卡/会话侧徽标
   // 三路入口 + 回收端点第四路共用；幂等——had=false = 本就无持权）
   revokeDirect: (token: string) => api.post<{ data: { ok: boolean; had: boolean } }>(`/share/${token}/direct/revoke`),
-  // getDirect 直通档状态投影（enabled/session/pending/hold——管理面轮询数据源）
-  getDirect: (token: string) =>
-    api.get<{
-      data: {
-        enabled: boolean
-        kind?: string
-        session?: { id: string; alive: boolean; kind?: string; name?: string }
-        pending?: { visitorId: string; nick?: string; requestedAt: string; expiresIn: number }
-        hold?: { visitorId: string; nick?: string; grantedAt: string; lastInputAt: string; expiresIn: number }
-      }
-    }>(`/share/${token}/direct`),
+  // getDirect 已删（P-20261121-1 建议采纳3：前端零消费——管理面轮询数据源是
+  // GET /api/share 全量列表行投影 direct.*，useDirectInputShares 单表混入；
+  // 服务端 GET /share/:token/direct 端点保留供 agent 可编程消费）
 }
 
 // buildShareUrl 兼容包装（P-20261020-2 起统一走 utils/shareAddress 的地址计划）：
@@ -500,6 +516,23 @@ export interface QuickdropItem {
   expiresAt: string
   /** 内容字节数（服务端 size 投影） */
   size: number
+  /** 逐文件投影（P-20261117-3：文件投递才有，服务端按 sidecar 批次链归组；
+   *  文本投递/文件已清盘为空数组。机器元数据单一事实源=磁盘 sidecar） */
+  files?: QuickdropDropFile[]
+}
+
+/** QuickdropDropFile 一条投递的逐文件投影（服务端 quickdrop qdFileItem 镜像） */
+export interface QuickdropDropFile {
+  /** 取件键（DropMeta.ID）：落盘名 <id>_<净化名> 天然唯一，同批同名双文件靠它消歧 */
+  id: string
+  /** 净化后的展示名（不回传访客原始 filename） */
+  name: string
+  size: number
+  /** 形态：image | file */
+  kind: string
+  sensitive?: boolean
+  /** 主人侧落盘绝对路径（鉴权面内投影——交给会话贴进会话 / 管理卡悬浮展示） */
+  absPath: string
 }
 
 /** 通知行内动作载荷前缀（服务端 quickdrop.PayloadPrefix 镜像）：「quickdrop:<id>」 */
@@ -524,3 +557,6 @@ export const quickdropApi = {
 export function buildDropUrl(token: string): string {
   return `${window.location.origin}/drop/${token}`
 }
+// 注：逐文件下载直链构造器 quickdropDropFileUrl 在 utils/directDownload.ts
+//（P-20261117-3，与 fileDownloadUrl 同族的直链构造面）——本域只收 axios 调用
+// 面，直链不经 api client（不引 instanceApiBase，防 domains↔utils 模块环）

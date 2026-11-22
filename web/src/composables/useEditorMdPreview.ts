@@ -1,6 +1,4 @@
 import { ref, computed, watch } from 'vue'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { useDebounceFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useEditorMdMode } from './useEditorMdMode'
@@ -8,7 +6,8 @@ import type { EditorMdMode } from '../stores/uiState'
 import { OPS_OPEN_FILE_AT, type OpenFileAtDetail } from '../utils/opsEvents'
 import { resolveMdLinkTarget, resolveMdAnchorTarget } from '../views/editor/mdPreviewLinks'
 import { jumpToMdAnchor } from '../views/editor/mdAnchorNav'
-import '../utils/markedHeadingIds'
+import { renderMdPreviewHtml } from '../utils/mdRender'
+import { openMdLightbox } from '../utils/mdLightbox'
 
 /**
  * Monaco Markdown 模式与预览管线（P-20261003-301 自 MonacoEditor.vue 原样搬运）：
@@ -73,23 +72,10 @@ export function useEditorMdPreview(deps: EditorMdPreviewDeps) {
 
   const renderedHtml = ref('')
 
-  // 配置 marked：启用 GFM、换行、任务列表
-  marked.setOptions({
-    gfm: true,
-    breaks: true,
-  })
-
+  // 渲染+净化走 utils/mdRender 单一管线（P-20261119-4 必改2(a)：与统一预览
+  // 视图 FilePreviewView 共用同源配置，防两处手抄漂移）
   const updateRenderedHtml = useDebounceFn((md: string) => {
-    if (!md) { renderedHtml.value = ''; return }
-    const raw = marked.parse(md, { async: false }) as string
-    // 允许 input 元素以支持 GFM 任务列表。a/target 在允许面（P-20261003-108 复核）：
-    // 落盘的 target 属性是惰性的——左键点击被预览容器委托 preventDefault 接管
-    // （见 handlePreviewClick），只剩中键新标签语义（现代浏览器对 target=_blank
-    // 隐式 noopener，无反向标签泄露面）
-    renderedHtml.value = DOMPurify.sanitize(raw, {
-      ADD_ATTR: ['target'],
-      ADD_TAGS: ['input'],
-    })
+    renderedHtml.value = renderMdPreviewHtml(md || '')
   }, 150)
 
   watch(getModelValue, (val) => {
@@ -114,8 +100,20 @@ export function useEditorMdPreview(deps: EditorMdPreviewDeps) {
    * 远程伪路径 / 未命名草稿无项目根可折叠，文件链接保持死链不导航（canNavigate 守卫）。
    */
   function handlePreviewClick(e: MouseEvent) {
-    const anchor = (e.target as HTMLElement | null)?.closest?.('a')
-    if (!anchor) return
+    const el = e.target as HTMLElement | null
+    const anchor = el?.closest?.('a')
+    if (!anchor) {
+      // 图片灯箱分流（P-20261120-3，mdPreviewLinks 委托体系邻位）：无链接
+      // 包裹的 img 点击 → 全屏看原图（分享访客页 openLightbox 同款，整幅预览
+      // 视图 FilePreviewView 同语义）。a 包裹图（[![alt](img)](link)）让链接
+      // 语义优先不进灯箱
+      const img = el?.closest?.('img')
+      if (img && img.getAttribute('src')) {
+        e.preventDefault()
+        openMdLightbox(img.src)
+      }
+      return
+    }
     e.preventDefault()
     const href = anchor.getAttribute('href') || ''
     if (/^https?:\/\//i.test(href)) {

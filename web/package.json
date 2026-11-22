@@ -31,12 +31,14 @@
     "check:e2e-dualpath": "node scripts/check-e2e-dualpath.mjs",
     "check:keybindings": "node scripts/check-keybindings.mjs",
     "check:event-names": "node ../scripts/check-event-names.mjs",
+    "check:file-size": "node scripts/check-file-size.mjs",
+    "check:import-boundaries": "node scripts/check-import-boundaries.mjs",
     "check:commit": "node ../scripts/check-commit-msg.cjs",
     "test:watch": "vitest",
     "lint": "eslint . --ext .vue,.ts --cache",
     "lint:fix": "eslint . --ext .vue,.ts --fix --cache",
-    "check": "vue-tsc --build && npm run lint && vitest run && npm run check:e2e-conventions && npm run check:e2e-dualpath && npm run check:hardcoded-colors && npm run check:fonts && npm run check:motion && npm run check:icon-titles && npm run check:icon-semantics && npm run check:keybindings && npm run check:audit-actions && npm run check:errmarkers && npm run check:errcodes && npm run check:event-names && npm run check:api-routes && npm run check:uistate-lanes",
-    "check:fast": "vue-tsc --build && npm run lint && node scripts/vitest-changed.mjs && npm run check:e2e-conventions && npm run check:e2e-dualpath && npm run check:hardcoded-colors && npm run check:fonts && npm run check:motion && npm run check:icon-titles && npm run check:icon-semantics && npm run check:keybindings && npm run check:audit-actions && npm run check:errmarkers && npm run check:errcodes && npm run check:event-names && npm run check:api-routes && npm run check:uistate-lanes",
+    "check": "vue-tsc --build && npm run lint && vitest run && npm run check:e2e-conventions && npm run check:e2e-dualpath && npm run check:hardcoded-colors && npm run check:fonts && npm run check:motion && npm run check:icon-titles && npm run check:icon-semantics && npm run check:keybindings && npm run check:audit-actions && npm run check:errmarkers && npm run check:errcodes && npm run check:event-names && npm run check:api-routes && npm run check:uistate-lanes && npm run check:file-size && npm run check:import-boundaries",
+    "check:fast": "vue-tsc --build && npm run lint && node scripts/vitest-changed.mjs && npm run check:e2e-conventions && npm run check:e2e-dualpath && npm run check:hardcoded-colors && npm run check:fonts && npm run check:motion && npm run check:icon-titles && npm run check:icon-semantics && npm run check:keybindings && npm run check:audit-actions && npm run check:errmarkers && npm run check:errcodes && npm run check:event-names && npm run check:api-routes && npm run check:uistate-lanes && npm run check:file-size && npm run check:import-boundaries",
     "check:i18n:unused": "node scripts/check-i18n.mjs --unused"
   },
   "dependencies": {

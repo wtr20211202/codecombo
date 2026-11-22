@@ -12,7 +12,7 @@
 // 设门后结果区提供「复制邀请信息」（链接+本次明文口令+TTL）。明文只存在于
 // 输入框与分享快照两处，成功分享即清输入框、关闭/重新生成即清快照，不进
 // URL/二维码。短链走分享地址计划（P-20261020-6 复用 buildRelayPlan 三形态），
-// 回环入口下给手机可达的局域网地址，而不是只对当前浏览器有效的 localhost。
+// 回环入口下默认浏览器地址、可在二维码面板显式切换候选（P-20261120-4）。
 import { computed, ref, watch } from 'vue'
 import { createDiscreteApi, NButton, NCheckbox, NIcon, NInput, NModal, NSpin } from 'naive-ui'
 import { CopyOutline, LockClosedOutline, ShareSocialOutline, RefreshOutline } from '@vicons/ionicons5'
@@ -23,6 +23,7 @@ import { useSnippetShare } from '../../composables/useSnippetShare'
 import { useShareAddressPlan } from '../../composables/useShareAddressPlan'
 import { SNIPPET_MAX_BYTES } from '../../api/domains/share'
 import { copyText } from '../../utils/clipboard'
+import { shouldWarnCopy } from '../../utils/shareAddress'
 import { buildShareInviteText } from '../../utils/shareInvite'
 import { formatDateTime } from '../../utils/git'
 
@@ -134,10 +135,19 @@ async function onShare(): Promise<void> {
   }
 }
 
+/** 复制成功后的可达性警示（P-20261119-7）：回环入口下按候选网卡自动改写的
+ *  短链不能承诺对端可达——判定单一事实源 shareAddress.shouldWarnCopy（与
+ *  分享管理器/二维码面板共用），链接本身不动只做知情提示 */
+function warnCopyReachability(): void {
+  const level = shouldWarnCopy(sharePlan.plan.value)
+  if (level) message.warning(t(`share.copyWarn.${level}`))
+}
+
 async function copyLink(): Promise<void> {
   const ok = await copyText(shareUrl.value)
   if (ok) message.success(t('handover.linkCopied'))
   else message.error(t('common.copyFailed'))
+  if (ok) warnCopyReachability()
 }
 
 /** 邀请信息：链接 + 本次明文口令 + 到期时点（24h 固定），一次复制交付 */
@@ -161,6 +171,7 @@ async function copyInvite(): Promise<void> {
   const ok = await copyText(inviteText.value)
   if (ok) message.success(t('handover.inviteCopied'))
   else message.error(t('common.copyFailed'))
+  if (ok) warnCopyReachability()
 }
 </script>
 

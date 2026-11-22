@@ -18,6 +18,8 @@ type termFrozenBootState struct {
 	Token string            `json:"token"`
 	Lang  string            `json:"lang"`
 	Dict  map[string]string `json:"dict"`
+	// Name 分享展示名（P-20261118-9 去品牌前缀）：页面校准 document.title 用
+	Name string `json:"name,omitempty"`
 	// Wm 溯源水印文本（P-20261005-193；空串 = 记录未开水印，页面不出水印层）
 	Wm string `json:"wm,omitempty"`
 	// MsgMax 留言板上限（协作通道 2000 / 缺省 500，P-20261024-1 boardMsgMax
@@ -38,6 +40,14 @@ var termFrozenDictZh = map[string]string{
 	"loadError":        "快照读取失败，链接可能已被撤销或过期",
 	"emptyTip":         "快照为空（创建时刻会话暂无输出）",
 	"poweredBy":        "由 Codecombo 提供",
+	// 主题切换器（P-20261120-1，theme.go guestThemeJS 消费；键名与文件页
+	// page_i18n.go 主题段同表，六页同键）
+	"theme":        "主题",
+	"themeAuto":    "跟随系统",
+	"themeLight":   "GitHub 浅色",
+	"themeDark":    "GitHub 深色",
+	"themeOneDark": "One Dark",
+	"themeDracula": "Dracula",
 	// 访客留言板（P-20261006-13）：页底留言区文案（三形态访客页同表）
 	"gbTitle":   "留言",
 	"gbNick":    "昵称（可选）",
@@ -62,6 +72,13 @@ var termFrozenDictEn = map[string]string{
 	"loadError":        "Failed to load the snapshot; the link may have been revoked or expired",
 	"emptyTip":         "Snapshot is empty (the session had no output at creation time)",
 	"poweredBy":        "Powered by Codecombo",
+	// 主题切换器（P-20261120-1；键名与文件页 page_i18n.go 主题段同表）
+	"theme":        "Theme",
+	"themeAuto":    "Auto (system)",
+	"themeLight":   "GitHub Light",
+	"themeDark":    "GitHub Dark",
+	"themeOneDark": "One Dark",
+	"themeDracula": "Dracula",
 	// 访客留言板（P-20261006-13）：页底留言区文案（三形态访客页同表）
 	"gbTitle":   "Messages",
 	"gbNick":    "Nickname (optional)",
@@ -94,6 +111,10 @@ type termFrozenPageData struct {
 	// LayoutCSS/LayoutJS 终端访客页共用布局件（P-20261106-9，termlayout.go）
 	LayoutCSS template.CSS
 	LayoutJS  template.JS
+	// ThemeCSS/ThemeJS 访客页族主题切换注入件（P-20261120-1，theme.go 单一
+	// 事实源——CSS 进 <style>，JS 在 head 先行 initTheme 防闪白）
+	ThemeCSS template.CSS
+	ThemeJS  template.JS
 	// Unfiltered 未过滤标记（P-20261106-9）：横幅位服务端直出 .unfiltered 类
 	Unfiltered bool
 }
@@ -116,6 +137,7 @@ const termFrozenPageTmplSrc = `<!doctype html>
 --accent:#3d7bfd;--accent2:#6a5cff;--chip:#eef2ff;--warn-bg:#fff7e8;--warn-bd:#f0d9a8;--warn-tx:#8a5b00;--shadow:0 10px 30px rgba(23,43,99,.08)}
 @media (prefers-color-scheme: dark){:root{--bg:#0e1320;--card:#161d2f;--text:#e6eaf3;--muted:#8b94a9;
 --border:#263149;--chip:#1e2a4a;--warn-bg:#2d2410;--warn-bd:#5a4a1e;--warn-tx:#e8c87a;--shadow:0 10px 30px rgba(0,0,0,.35)}}
+{{.ThemeCSS}}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;color:var(--text);overflow:hidden;
@@ -126,49 +148,53 @@ font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microso
 .b2{width:320px;height:320px;background:rgba(61,123,253,.26);bottom:-90px;left:-60px}
 /* .wrap 列容器 / 未过滤横幅 / 窄屏断点由 termLayoutCSS 注入（P-20261106-9，
    termlayout.go 单一事实源，三终端访客页共用） */
-.header{flex-shrink:0;display:flex;align-items:center;gap:14px;
+.header{flex-shrink:0;display:flex;align-items:center;gap:12px;
 background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:14px;
-padding:13px 20px;color:#fff;box-shadow:var(--shadow)}
-.header .icon{flex:0 0 auto;width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.16);
+padding:9px 16px;color:#fff;box-shadow:var(--shadow)}
+.header .icon{flex:0 0 auto;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.16);
 display:flex;align-items:center;justify-content:center}
 .header .meta{flex:1;min-width:0}
-.header h1{margin:0;font-size:16.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.header .sub{margin-top:2px;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header h1{margin:0;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header .sub{margin-top:1px;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 「快照」徽标：静态相机/定格语义，无呼吸点（与直播徽标的动态感刻意区分） */
 .badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.16);
-border:1px solid rgba(255,255,255,.4);border-radius:999px;padding:4px 13px;font-size:12px;font-weight:600;
+border:1px solid rgba(255,255,255,.4);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:600;
 letter-spacing:.4px}
-.banner{flex-shrink:0;margin-top:12px;display:flex;gap:9px;align-items:flex-start;
+.banner{flex-shrink:0;margin-top:8px;display:flex;gap:9px;align-items:flex-start;
 background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx);
-border-radius:10px;padding:9px 14px;font-size:12.5px;line-height:1.55}
+border-radius:10px;padding:6px 12px;font-size:12.5px;line-height:1.5}
 .banner svg{flex:0 0 auto;margin-top:2px}
-.card{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:12px;
+.card{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:8px;
 background:var(--card);border:1px solid var(--border);border-radius:14px;
 box-shadow:var(--shadow);overflow:hidden}
 .term-box{flex:1;min-height:0;padding:8px 10px}
 .term-box .xterm{height:100%}
 .term-box .xterm-viewport{background:transparent!important}
+/* foot-note 并入 footer 单行（P-20261118-9）：原两行（提示行+版权行）合并为
+   flex 两端单行——roTip 左、版权右；.footer 锚点语义保留（挂载脚本插入位） */
 .foot-note{flex-shrink:0;display:flex;justify-content:space-between;gap:12px;
-padding:8px 6px 2px;color:var(--muted);font-size:11.5px;opacity:.85}
+padding:6px 6px 0;color:var(--muted);font-size:11.5px;opacity:.85}
 .state{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
 color:var(--muted);text-align:center;padding:30px}
 .state .big{width:64px;height:64px;border-radius:18px;background:var(--chip);margin-bottom:14px;
 display:flex;align-items:center;justify-content:center}
 .state h2{margin:0 0 6px;font-size:16px;color:var(--text)}
 .state p{margin:0;font-size:12.5px}
-.footer{flex-shrink:0;text-align:center;color:var(--muted);font-size:11.5px;margin-top:9px;opacity:.75}
 /* 溯源水印（P-20261005-193）：与直播页/文件分享页同款对角双标低透明（4%）
    ——DOM 在页内自实现（单文件页零依赖契约，文案构造 share.WatermarkLabel
-   服务端共享），样式三页逐段对齐，改动任一端须同步 */
+   服务端共享），样式三页逐段对齐，改动任一端须同步。色取常量中性灰
+   （P-20261121-4 端面感知裁定）：var(--text) 在浅色档为深色、落在恒深终端
+   端面上 4% 不可见——中性灰在浅/深两种面上同档隐现，不随主题翻转 */
 .sc-wm{position:fixed;inset:0;pointer-events:none;z-index:65;
 -webkit-user-select:none;user-select:none}
 .sc-wm span{position:absolute;font-size:13px;font-weight:600;letter-spacing:.4px;
-color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
+color:#8b94a9;opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 .sc-wm .wm-a{top:16%;left:5%}
 .sc-wm .wm-b{bottom:16%;right:5%}
 {{.BoardCSS}}
 {{.LayoutCSS}}
 </style>
+<script>{{.ThemeJS}}</script>
 </head>
 <body>
 <div class="blob b1"></div><div class="blob b2"></div>
@@ -176,10 +202,11 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
   <div class="header">
     <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12.5 15H17" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="meta">
-      <h1>{{.Title}}</h1>
+      <h1 id="pageTitle">{{.Title}}</h1>
       <div class="sub" id="sub"></div>
     </div>
     <div class="badge" id="badge" data-state="loading"><span id="badgeText"></span></div>
+    <span id="themeSlot"></span>
   </div>
   <div class="banner{{if .Unfiltered}} unfiltered{{end}}" id="maskBanner" data-testid="share-mask-banner">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -189,8 +216,8 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
     <div class="term-box" id="termBox" style="display:none"></div>
     <div class="state" id="stateBox"></div>
   </div>
-  <div class="foot-note"><span id="roTip"></span><span></span></div>
-  <div class="footer" id="powered"></div>
+  <!-- foot-note 并入 footer 单行（P-20261118-9 布局紧凑化） -->
+  <div class="footer foot-note"><span id="roTip"></span><span id="powered"></span></div>
 </div>
 <script src="/assets/xterm.js"></script>
 <script src="/assets/addon-fit.js"></script>
@@ -202,12 +229,16 @@ const SC = {{.Boot}};
 {{.LayoutJS}}
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
-document.title = t('appTitle');
+// 标签页标题 = 分享名（P-20261118-9 去品牌前缀；<title> 已是分享名，此处校准）
+document.title = SC.name || document.title;
 $('badgeText').textContent = t('loadingTip');
 // 横幅位：遮蔽声明 / 未过滤警示二选一（P-20261106-9，记录配置随 boot 下发）
 $('bannerText').textContent = t(SC.unfiltered ? 'unfilteredBanner' : 'maskBanner');
 $('roTip').textContent = t('frozenTip');
 $('powered').textContent = t('poweredBy');
+// 主题切换器（P-20261120-1，theme.go 共享注入件——head 已先行 initTheme 设
+// data-theme 防闪白；渐变头部上的落位观感由页面实测门禁三视口裁定）
+$('themeSlot').appendChild(makeThemeSelect());
 
 // 溯源水印（P-20261005-193）：与直播页同款（文本服务端下发，空 = 不出层，
 // textContent 写入防注入）
@@ -228,14 +259,14 @@ $('powered').textContent = t('poweredBy');
 // scTermOptions 单一出口）；convertEol 开启——快照是剥离 ANSI 后的净化文本
 // （裸 \n），非 PTY 原始字节流。定格文本无光标定位语义，栅格按容器 fit 软折行
 // （与直播/回放的主机栅格模式刻意不同）──
-const dark = matchMedia('(prefers-color-scheme: dark)');
+// 端面恒深色（P-20261121-4，直播页同款）：快照字节流的 ANSI 着色按深色控制台
+// 语义发出，浅色主题透明底承接 = 深色语义落浅底不可辨——端面收敛常量深色
+// （底色同各页 OS-dark --bg=#0e1320、前景恒 #e6eaf3），页面 chrome 仍随四主题
+// 换装；旧主题随档接线全量退役
 const term = new Terminal(scTermOptions({ convertEol: true, theme: termTheme() }));
 function termTheme(){
-  return dark.matches
-    ? { background: 'rgba(0,0,0,0)', foreground: '#e6eaf3', cursor: 'transparent' }
-    : { background: 'rgba(0,0,0,0)', foreground: '#24292f', cursor: 'transparent' }
+  return { background: '#0e1320', foreground: '#e6eaf3', cursor: 'transparent' };
 }
-dark.addEventListener('change', () => { term.options.theme = termTheme(); });
 scTermUnicode(term);
 const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
@@ -302,18 +333,21 @@ var termFrozenPageTmpl = template.Must(template.New("termfrozen").Parse(termFroz
 // unfiltered 为记录的未过滤标记（P-20261106-9）——横幅位换「未过滤」警示
 func renderTermFrozenPage(w io.Writer, token, lang, title, wm string, collab, unfiltered bool) error {
 	boot, err := json.Marshal(termFrozenBootState{Token: token, Lang: lang, Dict: termFrozenDictFor(lang), Wm: wm,
-		MsgMax: boardMsgMax(collab), Unfiltered: unfiltered})
+		Name: title, MsgMax: boardMsgMax(collab), Unfiltered: unfiltered})
 	if err != nil {
 		return err
 	}
+	// Title 无品牌前缀（P-20261118-9，termpage.go 同款口径）
 	return termFrozenPageTmpl.Execute(w, termFrozenPageData{
 		Lang:       lang,
-		Title:      "Codecombo " + title,
+		Title:      title,
 		Boot:       template.JS(boot),
 		BoardCSS:   template.CSS(guestBoardCSS),
 		BoardJS:    template.JS(guestBoardJS),
 		LayoutCSS:  template.CSS(termLayoutCSS),
 		LayoutJS:   template.JS(termLayoutJS),
+		ThemeCSS:   template.CSS(GuestThemeCSS),
+		ThemeJS:    template.JS(guestThemeJS),
 		Unfiltered: unfiltered,
 	})
 }

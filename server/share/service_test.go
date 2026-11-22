@@ -3,10 +3,14 @@ package share
 import (
 	"archive/zip"
 	"bytes"
+	preview "codecombo/server/filepreview"
+	"encoding/binary"
 	"encoding/json"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -329,6 +333,44 @@ func TestUnsupportedFileDownloadAndZipDir(t *testing.T) {
 	}
 	if names["img.png"] {
 		t.Fatal("zip must not contain files outside share root")
+	}
+}
+
+// TestMetaKnownInfoFlag 显性化透传（P-20261116-5-S2）：已注册 KindInfo 格式
+// （xls）的 meta 携 known:true——信息卡出「暂不支持在线预览」显性提示；
+// 未注册后缀（.xyz 兜底）同为 info 卡但缺省 known（omitempty）——中性卡
+// 正负样本，判定源=preview registry
+func TestMetaKnownInfoFlag(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("ledger.xls", "OLDXLS")
+	write("blob.xyz", "???")
+
+	probe := func(tokenLabel, fileName string) string {
+		t.Helper()
+		token := fixedToken(tokenLabel) // token 形态门禁限 base36，与文件名分用
+		shares := fakeShares{token: {
+			Token: token, ProjectID: "p1", ProjectName: "proj", Name: fileName,
+			Path: fileName, IsDir: false, Size: 6,
+		}}
+		svc := NewService(shares, fakeRoots{byID: map[string]string{"p1": root}}, nil)
+		srv := httptest.NewServer(svc.Handler())
+		defer srv.Close()
+		resp := get(t, srv.URL+"/s/"+token+"/meta")
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return string(b)
+	}
+
+	if b := probe("xlsprobe", "ledger.xls"); !strings.Contains(b, `"kind":"info"`) || !strings.Contains(b, `"known":true`) {
+		t.Fatalf("registered KindInfo meta must carry known:true, got %s", b)
+	}
+	if b := probe("xyzprobe", "blob.xyz"); !strings.Contains(b, `"kind":"info"`) || strings.Contains(b, `"known"`) {
+		t.Fatalf("unregistered ext meta must stay neutral (no known), got %s", b)
 	}
 }
 
@@ -861,7 +903,8 @@ func TestAllEndpointsTraversalMatrix(t *testing.T) {
 		pathInQuery bool
 	}{
 		{"meta", true}, {"list", true}, {"render", true},
-		{"raw", true}, {"download", true},
+		{"raw", true}, {"download", true}, {"docx-media", true},
+		{"docx-embed", true},
 	}
 	for _, e := range endpoints {
 		for _, p := range traversal {
@@ -897,5 +940,633 @@ func TestAllEndpointsTraversalMatrix(t *testing.T) {
 			t.Errorf("legitimate %q broken: %d", ok, resp.StatusCode)
 		}
 		resp.Body.Close()
+	}
+}
+
+// ---- docx-media 端点（P-20261116-6：docx 预览图片端点供给） ----
+// 循本文件既有装配先例（fakeShares/fakeRoots + httptest.NewServer +
+// SnapshotDirs 注入的 frozen 双源）；docx 包构造复用 office_test.go 的
+// buildDocxFull/imgRel/blipXML/pngBytes（同包测试共享）
+
+// docxSampleRels/docxSampleDoc 最小图片文档（photo.png 命中 + ghost 悬空）
+var (
+	docxSampleRels = relsShell + imgRel("rId1", "media/photo.png")
+	docxSampleDoc  = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+		blipXML("rId1") + blipXML("rIdGhost") + `</w:body></w:document>`
+)
+
+// docxMediaURLFor 测试侧 URL 拼装（与 docxMediaURL 同形，独立落字避免
+// 断言与实现共用同一表达式而失去钉格式的作用）
+func docxMediaURLFor(token, path, media string) string {
+	return "/s/" + token + "/docx-media?path=" + url.QueryEscape(path) + "&m=" + url.QueryEscape(media)
+}
+
+func newDocxShareServer(t *testing.T, root string, frozen bool) (*httptest.Server, string) {
+	t.Helper()
+	token := fixedToken("docxshare")
+	shares := fakeShares{token: {
+		Token: token, ProjectID: "p1", ProjectName: "proj", Name: "docs",
+		Path: "docs", IsDir: true, Frozen: frozen,
+	}}
+	svc := NewService(shares, fakeRoots{byID: map[string]string{"p1": root}}, nil)
+	if frozen {
+		svc = svc.WithSnapshotDirs(fakeSnapshotDirs{dir: SnapshotsRoot()})
+	}
+	srv := httptest.NewServer(svc.Handler())
+	t.Cleanup(srv.Close)
+	return srv, token
+}
+
+// TestDocxMediaEndpoint live 源主链路：命中 200 + 嗅探 Content-Type +
+// 字节等值 + nosniff/sandbox；越权 m=（未被 rels 引用的包内条目/任意构造/
+// 空）一律 404——映射簿是唯一准入；渲染 HTML 含端点 src + 悬空 rId 占位
+func TestDocxMediaEndpoint(t *testing.T) {
+	root := fixture(t)
+	pkg := buildDocxFull(t, docxSampleDoc, docxSampleRels, map[string][]byte{
+		"word/media/photo.png":  pngBytes,
+		"word/media/hidden.png": pngBytes, // 包内存在但不进 rels 映射
+	})
+	if err := os.WriteFile(filepath.Join(root, "docs", "report.docx"), pkg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, token := newDocxShareServer(t, root, false)
+	base := srv.URL + "/s/" + token
+
+	resp := get(t, srv.URL+docxMediaURLFor(token, "report.docx", "word/media/photo.png"))
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("docx-media hit status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("content-type = %q, want sniffed image/png (not the .png extension guess)", ct)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(b, pngBytes) {
+		t.Fatalf("body mismatch: got %d bytes", len(b))
+	}
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("docx-media must carry nosniff")
+	}
+	if resp.Header.Get("Content-Security-Policy") != "sandbox" {
+		t.Fatal("docx-media must carry CSP sandbox (raw 同口径)")
+	}
+
+	// 越权 m=：未被 rels 引用的包内条目 / 任意构造 / 空 → 一律 404
+	for _, bad := range []string{"word/media/hidden.png", "word/media/../../docs/readme.md", "../photo.png", "photo.png", ""} {
+		u := base + "/docx-media?path=" + url.QueryEscape("report.docx") + "&m=" + url.QueryEscape(bad)
+		r2 := get(t, u)
+		body, _ := io.ReadAll(r2.Body)
+		r2.Body.Close()
+		if r2.StatusCode == 200 || bytes.Contains(body, pngBytes) {
+			t.Fatalf("unauthorized m=%q must not be served (status %d)", bad, r2.StatusCode)
+		}
+	}
+
+	// 非 docx 目标 / 目录 / 缺失：不在图片供给面
+	for _, bad := range []string{"readme.md", "sub", "gone.docx"} {
+		u := base + "/docx-media?path=" + url.QueryEscape(bad) + "&m=" + url.QueryEscape("word/media/photo.png")
+		r3 := get(t, u)
+		_, _ = io.Copy(io.Discard, r3.Body)
+		r3.Body.Close()
+		if r3.StatusCode == 200 {
+			t.Fatalf("non-docx target %q must not be served", bad)
+		}
+	}
+
+	// 渲染 HTML：命中 rId 产端点 src；悬空 rIdGhost 占位降级
+	render := get(t, base+"/render?path=report.docx")
+	defer render.Body.Close()
+	rb, _ := io.ReadAll(render.Body)
+	rs := string(rb)
+	wantSrc := `src="` + html.EscapeString(docxMediaURL(token, "report.docx", "word/media/photo.png")) + `"`
+	if !strings.Contains(rs, wantSrc) {
+		t.Fatalf("render html missing endpoint src %q:\n%.400s", wantSrc, rs)
+	}
+	if n := strings.Count(rs, "doc-img-missing"); n != 1 {
+		t.Fatalf("dangling rId should degrade to exactly 1 placeholder, got %d:\n%s", n, rs)
+	}
+}
+
+// TestDocxMediaFileShareForm 文件分享形态：vrel 为空 → src 的 path= 为空
+// 查询值，端点侧空 path= 解析回分享目标本身（与 raw 空 path 同语义）
+func TestDocxMediaFileShareForm(t *testing.T) {
+	root := fixture(t)
+	pkg := buildDocxFull(t, docxSampleDoc, docxSampleRels, map[string][]byte{
+		"word/media/photo.png": pngBytes,
+	})
+	if err := os.WriteFile(filepath.Join(root, "docs", "solo.docx"), pkg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token := fixedToken("singlefile")
+	shares := fakeShares{token: {
+		Token: token, ProjectID: "p1", ProjectName: "proj", Name: "solo.docx",
+		Path: "docs/solo.docx", IsDir: false,
+	}}
+	svc := NewService(shares, fakeRoots{byID: map[string]string{"p1": root}}, nil)
+	srv := httptest.NewServer(svc.Handler())
+	t.Cleanup(srv.Close)
+
+	resp := get(t, srv.URL+docxMediaURLFor(token, "", "word/media/photo.png"))
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("file-share docx-media status = %d", resp.StatusCode)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(b, pngBytes) {
+		t.Fatalf("file-share docx-media body mismatch (%d bytes)", len(b))
+	}
+}
+
+// TestDocxMediaFrozenSource frozen 双源：命中走快照副本；源漂移后访客
+// 仍供给创建时刻的字节（与 raw 的冻结承诺同口径）
+func TestDocxMediaFrozenSource(t *testing.T) {
+	snapEnv(t)
+	src := t.TempDir()
+	pkg := buildDocxFull(t, docxSampleDoc, docxSampleRels, map[string][]byte{
+		"word/media/photo.png": pngBytes,
+	})
+	mustFile(t, filepath.Join(src, "docs", "report.docx"), string(pkg))
+	// 快照目录名 = 记录 token（fakeSnapshotDirs 按记录 token 解析，与装配层
+	// FrozenNativeToken 重算同构——快照须用与 newDocxShareServer 同一 token）
+	if _, err := CreateFrozenSnapshot(src, "docs", fixedToken("docxshare")); err != nil {
+		t.Fatal(err)
+	}
+	srv, token := newDocxShareServer(t, src, true)
+
+	resp := get(t, srv.URL+docxMediaURLFor(token, "report.docx", "word/media/photo.png"))
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || !bytes.Equal(b, pngBytes) {
+		t.Fatalf("frozen docx-media = %d, %d bytes", resp.StatusCode, len(b))
+	}
+
+	// 源漂移：项目内 docx 换字节（media 变文本），快照供给不变
+	drifted := buildDocxFull(t, docxSampleDoc, docxSampleRels, map[string][]byte{
+		"word/media/photo.png": []byte("DRIFTED-NOT-AN-IMAGE"),
+	})
+	mustFile(t, filepath.Join(src, "docs", "report.docx"), string(drifted))
+	resp2 := get(t, srv.URL+docxMediaURLFor(token, "report.docx", "word/media/photo.png"))
+	defer resp2.Body.Close()
+	b2, _ := io.ReadAll(resp2.Body)
+	if resp2.StatusCode != 200 || !bytes.Equal(b2, pngBytes) {
+		t.Fatalf("frozen media drifted after project change: %d, %q", resp2.StatusCode, b2)
+	}
+}
+
+// TestDocxMediaOversizeAndSniff 解压闸与嗅探（渲染侧已零解压，两闸都在
+// 端点收口）：单部件超 preview.DocxMediaMaxBytes → 413（闸施加在解压流上——zip
+// 元数据声明的尺寸可伪造，零字节夹具高压缩不撑大测试）；非图字节伪装 →
+// 404 绝不透传
+func TestDocxMediaOversizeAndSniff(t *testing.T) {
+	root := fixture(t)
+	rels := relsShell + imgRel("rIdBig", "media/big.png") + imgRel("rIdFake", "media/fake.png")
+	doc := `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+		blipXML("rIdBig") + blipXML("rIdFake") + `</w:body></w:document>`
+	pkg := buildDocxFull(t, doc, rels, map[string][]byte{
+		"word/media/big.png":  make([]byte, preview.DocxMediaMaxBytes+1), // 超单部件解压上限
+		"word/media/fake.png": []byte("<script>alert(1)</script>"),
+	})
+	if err := os.WriteFile(filepath.Join(root, "docs", "huge.docx"), pkg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, token := newDocxShareServer(t, root, false)
+
+	resp := get(t, srv.URL+docxMediaURLFor(token, "huge.docx", "word/media/big.png"))
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize media status = %d, want 413", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "too_large") {
+		t.Fatalf("oversize body = %q", body)
+	}
+
+	resp2 := get(t, srv.URL+docxMediaURLFor(token, "huge.docx", "word/media/fake.png"))
+	body2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotFound || bytes.Contains(body2, []byte("<script>")) {
+		t.Fatalf("non-image bytes must 404 without leaking, got %d %q", resp2.StatusCode, body2)
+	}
+}
+
+// ---- docx-embed 端点（P-20261116-7：嵌入对象下载供给） ----
+
+// docxEmbedURLFor 测试侧 URL 拼装（与 docxEmbedURL 同形独立落字，避免
+// 断言与实现共用同一表达式而失去钉格式的作用）
+func docxEmbedURLFor(token, path, entry string) string {
+	return "/s/" + token + "/docx-embed?path=" + url.QueryEscape(path) + "&e=" + url.QueryEscape(entry)
+}
+
+// docxEmbedSampleRels/docxEmbedSampleDoc 嵌入文档：package 直存
+// （attached.html，embeddings 部件就是原文件字节）与 OLE .bin（oleObject1.bin，
+// CFB 容器内含 Ole10Native 流）双形态 + PNG 图标
+var (
+	docxEmbedSampleRels = relsShell +
+		imgRel("rIcon", "media/image1.png") +
+		embedRel("rEmbOle", "oleObject", "embeddings/oleObject1.bin") +
+		embedRel("rEmbPkg", "package", "embeddings/attached.html")
+	docxEmbedSampleDoc = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+		objectXML("rIcon", "rEmbOle", "Package") +
+		objectXML("", "rEmbPkg", "Package") + `</w:body></w:document>`
+)
+
+// TestDocxEmbedEndpoint live 源主链路：命中 200 + 恒 attachment/octet-stream
+// + Ole10Native 文件名抽取（CFB .bin）+ 字节等值 + nosniff；越权 e=（media
+// 条目/任意构造/空）一律 404——embeddings 映射簿是唯一准入；非 docx 目标
+// 不在供给面；渲染 HTML 含 docx-embed 链接
+func TestDocxEmbedEndpoint(t *testing.T) {
+	root := fixture(t)
+	cfb := buildCFB(t, 512, ole10Payload("需求文档.html", 600), true, nil)
+	pkg := buildDocxFull(t, docxEmbedSampleDoc, docxEmbedSampleRels, map[string][]byte{
+		"word/media/image1.png":          pngBytes,
+		"word/embeddings/oleObject1.bin": cfb,
+		"word/embeddings/attached.html":  []byte("<html>需求文档</html>"),
+	})
+	if err := os.WriteFile(filepath.Join(root, "docs", "report.docx"), pkg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, token := newDocxShareServer(t, root, false)
+	base := srv.URL + "/s/" + token
+
+	// OLE .bin：CFB 最小读抽出 Ole10Native 原始文件名 → Content-Disposition
+	resp := get(t, srv.URL+docxEmbedURLFor(token, "report.docx", "word/embeddings/oleObject1.bin"))
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("docx-embed hit status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Fatalf("content-type = %q, want fixed octet-stream (禁嗅探/禁扩展名推断)", ct)
+	}
+	cd := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(cd, "attachment") {
+		t.Fatalf("content-disposition must be attachment, got %q", cd)
+	}
+	// 非 ASCII 名经 contentDisposition 的 RFC 2231 形态（mime.FormatMediaType
+	// 自动 percent-encode）——断言编码后的文件名与 utf-8'' 扩展参数
+	if !strings.Contains(cd, "utf-8''") || !strings.Contains(cd, url.QueryEscape("需求文档.html")) {
+		t.Fatalf("content-disposition should carry the RFC 2231 Ole10Native name, got %q", cd)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(b, cfb) {
+		t.Fatalf("body mismatch: got %d bytes want %d", len(b), len(cfb))
+	}
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("docx-embed must carry nosniff")
+	}
+
+	// package 直存：无 CFB → 回落条目基名，仍是 attachment/octet-stream
+	respP := get(t, srv.URL+docxEmbedURLFor(token, "report.docx", "word/embeddings/attached.html"))
+	defer respP.Body.Close()
+	if respP.StatusCode != 200 {
+		t.Fatalf("package form status = %d", respP.StatusCode)
+	}
+	if cdP := respP.Header.Get("Content-Disposition"); !strings.Contains(cdP, "attached.html") || !strings.Contains(cdP, "attachment") {
+		t.Fatalf("package form disposition = %q", cdP)
+	}
+	if ctP := respP.Header.Get("Content-Type"); ctP != "application/octet-stream" {
+		t.Fatalf("package form content-type = %q (按扩展名推 text/html 即 XSS 面)", ctP)
+	}
+	bP, _ := io.ReadAll(respP.Body)
+	if !bytes.Equal(bP, []byte("<html>需求文档</html>")) {
+		t.Fatalf("package body mismatch: %d bytes", len(bP))
+	}
+
+	// 越权 e=：media 条目 / 任意构造 / 空 → 一律 404（映射簿唯一准入）
+	for _, bad := range []string{"word/media/image1.png", "word/embeddings/nope.bin", "../../docs/readme.md", ""} {
+		u := base + "/docx-embed?path=" + url.QueryEscape("report.docx") + "&e=" + url.QueryEscape(bad)
+		r2 := get(t, u)
+		body2, _ := io.ReadAll(r2.Body)
+		r2.Body.Close()
+		if r2.StatusCode == 200 || bytes.Contains(body2, cfb) || bytes.Contains(body2, pngBytes) {
+			t.Fatalf("unauthorized e=%q must not be served (status %d)", bad, r2.StatusCode)
+		}
+	}
+
+	// 非 docx 目标 / 目录 / 缺失：不在嵌入供给面
+	for _, bad := range []string{"readme.md", "sub", "gone.docx"} {
+		u := base + "/docx-embed?path=" + url.QueryEscape(bad) + "&e=" + url.QueryEscape("word/embeddings/oleObject1.bin")
+		r3 := get(t, u)
+		_, _ = io.Copy(io.Discard, r3.Body)
+		r3.Body.Close()
+		if r3.StatusCode == 200 {
+			t.Fatalf("non-docx target %q must not be served", bad)
+		}
+	}
+
+	// 渲染 HTML：嵌入块产 docx-embed 链接（PNG 图标走 docx-media 同前）。
+	// P-20261118-1：两块都是可预览型（CFB 抽出「需求文档.html」+ package
+	// 条目名 attached.html 自带 ext）。P-20261118-3：单行双动作、html 档
+	// 预览动作=壳页 URL（&ui=1），data-embed-ext/url 标记随页内 iframe
+	// 分支退役
+	render := get(t, base+"/render?path=report.docx")
+	defer render.Body.Close()
+	rb, _ := io.ReadAll(render.Body)
+	rs := string(rb)
+	wantHref := `href="` + html.EscapeString(docxEmbedURL(token, "report.docx", "word/embeddings/oleObject1.bin")) + `"`
+	if !strings.Contains(rs, wantHref) {
+		t.Fatalf("render html missing docx-embed href %q:\n%.400s", wantHref, rs)
+	}
+	if n := strings.Count(rs, `class="doc-embed"`); n != 2 {
+		t.Fatalf("want 2 embed blocks, got %d:\n%s", n, rs)
+	}
+	if !strings.Contains(rs, `&amp;ui=1`) || !strings.Contains(rs, "需求文档.html") {
+		t.Fatalf("render html missing shell-page preview URL/extracted name:\n%s", rs)
+	}
+}
+
+// TestDocxEmbedGarbageBinFallsBack legacy OLE 容器坏结构（非 CFB 字节）：
+// 抽取回落 .bin 直供名——绝不产出错误页，可下载性不受影响（红线）
+func TestDocxEmbedGarbageBinFallsBack(t *testing.T) {
+	root := fixture(t)
+	garbage := []byte("definitely not a CFB container, just junk bytes")
+	rels := relsShell + embedRel("rEmb", "oleObject", "embeddings/broken.bin")
+	doc := `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+		objectXML("", "rEmb", "Package") + `</w:body></w:document>`
+	pkg := buildDocxFull(t, doc, rels, map[string][]byte{
+		"word/embeddings/broken.bin": garbage,
+	})
+	if err := os.WriteFile(filepath.Join(root, "docs", "bad.docx"), pkg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, token := newDocxShareServer(t, root, false)
+
+	resp := get(t, srv.URL+docxEmbedURLFor(token, "bad.docx", "word/embeddings/broken.bin"))
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("garbage bin must still download, got %d", resp.StatusCode)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "broken.bin") {
+		t.Fatalf("fallback name should be the entry base, got %q", cd)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(b, garbage) {
+		t.Fatalf("garbage bin body mismatch: %d bytes", len(b))
+	}
+}
+
+// ---- docx-embed preview=1 分型（P-20261118-1） ----
+
+// docxPreviewSampleRels/docxPreviewSampleDoc preview 分型夹具：package 直存
+// 嵌入多类型（html/md/txt/png/svg/伪装 png/zip）——ext 从还原名/条目名
+// 判定，白名单内外各取一
+var (
+	docxPreviewSampleRels = relsShell +
+		embedRel("rH", "package", "embeddings/proto.html") +
+		embedRel("rM", "package", "embeddings/notes.md") +
+		embedRel("rT", "package", "embeddings/notes.txt") +
+		embedRel("rP", "package", "embeddings/photo.png") +
+		embedRel("rS", "package", "embeddings/proto.svg") +
+		embedRel("rF", "package", "embeddings/fake.png") +
+		embedRel("rZ", "package", "embeddings/bundle.zip")
+	docxPreviewSampleDoc = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+		objectXML("", "rH", "Package") + objectXML("", "rM", "Package") +
+		objectXML("", "rT", "Package") + objectXML("", "rP", "Package") +
+		objectXML("", "rS", "Package") + objectXML("", "rF", "Package") +
+		objectXML("", "rZ", "Package") + `</w:body></w:document>`
+	// previewMDBody md 夹具：标题/列表/链接结构 + XSS 探针（bluemonday 剥除）
+	previewMDBody = []byte("# 根据IP关联组织\n\n- item one\n\n<script>alert(1)</script>[x](https://example.com)\n")
+)
+
+// newPreviewShareServer preview 分型夹具的 live 源服务（docs/spec.docx）
+func newPreviewShareServer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	pkg := buildDocxFull(t, docxPreviewSampleDoc, docxPreviewSampleRels, map[string][]byte{
+		"word/embeddings/proto.html": []byte("<!doctype html><html><head><title>proto</title></head><body><button onclick=\"go()\">ok</button></body></html>"),
+		"word/embeddings/notes.md":   previewMDBody,
+		"word/embeddings/notes.txt":  []byte("plain text notes"),
+		"word/embeddings/photo.png":  pngBytes,
+		"word/embeddings/proto.svg":  []byte("<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\"><script>alert(1)</script></svg>"),
+		"word/embeddings/fake.png":   []byte("<script>alert(1)</script>"), // 伪装图字节
+		"word/embeddings/bundle.zip": []byte("PK\x03\x04 zipped"),
+	})
+	root := fixture(t)
+	if err := os.WriteFile(filepath.Join(root, "docs", "spec.docx"), pkg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return newDocxShareServer(t, root, false)
+}
+
+// TestDocxEmbedPreviewKinds 逐 kind 响应头断言（评审必改①/②）：命中白名单
+// 的直览形态（Content-Type 分型 + CSP sandbox + XFO SAMEORIGIN 覆写）与
+// 白名单外/降级的 attachment 回落（preview 参数忽略）
+func TestDocxEmbedPreviewKinds(t *testing.T) {
+	srv, token := newPreviewShareServer(t)
+	emb := func(entry string) string { return srv.URL + docxEmbedURLFor(token, "spec.docx", entry) }
+
+	// html：原样字节 text/html + sandbox + XFO SAMEORIGIN（无脚本档）
+	resp := get(t, emb("word/embeddings/proto.html")+"&preview=1")
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("html preview status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("html preview content-type = %q", ct)
+	}
+	if csp := resp.Header.Get("Content-Security-Policy"); csp != "sandbox" {
+		t.Fatalf("html preview CSP = %q, want bare sandbox (脚本默认禁)", csp)
+	}
+	if xfo := resp.Header.Get("X-Frame-Options"); xfo != "SAMEORIGIN" {
+		t.Fatalf("html preview must overwrite global XFO DENY, got %q", xfo)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(body, []byte("<button onclick=")) {
+		t.Fatalf("html preview must carry original bytes verbatim (KindHTML 同源语义), got %.200s", body)
+	}
+
+	// md：bluemonday 渲染 + 壳（title=还原名）+ 结构保留 + script 剥除
+	respM := get(t, emb("word/embeddings/notes.md")+"&preview=1")
+	defer respM.Body.Close()
+	if ct := respM.Header.Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("md preview content-type = %q", ct)
+	}
+	mb, _ := io.ReadAll(respM.Body)
+	ms := string(mb)
+	for _, want := range []string{"<title>notes.md</title>", "<h1 id=", "根据IP关联组织", "<li>item one", `rel="nofollow noopener"`} {
+		if !strings.Contains(ms, want) {
+			t.Fatalf("md preview missing %q:\n%.600s", want, ms)
+		}
+	}
+	if strings.Contains(ms, "<script>") {
+		t.Fatalf("md preview must strip scripts (bluemonday):\n%.600s", ms)
+	}
+	if !strings.Contains(ms, "md-article") {
+		t.Fatalf("md preview shell css class missing:\n%.600s", ms)
+	}
+	if respM.Header.Get("X-Frame-Options") != "SAMEORIGIN" {
+		t.Fatalf("md preview must overwrite XFO")
+	}
+
+	// text 族：text/plain + sandbox + XFO
+	respT := get(t, emb("word/embeddings/notes.txt")+"&preview=1")
+	defer respT.Body.Close()
+	if ct := respT.Header.Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Fatalf("txt preview content-type = %q", ct)
+	}
+	if respT.Header.Get("Content-Security-Policy") != "sandbox" || respT.Header.Get("X-Frame-Options") != "SAMEORIGIN" {
+		t.Fatalf("txt preview CSP/XFO = %q / %q", respT.Header.Get("Content-Security-Policy"), respT.Header.Get("X-Frame-Options"))
+	}
+
+	// png：嗅探命中 → image/png inline
+	respP := get(t, emb("word/embeddings/photo.png")+"&preview=1")
+	defer respP.Body.Close()
+	if ct := respP.Header.Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("png preview content-type = %q", ct)
+	}
+	pb, _ := io.ReadAll(respP.Body)
+	if !bytes.Equal(pb, pngBytes) {
+		t.Fatalf("png preview body mismatch: %d bytes", len(pb))
+	}
+
+	// 伪装图字节：嗅探不匹配 → attachment 回落（评审建议e）
+	respF := get(t, emb("word/embeddings/fake.png")+"&preview=1")
+	defer respF.Body.Close()
+	if ct := respF.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Fatalf("fake png must fall back to octet-stream, got %q", ct)
+	}
+	if cd := respF.Header.Get("Content-Disposition"); !strings.Contains(cd, "attachment") {
+		t.Fatalf("fake png must fall back to attachment, got %q", cd)
+	}
+
+	// svg/zip：白名单外 → preview 参数忽略回归 attachment（必改①回落语义）
+	for _, entry := range []string{"word/embeddings/proto.svg", "word/embeddings/bundle.zip"} {
+		respX := get(t, emb(entry)+"&preview=1")
+		ct := respX.Header.Get("Content-Type")
+		cd := respX.Header.Get("Content-Disposition")
+		_, _ = io.Copy(io.Discard, respX.Body)
+		respX.Body.Close()
+		if ct != "application/octet-stream" || !strings.Contains(cd, "attachment") {
+			t.Fatalf("%s must ignore preview=1 (attachment), got ct=%q cd=%q", entry, ct, cd)
+		}
+	}
+
+	// 无 preview=1：现形态不变（恒 attachment）
+	respN := get(t, emb("word/embeddings/proto.html"))
+	defer respN.Body.Close()
+	if ct := respN.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Fatalf("no-preview must stay octet-stream, got %q", ct)
+	}
+}
+
+// TestDocxEmbedPreviewScriptCombos 8 组合表驱动（复审建议②：scripts×forms×
+// popups 全 2^3 直连 URL 态——防只测前端可达 3 态漏 forms=1 无 scripts=1）：
+// CSP token 组合正确 + 硬红线（任何组合恒不含 allow-same-origin/
+// allow-top-navigation）
+func TestDocxEmbedPreviewScriptCombos(t *testing.T) {
+	srv, token := newPreviewShareServer(t)
+	base := srv.URL + docxEmbedURLFor(token, "spec.docx", "word/embeddings/proto.html") + "&preview=1"
+	for _, scripts := range []string{"0", "1"} {
+		for _, forms := range []string{"0", "1"} {
+			for _, popups := range []string{"0", "1"} {
+				u := base + "&scripts=" + scripts + "&forms=" + forms + "&popups=" + popups
+				resp := get(t, u)
+				csp := resp.Header.Get("Content-Security-Policy")
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				if resp.StatusCode != 200 {
+					t.Fatalf("scripts=%s forms=%s popups=%s status=%d", scripts, forms, popups, resp.StatusCode)
+				}
+				want := "sandbox"
+				if scripts == "1" {
+					want += " allow-scripts allow-fullscreen"
+				}
+				if forms == "1" {
+					want += " allow-forms allow-modals"
+				}
+				if popups == "1" {
+					want += " allow-popups"
+				}
+				if csp != want {
+					t.Errorf("scripts=%s forms=%s popups=%s:\n got %q\nwant %q", scripts, forms, popups, csp, want)
+				}
+				if strings.Contains(csp, "allow-same-origin") || strings.Contains(csp, "allow-top-navigation") {
+					t.Errorf("hard red line violated: %q", csp)
+				}
+			}
+		}
+	}
+}
+
+// TestDocxEmbedPreviewTextEncoding 文本编码规范化端到端（P-20261118-3 主刀②
+// 评审必改3 双轨第二轨）：package 直存嵌入的 UTF-16LE html（BOM）与 GBK txt
+// 经四级序转码 UTF-8 后无乱码供给；zip 魔数命名的 html 被魔数守卫拦回
+// attachment（必改2 魔数半边端到端）
+func TestDocxEmbedPreviewTextEncoding(t *testing.T) {
+	root := fixture(t)
+	u16HTML := utf16Bytes("<html><body>需求文档——UTF16 预览</body></html>", binary.LittleEndian, true)
+	gbkTxt := []byte(gbkSampleName) // GBK 字节（「根据IP关联组织.html」原文）
+	rels := relsShell +
+		embedRel("rU", "package", "embeddings/u16.html") +
+		embedRel("rG", "package", "embeddings/gbk.txt") +
+		embedRel("rZ", "package", "embeddings/zipped.html")
+	doc := `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+		objectXML("", "rU", "Package") + objectXML("", "rG", "Package") +
+		objectXML("", "rZ", "Package") + `</w:body></w:document>`
+	pkg := buildDocxFull(t, doc, rels, map[string][]byte{
+		"word/embeddings/u16.html":    u16HTML,
+		"word/embeddings/gbk.txt":     gbkTxt,
+		"word/embeddings/zipped.html": []byte("PK\x03\x04 not really html but named so"),
+	})
+	if err := os.WriteFile(filepath.Join(root, "docs", "enc.docx"), pkg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, token := newDocxShareServer(t, root, false)
+
+	// UTF-16LE BOM html：转码 UTF-8 后中文正文可读（乱码消除）
+	resp := get(t, srv.URL+docxEmbedURLFor(token, "enc.docx", "word/embeddings/u16.html")+"&preview=1")
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.Header.Get("Content-Type") != "text/html; charset=utf-8" {
+		t.Fatalf("u16 html preview content-type = %q", resp.Header.Get("Content-Type"))
+	}
+	if !bytes.Contains(b, []byte("需求文档——UTF16 预览")) || bytes.Contains(b, []byte{0xFF, 0xFE}) {
+		t.Fatalf("u16 html must be transcoded to utf-8, got %.120q", b)
+	}
+	// GBK txt：GB18030 兜底解码还原
+	respG := get(t, srv.URL+docxEmbedURLFor(token, "enc.docx", "word/embeddings/gbk.txt")+"&preview=1")
+	bg, _ := io.ReadAll(respG.Body)
+	respG.Body.Close()
+	if respG.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Fatalf("gbk txt preview content-type = %q", respG.Header.Get("Content-Type"))
+	}
+	if !bytes.Equal(bg, []byte("根据IP关联组织.html")) {
+		t.Fatalf("gbk txt must decode to readable text, got %.80q", bg)
+	}
+	// zip 魔数 + html 还原名：魔数守卫拦回 attachment（容器/压缩包整体
+	// 永不按文本 inline）
+	respZ := get(t, srv.URL+docxEmbedURLFor(token, "enc.docx", "word/embeddings/zipped.html")+"&preview=1")
+	_, _ = io.Copy(io.Discard, respZ.Body)
+	respZ.Body.Close()
+	if respZ.Header.Get("Content-Type") != "application/octet-stream" ||
+		!strings.Contains(respZ.Header.Get("Content-Disposition"), "attachment") {
+		t.Fatalf("zip-magic html must fall back to attachment, got %q %q",
+			respZ.Header.Get("Content-Type"), respZ.Header.Get("Content-Disposition"))
+	}
+}
+
+// TestDocxEmbedPreviewMDBound md 渲染上限对齐主面 preview.MaxRenderBytes（必改⑦）：
+// 超限回落 attachment——64MB 嵌入进 gomarkdown AST 内存放大数倍的两闸不一致
+// 收口
+func TestDocxEmbedPreviewMDBound(t *testing.T) {
+	root := fixture(t)
+	bigMD := make([]byte, preview.MaxRenderBytes+1)
+	for i := range bigMD {
+		bigMD[i] = 'a'
+	}
+	rels := relsShell + embedRel("rM", "package", "embeddings/huge.md")
+	doc := `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+		objectXML("", "rM", "Package") + `</w:body></w:document>`
+	pkg := buildDocxFull(t, doc, rels, map[string][]byte{"word/embeddings/huge.md": bigMD})
+	if err := os.WriteFile(filepath.Join(root, "docs", "big.docx"), pkg, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv, token := newDocxShareServer(t, root, false)
+
+	resp := get(t, srv.URL+docxEmbedURLFor(token, "big.docx", "word/embeddings/huge.md")+"&preview=1")
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Fatalf("oversize md must fall back to attachment, got %q", ct)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "attachment") {
+		t.Fatalf("oversize md disposition = %q", cd)
 	}
 }

@@ -1,0 +1,9 @@
+# 单文件体量基线：rel\tlines\treason（行）——豁免唯一通道=基线+拆分立项理由
+# 每个条目隐含承诺：该文件拆分收敛另行立项，登记后继续增长会被本测试拦下
+server/agentops/sections_builtin.go	2116	存量遗留，拆分收敛另行立项（P-20261121-2 直通申请到达感知 +3 行；P-20261121-1 访客输入统一收编手册段改写 +10 行：guest-input 开关/批准限定退役/WS 桥键入统一三段，同族能力文档面非新子系统）
+server/api/share/handlers.go	1792	存量遗留，拆分收敛另行立项（P-20261121-1 统一收编收紧：directInput 投影改 guestInput 反向极性、WritableDown 选择性清场注释换新）
+server/api/tools/dsh_test.go	1527	存量遗留，拆分收敛另行立项
+server/share/service.go	1753	存量遗留，拆分收敛另行立项（P-20261118-9 SSE 推流子系统迁 stream.go 后收紧；P-20261120-8 可写视口反喂装配面放宽；P-20261121-2 直通申请广播注入面 +12 行；P-20261121-1 统一收编收紧 1754→1753——WithDirectSink 退役/gates 账本字段一行，路由段 direct/state·input 两行摘除）
+
+server/share/service_test.go	1572	存量遗留，拆分收敛另行立项（P-20261118-10 嵌入端点真实字节轨两用例迁 embedextract_test.go、P-20261119-1 壳页 form GET 用例同址随迁后收紧；P-20261120-2 全幅断言组随 TestDocxEmbedPreviewNameSource 整函数迁 embedendpoint_test.go 嵌入端点测试集中地——断言面零改动仅迁址——后收紧 1717→1572）
+server/store/share.go	1721	存量遗留，拆分收敛另行立项（P-20261118-9 terminal 直播 repo 族迁 share_terminal.go 后收紧；P-20261121-1 统一收编收紧 1742→1721——SetDirectInput 换 SetGuestInput（反向极性字段 GuestInputOff，DirectInput/Writable 字段注释统一改写））

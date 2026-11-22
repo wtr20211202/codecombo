@@ -15,20 +15,28 @@
 //     带给下一目标（口令空串 = 不设门 = 安全基线）
 //   - 有效期语义（两形态服务端面不同，前端如实分流）：
 //     · 直播：POST /share/terminal 直收 ttlMinutes（0/缺省 = 服务端默认 30 分钟，
-//       钳 24h 上限、无永久档）。幂等命中既有直播时 store 不改倒计时（防无意识
-//       续期），显式选择经既有 /share/:token/expiry 端点对账生效（文件分享创建
-//       流 applyExplicitExpiry 同语义：只有显式选择才改期）
+//       钳 24h 上限）；P-20261119-5 起另有显式永久挡（TERM_LIVE_TTL_PERMANENT →
+//       请求发 permanent:true，记录与 token 不过期、直播态仍随会话）。永久 ×
+//       「关闭遮蔽」合法（【用户定向修订】2026-11-19：服务端不再 400 硬禁）——
+//       弹层就地警示、创建照发（撤销兜底在分享管理）。幂等命中既有直播时
+//       store 不改倒计时（防无意识续期），显式选择经既有 /share/:token/expiry
+//       端点对账生效（文件分享创建流 applyExplicitExpiry 同语义：只有显式选择
+//       才改期；永久挡对齐到「清窗」）
 //     · 快照：创建面无 TTL 字段（服务端默认 30 天、未过滤强制 24h），显式选择
 //       经同一 /share/:token/expiry 端点创建后立即生效（permanent = 恢复永久，
 //       服务端对未过滤记录钳 24h）
 //   - 结果卡/地址计划/敏感会话出域闸门全部复用 useShareDialog 既有原语（同一
 //     结果卡单例、同一地址口径、同一 override 二次请求契约）
+//   - 开放直入快捷选择（P-20261121-1，仅直播）：缺省关——键盘授权面显式
+//     opt-in 与行内开关同闸（强制口令门：无门记录必携口令，缺门提交就地
+//     拦下返回 passphraseRequired 由宿主提示）；幂等命中既有直播时服务端
+//     以既有记录为准（宿主按 modeMismatch 提示改授权须先结束直播）
 import { ref } from 'vue'
 import { shareApi, type ShareInfo, type TermShareOptions } from '../api/domains/share'
 import { bumpTerminalLiveShares } from './useTerminalLiveShares'
 import { confirmDialog } from './useDialog'
 import { confirmSensitiveSessionEgress, loadAddressContext, planFor, useShareDialog } from './useShareDialog'
-import { shareTtlExpiresAt, type ShareTtlChoice } from '../utils/shareTtl'
+import { shareTtlExpiresAt, TERM_LIVE_TTL_PERMANENT, type ShareTtlChoice } from '../utils/shareTtl'
 import { useTerminalSessionsStore } from '../stores/terminal-sessions'
 import i18n from '../i18n'
 
@@ -37,8 +45,9 @@ export type TermShareKind = 'live' | 'frozen'
 /** 选项确认结果：created = 已创建（结果卡已弹）；modeMismatch = 命中该会话既有
  *  直播、沿用其遮蔽设置（与本次请求不同，宿主应提示「改配置须先结束直播」）；
  *  cancelled = 用户在出域/敏感警示处取消（弹层保持打开可改选）；failed = 请求
- *  失败（拦截器已 toast，弹层保持打开可重试） */
-export type TermShareConfirmResult = 'created' | 'modeMismatch' | 'cancelled' | 'failed'
+ *  失败（拦截器已 toast，弹层保持打开可重试）。永久 × 关闭遮蔽合法（【用户
+ *  定向修订】2026-11-19），警示面在弹层就地说明，不在此拦截 */
+export type TermShareConfirmResult = 'created' | 'modeMismatch' | 'cancelled' | 'failed' | 'passphraseRequired'
 
 const showTermOptions = ref(false)
 const termOptionsTarget = ref<{ kind: TermShareKind; sessionId: string; name: string } | null>(null)
@@ -46,13 +55,18 @@ const termMask = ref(true)
 const termWatermark = ref(true)
 // 口令（⑤）：空串 = 不设门（安全基线）；明文只随创建请求发出，不落本地存储
 const termPassphrase = ref('')
-// 直播有效期（①）：分钟数；0 = 跟随服务端默认（不发字段）
+// 直播有效期（①）：分钟数；0 = 跟随服务端默认（不发字段）；
+// TERM_LIVE_TTL_PERMANENT = 永久挡（发 permanent:true，P-20261119-5）
 const termLiveTtlMinutes = ref(0)
 // 快照有效期（①）：复用文件分享创建流的档位表（custom 缺日期时禁提交）；
 // touched=false = 未动过 → 不调 /expiry（保持服务端默认 30 天，存量语义）
 const termFrozenTtlChoice = ref<ShareTtlChoice>('30d')
 const termFrozenTtlDate = ref<number | null>(null)
 const termFrozenTtlTouched = ref(false)
+// 开放直入快捷选择（P-20261121-1，仅 live 消费）：缺省关（安全基线——键盘
+// 授权面显式 opt-in）；开启时要求口令就位（创建面口令门与行内开关同闸——
+// 无门记录必携 passphrase，提交前校验）
+const termWritable = ref(false)
 // 确认进行中（出域警示/请求在途）：弹层按钮 loading 且防重复提交
 const termSubmitting = ref(false)
 
@@ -102,6 +116,7 @@ export function useTermShareDialog() {
     termFrozenTtlChoice.value = '30d'
     termFrozenTtlDate.value = null
     termFrozenTtlTouched.value = false
+    termWritable.value = false
     termSubmitting.value = false
     showTermOptions.value = true
   }
@@ -143,8 +158,10 @@ export function useTermShareDialog() {
    * 同一份地址计划
    */
   async function requestCreate(kind: TermShareKind, sessionId: string, name: string, ttlMinutes: number, opts: TermShareOptions): Promise<{ share: ShareInfo; context: Awaited<ReturnType<typeof loadAddressContext>> } | 'cancelled' | null> {
+    // 直播只发正数分钟（永久挡走 opts.permanent；0 = 跟随默认不发字段）——
+    // 永久哨兵值直接透传会被服务端 ttlMinutes<0 校验 400
     const call = (override: boolean) => kind === 'live'
-      ? shareApi.createTerminal(sessionId, ttlMinutes || undefined, override, opts)
+      ? shareApi.createTerminal(sessionId, ttlMinutes > 0 ? ttlMinutes : undefined, override, opts)
       : shareApi.createTerminalFrozen(sessionId, override, opts)
     try {
       const [firstRaw, context] = await Promise.all([call(false), loadAddressContext()])
@@ -163,15 +180,28 @@ export function useTermShareDialog() {
    * 选项弹层确认：关闭遮蔽时先弹出域警示（取消 = 弹层保持打开、零副作用），
    * 再走对应形态的创建链。有效期显式选择经 /share/:token/expiry 对账生效
    *（P-20261020-5 文件创建流 applyExplicitExpiry 同语义：只有显式选择才改期；
-   * 失败 = 拦截器已提示，结果卡展示生效记录，可在结果卡有效期行重试）
+   * 失败 = 拦截器已提示，结果卡展示生效记录，可在结果卡有效期行重试）。
+   * 永久挡（P-20261119-5）：permanent × unfiltered 合法（【用户定向修订】
+   * 2026-11-19：服务端不再 400 硬禁，警示面在弹层就地说明）；对账语义 =
+   * 幂等命中既有倒计时时 setExpiry(null) 清窗
    */
   async function confirmTermOptions(): Promise<TermShareConfirmResult> {
     const target = termOptionsTarget.value
     if (!target || termSubmitting.value) return 'cancelled'
+    const ttlMinutes = termLiveTtlMinutes.value
+    const permanent = target.kind === 'live' && ttlMinutes === TERM_LIVE_TTL_PERMANENT
     const opts: TermShareOptions = { unfiltered: !termMask.value, watermark: termWatermark.value }
     if (termPassphrase.value) opts.passphrase = termPassphrase.value
-    const ttlMinutes = termLiveTtlMinutes.value
+    if (permanent) opts.permanent = true
+    const writableReq = target.kind === 'live' && termWritable.value
+    if (writableReq) opts.writable = true
     const frozenTarget = target.kind === 'frozen' ? frozenExpiryTarget() : undefined
+    // 开放直入口令门（与行内开关同闸）：无门记录（本次也未携口令）不能开
+    // 键入直入——服务端 400 "writable requires a passphrase" 的前端对应校验，
+    // 就地提示（fail-fast 于请求前，免一次 400 往返）
+    if (writableReq && !opts.passphrase) {
+      return 'passphraseRequired'
+    }
     termSubmitting.value = true
     try {
       if (opts.unfiltered && !(await confirmUnfilteredEgress(target.name, target.kind))) return 'cancelled'
@@ -182,7 +212,17 @@ export function useTermShareDialog() {
       const context = res.context
       // 有效期显式选择对账（见函数头注）：live 幂等命中差值在允许窗内跳过
       //（fresh 创建已按请求落），frozen 只在 touched 时调
-      if (target.kind === 'live' && ttlMinutes > 0) {
+      if (target.kind === 'live' && permanent) {
+        // fresh 创建已落零值（响应无 expiresAt）→ 零额外请求；幂等命中既有
+        // 倒计时时清窗（未过滤记录的显式永久同样放行——【用户定向修订】，
+        // 服务端响应即生效值）
+        if (created.expiresAt) {
+          try {
+            const r = await shareApi.setExpiry(created.token, null) as unknown as { data?: ShareInfo }
+            if (r?.data) created = r.data
+          } catch { /* 拦截器已提示；结果卡展示生效记录 */ }
+        }
+      } else if (target.kind === 'live' && ttlMinutes > 0) {
         const want = Date.now() + ttlMinutes * 60_000
         const have = created.expiresAt ? new Date(created.expiresAt).getTime() : 0
         if (Math.abs(have - want) > TTL_RECONCILE_TOLERANCE_MS) {
@@ -197,9 +237,11 @@ export function useTermShareDialog() {
           if (r?.data) created = r.data
         } catch { /* 同上 */ }
       }
-      // 幂等命中同会话既有直播（创建时定死）：返回记录的遮蔽模式与本次请求
-      // 不同——如实回告，由弹层宿主提示「沿用既有设置，改配置须先结束直播」
+      // 幂等命中同会话既有直播（创建时定死）：返回记录的遮蔽模式/开放直入
+      // 与本次请求不同——如实回告，由弹层宿主提示「沿用既有设置，改配置须
+      // 先结束直播」（P-20261121-1 扩 writable 维度）
       const mismatch = (created.unfiltered === true) !== (opts.unfiltered === true)
+        || (created.writable === true) !== (writableReq === true)
       finishCreated(created, context, opts.passphrase || '')
       // 主播侧直播徽标（P-20261005-161）：创建成功即对账，tab 红点不等轮询
       if (target.kind === 'live') bumpTerminalLiveShares()
@@ -212,7 +254,7 @@ export function useTermShareDialog() {
   return {
     showTermOptions, termOptionsTarget, termMask, termWatermark, termPassphrase,
     termLiveTtlMinutes, termFrozenTtlChoice, termFrozenTtlDate, termFrozenTtlTouched,
-    termSubmitting,
+    termWritable, termSubmitting,
     createTerminalLive, createTerminalFrozen, confirmTermOptions, cancelTermOptions,
   }
 }

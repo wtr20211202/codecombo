@@ -71,6 +71,9 @@ const props = defineProps<{
   /** 直通输入持权投影（P-20261024-1，透传 AgentSidebarSessionTree）：会话行
    *  橙点徽标与右键「收回访客输入」项的数据面 */
   directHolds?: Record<string, { nick?: string; visitorTail?: string }>
+  /** 直通输入待批申请投影（P-20261121-2，透传 AgentSidebarSessionTree）：
+   *  会话行 amber 待批点的数据面 */
+  directPends?: Record<string, { nick?: string }>
   /** 直播中会话 id → 徽标 title（P-20261106-7，透传 AgentSidebarSessionTree）：
    *  会话行红点徽标与右键「直播分享/结束直播」翻转的数据面 */
   liveTitles?: Record<string, string>
@@ -533,6 +536,7 @@ function openSortMenu(e: MouseEvent) {
         :collapsed-groups="collapsedGroups"
         :locate-dirs="locateDirs"
         :direct-holds="directHolds"
+        :direct-pends="directPends"
         :live-titles="liveTitles"
         @select="(id) => emit('select', id)"
         @attach-project="(id) => emit('attach-project', id)"

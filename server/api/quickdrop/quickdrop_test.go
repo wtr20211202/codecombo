@@ -28,6 +28,7 @@ func newQuickdropRouter(t *testing.T) *gin.Engine {
 	r.GET("/drop/:token", GetDropPage)
 	r.POST("/drop/:token", PostDropForm)
 	r.GET("/api/quickdrop", ListDrops)
+	r.GET("/api/quickdrop/dropfile/:id", DownloadDropFile)
 	r.DELETE("/api/quickdrop/:id", DeleteDrop)
 	r.POST("/api/quickdrop/token", CreateDropToken)
 	r.GET("/api/quickdrop/token", GetDropToken)

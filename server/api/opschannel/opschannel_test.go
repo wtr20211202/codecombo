@@ -26,7 +26,7 @@ import (
 func swapTestHub(t *testing.T, n int) {
 	t.Helper()
 	old := h
-	h = &hub{clients: make(map[*wssafe.Conn]struct{}), queue: make(chan Event, n)}
+	h = &hub{clients: make(map[*wssafe.Conn]struct{}), browsers: make(map[*wssafe.Conn]string), queue: make(chan Event, n)}
 	t.Cleanup(func() { h = old })
 }
 

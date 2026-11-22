@@ -9,8 +9,9 @@
 
 ## 一次发布要做的事
 
-1. **导出**：`bash scripts/release-export.sh`（缺省 `release/public/`）。
-   导出树里会看到：
+1. **导出**：`bash scripts/release-export.sh`（缺省 `release/public/`；
+   P-20261115-3 起导出前自动跑官网双门禁 check-site-styles/content，未过即
+   FATAL 拦截，见下「样式防乱纪律」节）。导出树里会看到：
    - `site/` —— 官网源码原样一份（发布仓内可审阅、可改；含 landing 与
      `site/guide/` 文档分页族）
    - `docs/index.html` + `docs/assets/` + `docs/guide/` —— site 内容的 Pages 落位
@@ -92,6 +93,13 @@ REGISTRY 登记表）。**任何 site/ 改动后、导出发布前必跑对账�
 bash scripts/check-site-styles.sh
 ```
 
+**P-20261115-3 起导出脚本已自动执行本门禁与姊妹件内容门禁**：`release-export.sh`
+在 DEST 清空前依次跑两门禁（合计 ~5.5s），任一未过即 FATAL 拦截导出——上面的
+手动跑仍保留为改后即时自检，不必等导出才知红绿。近似边界如实注记：门禁查工作树
+`site/`，而导出走 git archive 提交树——「已提交红+工作树绿」或 `--ref` 导旧节点
+两态判的不是被导出的那棵树；主流程改→门禁→提交→导出下近似可接受，全保真需门禁
+支持对导出树跑，属后续独立提案。
+
 门禁三道对账（任一红 = 禁止合入/导出）：
 
 1. **页内 `<style>` 重定义即红**：各页 `<style>` 块的类选择器 × site.css 类
@@ -140,6 +148,9 @@ bash scripts/check-site-styles.sh
 bash scripts/check-site-content.sh
 ```
 
+（P-20261115-3 起导出脚本已自动执行本门禁——手动跑仍保留为改后即时自检；
+强制执行形态与「工作树门禁 × 提交树导出」近似边界见上「样式防乱纪律」节。）
+
 门禁两道对账（任一红 = 禁止合入/导出）：
 
 1. **双语 data-lang 配对**：各页 HTML 剥注释后按文档序提取 `data-lang-en` /
@@ -166,7 +177,9 @@ bash scripts/check-site-content.sh
    页（Chrome UA 不暴露 CPU 架构，保持 OS 维度 + 默认 amd64 + 下拉显式选 ARM）。
 4. 任何 site/ 改动（样式/文案/结构）→ `bash scripts/check-site-styles.sh`
    样式防乱对账绿（机制见上「样式防乱纪律」节）；改到 site.css 时再过该节
-   「改样式的必过清单」五件套。
+   「改样式的必过清单」五件套。导出脚本已自动执行（P-20261115-3），此处手动跑
+   仍保留为改后即时自检。
 5. 任何 site/ 改动（文案/链接/结构）→ `bash scripts/check-site-content.sh`
    内容防断链对账绿（机制见上「内容防断链纪律」节；改 README Details 落点、
-   换锚、增删页面时尤其必跑）。
+   换锚、增删页面时尤其必跑）。导出脚本已自动执行（P-20261115-3），此处手动跑
+   仍保留为改后即时自检。

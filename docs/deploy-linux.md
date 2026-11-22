@@ -395,9 +395,10 @@ sudo -v && p=$(mktemp) && curl -fsSL --retry 3 https://raw.githubusercontent.com
   `CODECOMBO_DATA_DIR=<原值>`——漏带则改写后的 unit 不再下发该变量，服务
   下次重启回落默认 `~/.codecombo`（数据仍在原目录，只是实例不再读它）；
   参数全表与并存第二套实例的注意事项见 README「可选参数」节；
-- 先 `sudo -v` 缓存提权凭据：脚本以 `sudo -n` 非交互探测提权，只认已
-  缓存/免密的 sudo（脚本内部写 `/etc/systemd/system` 需要它）；无可用凭据
-  时脚本跳过 unit 改写、只换盘上二进制；
+- 先 `sudo -v` 缓存提权凭据：脚本以 `sudo -n` 非交互探测提权，普通用户只认
+  已缓存/免密的 sudo（脚本内部写 `/etc/systemd/system` 需要它）；root 直跑
+  免 sudo 直写（真全新 root 机器仍被脚本 root 防线拦截）；无可用提权时
+  脚本跳过 unit 改写、只换盘上二进制；
 - 脚本以 `mv` 换包（rename 不碰运行中的旧 inode，服务在跑也不会 Text file
   busy），但旧进程仍是旧版本：提示「检测到正在运行的 Codecombo 实例——
   服务已注册但【未启动】」时，在跑的就是本服务则直接
@@ -523,10 +524,11 @@ launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 再替换二进制。
 
 应用内自更新在 launchd 形态的行为（P-20261112-1）：换包完成后更新子进程
-不另起进程，由上述 plist 的 `KeepAlive` 自动拉起新版本；更新健康检查轮询
-容忍 KeepAlive 先行重拉的竞态，15s 超时自动回滚——先恢复旧二进制再按数据
-目录 PID 文件结束重拉进程，KeepAlive 随即拉回旧版本（无需手动 `launchctl`
-收尾；各形态差异总表见 README「升级」节）。
+不另起进程，由上述 plist 的 `KeepAlive` 自动拉起新版本；更新健康等待为活
+性驱动（P-20261116-1，恢复再慢都等、不设时间死线——PID 基线播种防起点死
+旧 PID 误判、PID 连续变化 ≥2 判崩溃循环秒级回滚、10 分钟失控兜底）——
+回滚时先恢复旧二进制再按数据目录 PID 文件结束重拉进程，KeepAlive 随即拉
+回旧版本（无需手动 `launchctl` 收尾；各形态差异总表见 README「升级」节）。
 
 ## 7. 故障速查
 
@@ -538,6 +540,7 @@ launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 | 设密 429 | 同 IP 限流中 | 60s 后重试 |
 | `Text file busy` | 运行中覆盖二进制 | 先 `systemctl stop` 再替换（§6c） |
 | `systemctl status` 显示 `status=203/EXEC`，服务反复重启失败 | systemd 无法执行 ExecStart 指向的二进制 | `journalctl -u codecombo -n 30 --no-pager` 看 "Failed to execute" 后的具体错误：`Permission denied`=缺 exec 位（`chmod 0755 <bin>`）/ SELinux 标签（`restorecon -v <bin>`，§5）/ 二进制所在挂载点 noexec；`Exec format error`=架构不符或文件不完整（拿错资产/下载中断——对体积与 SHA256，§6c）；`No such file or directory`=ExecStart 路径不对（对照 `systemctl cat codecombo` 与 `ls -l`；动态链接库缺失时同样报此错，本产品发布二进制为静态链接，出现该错优先查路径） |
+| 应用内自更新后 203/EXEC **且 ExecStart 路径二进制消失**，update.log 末尾见 `rolled_back` | 在线更新误回滚 + 回滚丢文件的组合缺陷（**P-20261116-1 修复前版本**：15s 健康死线把慢恢复〔如大量会话恢复〕误判为新版本失败而回滚，回滚又先删后 rename 留路径空窗且失败被静默吞——现行版本已活性驱动等待 + 回滚防丢失窗三步序根治，不再产生此盘面） | 恢复：重跑 install.sh（§6b）或手工配方（§6c）把二进制装回 ExecStart 路径后 `systemctl start`；诊断：数据目录 `logs/update.log`（更新决策时间线）——结案行 `case closed: ExecStart path …` 即盘面快照（存在/权限/大小，`ABSENT`=文件确丢），配合每 10s 健康等待证据行可完整还原事故链；注意 `logs/update-restart.log` 只是 bare 重启形态的进程输出（systemd 形态进程输出走 journal、该文件不会创建），追更新决策勿翻错文件——两文件头注即职责说明 |
 | `systemctl status` 的 Memory 远大于 `free` 的 used | cgroup 记账含 page cache：tmux/claude 等子进程读写的工作区文件缓存都记在此 cgroup（§3 KillMode=process 下子进程留在组内），并非真实占用 | 正常现象；验证构成：`grep -E '^(anon\|file) ' /sys/fs/cgroup/system.slice/simple-coding.service/memory.stat`，anon=进程真实内存，file=可回收缓存 |
 
 ## 8. TLS 慢（深度检测网络）：明文伴随端口

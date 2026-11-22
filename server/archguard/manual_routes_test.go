@@ -85,6 +85,10 @@ var manualWhitelist = map[string]string{
 	"/assets/addon-unicode11.js":          "分享访客页 vendored 资产（xterm addon-unicode11 宽度表）",
 	"/assets/JetBrainsMono-Regular.woff2": "分享访客页 vendored 资产（终端字体 JetBrains Mono，OFL）",
 	"/assets/JetBrainsMono-Bold.woff2":    "分享访客页 vendored 资产（终端字体 JetBrains Mono 粗体，OFL）",
+	// 快投递访客页自持脚本（P-20261117-2-S2）：enforcing CSP script-src 'self'
+	// 下唯一脚本面——浏览器渲染资源非 agent 能力端点（share vendored 资产同款
+	// 豁免口径；访客页入口 GET /drop/<token> 已在手册 quickdrop 节登记）
+	"/drop/assets/app.js": "快投递访客页自持脚本（暂存/进度/本地记录的浏览器面，embed 随二进制交付）",
 	// —— 管理/设置 UI 数据面（agent 能力域之外；agent 自持 CC_LOCK_TOKEN，不管理凭据令牌）——
 	"/api/ui-state":    "前端 UI 状态持久化面（浏览器工作台专用，GET/PUT/PATCH/export 同族）",
 	"/api/updates":     "应用自更新链路（更新器/设置 UI 消费，agent 不触碰升级）",
@@ -98,6 +102,11 @@ var manualWhitelist = map[string]string{
 	// /api/quickdrop（收件箱清单/摘除 + 投递原语）已升格 agent 能力面登记手册
 	//（P-20261006-51，share 节「快投递」配方）；仅凭据生命周期管理留白
 	"/api/quickdrop/token": "快投递凭据管理面（设置·分享区 UI；生成即轮换/撤销属管理员动作，投递方持 scd_ token 即可）",
+	// 逐文件下载直链（P-20261117-3 主人侧接收面）：管理卡记录区 UI 的浏览器
+	// 消费面（utils/directDownload 同源 <a download> 直链，锁 cookie 载体，
+	// 不经 axios domains）；agent 取件走清单投影（GET /api/quickdrop 的
+	// files[].absPath）直读落盘路径，不经本端点
+	"/api/quickdrop/dropfile": "快投递文件下载直链（管理卡记录区 UI 消费面；attachment+octet-stream 附件红线）",
 	// /api/audit 与 /api/audit/export 已升格 agent 能力面登记手册（P-20261007-2，
 	// audit 节「审计日志」），从本白名单迁出；仅归档手动触发留白
 	"/api/audit/archive":           "审计归档手动触发（运维缩短窗口/升级前落档的运维动作，设置·审计 UI 专用）",
@@ -125,10 +134,19 @@ var manualWhitelist = map[string]string{
 	"/api/projects/:id/numstat":         "工作区逐文件行数统计（变更树「复制变更摘要」数据面）",
 	"/api/projects/:id/todos":           "TODO/FIXME 标记聚合（TODO 面板数据面）",
 	"/api/projects/:id/file/hunks":      "文件 hunk 切分（差异视图 hunk 级 UI 数据面）",
-	"/api/projects/:id/hunk":            "hunk 级暂存/取消/丢弃（差异视图 hunk 操作 UI 面）",
-	"/api/projects/:id/submodules":      "Submodule 管理（submodule 面板 UI）",
-	"/api/projects/:id/gpg":             "GPG 签名状态/开关（设置 UI 面）",
-	"/api/projects/:id/hooks":           "git hooks 查看/编辑（hooks 编辑器 UI；.git/hooks 写入另有敏感路径闸覆盖）",
+	// 项目文件直接预览六端点（P-20261119-4）：主人侧 UI 能力（编辑器统一双
+	// 视图「原文件↔预览」取数面），无 agent 操作面（提案钉死）——渲染/字节
+	// 供给由前端 iframe/img/video 与 fetch 消费
+	"/api/projects/:id/file/preview":  "项目文件预览元数据+渲染类 payload（编辑器统一双视图）",
+	"/api/projects/:id/file/raw":      "项目文件字节内联（预览 img/video/pdf 取数+二进制下载面）",
+	"/api/projects/:id/file/rel/":     "路径形态回源（htmlview <base href> 相对子资源落点）",
+	"/api/projects/:id/file/media":    "docx 预览图片供给（映射簿白名单，渲染 HTML img 消费）",
+	"/api/projects/:id/file/embed":    "docx 嵌入对象下载/预览分型（渲染 HTML 链接消费）",
+	"/api/projects/:id/file/htmlview": "html 档沙箱预览（CSP sandbox+opt-in scripts，预览 iframe 消费）",
+	"/api/projects/:id/hunk":          "hunk 级暂存/取消/丢弃（差异视图 hunk 操作 UI 面）",
+	"/api/projects/:id/submodules":    "Submodule 管理（submodule 面板 UI）",
+	"/api/projects/:id/gpg":           "GPG 签名状态/开关（设置 UI 面）",
+	"/api/projects/:id/hooks":         "git hooks 查看/编辑（hooks 编辑器 UI；.git/hooks 写入另有敏感路径闸覆盖）",
 	// /api/projects/:id/worktrees 已升格 agent 能力面登记手册（P-20261005-179，
 	// git 节「Worktree」——ref 通道透传裸 hash 的定点检视是 agent bisect 排查基元），从本白名单迁出
 	"/api/projects/:id/tasks":            "任务运行器 manifest 扫描（任务面板数据面）",

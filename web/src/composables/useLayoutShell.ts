@@ -14,10 +14,14 @@ import {
   OPS_SHARE_DROP,
   OPS_SHARE_WTYPING,
   OPS_SHARE_PASTE_REVIEW,
+  OPS_SHARE_WRESIZE,
+  OPS_SHARE_DIRECT_REQUEST,
   type RemoteOpenInEditorDetail,
   type ShareDropDetail,
   type ShareWritableTypingDetail,
   type SharePasteReviewDetail,
+  type ShareWritableResizeDetail,
+  type ShareDirectRequestDetail,
 } from '../utils/opsEvents'
 import { buildRemoteEditorPath } from '../utils/remoteEditorPath'
 import { activateRailPanel, railPanelCount } from '../panels/registry'
@@ -123,6 +127,19 @@ export function useLayoutShell() {
       nick: d.nick || t('share.msg.anon'),
     }))
   }
+  /** 直通输入申请到达直通分发（P-20261121-2）：sc-ops:share.direct-request →
+   *  toast 即时感知 + 待批锚点表 bump（管理器行内批准/拒绝钮即现，会话行
+   *  待批徽标同面）。带行内动作的通知条目由服务端入账（批准/收回在通知
+   *  中心/管理器行两路动作链）——本 handler 只播报与对账 */
+  function onShareDirectRequest(ev: Event): void {
+    const d = (ev as CustomEvent<ShareDirectRequestDetail>).detail
+    if (!d?.token) return
+    message.info(t('share.guestInput.requestArrived', {
+      name: d.shareName || d.token,
+      nick: d.nick || t('share.msg.anon'),
+    }))
+    bumpDirectInputShares()
+  }
   /** 可写分享「访客输入中」直通分发（P-20261106-8）：sc-ops:share.wtyping →
    *  bump 锚点表即时对账（会话行橙点徽标即现即摘，15s 轮询是断线兜底）。
    *  本 handler 只做对账不播报——徽标已是常驻可见面，逐次连接 toast 是噪音 */
@@ -130,6 +147,19 @@ export function useLayoutShell() {
     const d = (ev as CustomEvent<ShareWritableTypingDetail>).detail
     if (!d?.terminalId) return
     bumpDirectInputShares()
+  }
+  /** 可写分享视口 resize 直通分发（P-20261120-8）：sc-ops:share.wresize →
+   *  toast 即时感知（访客把主机终端改格到其视口宽度——「终端被无形改格」的
+   *  最小可见性面，评审必改5：wtyping 徽标给出访客在场，本事件给出改成了
+   *  什么格。合并窗+conn 节流后频度低，逐次播报不成噪） */
+  function onShareWResize(ev: Event): void {
+    const d = (ev as CustomEvent<ShareWritableResizeDetail>).detail
+    if (!d?.terminalId || !d.cols || !d.rows) return
+    message.info(t('share.writable.resized', {
+      name: d.shareName || d.token || '',
+      cols: d.cols,
+      rows: d.rows,
+    }))
   }
   /** 可写分享粘贴审批卡直通分发（P-20261106-8）：sc-ops:share.paste-review →
    *  confirmDialog 双动作卡（批准=注入 PTY / 拒绝=丢弃，60s 不决服务端自动
@@ -194,7 +224,7 @@ export function useLayoutShell() {
     // 键盘移动活跃标签（P-20261005-201，Alt+Shift+←/→ 键位消费）
     moveActiveTab,
     // 远程文件编辑（P-20261003-15）：离线横幅重试（EditorArea remoteRetry 转调）
-    retryRemoteFile,
+    retryRemoteFile, toggleFileViewMode,
   } = useOpenFiles({
     onRemoveRecent: (p) => {
       removeRecent(p)
@@ -808,6 +838,8 @@ export function useLayoutShell() {
     window.addEventListener(OPS_SHARE_DROP, onShareDrop)
     window.addEventListener(OPS_SHARE_WTYPING, onShareWTyping)
     window.addEventListener(OPS_SHARE_PASTE_REVIEW, onSharePasteReview)
+    window.addEventListener(OPS_SHARE_WRESIZE, onShareWResize)
+    window.addEventListener(OPS_SHARE_DIRECT_REQUEST, onShareDirectRequest)
     // Monaco 语言 worker chunk 空闲预取（P-20261002-103）：仅调度，不占引导/交互时间片
     prefetchMonacoLanguageWorkers()
     startInstanceId = instanceStore.currentInstanceId
@@ -920,6 +952,30 @@ export function useLayoutShell() {
             bumpDirectInputShares()
           }).catch(() => { /* 拦截器已 toast */ })
         },
+        // 直通输入申请卡「批准」（P-20261121-2）：payload=token——批准走缺省
+        // 取唯一在途申请的服务端语义（申请卡到点批准即当时的在途者；多访客
+        // 顶替窗口由服务端 pending 单槽语义仲裁）；持权卡入账由服务端批准
+        // 端点承接，这里只反馈 + 锚点表即时对账
+        shdirectApprove: (n) => {
+          const token = String(n.actionPayload ?? '')
+          if (!token) return
+          void shareApi.approveDirect(token).then((res) => {
+            const nick = (res as { data?: { nick?: string } })?.data?.nick || ''
+            message.success(t('share.guestInput.granted', { nick }))
+            bumpDirectInputShares()
+          }).catch(() => { /* 拦截器已 toast（含 409 申请已过期） */ })
+        },
+        // 直通输入申请卡「拒绝」（P-20261121-2）：payload=token——落点同主人
+        // 侧收回端点（幂等清 pending+持权），反馈按「拒绝申请」分流（持权卡
+        // shdirect-revoke 的「已收回」语义对申请卡是误导——持权本不存在）
+        shdirectDeny: (n) => {
+          const token = String(n.actionPayload ?? '')
+          if (!token) return
+          void shareApi.revokeDirect(token).then(() => {
+            message.success(t('share.guestInput.denied'))
+            bumpDirectInputShares()
+          }).catch(() => { /* 拦截器已 toast */ })
+        },
         // autoStash「恢复」（P-20261006-48）：payload=JSON {projectId,branch,
         // message}，重定位与 pop 反馈收口 useStashRecover.recoverFromNotification
         stashRecover: (payload: string) => { void stashRecoverFromNotification(payload) },
@@ -962,6 +1018,8 @@ export function useLayoutShell() {
     window.removeEventListener(OPS_SHARE_DROP, onShareDrop)
     window.removeEventListener(OPS_SHARE_WTYPING, onShareWTyping)
     window.removeEventListener(OPS_SHARE_PASTE_REVIEW, onSharePasteReview)
+    window.removeEventListener(OPS_SHARE_WRESIZE, onShareWResize)
+    window.removeEventListener(OPS_SHARE_DIRECT_REQUEST, onShareDirectRequest)
   })
 
   // 项目切换时刷新变更状态（路径已失效的项目跳过：git status 必失败，
@@ -1009,8 +1067,8 @@ export function useLayoutShell() {
     moveTabToGroup,
     // 未保存草稿恢复提示条（EditorArea 顶部）
     draftOffer, applyDraftRestore, discardDraftRestore, previewDraftRestore,
-    // 远程文件离线横幅重试（P-20261003-15，EditorArea remoteRetry 转调）
-    retryRemoteFile,
+    // 远程文件离线横幅重试（P-20261003-15）+ 统一双视图切换（P-20261119-4）
+    retryRemoteFile, toggleFileViewMode,
     // 主区视图
     remoteEverOpened, showRemoteConsole, remoteAutoHost,
     shareEverOpened, showShareManager,

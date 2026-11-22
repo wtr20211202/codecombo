@@ -1,19 +1,21 @@
 package share
 
 // 访客协作位共享资产（P-20261024-1，guestboard.go 同款单一事实源模式）：
-// 终端直播访客页挂载的两个协作位——
+// 终端直播访客页挂载的素材上行位——
 //   - 素材上行位（SC.collab）：「粘贴/拖入/点击」三入口 + 文字素材框 + 进度/
 //     完成态；上传端点 POST /s/{token}/drop（multipart files+nickname），完成态
 //     恢复取 GET /s/{token}/drops。手机测试主场景 = 点击「拍照」入口带
 //     accept="image/*" capture（paste 在移动端是系统分享菜单形态）。
-//   - 直通输入位（SC.directInput）：申请-批准握手 UI（申请 → 等待 → 持权输入）
-//     + 持权倒计时；2s 轮询 /direct/state（直通位在场才轮询）。
+//   - 直通输入位退役（P-20261121-1 统一收编）：申请-批准握手 UI（申请 → 等待
+//     → 持权输入）随「访客输入」双授权模式合并迁入 writablepage.go WS 上行
+//     桥（clDirect* 词表随迁 wr*）——本文件只收素材上行，键入通道单一事实源
+//     在 writablepage.go。
 //
 // 折叠条 + 浮层（P-20261107-4）：协作位收起为常驻一行的协作条（标题 + 状态摘要
 // + 展开钮），展开内容以浮层向上覆于终端卡片之上——素材清单/进度行/文字素材框
 // 再长也不进列流（此前 .cl-root 在列流内随进度行撑高，挤压上方终端区，「此消彼
-// 长」）。缺省收起；折叠态靠摘要给反馈（上传进度/已收份数/待批），失败与持权才
-// 自动展开（需要访客看见的状态才打扰）。与留言板浮层互斥（同锚位不叠）。
+// 长」）。缺省收起；折叠态靠摘要给反馈（上传进度/已收份数），失败才自动展开
+//（需要访客看见的状态才打扰）。与留言板浮层互斥（同锚位不叠）。
 //
 // 粘贴链路（P-20261023-2 同哲学，P-20261107-4 实勘修复两类失败形态）：
 //   ①访客点过终端区再 Ctrl+V——xterm 的 paste 处理器 stopPropagation，document
@@ -24,8 +26,8 @@ package share
 //   可编辑目标（输入框/可写终端）里剪贴板带文字时文字粘贴优先不劫持；只读页面
 //   上的纯文字粘贴送进文字素材框待访客确认（不直接上传）。
 // 文字素材：访客输入/粘贴的文字由页面成 .txt 文件后走同一 /drop 上行链——白名单/
-// 配额/频控/审计/通知/消费语义全复用，零新端点；与直通输入（PTY 键入通道）、
-// 留言板（board 消息）三者语义各自独立。
+// 配额/频控/审计/通知/消费语义全复用，零新端点；与访客输入（PTY 键入通道，
+// writablepage.go）、留言板（board 消息）三者语义各自独立。
 //
 // 渲染纪律与三页同款：零外部依赖、全部用户字符串 textContent 写入、
 // 昵称沿用留言板 gb-nick 输入（单一身份源）。v1 只挂终端直播页
@@ -34,10 +36,10 @@ package share
 // collabCSS 协作位样式（termpage 模板以 {{.CollabCSS}} 注入 <style>；
 // 变量取各页同源 :root 主题 token）
 const collabCSS = `
-.cl-root{position:relative;flex-shrink:0;margin-top:10px;background:var(--card);border:1px solid var(--border);
+.cl-root{position:relative;flex-shrink:0;margin-top:8px;background:var(--card);border:1px solid var(--border);
 border-radius:12px}
 .cl-head{display:flex;align-items:center;gap:8px;width:100%;border:none;background:transparent;
-color:var(--text);padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;text-align:left;border-radius:12px}
+color:var(--text);padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;text-align:left;border-radius:12px}
 .cl-head:hover{background:var(--hover)}
 .cl-head .cl-sum{min-width:0;color:var(--muted);font-weight:400;font-size:11.5px;
 overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -96,12 +98,10 @@ body.cl-dragging .cl-drag-mask{display:flex}
 
 // collabJS 协作位脚本（termpage 模板以 {{.CollabJS}} 注入主 script 尾部，
 // 在 guestBoardJS 之前挂载——插入位「留言板上方」按 gb-root 存在与否决定
-// 锚点）。全部用户字符串 textContent 写入；取数只在直通位在场时轮询
+// 锚点）。全部用户字符串 textContent 写入
 const collabJS = `
 (function mountCollab(){
-  const wantUpload = !!SC.collab;
-  const wantDirect = !!SC.directInput;
-  if (!wantUpload && !wantDirect) return;
+  if (!SC.collab) return;
   const wrap = document.querySelector('.wrap');
   if (!wrap) return;
   const root = document.createElement('section');
@@ -113,7 +113,7 @@ const collabJS = `
   head.setAttribute('data-testid', 'cl-toggle');
   head.setAttribute('aria-expanded', 'false');
   const headTtl = document.createElement('span');
-  headTtl.textContent = wantUpload ? t('clUpTitle') : t('clDirectTitle');
+  headTtl.textContent = t('clUpTitle');
   const sum = document.createElement('span'); sum.className = 'cl-sum';
   sum.setAttribute('data-testid', 'cl-summary');
   const arrow = document.createElement('span'); arrow.className = 'cl-arrow'; arrow.textContent = '▴';
@@ -121,10 +121,21 @@ const collabJS = `
   const panel = document.createElement('div'); panel.className = 'cl-panel';
   panel.setAttribute('data-testid', 'cl-panel');
   root.append(head, panel);
-  const board = wrap.querySelector('.gb-root');
-  if (board) wrap.insertBefore(root, board); else {
-    const footer = wrap.querySelector('.footer');
-    if (footer) wrap.insertBefore(root, footer); else wrap.appendChild(root);
+  // 挂载形态二分（P-20261119-3 入口条合并）：终端直播页由 entryBarJS 先建
+  // 条壳——协作入口以 chip 形态挂进条内（testid 迁按钮级 cl-root-btn，不复用
+  // cl-root 于条内防语义漂移；浮层锚条定位，entryBarCSS 覆写 chip 形态）；
+  // 条壳缺席（文件/定格/回放页等无本件的面）回落既有独立条形态，零行为变化。
+  // 挂载顺序：CollabJS 先于 BoardJS 执行，条内 chip 顺序 = [协作, 留言]
+  const bar = document.querySelector('[data-testid="sc-entrybar"]');
+  if (bar) {
+    root.setAttribute('data-testid', 'cl-root-btn');
+    bar.appendChild(root);
+  } else {
+    const board = wrap.querySelector('.gb-root');
+    if (board) wrap.insertBefore(root, board); else {
+      const footer = wrap.querySelector('.footer');
+      if (footer) wrap.insertBefore(root, footer); else wrap.appendChild(root);
+    }
   }
   function setOpen(on){
     root.classList.toggle('open', on);
@@ -140,11 +151,10 @@ const collabJS = `
   panel.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { setOpen(false); head.focus(); }
   });
-  // 折叠态摘要：上传进度/已收份数 · 直通态；默认显示用途说明
-  const sumState = { up: '', direct: '', err: false };
+  // 折叠态摘要：上传进度/已收份数；默认显示用途说明
+  const sumState = { up: '', err: false };
   function renderSum(){
-    const parts = [sumState.up, sumState.direct].filter(Boolean);
-    sum.textContent = parts.length ? parts.join(' · ') : (wantUpload ? t('clUpHint') : t('clDirectHint'));
+    sum.textContent = sumState.up || t('clUpHint');
     sum.classList.toggle('err', !!sumState.err);
   }
   renderSum();
@@ -164,8 +174,9 @@ const collabJS = `
     return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
   }
 
-  // ── 素材上行位 ──
-  if (wantUpload) {
+  // ── 素材上行位（挂载门控在 mountCollab 首行：SC.collab 关即整个 IIFE 早退，
+  // 到达此处恒为上行位在场景——旧 wantUpload 分支随直通位退役收拢） ──
+  {
     const sec = document.createElement('div'); sec.className = 'cl-sec';
     const title = document.createElement('p'); title.className = 'cl-title';
     const ttl = document.createElement('span'); ttl.textContent = t('clUpTitle');
@@ -446,158 +457,5 @@ const collabJS = `
     };
   }
 
-  // ── 直通输入位 ──
-  if (wantDirect) {
-    const sec = document.createElement('div'); sec.className = 'cl-sec';
-    const title = document.createElement('p'); title.className = 'cl-title';
-    const ttl = document.createElement('span'); ttl.textContent = t('clDirectTitle');
-    const hint = document.createElement('span'); hint.className = 'cl-hint'; hint.textContent = t('clDirectHint');
-    title.append(ttl, hint);
-    const status = document.createElement('div'); status.className = 'cl-status'; status.setAttribute('data-testid', 'cl-direct-status');
-    const box = document.createElement('div'); box.className = 'cl-dinput';
-    const ta = document.createElement('textarea');
-    ta.maxLength = 4096; ta.placeholder = t('clDirectPh');
-    ta.setAttribute('data-testid', 'cl-direct-text');
-    const foot = document.createElement('div'); foot.className = 'cl-dfoot';
-    const cnt = document.createElement('span'); cnt.className = 'cnt'; cnt.textContent = '0/4096';
-    const send = document.createElement('button'); send.type = 'button'; send.className = 'send';
-    send.setAttribute('data-testid', 'cl-direct-send');
-    send.textContent = t('clDirectSend'); send.disabled = true;
-    foot.append(cnt, send);
-    box.append(ta, foot);
-    const badge = document.createElement('span'); badge.className = 'cl-badge'; badge.style.display = 'none';
-    const dot = document.createElement('i'); dot.className = 'dot';
-    const badgeTxt = document.createElement('span'); badgeTxt.setAttribute('data-testid', 'cl-direct-badge');
-    badge.append(dot, badgeTxt);
-    sec.append(title, badge, status, box);
-    panel.appendChild(sec);
-
-    // 访客身份：首访生成随机 visitor id（localStorage 持久——SSE 断线重连
-    // 凭它恢复持权；与昵称绑定关系仅本地语义，服务端只认 id）
-    const VID_KEY = 'sc.share.visitorId';
-    let visitorId = '';
-    try {
-      visitorId = localStorage.getItem(VID_KEY) || '';
-      if (!visitorId) {
-        visitorId = (crypto.randomUUID ? crypto.randomUUID() :
-          'v-' + Date.now().toString(36) + Math.random().toString(36).slice(2));
-        localStorage.setItem(VID_KEY, visitorId);
-      }
-    } catch (e) { visitorId = 'v-' + Date.now().toString(36) + Math.random().toString(36).slice(2); }
-
-    let phase = 'none'; // none | pending | held
-    let heldMine = false; // 本访客持权（首次进入时自动展开浮层，访客要看见输入框）
-    function setDirectSum(text){ sumState.direct = text; renderSum(); }
-    ta.oninput = () => {
-      cnt.textContent = [...ta.value].length + '/4096';
-      send.disabled = !phase || phase !== 'held' || ![...ta.value.trim()].length;
-    };
-    // 多行粘贴警示（提案：粘贴长度上限 4KB 与多行粘贴警示）
-    ta.addEventListener('paste', (e) => {
-      const text = e.clipboardData ? e.clipboardData.getData('text') : '';
-      if (text && text.split(/\r\n|\r|\n/).length > 1) {
-        if (!window.confirm(t('clDirectMultiline'))) { e.preventDefault(); return; }
-      }
-      if (new Blob([text]).size > 4096) {
-        e.preventDefault();
-        setStatus(status, t('clDirectTooLong'), 'err');
-      }
-    });
-    async function post(path, body) {
-      const res = await fetch('/s/' + SC.token + path, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {})
-      });
-      let data = {};
-      try { data = await res.json(); } catch (err) {}
-      return { ok: res.ok, status: res.status, data };
-    }
-    send.onclick = async () => {
-      const text = ta.value;
-      if (!text.trim() || phase !== 'held') return;
-      send.disabled = true;
-      try {
-        const r = await post('/direct/input', { visitorId, text });
-        if (r.ok) {
-          ta.value = ''; cnt.textContent = '0/4096';
-          setStatus(status, t('clDirectSent'), '');
-        } else if (r.status === 403) {
-          phase = 'none'; renderNone(); setStatus(status, t('clDirectRevoked'), 'err');
-        } else if (r.status === 410) {
-          setStatus(status, t('clDirectGone'), 'err');
-        } else {
-          setStatus(status, t('clFailed'), 'err');
-        }
-      } catch (e) { setStatus(status, t('clFailed'), 'err'); }
-      send.disabled = phase !== 'held' || !ta.value.trim();
-    };
-    const requestBtn = document.createElement('button');
-    requestBtn.type = 'button'; requestBtn.className = 'cl-btn primary';
-    requestBtn.setAttribute('data-testid', 'cl-direct-request');
-    requestBtn.textContent = t('clDirectRequest');
-    requestBtn.onclick = async () => {
-      requestBtn.disabled = true;
-      try {
-        const r = await post('/direct/request', { visitorId, nickname: nickOf() });
-        if (r.ok) { phase = 'pending'; setStatus(status, t('clDirectWaiting'), ''); }
-        else setStatus(status, r.status === 429 ? t('clLimited') : t('clFailed'), 'err');
-      } catch (e) { setStatus(status, t('clFailed'), 'err'); }
-      requestBtn.disabled = false;
-      poll();
-    };
-    function renderNone() {
-      box.replaceChildren(requestBtn);
-      badge.style.display = 'none';
-      send.disabled = true;
-      heldMine = false;
-      setDirectSum('');
-    }
-    function renderPending() {
-      box.replaceChildren();
-      badge.style.display = 'none';
-      send.disabled = true;
-      heldMine = false;
-      setDirectSum(t('clDirectPending'));
-    }
-    function renderHeld(mine, nick, remain) {
-      if (mine) {
-        if (!box.contains(ta)) box.replaceChildren(ta, foot);
-        badge.style.display = '';
-        badgeTxt.textContent = t('clDirectHeld').replace('{m}', String(Math.max(1, Math.ceil(remain / 60))));
-        send.disabled = !ta.value.trim();
-        if (!heldMine) { heldMine = true; setOpen(true); }
-        setDirectSum(badgeTxt.textContent);
-      } else {
-        box.replaceChildren();
-        badge.style.display = '';
-        badgeTxt.textContent = t('clDirectOther');
-        send.disabled = true;
-        heldMine = false;
-        setDirectSum(t('clDirectOther'));
-      }
-    }
-    renderNone();
-    async function poll() {
-      try {
-        const res = await fetch('/s/' + SC.token + '/direct/state?visitorId=' + encodeURIComponent(visitorId));
-        if (!res.ok) { phase = 'none'; renderNone(); return; }
-        const d = await res.json();
-        if (d.status === 'held') {
-          phase = 'held';
-          renderHeld(!!d.mine, d.nick || '', d.remainSeconds || 0);
-        } else if (d.status === 'pending') {
-          phase = 'pending';
-          renderPending();
-          setStatus(status, t('clDirectWaiting'), '');
-        } else {
-          if (phase === 'held') setStatus(status, t('clDirectRevoked'), 'err');
-          phase = 'none';
-          renderNone();
-        }
-      } catch (e) { /* 网络闪断：保持当前态，下轮再对账 */ }
-    }
-    poll();
-    setInterval(poll, 2000);
-  }
 })();
 `

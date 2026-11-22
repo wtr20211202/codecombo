@@ -20,17 +20,22 @@ type termBootState struct {
 	Token string            `json:"token"`
 	Lang  string            `json:"lang"`
 	Dict  map[string]string `json:"dict"`
+	// Name 分享展示名（P-20261118-9 去品牌前缀）：页面据此校准 h1 与
+	// document.title；rename 帧到达前与 <title> 同源
+	Name string `json:"name,omitempty"`
 	// Wm 溯源水印文本（P-20261005-193；空串 = 记录未开水印，页面不出水印层）
 	Wm string `json:"wm,omitempty"`
 	// Collab 协作通道开关（P-20261024-1）：true = 页面挂载素材上行位
 	//（粘贴/拖入/点击三入口）。缺省 false = 页面无任何协作位（存量语义）
 	Collab bool `json:"collab,omitempty"`
-	// DirectInput 直通输入档开关（P-20261024-1 第二档独立开关，与 Collab
-	// 互不联动）：true = 页面挂载直通输入位（申请-批准握手 UI）
-	DirectInput bool `json:"directInput,omitempty"`
-	// Writable 可写分享开关（P-20261106-8「对方可直接输入」模式，与直通档
-	// 互不联动）：true = 页面挂载可写输入位（WS 上行桥 + 出域警示横幅；
-	// 键入直注主人终端 PTY，writablepage.go 单一事实源）
+	// GuestInput 访客输入·申请通道在场标记（P-20261024-1 直通档 directInput
+	// 随统一收编退役后的接替字段，反向极性在 store 落——GuestInputOff）：
+	// true = 申请-批准握手入口默认在场（申请通道缺省开；owner 关闭通道即
+	// 不渲染申请入口）
+	GuestInput bool `json:"guestInput,omitempty"`
+	// Writable 开放直入开关（P-20261106-8「对方可直接输入」模式）：
+	// true = 键入即开（WS 上行桥 + 出域警示横幅；键入直注主人终端 PTY，
+	// writablepage.go 单一事实源）
 	Writable bool `json:"writable,omitempty"`
 	// MsgMax 留言板上限（协作通道 2000 / 缺省 500，boardMsgMax 同源下发）
 	MsgMax int `json:"msgMax,omitempty"`
@@ -47,11 +52,19 @@ var termDictZh = map[string]string{
 	"connecting":       "连接中…",
 	"maskBanner":       "输出已经敏感值遮蔽（sc 令牌 / password 赋值 / 云密钥 key → ***）。遮蔽靠模式启发式，非绝对——不要在终端里打印高敏凭据。",
 	"unfilteredBanner": "未过滤：分享者已关闭敏感值遮蔽，输出原样直播（可能含令牌 / 密码 / 密钥等敏感信息）。请勿转发本链接，看完即可关闭页面。",
-	"readonlyTip":      "本页面为只读直播，无任何输入通道",
+	"readonlyTip":      "只读直播：输出只可观看；如需键入，点击「申请输入」提交申请（分享者批准后生效）",
 	"guestLimit":       "同时在线的访客已达上限，请稍后再试",
 	"endedTip":         "直播已结束（会话关闭或分享被撤销）",
 	"reconnecting":     "连接断开，重连中…",
 	"poweredBy":        "由 Codecombo 提供",
+	// 主题切换器（P-20261120-1，theme.go guestThemeJS 消费；键名与文件页
+	// page_i18n.go 主题段同表，六页同键）
+	"theme":        "主题",
+	"themeAuto":    "跟随系统",
+	"themeLight":   "GitHub 浅色",
+	"themeDark":    "GitHub 深色",
+	"themeOneDark": "One Dark",
+	"themeDracula": "Dracula",
 	// 访客留言板（P-20261006-13）：页底留言区文案（三形态访客页同表）
 	"gbTitle":   "留言",
 	"gbNick":    "昵称（可选）",
@@ -65,36 +78,22 @@ var termDictZh = map[string]string{
 	"gbLimited": "发送太频繁，请稍后再试",
 	"gbFailed":  "发送失败，请重试",
 	// 协作位（P-20261024-1）：素材上行 + 直通输入（collabpage.go 单一事实源）
-	"clUpTitle":         "协作素材",
-	"clUpHint":          "直达会话收件区，主人可一键交给智能体",
-	"clDropHint":        "粘贴 / 拖入文件到页面任意位置，或点击下方按钮上传",
-	"clPickFiles":       "选择文件",
-	"clCamera":          "拍照 / 相册",
-	"clUpNote":          "图片 ≤10MB，文件 ≤20MB，单次 ≤5 个",
-	"clDone":            "已上传",
-	"clReceived":        "已收到",
-	"clUsed":            "已交给会话",
-	"clQuota":           "收件区已满，请联系分享者",
-	"clLimited":         "上传太频繁，请稍后再试",
-	"clFailed":          "上传失败，请重试",
-	"clDirectTitle":     "直通输入",
-	"clDirectHint":      "向智能体会话补充信息（需分享者批准）",
-	"clDirectRequest":   "申请输入权",
-	"clDirectWaiting":   "已申请，等待分享者批准…（60 秒内有效）",
-	"clDirectPh":        "补充现场信息给智能体（≤4096 字符）…",
-	"clDirectSend":      "发送",
-	"clDirectSent":      "已送达会话",
-	"clDirectHeld":      "你正在输入 · 剩 {m} 分钟",
-	"clDirectOther":     "其他访客正在输入",
-	"clDirectRevoked":   "输入权已被收回",
-	"clDirectGone":      "会话已结束",
-	"clDirectMultiline": "粘贴内容包含多行文本，将作为多行输入送达会话。继续？",
-	"clDirectTooLong":   "粘贴内容超过 4096 字符上限",
+	"clUpTitle":   "协作素材",
+	"clUpHint":    "直达会话收件区，主人可一键交给智能体",
+	"clDropHint":  "粘贴 / 拖入文件到页面任意位置，或点击下方按钮上传",
+	"clPickFiles": "选择文件",
+	"clCamera":    "拍照 / 相册",
+	"clUpNote":    "图片 ≤10MB，文件 ≤20MB，单次 ≤5 个",
+	"clDone":      "已上传",
+	"clReceived":  "已收到",
+	"clUsed":      "已交给会话",
+	"clQuota":     "收件区已满，请联系分享者",
+	"clLimited":   "上传太频繁，请稍后再试",
+	"clFailed":    "上传失败，请重试",
 	// 协作条折叠态 / 文字素材 / 粘贴兜底（P-20261107-4，collabpage.go 单一事实源）
 	"clUploading":      "上传中 {i}/{n}…",
 	"clReceivedN":      "已收 {n} 份",
 	"clSomeFailed":     "有素材上传失败，展开查看",
-	"clDirectPending":  "输入权待批准",
 	"clDragHint":       "松开即上传为协作素材",
 	"clTextTitle":      "文字素材",
 	"clTextHint":       "输入或粘贴的文字会作为一份 .txt 素材送达收件区",
@@ -104,12 +103,30 @@ var termDictZh = map[string]string{
 	"clTextFile":       "文字素材",
 	"clImgFile":        "截图",
 	"clPasteRemoteImg": "剪贴板里只有网页图片链接，无法直接读取：请在图片上右键「复制图片」后再粘贴，或保存后用「选择文件」上传",
-	// 可写位（P-20261106-8）：WS 上行输入位文案（writablepage.go 单一事实源）
+	// 访客输入位（P-20261106-8 可写分享，P-20261121-1 统一双授权模式）：
+	// WS 上行输入位文案（writablepage.go 单一事实源；clDirect* 词表随直通位
+	// 退役并入 wr*——申请/等待/持权三态与开放直入同位呈现）
 	"wrOn":        "可写模式 · 你的输入将直达主人的终端（主人可随时收回）",
 	"wrTip":       "可写模式：你的键入会实时进入主人的终端，请谨慎操作",
 	"wrThrottled": "输入太快，部分输入被暂时拦截，请稍慢一点",
 	"wrReview":    "粘贴块包含高危命令，已提交主人审批（未批不会执行）…",
 	"wrDenied":    "主人未批准（或已超时）该粘贴块，输入被丢弃",
+	// 申请批准路径（P-20261121-1 统一收编：申请通道默认在场，申请-批准握手
+	// 三态——与开放直入共用状态条与键入通道）
+	"wrRequest": "申请输入",
+	"wrWaiting": "已申请，等待分享者批准…（10 分钟内有效）",
+	"wrHeld":    "你正在输入 · 剩 {m} 分钟",
+	"wrOther":   "其他访客正在输入",
+	"wrRevoked": "输入权已被收回（可重新申请）",
+	"wrClosed":  "申请通道未开放或分享已结束",
+	// 可写页头部副标题（P-20261119-3 sub 所有权二分）：可写页 sub 由
+	// writablepage 在 WS hello（键入通道开通）时写入本键、teardown 时恢复
+	// readonlyTip——termpage 的 ES hello 在 SC.writable 下不触 sub（到达顺序
+	// 不定的双通道竞态在所有权边界消解，见 hello 处理器内注）
+	"wrSubLive": "可写直播：键入将直达主人的终端",
+	// 视口反喂 resize 诚实回执（P-20261120-8 必改6）：服务端 resize_applied 后
+	// 状态条右段的即时反馈——访客视口已反喂为主机终端宽度（文字按视口折行）
+	"wrResized": "已按你的视口同步终端尺寸（文字按窗口折行）",
 }
 
 var termDictEn = map[string]string{
@@ -119,11 +136,18 @@ var termDictEn = map[string]string{
 	"connecting":       "Connecting…",
 	"maskBanner":       "Output is masked for sensitive values (sc tokens / password assignments / cloud keys → ***). Masking is heuristic, not absolute — avoid printing high-value credentials in this terminal.",
 	"unfilteredBanner": "Unfiltered: the sharer turned off sensitive-value masking — output is streamed verbatim and may contain tokens, passwords or keys. Do not forward this link; close the page when you are done.",
-	"readonlyTip":      "This page is a read-only live view with no input channel",
+	"readonlyTip":      "Read-only live: output is view-only; to type, click \"Request input access\" below (takes effect after owner approval)",
 	"guestLimit":       "Concurrent guest limit reached, try again later",
 	"endedTip":         "Live has ended (session closed or share revoked)",
 	"reconnecting":     "Connection lost, reconnecting…",
 	"poweredBy":        "Powered by Codecombo",
+	// 主题切换器（P-20261120-1；键名与文件页 page_i18n.go 主题段同表）
+	"theme":        "Theme",
+	"themeAuto":    "Auto (system)",
+	"themeLight":   "GitHub Light",
+	"themeDark":    "GitHub Dark",
+	"themeOneDark": "One Dark",
+	"themeDracula": "Dracula",
 	// 访客留言板（P-20261006-13）：页底留言区文案（三形态访客页同表）
 	"gbTitle":   "Messages",
 	"gbNick":    "Nickname (optional)",
@@ -136,37 +160,23 @@ var termDictEn = map[string]string{
 	"gbTooLong": "Message exceeds the 500-character limit",
 	"gbLimited": "Too many messages, please try again later.",
 	"gbFailed":  "Failed to send, try again",
-	// 协作位（P-20261024-1）：素材上行 + 直通输入（collabpage.go 单一事实源）
-	"clUpTitle":         "Shared materials",
-	"clUpHint":          "Go straight to the session inbox — hand them to the agent in one click",
-	"clDropHint":        "Paste or drop files anywhere on the page, or use the buttons below",
-	"clPickFiles":       "Choose files",
-	"clCamera":          "Camera / photos",
-	"clUpNote":          "Images ≤10MB, files ≤20MB, up to 5 per batch",
-	"clDone":            "Uploaded",
-	"clReceived":        "Received",
-	"clUsed":            "Handed to session",
-	"clQuota":           "Inbox is full, contact the share owner",
-	"clLimited":         "Too many uploads, please try again later.",
-	"clFailed":          "Upload failed, try again",
-	"clDirectTitle":     "Direct input",
-	"clDirectHint":      "Supplement the agent session (owner approval required)",
-	"clDirectRequest":   "Request input access",
-	"clDirectWaiting":   "Requested — waiting for owner approval… (valid for 60 seconds)",
-	"clDirectPh":        "Supplement on-site info for the agent (≤4096 chars)…",
-	"clDirectSend":      "Send",
-	"clDirectSent":      "Delivered to the session",
-	"clDirectHeld":      "You are typing · {m} min left",
-	"clDirectOther":     "Another visitor is typing",
-	"clDirectRevoked":   "Input access was revoked",
-	"clDirectGone":      "Session has ended",
-	"clDirectMultiline": "The pasted text contains multiple lines and will be delivered to the session as-is. Continue?",
-	"clDirectTooLong":   "Paste exceeds the 4096-character limit",
+	// 协作位（P-20261024-1）：素材上行（collabpage.go 单一事实源）
+	"clUpTitle":   "Shared materials",
+	"clUpHint":    "Go straight to the session inbox — hand them to the agent in one click",
+	"clDropHint":  "Paste or drop files anywhere on the page, or use the buttons below",
+	"clPickFiles": "Choose files",
+	"clCamera":    "Camera / photos",
+	"clUpNote":    "Images ≤10MB, files ≤20MB, up to 5 per batch",
+	"clDone":      "Uploaded",
+	"clReceived":  "Received",
+	"clUsed":      "Handed to session",
+	"clQuota":     "Inbox is full, contact the share owner",
+	"clLimited":   "Too many uploads, please try again later.",
+	"clFailed":    "Upload failed, try again",
 	// 协作条折叠态 / 文字素材 / 粘贴兜底（P-20261107-4，collabpage.go 单一事实源）
 	"clUploading":      "Uploading {i}/{n}…",
 	"clReceivedN":      "{n} received",
 	"clSomeFailed":     "Some uploads failed — expand to see",
-	"clDirectPending":  "Input access pending",
 	"clDragHint":       "Drop to upload as shared material",
 	"clTextTitle":      "Text material",
 	"clTextHint":       "Typed or pasted text is delivered to the inbox as a .txt file",
@@ -176,12 +186,24 @@ var termDictEn = map[string]string{
 	"clTextFile":       "text-note",
 	"clImgFile":        "screenshot",
 	"clPasteRemoteImg": "The clipboard only holds a link to a web image, which can't be read directly: right-click the image and choose “Copy image”, or save it and use “Choose files”",
-	// 可写位（P-20261106-8）：WS 上行输入位文案（writablepage.go 单一事实源）
+	// 访客输入位（P-20261106-8 可写分享，P-20261121-1 统一双授权模式，
+	// 注释见中文表同键条目）
 	"wrOn":        "Writable mode · your keystrokes go straight to the owner's terminal (owner can revoke anytime)",
 	"wrTip":       "Writable mode: your typing enters the owner's terminal live — operate with care",
 	"wrThrottled": "Typing too fast — some input was temporarily dropped, slow down a little",
 	"wrReview":    "Pasted block contains a high-risk command — submitted for owner approval (nothing executes until approved)…",
 	"wrDenied":    "The owner did not approve (or timed out) that pasted block — input was dropped",
+	// 申请批准路径（P-20261121-1 统一收编，注释见中文表同键条目）
+	"wrRequest": "Request input access",
+	"wrWaiting": "Requested — waiting for owner approval… (valid for 10 minutes)",
+	"wrHeld":    "You are typing · {m} min left",
+	"wrOther":   "Another visitor is typing",
+	"wrRevoked": "Input access was revoked (you can request again)",
+	"wrClosed":  "Request channel is closed or the share has ended",
+	// 可写页头部副标题（P-20261119-3 sub 所有权二分，注释见中文表同键条目）
+	"wrSubLive": "Writable live: keystrokes go to the owner's terminal",
+	// 视口反喂 resize 诚实回执（P-20261120-8 必改6，注释见中文表同键条目）
+	"wrResized": "Terminal size synced to your viewport (text wraps to the window)",
 }
 
 func termDictFor(lang string) map[string]string {
@@ -213,6 +235,15 @@ type termPageData struct {
 	// 单一事实源——WS 上行输入位，开关在场才挂载）
 	WritableCSS template.CSS
 	WritableJS  template.JS
+	// EntryCSS/EntryJS 合并入口条（P-20261119-3，entrybar.go 单一事实源——
+	// 协作/留言两条入口条并单条双入口的条壳；仅终端直播页注入）
+	EntryCSS template.CSS
+	EntryJS  template.JS
+	// ThemeCSS/ThemeJS 访客页族主题切换注入件（P-20261120-1，theme.go 单一
+	// 事实源——四主题 data-theme 覆盖块进 <style>，JS 在 head 先行 initTheme
+	// 设 data-theme 防闪白，xterm.js 加载之前）
+	ThemeCSS template.CSS
+	ThemeJS  template.JS
 }
 
 const termPageTmplSrc = `<!doctype html>
@@ -229,6 +260,7 @@ const termPageTmplSrc = `<!doctype html>
 --accent:#3d7bfd;--accent2:#6a5cff;--chip:#eef2ff;--warn-bg:#fff7e8;--warn-bd:#f0d9a8;--warn-tx:#8a5b00;--shadow:0 10px 30px rgba(23,43,99,.08)}
 @media (prefers-color-scheme: dark){:root{--bg:#0e1320;--card:#161d2f;--text:#e6eaf3;--muted:#8b94a9;
 --border:#263149;--chip:#1e2a4a;--warn-bg:#2d2410;--warn-bd:#5a4a1e;--warn-tx:#e8c87a;--shadow:0 10px 30px rgba(0,0,0,.35)}}
+{{.ThemeCSS}}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;color:var(--text);overflow:hidden;
@@ -239,55 +271,61 @@ font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microso
 .b2{width:320px;height:320px;background:rgba(61,123,253,.26);bottom:-90px;left:-60px}
 /* .wrap 列容器 / 未过滤横幅 / 窄屏断点由 termLayoutCSS 注入（P-20261106-9，
    termlayout.go 单一事实源，三终端访客页共用） */
-.header{flex-shrink:0;display:flex;align-items:center;gap:14px;
+.header{flex-shrink:0;display:flex;align-items:center;gap:12px;
 background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:14px;
-padding:13px 20px;color:#fff;box-shadow:var(--shadow)}
-.header .icon{flex:0 0 auto;width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.16);
+padding:9px 16px;color:#fff;box-shadow:var(--shadow)}
+.header .icon{flex:0 0 auto;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.16);
 display:flex;align-items:center;justify-content:center}
 .header .meta{flex:1;min-width:0}
-.header h1{margin:0;font-size:16.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.header .sub{margin-top:2px;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header h1{margin:0;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header .sub{margin-top:1px;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 「直播中」指示：呼吸点 + 徽标（结束态翻灰） */
 .badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.16);
-border:1px solid rgba(255,255,255,.4);border-radius:999px;padding:4px 13px;font-size:12px;font-weight:600;
+border:1px solid rgba(255,255,255,.4);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:600;
 letter-spacing:.4px;font-variant-numeric:tabular-nums}
 .badge .dot{width:8px;height:8px;border-radius:50%;background:#ff5b5b;animation:pulse 1.6s ease-in-out infinite}
 .badge.ended .dot{background:#9aa3b5;animation:none}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
-/* 遮蔽声明横幅（提案要求的双警示之一，显著不折叠） */
-.banner{flex-shrink:0;margin-top:12px;display:flex;gap:9px;align-items:flex-start;
+/* 遮蔽声明横幅（提案要求的双警示之一，显著不折叠）——完整文案与警示色不收，
+   只收条内纵向 padding 与条间 margin（P-20261118-9 布局紧凑化） */
+.banner{flex-shrink:0;margin-top:8px;display:flex;gap:9px;align-items:flex-start;
 background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx);
-border-radius:10px;padding:9px 14px;font-size:12.5px;line-height:1.55}
+border-radius:10px;padding:6px 12px;font-size:12.5px;line-height:1.5}
 .banner svg{flex:0 0 auto;margin-top:2px}
-.card{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:12px;
+.card{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:8px;
 background:var(--card);border:1px solid var(--border);border-radius:14px;
 box-shadow:var(--shadow);overflow:hidden}
 .term-box{flex:1;min-height:0;padding:8px 10px}
 .term-box .xterm{height:100%}
 .term-box .xterm-viewport{background:transparent!important}
+/* foot-note 并入 footer 单行（P-20261118-9）：原两行（提示行+版权行）合并为
+   flex 两端单行——roTip 左、版权右；.footer 锚点语义保留（挂载脚本插入位） */
 .foot-note{flex-shrink:0;display:flex;justify-content:space-between;gap:12px;
-padding:8px 6px 2px;color:var(--muted);font-size:11.5px;opacity:.85}
+padding:6px 6px 0;color:var(--muted);font-size:11.5px;opacity:.85}
 .state{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
 color:var(--muted);text-align:center;padding:30px}
 .state .big{width:64px;height:64px;border-radius:18px;background:var(--chip);margin-bottom:14px;
 display:flex;align-items:center;justify-content:center}
 .state h2{margin:0 0 6px;font-size:16px;color:var(--text)}
 .state p{margin:0;font-size:12.5px}
-.footer{flex-shrink:0;text-align:center;color:var(--muted);font-size:11.5px;margin-top:9px;opacity:.75}
 /* 溯源水印（P-20261005-193）：与文件分享页同款对角双标低透明（4%）——
    DOM 在页内自实现（单文件页零依赖契约，文案构造 share.WatermarkLabel
-   服务端共享），样式与 page.go 逐段对齐，改动两端须同步 */
+   服务端共享），样式与 page.go 逐段对齐，改动两端须同步。色取常量中性灰
+   （P-20261121-4 端面感知裁定）：var(--text) 在浅色档为深色、落在恒深终端
+   端面上 4% 不可见——中性灰在浅/深两种面上同档隐现，不随主题翻转 */
 .sc-wm{position:fixed;inset:0;pointer-events:none;z-index:65;
 -webkit-user-select:none;user-select:none}
 .sc-wm span{position:absolute;font-size:13px;font-weight:600;letter-spacing:.4px;
-color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
+color:#8b94a9;opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 .sc-wm .wm-a{top:16%;left:5%}
 .sc-wm .wm-b{bottom:16%;right:5%}
 {{.BoardCSS}}
 {{.CollabCSS}}
 {{.LayoutCSS}}
 {{.WritableCSS}}
+{{.EntryCSS}}
 </style>
+<script>{{.ThemeJS}}</script>
 </head>
 <body>
 <div class="blob b1"></div><div class="blob b2"></div>
@@ -295,10 +333,11 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
   <div class="header">
     <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12.5 15H17" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="meta">
-      <h1>{{.Title}}</h1>
+      <h1 id="pageTitle">{{.Title}}</h1>
       <div class="sub" id="sub"></div>
     </div>
     <div class="badge" id="badge" data-state="connecting"><span class="dot"></span><span id="badgeText"></span></div>
+    <span id="themeSlot"></span>
   </div>
   <div class="banner{{if .Unfiltered}} unfiltered{{end}}" id="maskBanner" data-testid="share-mask-banner">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -308,8 +347,9 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
     <div class="term-box" id="termBox"></div>
     <div class="state" id="stateBox" style="display:none"></div>
   </div>
-  <div class="foot-note"><span id="roTip"></span><span></span></div>
-  <div class="footer" id="powered"></div>
+  <!-- foot-note 并入 footer 单行（P-20261118-9 布局紧凑化）：roTip 左 / 版权右；
+       .footer class 保留——guestboard/collab 挂载锚点按它定位插入位 -->
+  <div class="footer foot-note"><span id="roTip"></span><span id="powered"></span></div>
 </div>
 <script src="/assets/xterm.js"></script>
 <script src="/assets/addon-fit.js"></script>
@@ -321,12 +361,24 @@ const SC = {{.Boot}};
 {{.LayoutJS}}
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
-document.title = t('appTitle');
+// 标签页标题 = 分享名（P-20261118-9 去品牌前缀：h1 与标签页都呈现会话本身，
+// 「Codecombo 终端 N」「终端直播」泛称双重误导同根）。<title> 已是分享名，
+// 此处用 SC.name 校准一次并供 rename 帧复用；name 缺席保持 <title> 原值
+function setPageName(name){
+  if (!name) return;
+  document.title = name;
+  const h1 = $('pageTitle');
+  if (h1) h1.textContent = name;
+}
+setPageName(SC.name);
 $('badgeText').textContent = t('connecting');
 // 横幅位：遮蔽声明 / 未过滤警示二选一（P-20261106-9，记录配置随 boot 下发）
 $('bannerText').textContent = t(SC.unfiltered ? 'unfilteredBanner' : 'maskBanner');
 $('roTip').textContent = t('readonlyTip');
 $('powered').textContent = t('poweredBy');
+// 主题切换器（P-20261120-1，theme.go 共享注入件——head 已先行 initTheme 设
+// data-theme 防闪白；渐变头部上的落位观感由页面实测门禁三视口裁定）
+$('themeSlot').appendChild(makeThemeSelect());
 
 // 溯源水印（P-20261005-193）：文本服务端下发（SC.wm，空 = 不出层），
 // textContent 写入防注入；纯视觉叠层与 SSE 数据面无涉
@@ -345,16 +397,18 @@ $('powered').textContent = t('poweredBy');
 
 // ── xterm 只读实例：渲染参数与产品内终端跨栈对齐（P-20261107-4：字体栈/字号/
 // scrollback/Unicode 11 宽度表同产品缺省，scTermOptions 单一出口）；disableStdin
-// 关键盘输入（配合服务端无输入端点 = 双层只读保证），背景透明融入页面主题，
-// 前景色随系统深浅 ──
-const dark = matchMedia('(prefers-color-scheme: dark)');
+// 关键盘输入（配合服务端无输入端点 = 双层只读保证）──
+// 端面恒深色（P-20261121-4）：主人控制台的 ANSI 着色按深色控制台语义发出
+// （PSReadLine 命令亮黄、红/绿输出），浅色主题透明底承接 = 深色语义落浅底
+// 不可辨，256 色/真彩输出无法靠前景重映射兜底——端面收敛常量深色（底色同
+// 各页 OS-dark --bg=#0e1320、前景恒 #e6eaf3，与 termLayoutCSS .term-box 端面
+// 同源），页面 chrome（头部/卡片/blob/主题切换器）仍随四主题换装（tmate/
+// ttyd/GitHub Live Share 同口径）。旧主题随档接线（前景映射/OS 深浅门禁/
+// 事件换装监听，P-20261120-1 段）全量退役（P-20261121-4）
 const term = new Terminal(scTermOptions({ convertEol: false, theme: termTheme() }));
 function termTheme(){
-  return dark.matches
-    ? { background: 'rgba(0,0,0,0)', foreground: '#e6eaf3', cursor: 'transparent' }
-    : { background: 'rgba(0,0,0,0)', foreground: '#24292f', cursor: 'transparent' };
+  return { background: '#0e1320', foreground: '#e6eaf3', cursor: 'transparent' };
 }
-dark.addEventListener('change', () => { term.options.theme = termTheme(); });
 scTermUnicode(term);
 const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
@@ -365,19 +419,29 @@ function doFit(){ try { fit.fit(); } catch (e) { /* 容器未布局完成时忽�
 
 // 主机栅格（P-20261107-4 渲染保真）：hello/resize 帧给出主机 cols×rows 时按其
 // 精确渲染——不让 fit 按访客容器改写列数（栅格与主机不符即 TUI 折行/光标定位
-// 错乱），字号在产品同款上限内缩放把整格装进容器；主机尺寸未知（会话从未
-// resize 过）回落容器 fit。重排由终端容器尺寸驱动（横幅/可写条/页底浮层引起
-// 的容器变化都会重排，不再底部裁切）
+// 错乱），字号收缩装进容器、主机栅格窄于容器时宽度优先放大（P-20261119-2，
+// 上限 3×产品字号；放大致纵向超容器走 overset 钉底跟随）；主机尺寸未知（会话
+// 从未 resize 过）回落容器 fit。重排由终端容器尺寸驱动（横幅/可写条/页底浮层
+// 引起的容器变化都会重排，不再底部裁切）
 let hostCols = 0, hostRows = 0;
+// 视口反喂回声钩子（P-20261120-8）：SSE resize 帧到达时通知可写页驱动对账——
+// 匹配自源上报值即回声清账，不匹配即主人侧动作（进抑制窗不回踩）。只读页
+// 无驱动，函数保持 null 零开销；writablepage 在 hello 后覆写本钩子
+let wrHostResize = null;
+// 视口反喂几何钩子（P-20261120-8）：容器几何变化（窗口拖拽/横幅折行/页底浮
+// 层）经既有 layout 重排点同步 kick 驱动重算目标——复用 scObserve 的观测链，
+// 可写页不再另挂第二个 ResizeObserver
+let wrLayoutHook = null;
 function layout(){
   if (!term.element) return;
   if (hostCols > 0 && hostRows > 0) {
-    scTermNeed(hostCols);
+    scTermNeed(hostCols, term.options.fontSize);
     scFitGrid(term, $('termBox'), hostCols, hostRows);
   } else {
     scClearGrid(term);
     doFit();
   }
+  if (wrLayoutHook) wrLayoutHook();
 }
 const relayout = scObserve($('termBox'), layout);
 function setHost(cols, rows){
@@ -385,13 +449,23 @@ function setHost(cols, rows){
   hostCols = Math.max(2, Math.min(cols, 500));
   hostRows = Math.max(2, Math.min(rows, 300));
   // 内容自适应列宽（P-20261106-9）：列容器按主机列数放宽/收窄（宽度仍受视口
-  // 约束，不强制铺满）；栅格立即换尺寸（随后到达的字节按主机栅格落屏）
-  scTermNeed(hostCols);
+  // 约束，不强制铺满；字号按当前生效值回算、钳 ≥ 产品字号，P-20261119-2）；
+  // 栅格立即换尺寸（随后到达的字节按主机栅格落屏）
+  scTermNeed(hostCols, term.options.fontSize);
   if (term.cols !== hostCols || term.rows !== hostRows) term.resize(hostCols, hostRows);
+  // 栅格重排改变 rows·cell.h（P-20261119-2）：尾部同钉——先按旧几何立起钉底态
+  // （rAF 间隙到达的写回调按钉底态贴底），rAF 重排里 scFitGrid 强制回钉兜新几何
+  scPinBottom($('termBox'), true, scCursorRowY(term));
   relayout();
 }
-// 产品同款字体就绪再 open（xterm 在 open 时测字宽）；字体晚到则重测重排
-scFontsReady(() => { term.open($('termBox')); layout(); }, () => { scRemeasure(term); relayout(); });
+// 产品同款字体就绪再 open（xterm 在 open 时测字宽）；字体晚到则重测重排。
+// open 后挂滚轮路由（scWheelRoute，P-20261118-9）：overset 态放行滚轮给
+// term-box，fits 态 xterm 照常 scrollback 导航——双滚动条收敛的 JS 半边
+scFontsReady(() => {
+  term.open($('termBox'));
+  scWheelRoute(term, $('termBox'));
+  layout();
+}, () => { scRemeasure(term); relayout(); });
 
 function setBadge(state, text){
   const b = $('badge');
@@ -433,20 +507,42 @@ es.addEventListener('hello', (ev) => {
   let m = {};
   try { m = JSON.parse(ev.data); } catch (e) {}
   if (m.ended) { markEnded(); return; }
-  $('sub').textContent = t('readonlyTip');
+  // sub 所有权二分（P-20261119-3）：只读页 sub 由本处写只读文案；可写页
+  // （SC.writable）sub 归 writablepage 独占——WS hello（键入通道开通）才写
+  // 可写文案、teardown 恢复只读文案。ES hello 与 WS hello 到达顺序不定（WS
+  // 构造失败还有 5s 轮询窗口），这里无条件写会让可写页头部先钉上「无任何
+  // 输入通道」再被翻面/永不翻面，与下方可写横幅同屏矛盾；重连重发 hello
+  // 也不回写，竞态在所有权边界消解
+  if (!SC.writable) $('sub').textContent = t('readonlyTip');
   setBadge('live', t('liveBadge'));
+  // 分享名校准（P-20261118-9）：hello 帧带 name——服务端渲染后到重连重播种
+  // 之间记录若已改名，这里对齐 h1 与标签页标题
+  setPageName(m.name);
   setHost(m.cols, m.rows);
   relayout();
 });
+// 会话重命名（P-20261118-9）：与 resize 帧同一 1s 对账 tick（syncName），
+// 分享侧改名即达访客——页面加载早于改名的存量连接同享；EventSource 未知
+// 事件静默忽略（旧缓存页零破坏）
+es.addEventListener('rename', (ev) => {
+  let m = {};
+  try { m = JSON.parse(ev.data); } catch (e) {}
+  setPageName(m.name);
+});
 // 主机调整窗口（P-20261107-4）：resize 帧排进写入队列——先于它到达的字节按旧
-// 栅格解析完再换栅格，随后的重绘字节落新栅格（与主机侧时序一致）
+// 栅格解析完再换栅格，随后的重绘字节落新栅格（与主机侧时序一致）。可写页的
+// 视口反喂回声对账挂同一帧（wrHostResize 钩子，P-20261120-8：服务端合并窗
+// 应用/主人本机调整/API 抢回都经此帧到达，驱动据此分流自源回声与主人动作）
 es.addEventListener('resize', (ev) => {
   let m = {};
   try { m = JSON.parse(ev.data); } catch (e) {}
   term.write('', () => setHost(m.cols, m.rows));
+  if (wrHostResize) wrHostResize(m.cols, m.rows);
 });
-es.addEventListener('tail', (ev) => { term.write(b64bytes(ev.data)); });
-es.addEventListener('data', (ev) => { term.write(b64bytes(ev.data)); });
+// data/tail 写回调钉底（P-20261119-2）：overset 态钉到最新输出行（光标行）使
+// 提示符可见、用户上滚即解钉不拽回（条件钉底语义见 termlayout scPinBottom 头注）
+es.addEventListener('tail', (ev) => { term.write(b64bytes(ev.data), () => scPinBottom($('termBox'), false, scCursorRowY(term))); });
+es.addEventListener('data', (ev) => { term.write(b64bytes(ev.data), () => scPinBottom($('termBox'), false, scCursorRowY(term))); });
 es.addEventListener('limit', () => {
   setBadge('ended', t('connecting'));
   showState(t('guestLimit'), '');
@@ -463,12 +559,18 @@ es.onopen = () => {
   if (!ended) term.reset();
 };
 
+// 合并入口条（P-20261119-3）：协作/留言两条独立入口条并单条双入口的条壳
+// （entrybar.go 单一事实源；先于两挂载脚本执行——它们按条壳在场与否选
+// chip/独立条形态）
+{{.EntryJS}}
 // 访客留言板（P-20261006-13）：页底留言区（三形态访客页同一段脚本，
 // 单一事实源 guestboard.go；只读的是终端流，留言是另一条带防线的回流面）
 // 协作位（P-20261024-1）：素材上行 + 直通输入（开关在场才挂载，collabpage.go
-// 单一事实源——留言板上方插入，是另一条带防线的回流面，非终端按键通道）
+// 单一事实源——合并条内 chip 形态或独立条，是另一条带防线的回流面，
+// 非终端按键通道）
 // 可写位（P-20261106-8）：WS 上行键入直注（开关在场才挂载，writablepage.go
-// 单一事实源——hello 前不开输入，出域警示横幅常驻，粘贴危险块服务端预检）
+// 单一事实源——hello 前不开输入，出域警示随页首横幅右段常驻，粘贴危险块
+// 服务端预检）
 {{.CollabJS}}
 {{.WritableJS}}
 {{.BoardJS}}
@@ -479,22 +581,27 @@ es.onopen = () => {
 var termPageTmpl = template.Must(template.New("termlive").Parse(termPageTmplSrc))
 
 // renderTermPage 输出终端直播访客页（已知 token；调用方已做 lookup）。
-// wm 为溯源水印文本（P-20261005-193，空串 = 未开水印）。collab/direct 为
-// 记录上的协作开关（P-20261024-1），unfiltered 为记录的未过滤标记
-// （P-20261106-9）——横幅位换「未过滤」警示，writable 为可写分享开关
-// （P-20261106-8）——缺省全关时页面零协作/可写位（存量语义）
-func renderTermPage(w io.Writer, token, lang, title, wm string, collab, direct, unfiltered, writable bool) error {
+// wm 为溯源水印文本（P-20261005-193，空串 = 未开水印）。collab 为记录上的
+// 协作开关（P-20261024-1），unfiltered 为记录的未过滤标记（P-20261106-9）
+// ——横幅位换「未过滤」警示，guestInput 为申请通道在场（P-20261121-1 统一
+// 收编：申请通道缺省开，owner 关闭即 false），writable 为开放直入开关
+// （P-20261106-8）——缺省全关时页面零协作/输入位（存量语义）
+func renderTermPage(w io.Writer, token, lang, title, wm string, collab, guestInput, unfiltered, writable bool) error {
 	boot, err := json.Marshal(termBootState{
-		Token: token, Lang: lang, Dict: termDictFor(lang), Wm: wm,
-		Collab: collab, DirectInput: direct, Writable: writable, MsgMax: boardMsgMax(collab),
+		Token: token, Lang: lang, Dict: termDictFor(lang), Wm: wm, Name: title,
+		Collab: collab, GuestInput: guestInput, Writable: writable, MsgMax: boardMsgMax(collab),
 		Unfiltered: unfiltered,
 	})
 	if err != nil {
 		return err
 	}
+	// Title 无品牌前缀（P-20261118-9）：h1 与标签页标题 = 纯分享名——访客页
+	// 呈现会话本身，「Codecombo 终端 1」的品牌前缀双重出现同根移除；品牌身份
+	// 由页脚 poweredBy 承载，IM/邮件网关识别度语义在文件分享页 meta 层独立
+	//（page.go fallbackTitle 保持）
 	return termPageTmpl.Execute(w, termPageData{
 		Lang:        lang,
-		Title:       "Codecombo " + title,
+		Title:       title,
 		Boot:        template.JS(boot),
 		BoardCSS:    template.CSS(guestBoardCSS),
 		BoardJS:     template.JS(guestBoardJS),
@@ -505,5 +612,9 @@ func renderTermPage(w io.Writer, token, lang, title, wm string, collab, direct, 
 		Unfiltered:  unfiltered,
 		WritableCSS: template.CSS(writableCSS),
 		WritableJS:  template.JS(writableJS),
+		EntryCSS:    template.CSS(entryBarCSS),
+		EntryJS:     template.JS(entryBarJS),
+		ThemeCSS:    template.CSS(GuestThemeCSS),
+		ThemeJS:     template.JS(guestThemeJS),
 	})
 }

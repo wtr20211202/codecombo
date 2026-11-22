@@ -52,6 +52,14 @@
   `sc-ops:<type>` 即可。
 - `hello` 握手帧不分发；`source` 字段现状恒为 `"system"`
   （`BroadcastEvent` 唯一构造点硬编码，agent 上报与内部广播线上不可凭此区分）。
+- **设备定向收件面**（P-20261117-4）：事件载荷新增可选 `targetBrowserId` 字段
+  （`opschannel.Event.TargetBrowserId`，空 = 全广播向后兼容）——仅
+  `frontend.download/clipboard/open/reload` 四事件按会话浏览器绑定填写
+  （白名单钉死 `opschannel.IsDeviceEffectEvent`），广播只投递到该浏览器的
+  WS 连接（握手 query `browserId` 路由键）；定向只滤 WS 收件面，观察者链/
+  通知中心/录制联动保持全量。其余事件族恒空 Target 全广播零变化；
+  frontend.* 的定向/启发式/降级通知化语义见 `notify.persist` 节与 CLAUDE.md
+  「frontend 动词族设备定向」。
 
 **事件两大来源**：
 
@@ -104,14 +112,16 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
 | `remoteaccess.status` | `sc-ops:remoteaccess.status`（`OPS_REMOTE_ACCESS_STATUS`） | 直通 | 服务端 |
 | `open-file-at` | `sc-ops:open-file-at`（`OPS_OPEN_FILE_AT`） | 直通 | agent |
 | `watch.invite` | `sc-ops:watch.invite`（`OPS_WATCH_INVITE`） | 直通 | agent |
-| `notify.persist` | `sc-ops:notify.persist`（`OPS_NOTIFY_PERSIST`） | 直通 | agent |
+| `notify.persist` | `sc-ops:notify.persist`（`OPS_NOTIFY_PERSIST`） | 直通 | 服务端 + agent |
 | `frontend.download` | `sc-ops:frontend.download`（`OPS_FRONTEND_DOWNLOAD`） | 直通 | agent |
 | `frontend.clipboard` | `sc-ops:frontend.clipboard`（`OPS_FRONTEND_CLIPBOARD`） | 直通 | agent |
 | `frontend.open` | `sc-ops:frontend.open`（`OPS_FRONTEND_OPEN`） | 直通 | agent |
 | `frontend.reload` | `sc-ops:frontend.reload`（`OPS_FRONTEND_RELOAD`） | 直通 | agent |
 | `share.drop` | `sc-ops:share.drop`（`OPS_SHARE_DROP`） | 直通 | 服务端 |
 | `share.wtyping` | `sc-ops:share.wtyping`（`OPS_SHARE_WTYPING`） | 直通 | 服务端 |
+| `share.wresize` | `sc-ops:share.wresize`（`OPS_SHARE_WRESIZE`） | 直通 | 服务端 |
 | `share.paste-review` | `sc-ops:share.paste-review`（`OPS_SHARE_PASTE_REVIEW`） | 直通 | 服务端 |
+| `share.direct-request` | `sc-ops:share.direct-request`（`OPS_SHARE_DIRECT_REQUEST`） | 直通 | 服务端 |
 | `notes.updated` | `sc-ops:notes.updated`（直通，无常量） | 直通 | 服务端 |
 | `system:rate-limited` | （无常量）`sc-ops:system:rate-limited` | 直通 | 服务端 |
 | `<自定义 type>` | `sc-ops:<type>` | 直通 | agent |
@@ -432,22 +442,29 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
 ### notify.persist
 
 - **window 事件**：`sc-ops:notify.persist`（`OPS_NOTIFY_PERSIST`，直通分发）
-- **广播点**：仅 agent 经 ops-notify 上报（发布口校验规整
-  `server/api/ai/opsentry.go`——title 必填 ≤200 rune、body 可选 ≤4096 字节、
-  level 枚举 info|success|warning|error 缺省 info、action 白名单
-  terminal|panel|url|preview 且 actionPayload 逐动作形态校验；title/body 入账
-  即过敏感遮蔽）——与 `notify`（纯 toast 即逝）的分工在**留痕与动作**：
-  服务端 handler 直调 `notification.Add` 入账（跨设备可见 + webhook 外发链
-  自动携带 + 历史留痕，与系统通知同库同偏好过滤——分类静音/免打扰全生效；
-  归类 task，任务子开关一并管辖），`preview.port`（P-20261002-70 前端入账
-  特例）的通用化收编
+- **广播点**：双源（P-20261117-4 起服务端 + agent）——①agent 经 ops-notify
+  上报（发布口校验规整 `server/api/ai/opsentry.go`——title 必填 ≤200 rune、
+  body 可选 ≤4096 字节、level 枚举 info|success|warning|error 缺省 info、
+  action 白名单 terminal|panel|url|preview|download 且 actionPayload 逐动作
+  形态校验；title/body 入账即过敏感遮蔽）——与 `notify`（纯 toast 即逝）的
+  分工在**留痕与动作**：服务端 handler 直调 `notification.Add` 入账（跨设备
+  可见 + webhook 外发链自动携带 + 历史留痕，与系统通知同库同偏好过滤——
+  分类静音/免打扰全生效；归类 task，任务子开关一并管辖），`preview.port`
+  （P-20261002-70 前端入账特例）的通用化收编；②服务端 frontend.* 设备效应
+  降级链（P-20261117-4，`server/api/ai/opsnotify_target.go`）：定向浏览器
+  不在场/多浏览器并存且无绑定时，frontend.download/clipboard/open/reload
+  不广播设备效应改入账降级通知，入账成功后广播本事件承载实时弹面（入账
+  先于广播、静音两者皆无，与 agent 自发路径同拍）
 - **payload**：`{title: string, body?: string, level?: "info"|"success"|
-  "warning"|"error", action?: "terminal"|"panel"|"url"|"preview",
+  "warning"|"error", action?: "terminal"|"panel"|"url"|"preview"|"download",
   actionPayload?: string}`——actionPayload 按动作：terminal=会话 id（「查看
   会话」直达终端 tab）/ panel=面板名（面板存在性由前端注册表兜底）/
   url=https(s) 绝对外链（scheme 白名单拒伪协议，window.open noopener 直开）/
-  preview=端口号（直达预览面板）。agent-fix 等人裁决面动作不对 agent 开放；
-  坏 action/载荷 400 退回；类别静音命中时服务端不入账也不广播本事件
+  preview=端口号（直达预览面板）/ download=`{"projectId","path"}` 复合 JSON
+  （P-20261117-4 设备效应降级链新增：通知点击直接触发既有文件下载链，
+  projectId 非空 ≤512、path 项目相对正斜杠无 .. 段）。agent-fix 等人裁决面
+  动作不对 agent 开放；坏 action/载荷 400 退回；类别静音命中时服务端不入账
+  也不广播本事件
 - **消费方**：通知中心条目经 `/ws/notifications` 全端实时入账（actions 由
   pendingAction 链既有分发）；`OpsChannelBridge.vue` → 实时弹面 toast
   （免打扰时段静默；error/warning 的桌面提醒由通知中心既有 watch 承担）。
@@ -546,6 +563,40 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
   命令才能裁决；summary 是 RiskSummary 一行命中摘要）
 - **消费方**：owner 工作台粘贴审批卡（批准/拒绝两动作，调 POST
   /api/share/:token/paste/:pid/decision，幂等 404——已决/超时决策卡零副作用）
+
+### share.wresize
+
+- **window 事件**：`sc-ops:share.wresize`（`OPS_SHARE_WRESIZE`，直通分发）
+- **广播点**：`server/api/share/module.go`（Module.Start 装配
+  `WithWritableResizeEvents` 回调——可写分享（P-20261106-8）的访客经 WS 控制
+  面把视口尺寸反喂主机 PTY（P-20261120-8「客户端窗口=终端宽度」语义）应用
+  成功后一次；服务端承接链=钳制→conn 节流 ≥1s→token 合并窗 500ms
+  last-write-wins，TmuxExternal 外部接管会话拒绝并回 resize_denied）
+- **payload**：`{token, shareName, terminalId, cols, rows, visitorTail?, at}`
+  （仅元数据；cols/rows 是应用后的终端栅格尺寸）
+- **消费方**：owner 工作台 toast 即时感知（`useLayoutShell.ts` onShareWResize
+  ——「终端被无形改格」的最小可见性面：wtyping 徽标给出访客在场，本事件给出
+  改成了什么格）；agent 监听同一事件可感知「锚定终端栅格被访客改动」（主人
+  PUT resize 之外主动因说明，TUI 布局错乱类报障的归因输入）；审计同批次入账
+  `share.writableResize`（元数据口径）
+
+### share.direct-request
+
+- **window 事件**：`sc-ops:share.direct-request`（`OPS_SHARE_DIRECT_REQUEST`，直通分发）
+- **广播点**：`server/api/share/module.go`（Module.Start 装配
+  `WithDirectRequestEvents` 回调——访客经统一「访客输入」申请批准路径
+  （P-20261121-1 统一收编，申请通道缺省在场）提交申请（POST
+  /s/{token}/direct/request）登记成功后一次；P-20261121-2 申请-必达修复的
+  即时感知面）
+- **payload**：`{token, shareName, terminalId?, nick?, visitorTail?, at}`
+  （仅元数据——visitorId 全串不上广播面；visitorTail 是访客 visitorId 前 8 位
+  摘要）。通知中心另有带「批准/拒绝」行内动作的入账条目（服务端
+  share.direct.notify.request 模板，share-flush 3s 攒批冲刷），两路消费面独立
+- **消费方**：owner 工作台 toast 即时感知 + 待批锚点表 bump（`useLayoutShell.ts`
+  onShareDirectRequest → `useDirectInputShares` pendingByToken 即时对账——
+  分享管理器行内批准钮与会话行待批徽标即现）；agent 监听同一事件可感知
+  「有访客在敲门」（申请面元数据，不含输入内容）
+
 ### notes.updated
 
 - **window 事件**：`sc-ops:notes.updated`（直通分发——前端无常量，笔记面板
@@ -633,6 +684,7 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
 | `OPS_AGENT_GROUPS_CHANGED` | `sc-ops:agent-groups-changed` | 无（收到即拉全量） | useWorkspaceSnapshot.ts（工作区预设恢复链 applyAgentGroups 落盘成功后，P-20261004-79）；**双栖事件**——同为线上 `agent.groups.changed` 的显式分发目标（agent 分组操作面写端广播，见 A 节，P-20261111-1-S3） | useAgentTerminalGroups.ts（live 挂载中的会话管理页重读 agentTerminal.groups 即时重应用；home overlay 与 project 内嵌双实例各自监听） |
 | `OPS_WORKTREES_CHANGED` | `sc-ops:worktrees-changed` | 无（收到即拉全量） | CommitsPanel.vue:341 等跨组件创建/清理动作（历史检视 worktree 落档后，P-20261005-179） | GitWorktreesSection.vue（收到即重拉列表——面板自身只挂项目切换 watch，同项目异组件创建对其不可见） |
 | `OPS_AGENT_CRONS_CHANGED` | `sc-ops:agent-crons-changed` | 无（收到即拉全量） | useCronRetry.ts:77（cron-retry 一键重试成功后，P-20261006-14） | AgentCronSettings.vue（设置·定时任务分区收到即重拉列表） |
+| `OPS_WATCH_FALLBACK` | `sc-ops:watch-fallback` | `{enabled?, source?: 'auto'\|'manual'\|'', since?}`（服务端 watch.fallback 快照同形，P-20261006-34） | stores/notification.ts:94（通知 WS 桥二次分发——`watch.fallback` 非通知形状消息不入通知列表，sync.progress 同款） | useWatchFallback.ts（状态栏「轮询降级中」微标显隐 + 聚焦重拉对账断线窗口） |
 | `NOTES_EXTERNAL_UPDATE` | `sc:notes-external-update`（**`sc:` 前缀历史命名**，非 `sc-ops:`） | `{projectId, noteId?, action?, focus?}`（projectId 恒为笔记库哨兵 `_global`，P-20261108-3） | useNotesDeposit.ts（任务终态「沉淀到笔记」追加进「[项目名] 交接」篇后，focus=true 聚焦该篇） | NotesPanel.vue（无未保存编辑时从服务端重读，防旧内容覆盖沉淀节；focus 时聚焦并重读该篇） |
 
 ---

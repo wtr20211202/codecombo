@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"codecombo/server/api/opschannel"
 	shared "codecombo/server/api/shared"
 	"codecombo/server/terminal"
 	"codecombo/server/wssafe"
@@ -134,6 +135,14 @@ func HandleTerminalWS(c *gin.Context) {
 	if session == nil {
 		shared.Error(c, http.StatusNotFound, "session not found", nil)
 		return
+	}
+
+	// 浏览器亲和重绑（P-20261117-4）：attach 即迁移，tie-break last-attach-wins
+	//（评审建议b）——另一浏览器接管打开该会话后，frontend.* 设备效应跟着人走。
+	// query 携带（与 ops-channel WS 同款升级期注入点）；缺省/非法 = 不动原绑定
+	//（刷新恢复的本浏览器重连携同一 id，语义幂等）
+	if bid := opschannel.SanitizeBrowserId(c.Query("browserId")); bid != "" {
+		session.BindBrowser(bid)
 	}
 
 	// 交互客户端附着登记（P-20261003-192）：空闲超时分离以「无人附着」为

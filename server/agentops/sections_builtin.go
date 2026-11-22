@@ -1447,26 +1447,32 @@ token+IP 频控），留言随分享生命周期级联删除——新留言入�
 - POST   /api/share/:token/drops/:id/consume 标已消费（交给会话即标——已消费 24h 清/
                                             未消费 72h 清，防主人未看即被清）
 - DELETE /api/share/:token/drops/:id        单删素材（垃圾出清；未知 id 幂等）
-- POST   /api/share/:token/direct-input     直通输入档开关（第二档独立开关，与协作
-                                            通道互不联动）{"on":true,"confirm":true}——
-                                            开启需显式 confirm（管理面摩擦硬闸）；
-                                            仅 terminal 形态可开（400）
-- GET    /api/share/:token/direct           直通档状态投影 {enabled,session{alive,kind},
-                                            pending?,hold?}（管理面轮询数据源）
-- POST   /api/share/:token/direct/approve   批准访客申请（单持有者握手；仅锚定 kind=agent
-                                            会话可授——普通终端直通=匿名远程 shell 明确不做；
-                                            授予即 owner 侧 WS 键盘挂只读闸）
-- POST   /api/share/:token/direct/revoke    一键收回（幂等；解除只读闸）
-- POST   /api/share/:token/writable         可写分享开关（P-20261106-8「对方可
-                                            直接输入」远程协助档，显式推翻 P-20261024-1
-                                            「普通终端不做直通」红线：owner 逐案开关+
-                                            出域警示+全量审计+实时可见+一键收回五重
-                                            补偿）{"on":true,"confirm":true,"passphrase"?}——
-                                            开启需显式 confirm；强制口令门（记录无
-                                            口令时必携 passphrase 补设，400 stable
+- POST   /api/share/:token/guest-input      访客输入·申请通道开关（P-20261121-1
+                                            统一收编：申请-批准握手路径缺省在场，
+                                            本开关=owner 显式关/回开）{"on":false}——
+                                            关闭即访客页申请入口消失+申请端点 404+
+                                            在途申请/持权级联回收（零摩擦，安全方向）
+- GET    /api/share/:token/direct           申请批准路径状态投影 {enabled(通道开),
+                                            session{alive,kind},pending?,hold?}
+                                            （管理面轮询数据源）
+- POST   /api/share/:token/direct/approve   批准访客申请（单持有者握手；锚定会话
+                                            存活即可授——P-20261121-1 起 agent 会话
+                                            限定退役，任意 terminal 会话同语义；
+                                            授予即 owner 侧 WS 键盘挂输入闸）
+- POST   /api/share/:token/direct/revoke    一键收回（幂等；解除输入闸+断该访客
+                                            WS 上行）
+- POST   /api/share/:token/writable         开放直入开关（P-20261106-8「对方可
+                                            直接输入」远程协助语义，P-20261121-1
+                                            统一收编为「访客输入」双授权模式之一：
+                                            owner 逐案开关+出域警示+全量审计+实时
+                                            可见+一键收回五重补偿）{"on":true,
+                                            "confirm":true,"passphrase"?}——开启需
+                                            显式 confirm；强制口令门（记录无口令时
+                                            必携 passphrase 补设，400 stable
                                             "writable requires a passphrase"）；仅
                                             terminal live 形态可开（frozen/cast/session
-                                            天然只读 400）；关闭零摩擦（断全部上行）
+                                            天然只读 400）；关闭零摩擦（断开放直入
+                                            上行；申请批准持权不受影响——两开关独立）
 - POST   /api/share/writable/batch          可写批量开关 {"tokens":[..],"on":true,
                                             "confirm":true}（管理列表多选；逐条独立
                                             结算 per-token {ok,reason}——无口令条目
@@ -1477,8 +1483,14 @@ token+IP 频控），留言随分享生命周期级联删除——新留言入�
                                             挂待批面——未批不注入 PTY，60s 不决自动
                                             拒绝；sc-ops:share.paste-review 审批卡两
                                             动作的调用端点，未知/已决 404 幂等）
-访客侧握手与输入在 /s/{token}/direct/*（申请 60s 时效、10min 无输入自动回收、
-每批 ≤4KB 全量审计）。素材到达经 ops-channel 广播 sc-ops:share.drop（detail 仅
+访客侧握手与键入（P-20261121-1 统一双授权模式）：申请 POST /s/{token}/direct/
+request（10min 时效——P-20261121-2 由 60s 延长）；键入与状态对账统一走
+/s/{token}/termws WS 上行桥（开放直入接入即键入；申请批准路径持权帧才注入，
+10min 无键入自动回收、收回/过期主动断开该访客连接）。旧 /s/{token}/direct/
+state 与 /direct/input 两端点已退役。访客申请到达即广播
+sc-ops:share.direct-request（detail 仅元数据：token/分享名/昵称/访客摘要）
++ 通知中心入账（share.direct.notify.request 模板，行内「批准/拒绝」双动作）。
+素材到达经 ops-channel 广播 sc-ops:share.drop（detail 仅
 元数据：token/文件名/大小/昵称）+ 通知中心入账（行内动作「交给当前会话/新会话
 处理」两键：回查 drops 取绝对路径 → broadcast-write 把路径贴进所选会话（不自动
 执行，agent 读路径即析图析文件）或 createAgent 以路径为种子新开会话；成功后
@@ -1506,10 +1518,11 @@ GET 链接只出泛化确认页（不计数、不武装、不渲染内容、不�
 可逆（rotate/SetExpiry 救不回），要再发请撤销后重建（重建即全新倒计时）。
 安全边界：访客只能访问分享根内的内容（符号链接不可见），路径穿越被拒绝；
 终端直播缺省严格只读（访客面无分享内容写入端点：/gate 口令验证、/view 一次性
-确认、/messages 留言均不写分享内容；唯一例外=可写分享档 POST
-/api/share/:token/writable 显式开启后的 /s/{token}/termws 上行桥——五重补偿
-控制见上文端点行，缺省关即回到只读）；冻结副本住服务端数据目录隔离区，
-不随项目删除联动（撤销/过期才清）。
+确认、/messages 留言均不写分享内容；例外=访客输入双授权模式：开放直入 POST
+/api/share/:token/writable 显式开启（或创建弹层快捷选择，口令门同闸）后的
+/s/{token}/termws 上行桥——五重补偿控制见上文端点行；申请批准路径 POST
+/s/{token}/direct/request 申请+owner 批准后同一 WS 桥键入，批准闸始终在
+owner）；冻结副本住服务端数据目录隔离区，不随项目删除联动（撤销/过期才清）。
 
 ## 快投递 quickdrop（P-20261006-51「手机触发 agent」配方）
 
@@ -1527,19 +1540,47 @@ scd_ 投递 token 由用户在设置·分享区生成/撤销，无效凭据一�
                                            status 分支：404=凭据无效、400=内容
                                            为空、413=超 4KB
 - GET    /api/quickdrop                    收件箱清单（新→旧，[{id,content,size,
-                                           from,createdAt,expiresAt}]）——
-                                           「刚才投了什么」的自查口
-- DELETE /api/quickdrop/:id                摘除单条（转发消费后清理；未知 id 幂等）
+                                           from,createdAt,expiresAt,files[]}]）——
+                                           「刚才投了什么」的自查口。files 是
+                                           逐文件投影（P-20261117-3，文件投递
+                                           才有：[{id,name,size,kind,sensitive?,
+                                           absPath}]，磁盘 sidecar 单一事实源；
+                                           absPath = 落盘绝对路径，主人侧鉴权
+                                           面内可见——agent 读文件直接用此路
+                                           径，不必经下载端点）
+- DELETE /api/quickdrop/:id                摘除单条（转发消费后清理；未知 id 幂等）。
+                                           摘除联动删该条目的落盘文件+sidecar
+                                           （P-20261117-3——配额即时回收；残留
+                                           由 24h TTL GC 兜底）
 - GET    /drop/<token>                     访客投递页（零依赖单页，手机浏览器直开
                                            直投；表单 POST /drop/<token>，成功
                                            303 回 ?sent=1 成功态）。链接 =
                                            工作台地址 /drop/<token>
+- POST   /drop/<token>                     访客页多文件上行（P-20261117-2-S1，
+                                           multipart 形态：content 可选文本 ≤4KB
+                                           + files[] 多文件，内容或文件至少一项）。
+                                           护栏链同 share collab 上行（白名单×
+                                           大小×单批×配额×敏感名警示），档位为
+                                           快投递自有：图片 10MB 同档、文件 200MB、
+                                           单批 20、单 token 总配额 2GB。落盘
+                                           artifacts/quickdrop/<token>/，与收件箱
+                                           doc 同 24h TTL；轮换/撤销凭据即清盘。
+                                           文件投递的通知类别仍为 drop（titleKey
+                                           filesArrived，Body=文件名/大小速览），
+                                           行内动作 payload 不变；收件箱 doc 的
+                                           content 即「文本+目录+文件清单」，转交
+                                           会话后 agent 按目录行取件；转交内容
+                                           在原文之后自动附逐文件 absPath 清单
+                                           段（防 content 4KB 预算裁切丢明细）
+                                           ，agent 按路径直读文件即可
 
 「手机触发 agent」配方（向用户转述的口径）：设置·分享区快投递卡生成凭据 →
 把 <工作台地址>/drop/<token> 存成手机书签或快捷指令 → 手机粘贴内容点投递 →
 工作台通知中心到达 → 用户点行内动作「交给当前会话」（broadcast-write 写入
 激活会话）或「新会话处理」（createAgent 以投递内容为 launchArgs 种子，超
-500 字节自动走任务文件降级）。`,
+500 字节自动走任务文件降级）。文件投递的取件：读 GET /api/quickdrop 的
+files[].absPath 直接读盘（下载端点 /api/quickdrop/dropfile 是主人侧管理
+UI 面不供 agent）；处理完可 DELETE /api/quickdrop/:id 摘除（文件一并清）。`,
 		},
 		Section{
 			ID: "inbound-hooks", Title: "入站事件 Hook（外部事件 → 通知/面板直达）", Order: 66,

@@ -148,10 +148,18 @@ describe('存量豁免清单 ↔ 注册表（链接面 + 防悬空形态）', ()
     }
   })
 
-  it('每个 lane=localStorage 登记行都被豁免基线收编或自带 keys 登记键面', () => {
+  it('每个 lane=localStorage 登记行都被豁免基线收编、自带 keys 或声明 externalKey（键面在 web/src 提取面之外）', () => {
     const linked = new Set(registry.legacyScKeys.map((e) => e.registryId))
     for (const r of rows) {
       if (r.lane !== 'localStorage') continue
+      // externalKey：键面字面量在 web/src 提取面之外（Go embed 访客页脚本先例
+      // ls.drop.history）——键名在此显式声明，不可入 keys（悬空检查只对账
+      // web/src 字面量，入 keys 即假红）；仍须是 sc.* 形态防糊登记
+      if (r.externalKey) {
+        expect(r.externalKey, `localStorage 行 ${r.id} externalKey 须 sc.* 形态`).toMatch(/^sc\./)
+        expect(r.keys, `localStorage 行 ${r.id} externalKey 与 keys 互斥`).toBeUndefined()
+        continue
+      }
       expect(linked.has(r.id) || (r.keys?.length ?? 0) > 0, `localStorage 行 ${r.id} 既无豁免链接也无 keys 登记`).toBe(true)
     }
   })

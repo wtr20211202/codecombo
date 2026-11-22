@@ -539,16 +539,22 @@ func DshRollback(c *gin.Context) {
 		return
 	}
 	stopDsh()
-	available, _, logPath, spawnErr, logTail := launchAndWait()
-	if spawnErr != nil {
+	out := launchAndWait()
+	if out.SpawnErr != nil {
 		shared.Error(c, http.StatusInternalServerError, "Rollback restart failed",
-			fmt.Errorf("%v\n%s", spawnErr, logTail))
+			fmt.Errorf("%v\n%s", out.SpawnErr, out.LogTail))
 		return
 	}
+	// externalOwner 随响应显式下发（同 restartDshProcess——外部 dsh 占端口时
+	// 回退后的重启静默无效，前端据此提示而非误判回退版本已加载）
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
-		"ok":        available,
-		"available": available,
-		"version":   v,
-		"logPath":   logPath,
+		"ok":            out.Available,
+		"available":     out.Available,
+		"version":       v,
+		"logPath":       out.LogPath,
+		"externalOwner": out.ExternalOwner,
+		"notReady":      out.NotReady,
+		"portBusy":      out.PortBusy,
+		"probeBase":     out.ProbeBase,
 	}})
 }

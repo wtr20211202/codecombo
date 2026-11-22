@@ -17,6 +17,7 @@ import { handleAgentTaskProgressNotify, type AgentTaskProgressPayload } from '..
 import { handlePreviewPortNotify } from '../../utils/previewPortNotify'
 import { handleWatchInviteNotify } from '../../utils/watchInviteNotify'
 import { handleFrontendDownload, handleFrontendClipboard, handleFrontendOpen, handleFrontendReload } from '../../utils/frontendAtomActions'
+import { executeFrontendEffect } from '../../utils/opsAtomElection'
 import { isForeignArrival } from '../../utils/clipRelay'
 import { playAlert, bindAudioUnlock } from '../../utils/alertSound'
 import { useDndStore } from '../../stores/dnd'
@@ -207,18 +208,30 @@ function onNotifyPersist(e: Event) {
 // frontend 动词族三原子（P-20261023-4）：浏览器即时效应的消费委托——校验/
 // 开关门控/效应面限频/可见 toast/回落链（中继槽/通知条目）都在
 // utils/frontendAtomActions 纯函数链内（previewPortNotify 同构）；桥只解包
-// detail 并注入 message 面
+// detail 并注入 message 面。四到达口先过同浏览器标签选举（P-20261117-4）：
+// 定向广播对本浏览器全部标签送达，选举裁决本浏览器唯一执行标签（BroadcastChannel
+// 单阶段 claim 竞选为主路径——跨标签共享含 headless；Web Locks per-arrival 回退；
+// hidden 标签让先前台抢跑）——非执行标签静默跳过（执行标签的可见 toast 是
+// 唯一反馈面），浏览器级一次效应
 function onFrontendDownload(e: Event) {
-  handleFrontendDownload(((e as CustomEvent<FrontendDownloadDetail>).detail || {}) as FrontendDownloadDetail, message)
+  void executeFrontendEffect(() => {
+    handleFrontendDownload(((e as CustomEvent<FrontendDownloadDetail>).detail || {}) as FrontendDownloadDetail, message)
+  })
 }
 function onFrontendClipboard(e: Event) {
-  void handleFrontendClipboard(((e as CustomEvent<FrontendClipboardDetail>).detail || {}) as FrontendClipboardDetail, message)
+  void executeFrontendEffect(async () => {
+    await handleFrontendClipboard(((e as CustomEvent<FrontendClipboardDetail>).detail || {}) as FrontendClipboardDetail, message)
+  })
 }
 function onFrontendOpen(e: Event) {
-  handleFrontendOpen(((e as CustomEvent<FrontendOpenDetail>).detail || {}) as FrontendOpenDetail, message)
+  void executeFrontendEffect(() => {
+    handleFrontendOpen(((e as CustomEvent<FrontendOpenDetail>).detail || {}) as FrontendOpenDetail, message)
+  })
 }
 function onFrontendReload(e: Event) {
-  handleFrontendReload(((e as CustomEvent<FrontendReloadDetail>).detail || {}) as FrontendReloadDetail, message)
+  void executeFrontendEffect(() => {
+    handleFrontendReload(((e as CustomEvent<FrontendReloadDetail>).detail || {}) as FrontendReloadDetail, message)
+  })
 }
 
 // 排队指令队列已变（P-20261003-248）：回执引擎弹队首后广播，前端拉全量对账

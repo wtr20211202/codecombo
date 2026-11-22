@@ -1,0 +1,62 @@
+{
+ "src/api/domains/git.ts": {
+  "lines": 885,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/api/domains/system.ts": {
+  "lines": 1139,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/components/claude/ClaudeSessionPicker.vue": {
+  "lines": 1980,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/components/claude/SessionTimeline.vue": {
+  "lines": 2295,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/components/layout/EditorGroupPane.vue": {
+  "lines": 1945,
+  "reason": "P-20261119-4 增量：统一双视图内容区分支+面包屑「原文件|预览」分段开关+信息卡下载出口+窄屏双视图开关条 narrow-view-bar（视觉验收移动可达性修复，+187 行累计）；拆分方向已明=tab 右键菜单模板块（ctx-* 面约 250 行）抽 EditorTabContextMenu.vue 独立组件、tab 条交互随 tabs.ts 域模型归位——存量 1758 行本就超阈，下一轮触阈即拆，不继续记欠账"
+ },
+ "src/composables/useChangeTree.ts": {
+  "lines": 806,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/composables/useFileTreeContext.ts": {
+  "lines": 863,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/composables/useLayoutShell.ts": {
+  "lines": 1108,
+  "reason": "存量遗留，拆分收敛另行立项（P-20261120-8 可写视口反喂 owner 可见性 +17 行放宽 1050→1067；P-20261121-2 直通申请到达感知 +41 行放宽 1067→1108——onShareDirectRequest toast+bump 直通消费/shdirectApprove+shdirectDeny 通知动作 handler/常量与 detail 类型导入，同族直通分发消费面非新子系统）"
+ },
+ "src/composables/useLayoutViews.ts": {
+  "lines": 898,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/composables/useTerminalSession.ts": {
+  "lines": 1412,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/stores/uiState.ts": {
+  "lines": 1235,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/views/files/FileTreeView.vue": {
+  "lines": 1547,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/views/monitor/MonitorView.vue": {
+  "lines": 1733,
+  "reason": "存量遗留，拆分收敛另行立项"
+ },
+ "src/views/share/ShareManagerView.vue": {
+  "lines": 2624,
+  "reason": "存量遗留，拆分收敛另行立项；P-20261119-7 复制可达性警示 +24 行（判定抽在 utils/shareAddress.shouldWarnCopy，本文件仅复制面调用/注释，未新增业务逻辑层）；P-20261121-2 直通待批投影 +49 行（行内批准钮/拒绝菜单项/锚点表轮询宿主/拒绝 handler——动作面接线非新子系统）"
+ },
+ "src/views/sync/SyncCenterPanel.vue": {
+  "lines": 1905,
+  "reason": "存量遗留，拆分收敛另行立项"
+ }
+}

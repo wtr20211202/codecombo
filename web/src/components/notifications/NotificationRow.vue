@@ -146,6 +146,9 @@ function actionInlineLabel(n: NotificationItem): string {
   // 直通输入持权卡「收回」（P-20261024-1）：授予即入账的持权条目，一键收回
   // 即解除会话只读闸（幂等）
   if (n.action === 'shdirect-revoke') return t('notify.shdirect.actionRevoke')
+  // 直通输入申请卡「批准」（P-20261121-2）：申请到达即入账的待批条目，批准
+  // 唯一在途申请（409=已过期如实提示）
+  if (n.action === 'shdirect-approve') return t('notify.shdirect.actionApprove')
   // autoStash「恢复」（P-20261006-48）：切回原分支后点名切走前的自动暂存条目，
   // 点击行/按钮同义（pendingAction 分发到 useStashRecover 的既有 pop 链）
   if (n.action === 'stash-recover') return t('git.autoStashRecoverAction')
@@ -156,6 +159,10 @@ function actionInlineLabel(n: NotificationItem): string {
   // 自更新开始/失败/回滚「查看详情」（P-20261109-10）：点击行/按钮同义，
   // store.handleClick 就地打开版本面板（设置 → 关于）
   if (n.action === 'update-panel') return t('update.notify.action')
+  // frontend 设备效应降级链「下载文件」（P-20261117-4）：payload={"projectId",
+  // "path"} 复合 JSON，点击行/按钮同义（handleClick 直接触发既有下载链，
+  // 浏览器下载框即手势反馈）
+  if (n.action === 'download') return t('notify.frontendFallback.actionDownload')
   return ''
 }
 
@@ -172,6 +179,9 @@ function secondActionLabel(n: NotificationItem): string {
   if (n.secondAction === 'quickdrop-new') return t('notify.quickdrop.actionNew')
   // 协作素材「新会话处理」（P-20261024-1）：createAgent 以素材绝对路径为种子
   if (n.secondAction === 'shdrop-new') return t('notify.shdrop.actionNew')
+  // 直通输入申请卡「拒绝」（P-20261121-2）：落点同收回端点（幂等清 pending
+  // +持权），文案按申请卡语义分流
+  if (n.secondAction === 'shdirect-deny') return t('notify.shdirect.actionDeny')
   return ''
 }
 

@@ -227,7 +227,15 @@ export function useDshVersions(options: { reload: () => Promise<void> }) {
       }
 
       upState.value = 'restarting'
-      const rs = (await settingsApi.dshUpgradeRestart()) as unknown as { data?: { ok?: boolean } }
+      const rs = (await settingsApi.dshUpgradeRestart()) as unknown as { data?: { ok?: boolean; externalOwner?: boolean } }
+      if (rs?.data?.externalOwner) {
+        // 重启未生效：新实例撞外部进程 EADDRINUSE 秒退，探活探到的是外部进程
+        // ——available=true 在此形态下不代表新版本已加载，显式报错防误判
+        //（P-20261118-4 评审必改1）
+        upState.value = 'failed'
+        upError.value = t('dshConsole.upRestartExternalOwner')
+        return
+      }
       if (rs?.data?.ok) {
         upState.value = 'idle'
         await options.reload()

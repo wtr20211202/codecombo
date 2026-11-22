@@ -102,6 +102,9 @@ export interface OpenFilesCtx {
   getUnsavedFiles: () => OpenFile[]
   updateContent: (path: string, content: string) => void
   retryRemoteFile: (path: string) => Promise<void>
+  /** 统一双视图切换（P-20261119-4）：原文件 ↔ 预览翻转 + per 扩展名偏好
+   *  记忆（utils/filePreviewMode）。非预览 Kind（info/未注册）调用为 no-op */
+  toggleFileViewMode: (path: string) => void
 
   // ── 分屏双组（split 填充）──
   /** 分屏方向（core 填充，P-20261005-230）：缺省 horizontal = P-13 既有行为 */

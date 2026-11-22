@@ -12,6 +12,13 @@ import { DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock } from '../../tests/helper
 const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:9999'
 const PROJECT_NAME = 'simple-coding'
 
+/** 分享行投影（本 spec 只取 token/到期时点/遮蔽模式；无 expiresAt = 永久记录） */
+interface ShareRow {
+  token: string
+  expiresAt?: string
+  unfiltered?: boolean
+}
+
 async function unlockHeaders(request: APIRequestContext): Promise<Record<string, string>> {
   const res = await request.post(`${BASE}/api/lock/unlock`, {
     data: { password: DEFAULT_PASSWORD },
@@ -136,6 +143,9 @@ test.describe('share-terminal-live', () => {
     await expect(page.locator('.xterm-screen')).toBeVisible({ timeout: 20_000 })
     await expect(page.locator('#badge[data-state="live"]')).toBeVisible({ timeout: 20_000 })
     await expect(page.locator('#bannerText')).toContainText('遮蔽')
+    // 只读态头部副标题（P-20261119-3 sub 三态 e2e 之「只读」）：非可写分享
+    // ES hello 后 sub = 只读文案（与页面实际能力一致）
+    await expect(page.locator('#sub')).toContainText(/只读直播|read-only/i)
     // 播种回看（创建前 shell 的 banner/提示符）已铺进访客屏
     await expect(page.locator('.xterm-rows')).toContainText(/\$|>|#/, { timeout: 20_000 })
 
@@ -160,5 +170,81 @@ test.describe('share-terminal-live', () => {
 
     // 撤销后短链死亡：页面 404
     expect((await request.get(`${shareBase}/s/${token}`)).status()).toBe(404)
+  })
+
+  test('永久挡（P-20261119-5）：创建无到期时点 / 幂等保持 / 未过滤组合合法落库零值 / 改期钳 24h / 清回永久 / 撤销死亡', async ({ request }) => {
+    test.setTimeout(90_000)
+    const headers = await unlockHeaders(request)
+    const projectId = await getProjectId(request, headers)
+    const sessionId = await createTerminal(request, headers, projectId)
+    liveSessionId = sessionId
+
+    // 未过滤 × 永久组合先行（【用户定向修订】2026-11-19：合法、不再 400 硬禁
+    // ——组合先建才能落 fresh 记录；遮蔽模式创建时定死，后建的遮蔽档会幂等
+    // 命中本记录）。落库零值断言：ExpiresAt 不被 store 静默钳回 24h
+    const combo = await request.post(`${BASE}/api/share/terminal`, {
+      headers, data: { sessionId, permanent: true, unfiltered: true },
+    })
+    expect(combo.ok()).toBeTruthy()
+    const comboRow = ((await combo.json()) as { data?: ShareRow }).data!
+    expect(comboRow.token).toBeTruthy()
+    expect(comboRow.unfiltered).toBe(true)
+    expect(comboRow.expiresAt).toBeUndefined()
+
+    // 组合幂等重建：同链（未过滤直播 token 派生键带模式后缀）、仍无到期时点
+    const comboAgain = await request.post(`${BASE}/api/share/terminal`, {
+      headers, data: { sessionId, permanent: true, unfiltered: true },
+    })
+    expect(comboAgain.ok()).toBeTruthy()
+    const comboAgainRow = ((await comboAgain.json()) as { data?: ShareRow }).data!
+    expect(comboAgainRow.token).toBe(comboRow.token)
+    expect(comboAgainRow.expiresAt).toBeUndefined()
+
+    // 撤销组合记录（一个会话同一时刻至多一条直播——遮蔽档须先腾位）
+    expect((await request.delete(`${BASE}/api/share/${comboRow.token}`, { headers })).ok()).toBeTruthy()
+
+    // 显式永久（遮蔽档）：记录无到期时点 = 链接与 token 不过期（直播态本身仍随会话）
+    const created = await request.post(`${BASE}/api/share/terminal`, { headers, data: { sessionId, permanent: true } })
+    expect(created.ok()).toBeTruthy()
+    const share = ((await created.json()) as { data?: ShareRow }).data!
+    expect(share.token).toBeTruthy()
+    expect(share.unfiltered).toBeFalsy()
+    expect(share.expiresAt).toBeUndefined()
+
+    // 幂等重建（显式永久）：同链；记录本就无到期时点（不清窗也无窗可清）
+    const again = await request.post(`${BASE}/api/share/terminal`, { headers, data: { sessionId, permanent: true } })
+    expect(again.ok()).toBeTruthy()
+    const againRow = ((await again.json()) as { data?: ShareRow }).data!
+    expect(againRow.token).toBe(share.token)
+    expect(againRow.expiresAt).toBeUndefined()
+
+    // 改期：显式时点越 24h 被钳回上限（「非显式永久不越 24h」与创建面对称）
+    const far = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
+    const capped = await request.post(`${BASE}/api/share/${share.token}/expiry`, { headers, data: { expiresAt: far } })
+    expect(capped.ok()).toBeTruthy()
+    const cappedRow = ((await capped.json()) as { data?: ShareRow }).data!
+    const remain = new Date(cappedRow.expiresAt!).getTime() - Date.now()
+    expect(remain).toBeLessThanOrEqual(24 * 60 * 60 * 1000 + 5 * 60_000)
+
+    // 显式永久幂等命中倒计时记录：同链且旧窗被清（store 幂等保留旧值是安全
+    // 边界，清窗由 handler 经 SetExpiry 落——P-20261119-5 幂等语义钉死面，
+    // store 层对应断言在 share_terminal_ttl_test）
+    const clearHit = await request.post(`${BASE}/api/share/terminal`, { headers, data: { sessionId, permanent: true } })
+    expect(clearHit.ok()).toBeTruthy()
+    const clearHitRow = ((await clearHit.json()) as { data?: ShareRow }).data!
+    expect(clearHitRow.token).toBe(share.token)
+    expect(clearHitRow.expiresAt).toBeUndefined()
+
+    // 改回永久：null 清窗（同端点双向），列表投影同步不带 expiresAt
+    const cleared = await request.post(`${BASE}/api/share/${share.token}/expiry`, { headers, data: { expiresAt: null } })
+    expect(cleared.ok()).toBeTruthy()
+    expect(((await cleared.json()) as { data?: ShareRow }).data!.expiresAt).toBeUndefined()
+    const list = await request.get(`${BASE}/api/share`, { headers })
+    const row = (((await list.json()) as { data?: ShareRow[] }).data || []).find(s => s.token === share.token)
+    expect(row?.expiresAt).toBeUndefined()
+
+    // 撤销：永久记录同样即时死亡（撤销链零特殊）
+    expect((await request.delete(`${BASE}/api/share/${share.token}`, { headers })).ok()).toBeTruthy()
+    expect((await request.get(`${BASE}/api/share/${share.token}`, { headers })).status()).toBe(404)
   })
 })

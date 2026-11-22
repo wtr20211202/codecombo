@@ -154,7 +154,7 @@
       "level",
       "title"
     ],
-    "source": "agent"
+    "source": "server+agent"
   },
   "open-file-at": {
     "anchor": "open-file-at",
@@ -220,6 +220,18 @@
       "startedAt",
       "state",
       "totalConnections"
+    ],
+    "source": "server"
+  },
+  "share.direct-request": {
+    "anchor": "share.direct-request",
+    "payload": [
+      "at",
+      "nick",
+      "shareName",
+      "terminalId",
+      "token",
+      "visitorTail"
     ],
     "source": "server"
   },
@@ -332,6 +344,19 @@
       "preview",
       "shareName",
       "summary",
+      "terminalId",
+      "token",
+      "visitorTail"
+    ],
+    "source": "server"
+  },
+  "share.wresize": {
+    "anchor": "share.wresize",
+    "payload": [
+      "at",
+      "cols",
+      "rows",
+      "shareName",
       "terminalId",
       "token",
       "visitorTail"

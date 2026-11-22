@@ -27,9 +27,11 @@ import (
 // 缩短录制窗口，而非无限放大访客页内存）。
 
 type castBootState struct {
-	Token string            `json:"token"`
-	Lang  string            `json:"lang"`
-	Dict  map[string]string `json:"dict"`
+	Token string `json:"token"`
+	Lang  string `json:"lang"`
+	// Name 分享展示名（P-20261118-9 去品牌前缀）：页面校准 document.title 用
+	Name string            `json:"name,omitempty"`
+	Dict map[string]string `json:"dict"`
 	// Wm 溯源水印文本（P-20261005-193；空串 = 记录未开水印，页面不出水印层）
 	Wm string `json:"wm,omitempty"`
 }
@@ -52,6 +54,14 @@ var castDictZh = map[string]string{
 	"noChapters":   "未捕获到命令章节（OSC 133 shell integration 未启用）",
 	"downloadCast": "下载 cast 文件",
 	"poweredBy":    "由 Codecombo 提供",
+	// 主题切换器（P-20261120-1，theme.go guestThemeJS 消费；键名与文件页
+	// page_i18n.go 主题段同表，六页同键）
+	"theme":        "主题",
+	"themeAuto":    "跟随系统",
+	"themeLight":   "GitHub 浅色",
+	"themeDark":    "GitHub 深色",
+	"themeOneDark": "One Dark",
+	"themeDracula": "Dracula",
 	"gbTitle":      "留言",
 	"gbNick":       "昵称（可选）",
 	"gbPh":         "写下你的问题或反馈（≤500 字）…",
@@ -83,6 +93,13 @@ var castDictEn = map[string]string{
 	"noChapters":   "No command chapters captured (OSC 133 shell integration was not enabled)",
 	"downloadCast": "Download cast",
 	"poweredBy":    "Powered by Codecombo",
+	// 主题切换器（P-20261120-1；键名与文件页 page_i18n.go 主题段同表）
+	"theme":        "Theme",
+	"themeAuto":    "Auto (system)",
+	"themeLight":   "GitHub Light",
+	"themeDark":    "GitHub Dark",
+	"themeOneDark": "One Dark",
+	"themeDracula": "Dracula",
 	"gbTitle":      "Messages",
 	"gbNick":       "Nickname (optional)",
 	"gbPh":         "Leave a question or feedback (≤500 chars)…",
@@ -114,6 +131,10 @@ type castPageData struct {
 	// LayoutCSS/LayoutJS 终端访客页共用布局件（P-20261106-9，termlayout.go）
 	LayoutCSS template.CSS
 	LayoutJS  template.JS
+	// ThemeCSS/ThemeJS 访客页族主题切换注入件（P-20261120-1，theme.go 单一
+	// 事实源——CSS 进 <style>，JS 在 head 先行 initTheme 防闪白）
+	ThemeCSS template.CSS
+	ThemeJS  template.JS
 }
 
 // 模板与 termpage.go/termpagefrozen.go 同族（头/横幅/卡片/主题化样式逐段
@@ -134,6 +155,7 @@ const castPageTmplSrc = `<!doctype html>
 --accent:#3d7bfd;--accent2:#6a5cff;--chip:#eef2ff;--warn-bg:#fff7e8;--warn-bd:#f0d9a8;--warn-tx:#8a5b00;--shadow:0 10px 30px rgba(23,43,99,.08)}
 @media (prefers-color-scheme: dark){:root{--bg:#0e1320;--card:#161d2f;--text:#e6eaf3;--muted:#8b94a9;
 --border:#263149;--chip:#1e2a4a;--warn-bg:#2d2410;--warn-bd:#5a4a1e;--warn-tx:#e8c87a;--shadow:0 10px 30px rgba(0,0,0,.35)}}
+{{.ThemeCSS}}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;color:var(--text);overflow:hidden;
@@ -144,22 +166,22 @@ font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microso
 .b2{width:320px;height:320px;background:rgba(61,123,253,.26);bottom:-90px;left:-60px}
 /* .wrap 列容器 / 窄屏断点由 termLayoutCSS 注入（P-20261106-9，termlayout.go
    单一事实源，三终端访客页共用） */
-.header{flex-shrink:0;display:flex;align-items:center;gap:14px;
+.header{flex-shrink:0;display:flex;align-items:center;gap:12px;
 background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:14px;
-padding:13px 20px;color:#fff;box-shadow:var(--shadow)}
-.header .icon{flex:0 0 auto;width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.16);
+padding:9px 16px;color:#fff;box-shadow:var(--shadow)}
+.header .icon{flex:0 0 auto;width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.16);
 display:flex;align-items:center;justify-content:center}
 .header .meta{flex:1;min-width:0}
-.header h1{margin:0;font-size:16.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.header .sub{margin-top:2px;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header h1{margin:0;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header .sub{margin-top:1px;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.16);
-border:1px solid rgba(255,255,255,.4);border-radius:999px;padding:4px 13px;font-size:12px;font-weight:600;
+border:1px solid rgba(255,255,255,.4);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:600;
 letter-spacing:.4px;font-variant-numeric:tabular-nums}
-.banner{flex-shrink:0;margin-top:12px;display:flex;gap:9px;align-items:flex-start;
+.banner{flex-shrink:0;margin-top:8px;display:flex;gap:9px;align-items:flex-start;
 background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx);
-border-radius:10px;padding:9px 14px;font-size:12.5px;line-height:1.55}
+border-radius:10px;padding:6px 12px;font-size:12.5px;line-height:1.5}
 .banner svg{flex:0 0 auto;margin-top:2px}
-.card{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:12px;
+.card{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:8px;
 background:var(--card);border:1px solid var(--border);border-radius:14px;
 box-shadow:var(--shadow);overflow:hidden}
 /* 回放舞台 + 浮层控件条（P-20261106-9 工具栏浮层化）：终端区占满卡片主体，
@@ -205,29 +227,35 @@ overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chapter .ce{margin-left:auto;color:var(--muted);flex-shrink:0}
 .chapter .ce.fail{color:#d03050}
 .no-chapters{font-size:12px;color:var(--muted)}
+/* foot-note 并入 footer 单行（P-20261118-9）：原两行（提示行+版权行）合并为
+   flex 两端单行——roTip 左、版权右；.footer 锚点语义保留（挂载脚本插入位） */
 .foot-note{flex-shrink:0;display:flex;justify-content:space-between;gap:12px;
-padding:8px 6px 2px;color:var(--muted);font-size:11.5px;opacity:.85}
+padding:6px 6px 0;color:var(--muted);font-size:11.5px;opacity:.85}
 .state{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
 color:var(--muted);text-align:center;padding:30px}
 .state .big{width:64px;height:64px;border-radius:18px;background:var(--chip);margin-bottom:14px;
 display:flex;align-items:center;justify-content:center}
 .state h2{margin:0 0 6px;font-size:16px;color:var(--text)}
 .state p{margin:0;font-size:12.5px}
-.footer{flex-shrink:0;text-align:center;color:var(--muted);font-size:11.5px;margin-top:9px;opacity:.75}
+/* 溯源水印（P-20261005-193）：三页+文件页逐段对齐，改动任一端须同步。
+   色取常量中性灰（P-20261121-4 端面感知裁定）：var(--text) 在浅色档为深色、
+   落在恒深终端端面上 4% 不可见——中性灰在浅/深两种面上同档隐现 */
 .sc-wm{position:fixed;inset:0;pointer-events:none;z-index:65;
 -webkit-user-select:none;user-select:none}
 .sc-wm span{position:absolute;font-size:13px;font-weight:600;letter-spacing:.4px;
-color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
+color:#8b94a9;opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 .sc-wm .wm-a{top:16%;left:5%}
 .sc-wm .wm-b{bottom:16%;right:5%}
 {{.BoardCSS}}
 {{.LayoutCSS}}
-/* 回放主机栅格渲染（P-20261106-9 / P-20261107-4，须在共用布局件之后才能覆盖）：
-   终端按录制 cols×rows 精确渲染、字号在产品同款上限内缩放装进舞台（scFitGrid，
-   xterm 元素按栅格定宽居中）；列放宽只多留白——流式下限收回 1180，录制更宽才随
-   --term-need 放宽；字号到下限仍装不下时舞台内滚动查看（不折行不裁切） */
+/* 回放主机栅格渲染（P-20261106-9 / P-20261107-4 / P-20261119-2，须在共用布局件
+   之后才能覆盖）：终端按录制 cols×rows 精确渲染、字号收缩装进舞台，录制栅格窄
+   于舞台时宽度优先放大（scFitGrid 放大段与直播页同口径，xterm 元素按栅格定宽
+   居中）；列放宽只多留白——流式下限收回 1180，录制更宽才随 --term-need 放宽；
+   字号到下限仍装不下时舞台内滚动查看（不折行不裁切，纵向超出走 overset 钉底） */
 :root{--col-floor:1180px}
 </style>
+<script>{{.ThemeJS}}</script>
 </head>
 <body>
 <div class="blob b1"></div><div class="blob b2"></div>
@@ -235,10 +263,11 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
   <div class="header">
     <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M10 8.5l6 3.5-6 3.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="meta">
-      <h1>{{.Title}}</h1>
+      <h1 id="pageTitle">{{.Title}}</h1>
       <div class="sub" id="sub"></div>
     </div>
     <div class="badge" id="badgeText"></div>
+    <span id="themeSlot"></span>
   </div>
   <div class="banner">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -262,8 +291,8 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
     </div>
     <div class="state" id="stateBox"></div>
   </div>
-  <div class="foot-note"><span id="roTip"></span><span></span></div>
-  <div class="footer" id="powered"></div>
+  <!-- foot-note 并入 footer 单行（P-20261118-9 布局紧凑化） -->
+  <div class="footer foot-note"><span id="roTip"></span><span id="powered"></span></div>
 </div>
 <script src="/assets/xterm.js"></script>
 <script src="/assets/addon-fit.js"></script>
@@ -275,7 +304,8 @@ const SC = {{.Boot}};
 {{.LayoutJS}}
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
-document.title = t('appTitle');
+// 标签页标题 = 分享名（P-20261118-9 去品牌前缀；<title> 已是分享名，此处校准）
+document.title = SC.name || document.title;
 $('badgeText').textContent = t('loadingTip');
 $('bannerText').textContent = t('maskBanner');
 $('roTip').textContent = t('readonlyTip');
@@ -285,6 +315,9 @@ $('replayBtn').textContent = t('replay');
 $('chaptersHead').textContent = t('chapters');
 $('download').textContent = t('downloadCast');
 $('download').href = '/s/' + SC.token + '/cast?dl=1';
+// 主题切换器（P-20261120-1，theme.go 共享注入件——head 已先行 initTheme 设
+// data-theme 防闪白；渐变头部上的落位观感由页面实测门禁三视口裁定）
+$('themeSlot').appendChild(makeThemeSelect());
 
 // 溯源水印（P-20261005-193）：文本服务端下发（空 = 不出层），textContent 防注入
 (function mountWatermark(){
@@ -303,21 +336,24 @@ $('download').href = '/s/' + SC.token + '/cast?dl=1';
 // ── xterm 只读实例：disableStdin + 页面无输入通道代码 = 双层只读保证。
 // 按 cast header 的录制栅格渲染（忠实实况，不按容器改写列数——与回放器
 // CastReplayer 同口径），渲染参数与产品内终端对齐（P-20261107-4，scTermOptions
-// 单一出口），字号随舞台缩放装下整格（scFitGrid）──
-const dark = matchMedia('(prefers-color-scheme: dark)');
-function termTheme(){
-  return dark.matches
-    ? { background: 'rgba(0,0,0,0)', foreground: '#e6eaf3', cursor: 'transparent' }
-    : { background: 'rgba(0,0,0,0)', foreground: '#24292f', cursor: 'transparent' };
-}
+// 单一出口），字号随舞台收缩/放大装下整格（scFitGrid，放大段 P-20261119-2）──
+// 端面恒深色（P-20261121-4，直播页同款）：录制回放的是主机字节流，ANSI 着色
+// 按深色控制台语义发出，浅色主题透明底承接 = 深色语义落浅底不可辨——端面
+// 收敛常量深色（底色同各页 OS-dark --bg=#0e1320、前景恒 #e6eaf3），页面
+// chrome 仍随四主题换装；旧主题随档接线全量退役
 const term = new Terminal(scTermOptions({ convertEol: false, theme: termTheme() }));
-dark.addEventListener('change', () => { term.options.theme = termTheme(); });
+function termTheme(){
+  return { background: '#0e1320', foreground: '#e6eaf3', cursor: 'transparent' };
+}
 scTermUnicode(term);
 let termOpened = false;
 function openTerm(){
   if (termOpened) return;
   term.open($('termBox'));
   term.onData(() => {}); // 只读保险丝：不存在把输入送回服务端的路径
+  // 滚轮路由（scWheelRoute，P-20261118-9）：overset 态放行滚轮给 term-box，
+  // fits 态 xterm 照常 scrollback 导航——双滚动条收敛的 JS 半边
+  scWheelRoute(term, $('termBox'));
   termOpened = true;
 }
 // 录制栅格 + 舞台尺寸驱动的重排（舞台/章节区/窗口任何变化都按栅格重新定字号）
@@ -394,6 +430,10 @@ function drain(){
     term.write(events[cursor].text);
     cursor++;
   }
+  // 批尾一次钉（P-20261119-2）：勿逐 write 挂回调——100ms tick 批量写面，钉底
+  // 判定读的是 term-box 几何（el 高度由 scFitGrid 定死，与批内写入数无关）；
+  // 钉到回放推进中的光标行（最新输出），回放超过一屏时即贴底
+  scPinBottom($('termBox'), false, scCursorRowY(term));
   syncChapter();
 }
 function syncChapter(){
@@ -537,9 +577,10 @@ $('seek').addEventListener('input', (e) => { pause(); seekTo(parseFloat(e.target
     const cols = Math.max(2, Math.min(Number(parsed.header.width) || 80, 500));
     const rows = Math.max(2, Math.min(Number(parsed.header.height) || 24, 300));
     // 内容自适应列宽（P-20261106-9）：按 cast 录制宽度定列容器；终端按录制栅格
-    // 精确渲染，字号缩放装进舞台（P-20261107-4 scFitGrid，视口够宽即产品字号居中）
+    // 精确渲染，字号收缩装进舞台、录制栅格窄于舞台时宽度优先放大（P-20261107-4
+    // scFitGrid + P-20261119-2 放大段，与直播页同口径）
     castCols = cols; castRows = rows;
-    scTermNeed(cols);
+    scTermNeed(cols, term.options.fontSize);
     term.resize(cols, rows);
     $('stateBox').style.display = 'none';
     $('stage').style.display = '';
@@ -575,17 +616,20 @@ var castPageTmpl = template.Must(template.New("castreplay").Parse(castPageTmplSr
 // renderCastPage 输出会话回放访客页（已知 token；调用方已做 lookup）。
 // wm 为溯源水印文本（P-20261005-193，空串 = 未开水印）
 func renderCastPage(w io.Writer, token, lang, title, wm string) error {
-	boot, err := json.Marshal(castBootState{Token: token, Lang: lang, Dict: castDictFor(lang), Wm: wm})
+	boot, err := json.Marshal(castBootState{Token: token, Lang: lang, Dict: castDictFor(lang), Wm: wm, Name: title})
 	if err != nil {
 		return err
 	}
+	// Title 无品牌前缀（P-20261118-9，termpage.go 同款口径）
 	return castPageTmpl.Execute(w, castPageData{
 		Lang:      lang,
-		Title:     "Codecombo " + title,
+		Title:     title,
 		Boot:      template.JS(boot),
 		BoardCSS:  template.CSS(guestBoardCSS),
 		BoardJS:   template.JS(guestBoardJS),
 		LayoutCSS: template.CSS(termLayoutCSS),
 		LayoutJS:  template.JS(termLayoutJS),
+		ThemeCSS:  template.CSS(GuestThemeCSS),
+		ThemeJS:   template.JS(guestThemeJS),
 	})
 }

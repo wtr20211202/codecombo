@@ -137,7 +137,7 @@ test('公网分享基址：结果卡绿徽标，结果卡复制值与管理器�
   await expect(qrModal.locator('[data-testid="sm-qr-url"] input')).toHaveValue(value)
 })
 
-test('回环入口 + 局域网候选：红态「本机回环」提示需同网，复制与二维码都用候选 origin', async ({ page, request }) => {
+test('回环入口 + 局域网候选：默认浏览器地址（loopbackSelf），候选可显式切换', async ({ page, request }) => {
   const token = await createShare(request)
   await fixedLocale(page)
   await mockRelayAddressContext(page, {
@@ -147,17 +147,17 @@ test('回环入口 + 局域网候选：红态「本机回环」提示需同网�
   })
   await openManager(page)
 
-  // 回环入口且无外部基址 = 红态（与二维码接力同一语义：地址虽自动改到候选，
-  // 但不能保证对端与服务器同一网络）；hint 说明已改址与同网前提
+  // P-20261120-4：回环入口默认「自动（浏览器地址）」= loopbackSelf 红态
+  //（链接即当前 origin，本机自测可用；要发给别人由用户在下拉显式切换）
   const managerBadge = page.locator('[data-testid="sm-share-reach"] [data-testid="share-reach-badge"]')
   await expect(managerBadge).toHaveAttribute('data-tone', 'red')
-  await expect(managerBadge).toHaveAttribute('data-source', 'candidate')
+  await expect(managerBadge).toHaveAttribute('data-source', 'loopbackSelf')
   await expect(managerBadge).toContainText('本机回环')
-  await expect(managerBadge.locator('.share-reach-pill')).toHaveAttribute('title', /已自动改用局域网地址/)
+  await expect(managerBadge.locator('.share-reach-pill')).toHaveAttribute('title', /仅本机可打开/)
 
-  // 候选 origin 沿用当前页面协议/端口（utils/networkAddress.candidateOrigin）
-  const u = new URL(page.url())
-  const expected = `${u.protocol}//${RELAY_FIXTURE_LAN.ip}${u.port ? `:${u.port}` : ''}/s/${token}`
+  // 自动态链接 = 当前页面 origin（不再自动改写到候选首项）
+  const pageOrigin = new URL(page.url()).origin
+  const expected = `${pageOrigin}/s/${token}`
 
   // 行内复制 = 二维码输入框 = 同一地址计划（不再各算各的）
   await page.context().grantPermissions(['clipboard-read'])
@@ -165,7 +165,12 @@ test('回环入口 + 局域网候选：红态「本机回环」提示需同网�
   await row.locator('button[aria-label="复制链接"]').click()
   await expect(page.locator('.n-message').filter({ hasText: '已复制' })).toBeVisible({ timeout: 5000 })
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(expected)
+  // 复制可达性警示（P-20261119-7；P-20261120-4 扩档）：回环本源链接对方无法
+  // 访问——成功 toast 之后追加警示（判定 shouldWarnCopy source=loopbackSelf）
+  await expect(page.locator('.n-message').filter({ hasText: '本机回环地址生成' })).toBeVisible({ timeout: 5000 })
 
+  // 行内二维码弹层（独立 useShareAddressPlan 实例）默认同走自动态：
+  // 链接框 = 当前 origin 短链，与行内复制同源
   await row.locator('button[aria-label="二维码"]').click()
   const qrModal = page.locator('.n-modal.sm-qr-modal')
   await expect(qrModal).toBeVisible({ timeout: 5000 })

@@ -27,10 +27,14 @@ package share
 //     TUI 整行错位）。三处常量的漂移由 termlayout_test 对账产品侧定义源钉死
 //   - 栅格 = 主机栅格：直播/回放按主机（录制）cols×rows 精确渲染，不让 fit 按访客
 //     容器改写列数——栅格与主机不符即 TUI 折行/光标定位错乱（产品内终端栅格就是
-//     PTY 尺寸本身，访客侧的对等物是主机尺寸）。字号在 [9, 14] 内缩放把整格装进
-//     容器（产品字号为上限，只缩不放），下限仍装不下则终端区自身滚动查看；主机
-//     调整窗口时直播页随 SSE resize 帧换栅格。定格快照是剥 ANSI 的纯文本（无光标
-//     定位语义），维持按容器 fit 的软折行
+//     PTY 尺寸本身，访客侧的对等物是主机尺寸）。字号布局宽度优先（P-20261120-8
+//     必改0 修订 P-20261107-4 的「宽高双拟合」）：放大段只看宽度（主机栅格窄于
+//     容器，上限 SC_TERM_MAX_FONT = 3×产品字号，P-20261119-2 定 cap）、收缩段只
+//     随宽度收缩到装得下为止——高度溢出一律走既有 overset 滚动 + scPinBottom 钉底
+//     跟随（P-20261118-9 机制），不再压缩字号迁就高度（压高不救宽：网格宽度不变
+//     居中留白原样，高会话×矮终端区必然字号缩+两侧大空白，用户第三轮主诉即此收
+//     缩分支盲区）。主机调整窗口时直播页随 SSE resize 帧换栅格。定格快照是剥 ANSI
+//     的纯文本（无光标定位语义），维持按容器 fit 的软折行
 //   - 重排触发 = 终端容器尺寸（ResizeObserver，回落 window resize）：横幅/可写
 //     条/页底浮层任何一处让容器变化都会重排，不再出现「容器缩了 xterm 没跟」的
 //     底部裁切
@@ -56,9 +60,29 @@ max-width:calc(max(var(--term-need),var(--col-floor)) + 2 * var(--pad-x));margin
 padding:clamp(10px,1.6vw,24px) var(--pad-x) 10px;display:flex;flex-direction:column}
 .banner.unfiltered{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx);font-weight:600}
 .card{position:relative}
-.term-box{overflow:auto}
+/* 端面恒深底+圆角（P-20261121-4）：xterm 端面（termTheme 恒深 #0e1320 同源值）
+   铺满容器内边距区——浅色主题下卡片 chrome（var(--card) 白底）与深端面的分界
+   圆角化；单一事实源勿三页各抄。透明 viewport 收敛规则与[data-overset]条目
+   不受影响（透明承接面从此换为不透明端面底） */
+.term-box{overflow:auto;background:#0e1320;border-radius:10px}
+/* overset 双滚动条收敛（P-20261118-9）：最小字号仍装不下时 scFitGrid 写
+[data-overset]，隐藏 term-box 自身滚动条视觉（滚动功能保留，overflow:auto
+不动——滚轮经 scWheelRoute 放行冒泡驱动；键盘/触摸滚动同走原生行为），
+避免「外层超集条 × xterm 内滚动条」双条并现。scrollbar-width 无效时由
+::-webkit-scrollbar 兜底（旧 Chromium/Edge 内核）。xterm 的 scrollback
+导航不经过 .xterm-viewport（vendored build 实勘：viewport 是空元素、滚动
+状态由 scrollable-element 内部管理 + 自绘 slider），其 overflow-y:scroll
+（xterm.css 原生规则）只是常驻死槽——本域内收为 hidden 净掉一条伪滚动条，
+对 scrollback 可达性零影响 */
+.term-box[data-overset]{scrollbar-width:none}
+.term-box[data-overset]::-webkit-scrollbar{display:none}
+.term-box .xterm-viewport{overflow-y:hidden}
 .wrap>.gb-root{position:relative;overflow:visible}
-.wrap>.gb-root .gb-body{position:absolute;left:0;right:0;bottom:calc(100% + 6px);z-index:30;
+/* 浮层规则加选合并入口条形态（P-20261119-3）：留言 chip 挂进 sc-entrybar 后
+   浮层锚条定位（chip position:static 由 entryBarCSS 覆写，就近锚到条壳）。
+   纯加选——无 sc-entrybar 的页面（frozen/cast/文件页）选择器不命中，既有
+   独立单条形态零变化 */
+.wrap>.gb-root .gb-body,.sc-entrybar .gb-root .gb-body{position:absolute;left:0;right:0;bottom:calc(100% + 6px);z-index:30;
 max-height:min(62vh,520px);overflow:auto;padding:12px 14px;background:var(--card);
 border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
 @media (max-width:640px){
@@ -83,16 +107,52 @@ border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
 //     选项值变化重测字宽；不碰私有 API）
 //   - scCellAt(fs)：按字号测单元格（DOM 量 32 个 'W'，与 xterm 字宽测量同法——
 //     宽 = 字宽、高 = 字高按设备像素上取整；不碰 xterm 私有渲染器 API）
-//   - scTermNeed(cols)：按列数（产品字号下）估算列容器所需宽度写入 --term-need，
+//   - scTermNeed(cols, fs)：按列数与字号估算列容器所需宽度写入 --term-need，
 //     返回该宽度（px；0 = 未生效）。+2 列余量吸收设备像素取整；列数钳 [80, 500]
-//     （直播 hello 尺寸钳制同上限）。以常量字号而非当前字号计算：栅格缩放改的是
-//     终端字号，若按当前字号回算列宽会与缩放互相追逐
+//     （直播 hello 尺寸钳制同上限）。字号半边参数化且 helper 内部钳 ≥ 产品字号
+//     （P-20261119-2；调用点传当前字号）——只放宽不收窄：放大段按实际字号回算
+//     列宽，闭环 fs_{n+1} = 14·min(aw/栅格宽, 3) 单调递增被 3× cap 兜底收敛到
+//     稳定点、且 f 单调不减无 2-循环，不与缩放互相追逐；收缩段若按收缩后字号
+//     回算列宽会单调递减螺旋跌向下限附近才稳（视觉回退），钳 ≥14 后 fits/shrink
+//     两态与只缩时代逐字节等价
 //   - scFitGrid(term, box, cols, rows)：主机栅格自适应——终端按 cols×rows 精确
-//     resize，字号在 [SC_TERM_MIN_FONT, SC_TERM_FONT_SIZE] 内取「整格装进容器」的
-//     最大值（逐 0.25px 校验收敛，保证装得下就绝不出滚动条——否则滚动条出没会让
-//     可用宽度来回跳、字号振荡）；字号到下限仍装不下则容器滚动。xterm 元素按栅格
-//     定宽居中（右侧预留滚动条宽 SC_TERM_SB，与 FitAddon 同口径）、高度不小于容器
-//     （滚轮在整块终端区内都作用于 scrollback）。容器隐藏/未布局时不动作，等下一次观测
+//     resize，栅格列数行数恒不变。字号布局宽度优先（P-20261120-8 必改0）：放大段
+//     （14px 整格装得下容器宽，P-20261119-2 起）fs = 产品字号 × min(宽度比,
+//     SC_TERM_MAX_FONT/SC_TERM_FONT_SIZE)，0.25px 步进向下取整并逐 0.25 校验宽
+//     度装得下（量测非线性防御）；收缩段（14px 整格装不下容器宽）fs 在
+//     [SC_TERM_MIN_FONT, SC_TERM_FONT_SIZE] 内取「宽度装进容器」的最大值（逐
+//     0.25px 校验收敛，宽度装得下绝不出横向滚动条——否则滚动条出没会让可用宽度
+//     来回跳、字号振荡），到下限仍装不下则容器横滚。两段高度都不设限——纵向超出
+//     走 overset 滚动 + scPinBottom 钉底（见下注），不再压缩字号迁就高度（旧
+//     min(1,wR,hR) 把高会话/矮终端区压成小字窄条居中，两侧留白原样）。xterm
+//     元素按栅格定宽居中（右侧预留滚动条宽 SC_TERM_SB，与 FitAddon 同口径）、
+//     高度不小于容器（滚轮在整块终端区内都作用于 scrollback）。容器隐藏/未布局
+//     时不动作，等下一次观测。纵向装不下（overset）时写 box.dataset.overset='1'
+//     （撤销即删）——scWheelRoute 据此把滚轮让给容器、CSS 收敛双滚动条（见下
+//     注），并 scPinBottom 钉底使提示符（最新输出）可见
+//   - scWheelRoute(term, box)：overset 双滚动条收敛的滚轮路由（P-20261118-9）。
+//     装得下（fits）返回 true = xterm 照常消费滚轮做 scrollback 导航；装不下
+//     （overset，scFitGrid 已标记）返回 false = xterm 不消费不 preventDefault，
+//     wheel 事件冒泡到 term-box（overflow:auto）滚动超集栅格——否则外层原生
+//     滚动条与 xterm 内滚动面同时在场（用户截图双条并现），外条藏了滚轮也到
+//     不了它。attachCustomWheelEventHandler 是 vendored build（5.x+）实勘在
+//     场的 API：handler 返回 false 时事件放行冒泡（_handleWheel 入口短路）
+//   - scPinBottom(box, force, rowY)：overset 底部跟随（P-20261119-2）：超集栅格
+//     顶对齐时最新输出（提示符）不可见——条件钉底，钉到「最新输出行在窗内」：
+//     滚到光标行顶（rowY = 光标行顶 y，scCursorRowY 供给）再被 maxTop 钳制——
+//     满屏输出（光标在格底）即贴底；新鲜空格提示符在格顶时只滚到提示符行为止
+//     （钉到格底会留「提示符在折叠线上方一格」的空窗态）。用户上滚即解钉（后续
+//     写入不再拽回，外层上滚只见栅格窗内旧行、更深 scrollback 历史仍须拖自绘
+//     slider——P-9 既有权衡非本案引入），滚回底部重新钉。force=true（scFitGrid
+//     进入/维持 overset 的重排）强制回钉——栅格重排本身跳滚动位（scrollHeight
+//     跳变被浏览器钳制），此时光标行 = 唯一有意义的默认位。挂点 = live 页
+//     data/tail 写回调 + setHost 尾部、cast 页 drain() 批尾（批量写一次钉勿逐
+//     write 挂回调——100ms tick 批面）；清态面两处 = overset 撤销（scFitGrid
+//     fits 分支复位钉底态与 scrollTop）与 scClearGrid 同撤——残留钉底态在非溢出
+//     容器空转/顶对齐误判
+//   - scCursorRowY(term)：光标行顶 y（px，px 级锚点供给 scPinBottom）——
+//     buffer.active.cursorY 是栅格内行号（0..rows-1），单元高与 scFitGrid 同源
+//     scCellAt 按当前字号量测；实例未开放/异常回落 0
 //   - scClearGrid(term)：撤销栅格模式内联尺寸（回落容器 fit 时用）
 //   - scObserve(el, fn)：容器尺寸观测（ResizeObserver，回落 window resize；rAF
 //     合并同帧多次变化），返回可手动触发的 kick
@@ -103,6 +163,10 @@ border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
 const termLayoutJS = `const SC_TERM_FONT = "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace";
 const SC_TERM_FONT_SIZE = 14;
 const SC_TERM_MIN_FONT = 9;
+// 放大上限 = 3×产品字号（P-20261119-2）：80 列主机在 ~2000px 视口恰好填满
+// （80×25.2≈2016px）；guest-only 常量（无产品侧对应物，访客呈现选择）——
+// cap 兜底防超宽屏下字号失控，也为放大段闭环提供收敛锚（fs_{n+1} ≤ cap）
+const SC_TERM_MAX_FONT = 42;
 const SC_TERM_SCROLLBACK = 20000;
 const SC_TERM_SB = 14;
 function scTermOptions(extra){
@@ -161,9 +225,11 @@ function scCellAt(fs){
   const dpr = window.devicePixelRatio || 1;
   return { w: r.width / 32, h: Math.ceil(r.height * dpr) / dpr };
 }
-function scTermNeed(cols){
+function scTermNeed(cols, fs){
   if (!(cols > 0)) return 0;
-  const cw = scCellAt(SC_TERM_FONT_SIZE).w;
+  // 半边参数化钳 ≥ 产品字号（P-20261119-2，只放宽不收窄——理由见头注 scTermNeed 条目）
+  fs = Math.max(SC_TERM_FONT_SIZE, fs || 0);
+  const cw = scCellAt(fs).w;
   if (!(cw > 0)) return 0;
   const n = Math.max(80, Math.min(cols, 500));
   // 36 = term-box 左右内边距 20 + 卡片边框 2 + 滚动条让位 14
@@ -182,27 +248,105 @@ function scFitGrid(term, box, cols, rows){
   if (!(aw > 0 && ah > 0)) return false;
   const base = scCellAt(SC_TERM_FONT_SIZE);
   if (!(base.w > 0 && base.h > 0)) return false;
-  let fs = SC_TERM_FONT_SIZE * Math.min(1, aw / (cols * base.w), ah / (rows * base.h));
-  fs = Math.max(SC_TERM_MIN_FONT, Math.min(SC_TERM_FONT_SIZE, Math.floor(fs * 4) / 4));
-  let cell = scCellAt(fs);
-  while (fs > SC_TERM_MIN_FONT && (cols * cell.w > aw || rows * cell.h > ah)) {
-    fs = Math.max(SC_TERM_MIN_FONT, fs - 0.25);
+  const wR = aw / (cols * base.w);
+  let fs, cell;
+  if (wR >= 1) {
+    // 放大段（P-20261119-2）：宽度优先——fs 单调递增被 3× cap 兜底收敛（头注
+    // 闭环推演），0.25 步进向下取整对齐收缩段取整惯例；逐 0.25 校验宽度装得下
+    // （cell 量测随字号非线性，不按比例线性外推）；高度不设限，纵向超出走 overset。
+    // P-20261120-8 必改0：不再要求 hR>=1——高会话/矮终端区（hR<1）此前掉收缩段
+    // 被压字号、网格保持 host cols 基础宽居中两侧留白（用户第三轮主诉的收缩分支
+    // 盲区），宽度优先 + overset 钉底后纵向溢出不再吞掉宽度放大
+    fs = SC_TERM_FONT_SIZE * Math.min(wR, SC_TERM_MAX_FONT / SC_TERM_FONT_SIZE);
+    fs = Math.max(SC_TERM_FONT_SIZE, Math.floor(fs * 4) / 4);
     cell = scCellAt(fs);
+    while (fs > SC_TERM_FONT_SIZE && cols * cell.w > aw) {
+      fs = Math.max(SC_TERM_FONT_SIZE, fs - 0.25);
+      cell = scCellAt(fs);
+    }
+  } else {
+    // 收缩段：宽度优先（P-20261120-8 必改0 修订 P-20261107-4 的 min(1, wR, hR)
+    // 双拟合）——字号只随宽度收缩到装得下为止，高度溢出交给下方 overset 钉底而
+    // 非压缩字号（压高不救宽：网格宽度不变居中留白原样，且字号缩小迁就高度是
+    // 用户主诉的直接成因）；0.25 步进收敛惯例不变
+    fs = SC_TERM_FONT_SIZE * Math.min(1, wR);
+    fs = Math.max(SC_TERM_MIN_FONT, Math.min(SC_TERM_FONT_SIZE, Math.floor(fs * 4) / 4));
+    cell = scCellAt(fs);
+    while (fs > SC_TERM_MIN_FONT && cols * cell.w > aw) {
+      fs = Math.max(SC_TERM_MIN_FONT, fs - 0.25);
+      cell = scCellAt(fs);
+    }
   }
   if (term.options.fontSize !== fs) term.options.fontSize = fs;
   if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
   el.style.width = (Math.ceil(cols * cell.w) + SC_TERM_SB) + 'px';
   el.style.height = Math.max(Math.ceil(rows * cell.h), ah) + 'px';
   el.style.margin = '0 auto';
+  // overset 标记（P-20261118-9）：整格高于容器——双滚动条收敛的开关面（CSS 隐藏
+  // 外层滚动条 + scWheelRoute 放行滚轮给容器）；装得下即撤并复位钉底态与
+  // scrollTop（清态面：残留钉底态会在非溢出容器空转/顶对齐误判）。overset 态经
+  // scPinBottom(true) 强制回钉（重排跳滚动位，光标行=最新输出=默认位，见头注）
+  if (rows * cell.h > ah) {
+    box.dataset.overset = '1';
+    scPinBottom(box, true, scCursorRowY(term));
+  } else {
+    delete box.dataset.overset;
+    delete box.dataset.pinBottom;
+    box.scrollTop = 0;
+  }
   box.dataset.cols = String(cols);
   box.dataset.rows = String(rows);
   box.dataset.fontSize = String(fs);
   return true;
 }
+function scWheelRoute(term, box){
+  if (!term || typeof term.attachCustomWheelEventHandler !== 'function') return;
+  term.attachCustomWheelEventHandler(function(){
+    // false = xterm 不消费、不 preventDefault，滚轮冒泡到 term-box 滚超集
+    // 栅格（overset 才让位；fits 态 scrollback 导航原样）
+    return !(box && box.dataset && box.dataset.overset === '1');
+  });
+}
+function scCursorRowY(term){
+  // 光标行顶 y（px）：最新输出行锚点（buffer.active.cursorY = 栅格内行号 0..rows-1，
+  // 单元高与 scFitGrid 同源 scCellAt 按当前字号量测）；未开放/异常回落 0
+  try {
+    const cy = term.buffer.active.cursorY;
+    if (!(cy > 0)) return 0;
+    return cy * scCellAt(term.options.fontSize).h;
+  } catch (e) { return 0; }
+}
+function scPinBottom(box, force, rowY){
+  if (!box) return;
+  // 无纵向溢出（fits/容器隐藏）：清钉底态——残留会在非溢出容器空转/顶对齐误判
+  if (!(box.scrollHeight > box.clientHeight + 1)) { delete box.dataset.pinBottom; return; }
+  // 贴底判定留 1px 容差吸收亚像素取整；贴底即钉（含重排强制回钉），上滚解钉、
+  // 滚回底部由下一次挂点调用重新钉。量测读写均为既有布局面，写回调频度低
+  // （服务端 8ms 合帧），无热路径顾虑
+  const maxTop = box.scrollHeight - box.clientHeight;
+  if (force || box.scrollTop + box.clientHeight >= box.scrollHeight - 1) {
+    box.dataset.pinBottom = '1';
+    // 钉到最新输出行在窗内：滚到光标行顶（maxTop 钳制）——满屏输出即贴底，
+    // 新鲜空格提示符在格顶时只滚到提示符行为止（rowY=0 即空格/未知，顶对齐）
+    box.scrollTop = (rowY > 0 && rowY < maxTop) ? rowY : maxTop;
+  } else {
+    delete box.dataset.pinBottom;
+  }
+}
 function scClearGrid(term){
   const el = term.element;
   if (!el) return;
   el.style.width = ''; el.style.height = ''; el.style.margin = '';
+  // 回落容器 fit（主机尺寸未知/撤销栅格）：overset 标记随内联尺寸一起撤——
+  // 残留会把滚轮路由钉在「让给容器」态而容器此时无溢出，scrollback 导航失灵。
+  // 钉底态与 scrollTop 同撤（P-20261119-2 清态面②）：软折行无超集滚动面，残留
+  // 钉底态会在容器回涨到溢出时把首屏误拽到底部
+  const box = el.parentElement;
+  if (box && box.dataset) {
+    delete box.dataset.overset;
+    delete box.dataset.pinBottom;
+    box.scrollTop = 0;
+  }
 }
 function scObserve(el, fn){
   let raf = 0;

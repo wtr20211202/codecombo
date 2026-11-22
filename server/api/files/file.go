@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"codecombo/server/filepolicy"
+	preview "codecombo/server/filepreview"
 	"codecombo/server/fsattr"
 	"codecombo/server/middleware"
 	"codecombo/server/store"
@@ -29,6 +30,21 @@ import (
 func contentHash(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// pvDescriptor 预览注册表判定（P-20261119-4）：file-policy 响应 data 内
+// 增量字段（kind/mime/known），与 filepreview.ForFile 输出同构
+type pvDescriptor struct {
+	Kind  string `json:"kind"`
+	Mime  string `json:"mime"`
+	Known bool   `json:"known"`
+}
+
+// policyRespData file-policy 响应 data：Decision 平铺 + pv 增量字段
+// （内嵌保 json tag 原样——响应既有字段形态零变化）
+type policyRespData struct {
+	filepolicy.Decision
+	Pv pvDescriptor `json:"pv"`
 }
 
 // GetFilePolicy GET /api/projects/:id/file-policy?path=
@@ -78,7 +94,15 @@ func GetFilePolicy(c *gin.Context) {
 	d.Size = info.Size()
 	d.SizeHuman = filepolicy.HumanBytes(info.Size())
 
-	resp := gin.H{"data": d}
+	// 预览描述符（P-20261119-4）：filepreview 注册表的 kind/mime 随策略
+	// 响应增量下发（前端打开链同点位取到「统一双视图」的分流判定源——
+	// 预览 Kind 命中的二进制类默认预览态，未命中回落既有信息卡）。加法
+	// 字段零回归：Decision 内嵌平铺（json tag 语义原样，omitempty 不变），
+	// 既有消费者不认识 pv 键自然忽略
+	desc := preview.ForFile(info.Name())
+	resp := gin.H{"data": policyRespData{Decision: d, Pv: pvDescriptor{
+		Kind: string(desc.Kind), Mime: desc.MIME, Known: desc.Known,
+	}}}
 	if ec, ok := filepolicy.EditorConfigFor(p.Path, NormalizeRelPath(filePath)); ok {
 		resp["editorconfig"] = ec
 	}

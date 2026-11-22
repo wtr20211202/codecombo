@@ -85,8 +85,8 @@ const (
 	dropSidecarNameLimit = 64 << 10
 )
 
-// dropSidecarSuffix sidecar 元数据文件后缀（清单枚举据此排除）
-const dropSidecarSuffix = ".json"
+// DropSidecarSuffix sidecar 元数据文件后缀（清单枚举据此排除）
+const DropSidecarSuffix = ".json"
 
 // ratePair 双维固定窗口频控（msgRateLimiter 的参数化通用形态）：perIP 按
 // (token, IP) 维度、perToken 按 token 全局维度——访客面写入端点的标准
@@ -153,13 +153,29 @@ var dropFileExts = map[string]bool{
 	".tar": true, ".gz": true, ".tgz": true,
 }
 
-// dropKindFor 扩展名 → 形态与大小上限（"" = 白名单外，拒收）
-func dropKindFor(ext string) (kind string, maxBytes int64) {
+// DropExtKind 访客素材扩展名 → 形态（image | file；"" = 白名单外，拒收）。
+// 扩展名白名单是安全策略——跨特性（share collab / quickdrop 多文件上行
+// P-20261117-2-S1）的单一事实源在本包；大小上限是各特性自有的滥用面参数
+// （图片档对齐 UploadPasteImage 10MB 共用，文件档各特性按落盘与滥用面定档），
+// 不在此绑定
+func DropExtKind(ext string) string {
 	if dropImageExts[ext] {
-		return "image", MaxDropImageBytes
+		return "image"
 	}
 	if dropFileExts[ext] {
-		return "file", MaxDropFileBytes
+		return "file"
+	}
+	return ""
+}
+
+// dropKindFor 扩展名 → 形态与大小上限（"" = 白名单外，拒收）
+func dropKindFor(ext string) (kind string, maxBytes int64) {
+	kind = DropExtKind(ext)
+	if kind == "image" {
+		return kind, MaxDropImageBytes
+	}
+	if kind == "file" {
+		return kind, MaxDropFileBytes
 	}
 	return "", 0
 }
@@ -174,13 +190,13 @@ var windowsReservedNames = map[string]bool{
 	"lpt6": true, "lpt7": true, "lpt8": true, "lpt9": true,
 }
 
-// sanitizeDropFileName 上传文件名净化（落盘名的唯一权威实现）：取末段
+// SanitizeDropFileName 上传文件名净化（落盘名的唯一权威实现）：取末段
 // （剥路径分隔符与盘符——multipart filename 可能带客户端全路径）、控制
 // 字符折叠为空格、剥首尾空白与点（Windows 尾点/尾空格静默丢失、首点藏
 // 文件）、Windows 保留名词干 "_" 前缀改写、rune 截断、空名回退 "file"。
 // 产出恒为单段安全名（无分隔符——os.Root 落盘无穿越面，且管理面取绝对
 // 路径时无拼接受污染输入）
-func sanitizeDropFileName(name string) string {
+func SanitizeDropFileName(name string) string {
 	if idx := strings.LastIndexAny(name, "/\\"); idx >= 0 {
 		name = name[idx+1:]
 	}
@@ -243,6 +259,12 @@ type DropMeta struct {
 	ConsumedAt time.Time `json:"consumedAt,omitempty"`
 	// Sensitive 敏感文件名扫描命中（警示注记：主人侧清单橙标，处置权在主人）
 	Sensitive bool `json:"sensitive,omitempty"`
+	// DropID 归属的快投递收件箱条目 id（P-20261117-3；share drops 不设——
+	// 零值 JSON 省略，存量 sidecar 反序列化为空串零行为变化）。快投递侧在
+	// 收件箱 Add 成功后回填：文件落盘在先、doc 发号在后，归属链只能后写。
+	// 这是「收件箱条目 ↔ 落盘文件」的单一事实源（quickdrop store 五字段
+	// 不扩裁决的承接面）——清单投影/下载归属/摘除回收据此对账
+	DropID string `json:"dropId,omitempty"`
 }
 
 // DropsRoot 访客素材隔离区根（车道 2：<DataDir>/artifacts/share-drops/；
@@ -274,7 +296,7 @@ func listDrops(token string, limit int) []DropMeta {
 	out := make([]DropMeta, 0, len(entries)/2+1)
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasSuffix(name, dropSidecarSuffix) {
+		if !strings.HasSuffix(name, DropSidecarSuffix) {
 			continue
 		}
 		f, err := root.Open(name)
@@ -359,7 +381,7 @@ func deleteDrop(token, id string) error {
 		return nil
 	}
 	_ = root.Remove(sidecar)
-	_ = root.Remove(strings.TrimSuffix(sidecar, dropSidecarSuffix))
+	_ = root.Remove(strings.TrimSuffix(sidecar, DropSidecarSuffix))
 	return nil
 }
 
@@ -374,7 +396,7 @@ func readDropMeta(root *os.Root, id string) (*DropMeta, string, error) {
 	prefix := id + "_"
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, dropSidecarSuffix) {
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, DropSidecarSuffix) {
 			continue
 		}
 		f, err := root.Open(name)
@@ -469,7 +491,7 @@ func cleanExpiredDrops(now time.Time, logger *slog.Logger) int {
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if strings.HasSuffix(name, dropSidecarSuffix) {
+			if strings.HasSuffix(name, DropSidecarSuffix) {
 				continue // sidecar 随本体判定/删除，不独立计时
 			}
 			var cutoff time.Time
@@ -488,7 +510,7 @@ func cleanExpiredDrops(now time.Time, logger *slog.Logger) int {
 			}
 			if now.After(cutoff) {
 				_ = dir.Remove(name)
-				_ = dir.Remove(name + dropSidecarSuffix)
+				_ = dir.Remove(name + DropSidecarSuffix)
 				removed++
 				continue
 			}
@@ -577,7 +599,7 @@ func (s *Service) handleGuestDropPost(w http.ResponseWriter, r *http.Request) {
 	for _, fh := range files {
 		ext := strings.ToLower(filepath.Ext(fh.Filename))
 		kind, maxBytes := dropKindFor(ext)
-		name := sanitizeDropFileName(fh.Filename)
+		name := SanitizeDropFileName(fh.Filename)
 		if kind == "" || fh.Size > maxBytes {
 			// 白名单外/超限：拒绝位（不消耗配额不落盘，访客拿到逐文件失败态）
 			added = append(added, DropMeta{Name: name, Kind: "rejected"})
@@ -636,7 +658,7 @@ func (s *Service) handleGuestDropPost(w http.ResponseWriter, r *http.Request) {
 			ID: id, FileName: fileName, Name: name, Size: n, Kind: kind,
 			Nick: nick, At: now, Sensitive: IsSensitiveName(name),
 		}
-		if err := writeDropSidecar(dir, meta); err != nil {
+		if err := WriteDropSidecar(dir, meta); err != nil {
 			// 本体已落、元数据失败：删本体重来（宁失败不留「清单可见而文件
 			// 缺失」的坏条目——访客重传是干净路径）
 			_ = os.Remove(filepath.Join(dir, fileName))
@@ -670,9 +692,10 @@ func (s *Service) handleGuestDropPost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"added": added, "warnings": warnings})
 }
 
-// writeDropSidecar 落 sidecar 元数据（os.Root 同锚定；本体已在盘后才写——
-// sidecar 在场即清单可见，本体先于 sidecar 保证无坏条目）
-func writeDropSidecar(dir string, meta *DropMeta) error {
+// WriteDropSidecar 落 sidecar 元数据（os.Root 同锚定；本体已在盘后才写——
+// sidecar 在场即清单可见，本体先于 sidecar 保证无坏条目）。dir 参数化：
+// share collab 与 quickdrop 文件隔离区各自传自己的收件目录
+func WriteDropSidecar(dir string, meta *DropMeta) error {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
@@ -682,7 +705,7 @@ func writeDropSidecar(dir string, meta *DropMeta) error {
 	if err != nil {
 		return err
 	}
-	sf, err := root.Create(meta.FileName + dropSidecarSuffix)
+	sf, err := root.Create(meta.FileName + DropSidecarSuffix)
 	if err != nil {
 		return err
 	}
@@ -755,7 +778,7 @@ func dropNote(sh *store.Share, meta *DropMeta) notification.Notification {
 		TitleKey: "share.drop.notify.title",
 		BodyKey:  "share.drop.notify.body",
 		Title:    "分享收到访客素材",
-		Body:     "「" + sh.Name + "」" + displayNick(meta.Nick) + " 上传了 " + meta.Name + "（" + fmtSize(meta.Size) + "）",
+		Body:     "「" + sh.Name + "」" + displayNick(meta.Nick) + " 上传了 " + meta.Name + "（" + FmtSize(meta.Size) + "）",
 		Time:     meta.At,
 		MsgParams: map[string]any{
 			"name": sh.Name, "file": meta.Name, "nick": displayNick(meta.Nick), "size": meta.Size,
@@ -786,8 +809,8 @@ func parseShDropPayload(payload string) (token, id string) {
 	return rest[:i], rest[i+1:]
 }
 
-// fmtSize 通知体的字节量速览（KB/MB 一档小数；语言中立的数字+单位）
-func fmtSize(n int64) string {
+// FmtSize 通知体/元数据行的字节量速览（KB/MB 一档小数；语言中立的数字+单位）
+func FmtSize(n int64) string {
 	switch {
 	case n >= 1<<20:
 		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))

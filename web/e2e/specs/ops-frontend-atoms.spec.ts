@@ -214,8 +214,13 @@ test('frontend.open → 新标签打开（noopener spy 承接）；popup 被拦�
   await enterProject(page)
   const ok = await postAtom(page, headers, 'frontend.open', { url: 'https://ci.example.net/runs/42' })
   expect(ok.ok()).toBeTruthy()
+  // P-20261117-4 设备定向落地后效应执行前有同浏览器标签选举窗（BroadcastChannel
+  // claim 收集 120ms，单标签常态）——open 时点经 poll 等待选举窗收口，断言本体
+  // 不变（noopener 三参与 url 逐字）
+  await expect.poll(async () => page.evaluate(() => (window as unknown as { __scAtomOpens: unknown[][] }).__scAtomOpens.length), {
+    timeout: 10_000,
+  }).toBe(1)
   const opens = await page.evaluate(() => (window as unknown as { __scAtomOpens: unknown[][] }).__scAtomOpens)
-  expect(opens).toHaveLength(1)
   expect(opens[0][0]).toBe('https://ci.example.net/runs/42')
   expect(opens[0][1]).toBe('_blank')
   expect(opens[0][2]).toBe('noopener')

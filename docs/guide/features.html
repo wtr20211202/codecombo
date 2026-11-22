@@ -530,6 +530,64 @@
           实时终端分享为只读且经遮蔽处理。</span>
         </p>
         <p class="doc-p">
+          <!-- 文档预览口径（P-20261116-6/-7/P-20261118-1/P-20261118-3/P-20261118-7 office 家族支持矩阵，源=server/share/preview/preview.go
+               registry + office.go + embedshell.go + sheet.go：md/docx 文本排版+图片同源端点加载+嵌入对象还原原始
+               文件名（GBK 解码）+正文抽取（扫描式数据长度定位+内容锚点回退）与编码规范化（容器抽不出正文时壳页显性
+               提示「该附件结构暂不支持自动预览，可下载查看」，不再静默弹下载）+可预览类型
+               新标签预览（html 档进预览器壳页 &ui=1：风险确认勾选+表单重提交开关+全幅沙箱 iframe，
+               任何组合绝不 allow-same-origin/allow-top-navigation）+EMF/WMF 图元诚实占位、xlsx 首
+               表表格；已知无预览格式（xls/ppt/pptx/odt/ods/odp/epub/字体）显性提示可下载，未识别
+               后缀中性信息卡；改先改源） -->
+          <span data-lang-en>Document shares open as a rendered reader view, not a raw file:
+          Markdown and Word (<code>.docx</code>) show text layout — headings, lists, tables,
+          bold/italic — with images embedded in a Word document loaded from a same-origin
+          endpoint, so photo-heavy documents render in full; embedded objects (attachments)
+          show as single-line 📎 blocks carrying the original file name recovered from the
+          document (legacy GBK-encoded names are decoded back to readable text), and
+          previewable types — HTML, PDF, images, plain text and Markdown — get a preview
+          action that opens in a new tab so the reading column stays clean: HTML prototypes
+          open in a dedicated previewer page (title, a scripts risk-ack checkbox plus an
+          optional forms-and-popups switch applied via plain form resubmit, and a
+          full-height iframe); embedded text bodies are first extracted out of OLE
+          containers and transcoded to UTF-8 (UTF-16/GBK legacy text stops rendering as
+          mojibake) — extraction scans for the declared-length field so real-world Word
+          writers with extra header fields are covered, with content anchors as a second
+          line of defense, and containers that yield no extractable body open an explicit
+          "structure can't be auto-previewed yet — download it to view" page instead of
+          silently downloading — everything stays sandboxed away from this app's sessions with no
+          <code>allow-same-origin</code> or top-level
+          navigation ever granted, and images stored as EMF/WMF
+          metafiles, which browsers cannot render, show an honest placeholder instead of a
+          broken picture; Excel workbooks
+          (<code>.xlsx</code>) render their first sheet as a table, CSV/TSV
+          the same. Full fidelity (fonts, colors, headers and footers) is one download click
+          away. Known formats that have no preview renderer yet — legacy office files
+          (<code>.xls</code>/<code>.ppt</code>/<code>.pptx</code>), OpenDocument
+          (<code>.odt</code>/<code>.ods</code>/<code>.odp</code>) and <code>.epub</code> — say
+          so explicitly ("preview is not available for this format, you can download it
+          instead") instead of failing silently; unrecognized extensions just get a plain
+          info card with the download button.</span>
+          <span data-lang-zh>文档类分享打开即是渲染后的阅读视图，不是裸文件：Markdown 与
+          Word（<code>.docx</code>）呈现文本排版——标题/列表/表格/粗斜体——Word 内嵌
+          图片由同源端点加载进预览，图片密集的文档也能整份渲染；嵌入对象（附件）以单行 📎 块
+          呈现，块上带有从文档中还原的原始文件名（老式 GBK 编码名也会解码还原），可预览类型
+          ——HTML、PDF、图片、纯文本与 Markdown——获得「预览」动作、新标签打开，阅读列
+          保持干净：HTML 原型进专门的预览器壳页（标题、脚本风险确认勾选与可选的
+          「允许表单与弹窗」开关经普通表单重提交生效、全幅 iframe 承载原型）；嵌入的文本
+          正文先从 OLE 容器里抽取出来并转码 UTF-8（UTF-16/GBK 老文本不再乱码；抽取按扫描式
+          定位数据长度字段，真实 Word 写入器多出的头字段变体也覆盖，内容锚点回退兜底第二道），
+          抽不出正文的容器显性提示「该附件结构暂不支持自动预览，可下载查看」不再静默弹下载；
+          一切都在沙箱内读不到本应用登录态，任何组合都不授予
+          <code>allow-same-origin</code> 与顶层导航；以 EMF/WMF 图元格式存储、浏览器无法渲染
+          的图片则显示诚实占位块而不再破图；Excel 工作簿
+          （<code>.xlsx</code>）把首表渲染成表格，CSV/TSV 同理；完整还原（字体、颜色、
+          页眉页脚）点一下下载就有。已知格式中暂无预览渲染的——老办公格式
+          （<code>.xls</code>/<code>.ppt</code>/<code>.pptx</code>）、
+          OpenDocument（<code>.odt</code>/<code>.ods</code>/<code>.odp</code>）与
+          <code>.epub</code>——会显性提示「该格式暂不支持在线预览，可下载后查看」，
+          不再沉默；未识别的后缀则只给一张中性信息卡与下载按钮。</span>
+        </p>
+        <p class="doc-p">
           <span data-lang-en><b>Where to find it:</b> right-click any file → <b>Share</b> for a
           one-click link; the link icon in the activity bar opens the share manager where
           every link you've issued can be reviewed and revoked. The day-trip walkthrough is

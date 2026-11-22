@@ -470,11 +470,13 @@ type NotifyPersistPayload struct {
 	//（error/warning 在通知中心桌面提醒链吃 error 穿透勿扰）
 	Level string `json:"level,omitempty"`
 	// Action 可选一键直达动作，白名单收敛自通知 Action 既有枚举：
-	// terminal|panel|url|preview。agent-fix（人裁决后修复语义）等其余动作
-	// 不对 agent 开放
+	// terminal|panel|url|preview|download。agent-fix（人裁决后修复语义）等
+	// 其余动作不对 agent 开放
 	Action string `json:"action,omitempty"`
 	// ActionPayload 动作目标，按 Action 逐形态校验（见 isNotifyPersistAction）：
-	// terminal=会话 id / panel=面板名 / url=https(s) 绝对外链 / preview=端口号
+	// terminal=会话 id / panel=面板名 / url=https(s) 绝对外链 / preview=端口号 /
+	// download={"projectId","path"} 复合 JSON（P-20261117-4 设备效应降级链的
+	// 同款形态——前端通知点击直接触发既有文件下载链）
 	ActionPayload string `json:"actionPayload,omitempty"`
 }
 
@@ -530,8 +532,10 @@ func ValidateNotifyPersist(payload interface{}) (interface{}, bool) {
 }
 
 // isNotifyPersistAction action 白名单 + actionPayload 逐动作形态校验。
-// 四动作收敛自服务端既有通知的 Action 枚举，payload 形态与各自动作的消费链
-// 对齐（前端 pendingAction 分发面 useLayoutBootstrap.bindPendingActionWatch）：
+// 五动作收敛自服务端既有通知的 Action 枚举（download 为 P-20261117-4 设备
+// 效应降级链新增），payload 形态与各自动作的消费链对齐（前端分发面：
+// terminal/panel/preview 走 pendingAction 桥 useLayoutBootstrap.bindPendingActionWatch，
+// url/download 在通知 store handleClick 就地执行——免路由桥接的浏览器直接效应）：
 //   - terminal：会话 id 单 token（≤128 字节、无空白/控制符）——「查看会话」
 //     直达终端 tab；会话存在性由消费链对账兜底（发布口不依赖终端注册表，
 //     保持事件通道解耦，同 open-file-at projectId 口径）
@@ -543,6 +547,11 @@ func ValidateNotifyPersist(payload interface{}) (interface{}, bool) {
 //     该值经前端 window.open noopener 直开，scheme 是唯一防线；主机不限：
 //     agent 报的 CI/PR 链接本就是站外形态）
 //   - preview：端口号字符串 1024~65535（与 preview.port 事件端口校验同口径）
+//   - download：{"projectId","path"} 复合 JSON——projectId 非空（≤512）、path
+//     项目相对正斜杠无 .. 段（isOpenFilePath 同防线），前端通知点击触发既有
+//     文件下载链（同 frontend.download 原子消费端）；恶意复合只影响用户自己
+//     点击后的下载落点，下载端点 SafeJoinProject + Content-Disposition 净化链
+//     既有，payload 校验只是早失败
 func isNotifyPersistAction(action, target string) bool {
 	if target == "" || len(target) > notifyPersistActionPayloadMax {
 		return false
@@ -574,6 +583,19 @@ func isNotifyPersistAction(action, target string) bool {
 	case "preview":
 		port, err := strconv.Atoi(target)
 		return err == nil && port >= 1024 && port <= 65535
+	case "download":
+		var p struct {
+			ProjectID string `json:"projectId"`
+			Path      string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(target), &p); err != nil {
+			return false
+		}
+		p.ProjectID = strings.TrimSpace(p.ProjectID)
+		if p.ProjectID == "" || len(p.ProjectID) > openFileAtPathMax {
+			return false
+		}
+		return isOpenFilePath(p.Path)
 	default:
 		return false
 	}
@@ -742,6 +764,19 @@ func ValidateFrontendReload(payload interface{}) (interface{}, bool) {
 	return p, true
 }
 
+// frontendTargetingNote frontend 动词族共有的「效应定向」语义注记（P-20261117-4
+// 评审建议e）：四原语的效应都落在发起会话的浏览器——不是全部已连浏览器。
+// 渲染进每个 frontend 原子的手册 Detail（SKILL.md 参考文件同源），agent 无需
+// 改调用形态（X-Session-ID 既有约定承担亲和键）
+const frontendTargetingNote = `效应定向（P-20261117-4）：本原语的设备效应只落在发起
+                 会话的浏览器（会话创建/终端接管时的浏览器绑定自动承担亲和，
+                 接管即跟随最后附着方），你无需改任何调用形态；会话无绑定时，
+                 实例仅一台浏览器在线仍定向该浏览器，多台浏览器在线且无法判定
+                 作用面则不执行效应、降级为通知中心条目（下载带一键下载动作，
+                 打开带可点链接）——效应未发生但功能不缺失。通知类别被用户静音
+                 时降级条目同样被静音（时段内零反馈属既有静音语义）。browserId
+                 是路由标签非安全边界`
+
 // ============== 注册表装配（首批收编） ==============
 
 func init() {
@@ -755,7 +790,7 @@ func init() {
                  无静默写入；用户可在设置·通用分区按原子关闭（默认开）。
                  浏览器焦点/权限边界诚实声明：writeText 失败时自动回落跨设备
                  中继链——内容进服务端单槽，toast 点击读取即焚落本地剪贴板，
-                 功能不缺失只是多一次点击`,
+                 功能不缺失只是多一次点击。` + frontendTargetingNote,
 		Validate:              ValidateFrontendClipboard,
 		InvalidPayloadMessage: "invalid frontend.clipboard payload: text (required) must be non-empty and at most 32768 bytes",
 	})
@@ -767,7 +802,7 @@ func init() {
 		Detail: `path 必填项目相对路径（正斜杠），projectId 必填非空（GET /api/projects
                  取 id）。下载走既有文件下载端点 GET /api/projects/:id/file/download
                  （路径防穿越 + 下载头净化既有），文件字节不经事件通道。组合
-                 frontend.download + notify.persist =「报告已生成并已开始下载」`,
+                 frontend.download + notify.persist =「报告已生成并已开始下载」。` + frontendTargetingNote,
 		Validate:              ValidateFrontendDownload,
 		InvalidPayloadMessage: "invalid frontend.download payload: path (project-relative, forward slashes, no .. segment) and projectId are required",
 	})
@@ -778,7 +813,7 @@ func init() {
 		PayloadFields: []string{"url"},
 		Detail: `url 必填 http(s) 绝对外链（scheme 白名单拒伪协议，同 notify.persist
                  action=url 防线）。popup blocker 是浏览器边界：被拦时自动回落
-                 通知中心带 url 动作条目，用户点击开——功能不缺失只是多一次点击`,
+                 通知中心带 url 动作条目，用户点击开——功能不缺失只是多一次点击。` + frontendTargetingNote,
 		Validate:              ValidateFrontendOpen,
 		InvalidPayloadMessage: "invalid frontend.open payload: url (required) must be an absolute http(s) URL with a host",
 	})
@@ -792,7 +827,7 @@ func init() {
                  草稿自动保存与确认框兜底，勿高频刷发（效应面限频 10 次/分钟）。
                  view = 仅重建当前视图（路由/URL 不变）——视图状态机卡滞自救，
                  比 page 轻。勿用本原语替代 navigate：要「去某个视图」用
-                 navigate，要「当前视图重取」才用 reload`,
+                 navigate，要「当前视图重取」才用 reload。` + frontendTargetingNote,
 		Validate:              ValidateFrontendReload,
 		InvalidPayloadMessage: "invalid frontend.reload payload: scope (optional) must be \"page\" or \"view\"",
 	})

@@ -1,8 +1,9 @@
 package store_test
 
-// 协作通道开关（P-20261024-1）store 层语义：SetCollab/SetDirectInput 的
-// RMW 单字段覆写（其余字段原样）、过期记录拒绝（与 Rotate 同口径）、
-// 缺省关闭的存量零迁移
+// 协作通道/申请通道开关（P-20261024-1，P-20261121-1 统一收编）store 层语义：
+// SetCollab/SetGuestInput 的 RMW 单字段覆写（其余字段原样）、过期记录拒绝
+// （与 Rotate 同口径）、缺省零迁移（collab 缺省关；GuestInputOff 反向极性
+// ——缺省零值=申请通道开，默认在场定案）
 
 import (
 	"errors"
@@ -20,8 +21,8 @@ func TestShareStoreCollabToggle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if created.Collab || created.DirectInput {
-		t.Fatal("new share must default to collab/direct-input off (存量零迁移)")
+	if created.Collab || created.GuestInputOff {
+		t.Fatal("new share must default to collab off + guest-input channel on (存量零迁移/默认在场)")
 	}
 
 	// 开启：单字段覆写，其余字段原样（CreatedAt/Hits 不动）
@@ -29,7 +30,7 @@ func TestShareStoreCollabToggle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set collab on: %v", err)
 	}
-	if !on.Collab || on.DirectInput {
+	if !on.Collab || on.GuestInputOff {
 		t.Fatalf("collab on wrong: %+v", on)
 	}
 	if !on.CreatedAt.Equal(created.CreatedAt) {
@@ -52,33 +53,35 @@ func TestShareStoreCollabToggle(t *testing.T) {
 	}
 }
 
-func TestShareStoreDirectInputToggle(t *testing.T) {
+func TestShareStoreGuestInputToggle(t *testing.T) {
 	st := newShareStoreForTest(t)
 	created, err := st.Create(store.Share{ProjectID: "p1", ProjectName: "demo", Path: "a.txt", Name: "a"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	on, err := st.SetDirectInput(created.Token, true)
-	if err != nil || !on.DirectInput || on.Collab {
-		t.Fatalf("direct on: %+v err=%v", on, err)
+	// 反向极性（必改1 纪律锁）：SetGuestInput(false) 落 GuestInputOff=true
+	//（owner 显式关，与「旧缺省 false=关」可区分）；SetGuestInput(true) 清零
+	off, err := st.SetGuestInput(created.Token, false)
+	if err != nil || !off.GuestInputOff || off.Collab {
+		t.Fatalf("guest-input off: %+v err=%v", off, err)
 	}
-	// 与协作通道互不联动：开直通不带上协作，反之亦然
+	// 与协作通道互不联动
 	if _, err := st.SetCollab(created.Token, true); err != nil {
 		t.Fatalf("collab on: %v", err)
 	}
 	got, _ := st.Get(created.Token)
-	if !got.Collab || !got.DirectInput {
+	if !got.Collab || !got.GuestInputOff {
 		t.Fatalf("independent toggles wrong: %+v", got)
 	}
-	if _, err := st.SetDirectInput(created.Token, false); err != nil || got == nil {
-		t.Fatalf("direct off failed")
+	if _, err := st.SetGuestInput(created.Token, true); err != nil {
+		t.Fatalf("guest-input on failed: %v", err)
 	}
 	got, _ = st.Get(created.Token)
-	if got.DirectInput || !got.Collab {
-		t.Fatalf("direct off wrong: %+v", got)
+	if got.GuestInputOff || !got.Collab {
+		t.Fatalf("guest-input on wrong: %+v", got)
 	}
 	// 未知 token → ErrNotFound
-	if _, err := st.SetDirectInput("nope0123456789ab", true); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.SetGuestInput("nope0123456789ab", true); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unknown token = %v, want ErrNotFound", err)
 	}
 }
@@ -95,15 +98,17 @@ func TestShareStoreCollabExpiredRejected(t *testing.T) {
 	if _, err := st.SetCollab(created.Token, true); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expired collab toggle = %v, want ErrNotFound", err)
 	}
-	if _, err := st.SetDirectInput(created.Token, true); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("expired direct toggle = %v, want ErrNotFound", err)
+	if _, err := st.SetGuestInput(created.Token, false); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expired guest-input toggle = %v, want ErrNotFound", err)
 	}
 }
 
 // TestShareStoreLegacyDocWithoutCollabFields 旧数据面 + 新二进制（升级兼容
-// 纪律的形态验证）：旧版本落库的 Share 文档没有 collab/directInput 字段——
-// 新二进制读出必须零值关（存量语义零变化），且 SetCollab 可在其上增量开启
-// （升级路径不要求清数据目录/迁移标记）
+// 纪律的形态验证）：旧版本落库的 Share 文档没有 collab/guestInputOff 字段
+// ——新二进制读出必须零值语义（collab 关；GuestInputOff 零值=申请通道开，
+// P-20261121-1 默认在场定案的存量面：全部存量即得通道开，无需迁移），且
+// SetCollab/SetGuestInput 可在其上增量操作（升级路径不要求清数据目录/迁移
+// 标记）
 func TestShareStoreLegacyDocWithoutCollabFields(t *testing.T) {
 	fdir := t.TempDir()
 	fs := filestore.New(fdir)
@@ -122,8 +127,8 @@ func TestShareStoreLegacyDocWithoutCollabFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get legacy share: %v", err)
 	}
-	if got.Collab || got.DirectInput {
-		t.Fatalf("legacy doc must read as both switches off, got %+v", got)
+	if got.Collab || got.GuestInputOff {
+		t.Fatalf("legacy doc must read as collab off + guest-input channel on, got %+v", got)
 	}
 	if got.Hits != 3 {
 		t.Fatalf("legacy fields must survive: hits = %d", got.Hits)
@@ -133,8 +138,16 @@ func TestShareStoreLegacyDocWithoutCollabFields(t *testing.T) {
 		t.Fatalf("set collab on legacy share: %v", err)
 	}
 	re, _ := st.Share.Get("2315s8zyxrj82squ")
-	if !re.Collab || re.DirectInput {
+	if !re.Collab || re.GuestInputOff {
 		t.Fatalf("legacy share collab on wrong: %+v", re)
+	}
+	// 存量记录显式关通道（新开关承载）：反向极性字段落库可辨
+	if _, err := st.Share.SetGuestInput("2315s8zyxrj82squ", false); err != nil {
+		t.Fatalf("set guest-input off legacy share: %v", err)
+	}
+	re, _ = st.Share.Get("2315s8zyxrj82squ")
+	if !re.GuestInputOff {
+		t.Fatalf("legacy share guest-input off wrong: %+v", re)
 	}
 	if re.Hits != 3 {
 		t.Fatalf("RMW must not touch legacy hits: %d", re.Hits)

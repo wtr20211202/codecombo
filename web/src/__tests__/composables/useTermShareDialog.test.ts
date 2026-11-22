@@ -4,6 +4,7 @@ import { useShareDialog } from '@/composables/useShareDialog'
 import { confirmDialog } from '@/composables/useDialog'
 import { shareApi } from '@/api/domains/share'
 import type { ShareInfo } from '@/api/domains/share'
+import { TERM_LIVE_TTL_PERMANENT } from '@/utils/shareTtl'
 
 // 终端输出分享选项流单测（P-20261106-9）：安全默认（每次打开重置为遮蔽开/水印
 // 开）、确认载荷映射（开关 → unfiltered/watermark 字段）、出域警示的确认/取消
@@ -262,5 +263,47 @@ describe('useTermShareDialog 选项流', () => {
     shareFrozen.mockResolvedValue({ data: createdShare({ token: 'tok-pass', kind: 'terminal-frozen' }) } as never)
     expect(await term.confirmTermOptions()).toBe('created')
     expect(shareFrozen).toHaveBeenCalledWith('s1', false, { unfiltered: false, watermark: true, passphrase: 'snap-key' })
+  })
+
+  // ── 永久挡（P-20261119-5） ──
+
+  it('直播永久挡：发 permanent:true 且不发 ttlMinutes；fresh 创建无 expiresAt → 零对账请求', async () => {
+    const term = useTermShareDialog()
+    term.createTerminalLive('s1')
+    term.termLiveTtlMinutes.value = TERM_LIVE_TTL_PERMANENT
+    shareCreate.mockResolvedValue({ data: createdShare({ token: 'tok-perm' }) } as never)
+    expect(await term.confirmTermOptions()).toBe('created')
+    // 永久哨兵不得透传为 ttlMinutes（服务端负数 400），改走 permanent 标记
+    expect(shareCreate).toHaveBeenCalledWith('s1', undefined, false, { unfiltered: false, watermark: true, permanent: true })
+    expect(setExpiryMock).not.toHaveBeenCalled()
+  })
+
+  it('直播永久挡命中既有倒计时：setExpiry(null) 清窗对账（幂等不清窗由这里补）', async () => {
+    const term = useTermShareDialog()
+    term.createTerminalLive('s1')
+    term.termLiveTtlMinutes.value = TERM_LIVE_TTL_PERMANENT
+    const stale = createdShare({ token: 'tok-old', expiresAt: new Date(Date.now() + 5 * 60_000).toISOString() })
+    shareCreate.mockResolvedValue({ data: stale } as never)
+    setExpiryMock.mockResolvedValue({ data: createdShare({ token: 'tok-old' }) } as never)
+    expect(await term.confirmTermOptions()).toBe('created')
+    expect(setExpiryMock).toHaveBeenCalledTimes(1)
+    expect(setExpiryMock.mock.calls[0]![0]).toBe('tok-old')
+    expect(setExpiryMock.mock.calls[0]![1]).toBeNull()
+  })
+
+  it('永久挡 × 关闭遮蔽：组合合法照常创建（permanent+unfiltered 同传；警示面在弹层就地说明）', async () => {
+    const term = useTermShareDialog()
+    term.createTerminalLive('s1')
+    term.termMask.value = false
+    term.termLiveTtlMinutes.value = TERM_LIVE_TTL_PERMANENT
+    confirmMock.mockResolvedValueOnce(true) // 未过滤出域警示确认（组合不禁创建）
+    shareCreate.mockResolvedValue({ data: createdShare({ token: 'tok-perm-unf', unfiltered: true }) } as never)
+    expect(await term.confirmTermOptions()).toBe('created')
+    // 组合照发请求（【用户定向修订】：不再 400 硬禁——知情面保留、行动自由
+    // 交给用户，撤销兜底在分享管理）
+    expect(shareCreate).toHaveBeenCalledWith('s1', undefined, false, { unfiltered: true, watermark: true, permanent: true })
+    // fresh 创建已落零值（响应无 expiresAt）→ 零对账请求
+    expect(setExpiryMock).not.toHaveBeenCalled()
+    expect(term.showTermOptions.value).toBe(false)
   })
 })

@@ -9,6 +9,7 @@ import { CopyOutline } from '@vicons/ionicons5'
 import { useI18n } from '../../composables/useI18n'
 import { useShareAddressPlan } from '../../composables/useShareAddressPlan'
 import { copyText } from '../../utils/clipboard'
+import { shouldWarnCopy } from '../../utils/shareAddress'
 
 const props = withDefaults(defineProps<{
   token: string
@@ -25,7 +26,7 @@ const emit = defineEmits<{ 'update:url': [url: string] }>()
 
 const { t } = useI18n()
 const message = useMessage()
-const { loading, status, candidates, selectedIP, statusTone, statusKey, hint, urlOf, load } = useShareAddressPlan()
+const { loading, status, plan, candidates, selectedIP, statusTone, statusKey, hint, urlOf, load } = useShareAddressPlan()
 
 const url = computed(() => urlOf(props.token))
 watch(url, (v) => emit('update:url', v), { immediate: true })
@@ -38,8 +39,12 @@ watch(() => props.active, (v) => {
 }, { immediate: true })
 
 const testid = (suffix: string) => `${props.testidPrefix}-${suffix}`
-const candidateOptions = computed(() =>
-  candidates.value.map(a => ({ label: `${a.iface} · ${a.ip}`, value: a.ip })))
+// 首项「自动（当前浏览器地址）」伪选项：selectedIP 空 = 自动态（回环入口下
+// 链接即浏览器地址栏 origin，P-20261120-4）；显式选择后可随时切回
+const candidateOptions = computed(() => [
+  { label: t('share.qr.addressAuto'), value: '' },
+  ...candidates.value.map(a => ({ label: `${a.iface} · ${a.ip}`, value: a.ip })),
+])
 
 async function onCopy() {
   if (!url.value) return
@@ -48,6 +53,13 @@ async function onCopy() {
   const ok = await copyText(url.value)
   if (ok) message.success(t('share.linkCopied'))
   else message.error(t('common.copyFailed'))
+  // 回环入口下的回环本源/候选/旧格式链接不能承诺对端可达（P-20261119-7，
+  // P-20261120-4 扩 loopbackSelf 档）：判定与文案单一事实源在
+  // shareAddress.shouldWarnCopy，与管理器各复制面共用
+  if (ok) {
+    const level = shouldWarnCopy(plan.value)
+    if (level) message.warning(t(`share.copyWarn.${level}`))
+  }
 }
 </script>
 

@@ -14,8 +14,9 @@
 #
 # 行为：探测平台 → 版本决策（正式版优先，无则最新 rc，再无最新 beta）→
 # 从 GitHub Releases 下载对应二进制 →
-# SHA256 校验 → 装入用户级目录 → 服务化（Linux systemd 系统服务需 sudo，
-# 无 sudo 退化为手动启动说明；macOS launchd 用户代理免 sudo）→ Linux systemd
+# SHA256 校验 → 装入用户级目录 → 服务化（Linux systemd 系统服务需免密 sudo
+# 或 root 身份直写——root 会话免 sudo；两者皆无退化为手动启动说明；macOS
+# launchd 用户代理免 sudo）→ Linux systemd
 # 路径同装 polkit 放行规则（应用内自更新收尾与「重启应用」按钮以服务用户
 # 身份 systemctl restart codecombo.service，系统服务默认策略要求鉴权，无规则
 # 必被拒——与远程部署器 server/deploy/codecombo.go 同款）。
@@ -25,8 +26,8 @@
 # PATH/WorkingDirectory 与默认开启的 NoNewPrivileges）【禁止】重跑：unit 被
 # 本脚本模板覆写丢掉这几行、缺省绑定缩回 127.0.0.1，服务一重启远程访问即断。
 # npm 安装的更新归 npm 管（应用内自动让位）。数据目录零触碰（见下 PREFIX 注）。
-# Linux 上服务在跑时重跑只换盘上二进制（有免密 sudo 时连带重写 unit）、
-# 不重启——需 sudo systemctl restart codecombo 才生效（macOS 由脚本
+# Linux 上服务在跑时重跑只换盘上二进制（有免密 sudo 或 root 身份时连带重写
+# unit）、不重启——需 sudo systemctl restart codecombo 才生效（macOS 由脚本
 # launchctl unload/load 即时生效）。
 #
 # 环境变量：
@@ -41,6 +42,10 @@
 #                      unit / launchd plist 的 CC_DATA_DIR 环境变量、手动启动
 #                      命令的 --data-dir——仍不创建/写入该目录（首启由应用自
 #                      建）；未设置时 unit/plist 不写该变量，与旧版逐字一致
+#   CODECOMBO_MIRROR  镜像前缀（默认 https://ghproxy.net/；下载官方直连失败时
+#                      自动以「前缀+完整 URL」形态重试一轮）。置空禁用镜像回落；
+#                      也可覆盖为其他 ghproxy 型前缀——此类服务历史上换域名/
+#                      易主频发，失效时改环境变量即可，不必改脚本
 #
 # 并存第二套实例：服务名固定（codecombo.service / com.codecombo），一台机器
 # 只有一个脚本托管的服务——已有该服务的实例（脚本装或远程部署装）时，带新
@@ -60,8 +65,9 @@ REPO="wtr20211202/codecombo"
 PORT="${CODECOMBO_PORT:-9999}"
 BIND_HOST="${CODECOMBO_HOST:-127.0.0.1}"
 
-# 运行用户感知：脚本设计为「普通用户身份运行，内部 sudo 提权写系统文件」。
-# 整条 sudo 跑时 $HOME/SUDO_USER 会指向 root——服务 unit 的 User= 与安装/数据
+# 运行用户感知：脚本设计为「普通用户身份运行，内部 sudo 提权写系统文件」；
+# root 直跑同样支持（免 sudo 直写系统文件，见下方服务化判定分支）。整条
+# sudo 跑时 $HOME/SUDO_USER 会指向 root——服务 unit 的 User= 与安装/数据
 # 目录必须跟随真实用户，否则服务以 root 身份跑、数据落 /root/.codecombo
 REAL_USER="${SUDO_USER:-$(id -un)}"
 
@@ -96,6 +102,9 @@ if [ -n "$SELF" ] && [ -f "$SELF" ]; then
   else
     echo "ERROR: 安装脚本下载不完整——网络中断或代理改写（尾部哨兵缺失）。" >&2
     echo "  请重试下载安装，或改用 npm 渠道：npm i -g codecombo@next" >&2
+    # 镜像回退指引（P-20261116-2-S1）：CN 网络官方直连不可达是失败常态——给可整条
+    # 粘贴的镜像前缀命令（循上方 root 防线 printf 全命令先例）；脚本内自动重试归 S2
+    printf '  官方直连不可达可走镜像前缀重试：p=$(mktemp) && curl -fsSL --retry 3 https://ghproxy.net/https://raw.githubusercontent.com/%s/main/scripts/install.sh -o "$p" && sh "$p"; rm -f "$p"\n' "$REPO" >&2
     exit 1
   fi
 else
@@ -201,9 +210,54 @@ if [ -n "${CODECOMBO_DATA_DIR:-}" ]; then
   say "数据目录：${DATA_DIR}（CODECOMBO_DATA_DIR；首启由应用自建，安装器不写入）"
 fi
 
-# ---------- 下载（指定版本资产 + 校验和清单） ----------
+# ---------- 下载（指定版本资产 + 校验和清单；官方直连失败自动镜像重试） ----------
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+
+# 镜像回退（P-20261116-2-S2）：CODECOMBO_MIRROR 覆盖镜像前缀，默认 ghproxy.net
+# 示例——ghproxy 型服务历史上换域名/易主频发，硬编码无逃生口则失效即白付一轮
+# 超时（评审修订点③）；置空禁用镜像回落。形态与 README/官网示例同款=完整 URL
+# 前加前缀，尾斜杠缺失自动补；非 http(s) 值视为误配、下载前即报（fail fast 省
+# 一轮必然失败的超时，循上方 CODECOMBO_DATA_DIR 校验先例）。`${VAR-默认}` 无冒
+# 号形态是刻意的：`:-` 会把显式置空也回落默认，「置空=禁用」就没了
+MIRROR="${CODECOMBO_MIRROR-https://ghproxy.net/}"
+if [ -n "${MIRROR}" ]; then
+  case "${MIRROR}" in
+    http://*|https://*) ;;
+    *) printf 'ERROR: CODECOMBO_MIRROR 须为 http(s):// 形态的镜像前缀（当前值：%s）\n' "${MIRROR}" >&2; exit 1 ;;
+  esac
+  case "${MIRROR}" in
+    */) ;;
+    *) MIRROR="${MIRROR}/" ;;
+  esac
+fi
+
+# dl <回落提示> <URL> <输出文件> <curl 选项...>：官方直连优先（选项由调用方传，
+# 资产与清单各自的进度/续传/超时形态原样保留）；curl 非零退出且启用镜像时清掉
+# 半成品（-C - 续传跨源会把两个来源拼进同一文件，镜像轮整文件重下、SHA256 对
+# 单源结果兜底）、say 回落提示后以镜像前缀重试一轮。两轮均败（或镜像置空）返
+# 回非零交调用方 dl_fail 报错。调用方一律置于 if ! 测试语境——函数体内 set -e
+# 挂起，curl 失败不再像裸两条 curl 那样静默退出（本函数即 S2 新建的下载失败分支）
+dl() {
+  _dl_note="$1"; _dl_url="$2"; _dl_out="$3"; shift 3
+  if curl "$@" "${_dl_url}" -o "${_dl_out}"; then
+    return 0
+  fi
+  [ -n "${MIRROR}" ] || return 1
+  rm -f "${_dl_out}"
+  if [ -n "${_dl_note}" ]; then say "${_dl_note}"; fi
+  curl "$@" "${MIRROR}${_dl_url}" -o "${_dl_out}"
+}
+
+# 两轮均败的统一出口：npm 渠道 + 镜像手动指引（前缀可覆盖，失效换值即可，
+# 不硬编码单点镜像）
+dl_fail() {
+  echo "ERROR: 下载失败：官方直连不可达，镜像回落未启用（CODECOMBO_MIRROR 置空）或同样失败。" >&2
+  echo "  改用 npm 渠道：npm i -g codecombo@next（registry 自带完整性机制）" >&2
+  echo "  或稍后重试官方直连；镜像前缀可用 CODECOMBO_MIRROR 覆盖（ghproxy 型服务换域名/易主时改值即可）" >&2
+  exit 1
+}
+
 say "下载 $BASE/${ASSET}（约 50MB，进度条见下；慢网络需数分钟）"
 # -# 进度条（静默模式像卡死）；--connect-timeout/--max-time 防死连接挂起
 # -C - 断点续传（BASE 固定 GitHub Releases 下载端点，支持 Range）：有续传条件
@@ -211,11 +265,23 @@ say "下载 $BASE/${ASSET}（约 50MB，进度条见下；慢网络需数分钟�
 # 本分化（本机双二进制实测）：新版 curl（上游 2025-10 修复 retry 续传，
 # Windows 自带 8.21.0 实测重连即 Range 续传）；老版（Ubuntu 24.04 自带 8.5.0
 # 实测）重试仍从零重下（无害——输出被重写，SHA256 兜底）；传输被掐断
-# （error 18）各版都不重试，直接报错走下方失败提示。$TMP 由 mktemp 本次运行
-# 新建，无旧版本残留文件被误续拼接的可能。SHA256SUMS 小文件不加 -C -：整文
-# 件重试代价可忽略，不为它引入续传语义变量
-curl -# -fSL -C - --retry 3 --connect-timeout 30 --max-time 1800 "$BASE/$ASSET" -o "$TMP/codecombo"
-curl -fsSL --retry 3 --connect-timeout 30 "$BASE/SHA256SUMS.txt" -o "$TMP/SHA256SUMS.txt"
+# （error 18）各版都不重试——非零退出即进下方 dl 的镜像回退。$TMP 由 mktemp
+# 本次运行新建，无旧版本残留文件被误续拼接的可能（镜像轮的半成品由 dl 清掉）。
+# SHA256SUMS 小文件不加 -C -：整文件重试代价可忽略，不为它引入续传语义变量
+if ! dl "官方直连失败，改走镜像重试（CODECOMBO_MIRROR=${MIRROR}）" \
+     "${BASE}/${ASSET}" "${TMP}/codecombo" \
+     -# -fSL -C - --retry 3 --connect-timeout 30 --max-time 1800; then
+  dl_fail
+fi
+# SHA256SUMS 清单：官方源优先、镜像回落——回落提示附信任边界残余风险注记
+# （清单与二进制同走镜像时校验基准可被一并调包——与 README「信任边界如实说」
+# 措辞同源：防损坏有防线/防恶意改写无防线的边界不因回落而含糊）；清单缺行
+# fail-closed 现状保持（下方 expect 守卫零改动）
+if ! dl "官方直连失败，SHA256SUMS 清单改走镜像下载（CODECOMBO_MIRROR=${MIRROR}）。注意：清单与二进制同走镜像时，校验基准可被一并调包（防损坏不防恶意改写）——完整性敏感场景请改官方直连或 npm 渠道" \
+     "${BASE}/SHA256SUMS.txt" "${TMP}/SHA256SUMS.txt" \
+     -fsSL --retry 3 --connect-timeout 30; then
+  dl_fail
+fi
 
 # ---------- SHA256 校验（GNU sha256sum 与 macOS shasum 双兼容） ----------
 expect=$(grep " ${ASSET}\$" "$TMP/SHA256SUMS.txt" | awk '{print $1}')
@@ -274,10 +340,26 @@ UNIT
 }
 
 if [ "$OS" = linux ] && command -v systemctl >/dev/null 2>&1; then
-  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  # 服务化判定（P-20261116-3）：root 身份免 sudo 直注册——sudo 未装/免密探测
+  # 失败的 root 会话此前被漏判只落手动指引（用户实测：事故机 root 直跑装完
+  # 二进制却不注册不拉起，而机器上 enabled 旧 unit 恰与新二进制 ExecStart 同
+  # 路径，只差一条 systemctl start）；真全新 root 机器仍被上方 root 防线拦截，
+  # 本判定只放行 SUDO_USER 在场的 root 会话
+  if [ "$(id -u)" = "0" ] || { command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; }; then
+    # 特权前缀单一变量：root 置空、非 root 统一 sudo——本分支全部特权命令走
+    # ${SUDO} 单代码路径，不复制 root/sudo 两分支（root 直写与 sudo tee 产物
+    # 等价：sudo tee 本以 root 身份执行，root:root 同权限同 SELinux 语境）
+    if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi
     say "注册 systemd 系统服务 codecombo.service（端口 ${PORT}）"
-    SERVICE_unit | sudo tee /etc/systemd/system/codecombo.service >/dev/null
-    sudo systemctl daemon-reload
+    # unit 原子写（评审修订点②「写失败不破坏现有注册」）：先写同目录临时名
+    # 再 mv——同目录 mv 走 rename(2) 原子替换；tee/重定向先截断后写，中写失败
+    # 会留残缺 unit 破坏既有注册，本形态写失败只丢临时件（临时名非 .service
+    # 后缀，systemd 单元扫描不认，残留无副作用），原 unit 分毫不动。$$ 防并发
+    # 重跑互踩
+    UNIT_TMP="/etc/systemd/system/.codecombo.service.new.$$"
+    SERVICE_unit | ${SUDO} tee "$UNIT_TMP" >/dev/null
+    ${SUDO} mv -f "$UNIT_TMP" /etc/systemd/system/codecombo.service
+    ${SUDO} systemctl daemon-reload
     # 自更新/页面重启配套（与远程部署器 server/deploy/codecombo.go 同款规则）：
     # 更新收尾与「重启应用」钩子以服务用户身份执行 `systemctl restart`，系统
     # 服务默认 polkit 策略为 auth_admin（manage-units implicit any）——无放行
@@ -307,20 +389,26 @@ Action=org.freedesktop.systemd1.manage-units
 ResultAny=yes
 PKLA
 )
-    if sudo mkdir -p /etc/polkit-1/rules.d /etc/polkit-1/localauthority/50-local.d \
-      && printf '%s\n' "$POLKIT_RULE" | sudo tee /etc/polkit-1/rules.d/10-codecombo-restart.rules >/dev/null \
-      && printf '%s\n' "$POLKIT_PKLA" | sudo tee /etc/polkit-1/localauthority/50-local.d/10-codecombo-restart.pkla >/dev/null; then
+    if ${SUDO} mkdir -p /etc/polkit-1/rules.d /etc/polkit-1/localauthority/50-local.d \
+      && printf '%s\n' "$POLKIT_RULE" | ${SUDO} tee /etc/polkit-1/rules.d/10-codecombo-restart.rules >/dev/null \
+      && printf '%s\n' "$POLKIT_PKLA" | ${SUDO} tee /etc/polkit-1/localauthority/50-local.d/10-codecombo-restart.pkla >/dev/null; then
       say "已装 polkit 放行规则（允许服务用户自重启 codecombo.service——应用内自更新收尾与重启按钮依赖）"
     else
       say "警告：polkit 规则安装失败——应用内自更新收尾与「重启应用」按钮将被拒（修复后重跑本脚本即可）"
     fi
     # 数据目录保护（安装器纪律）：已有活实例在跑时只注册不启动——两个实例
-    # 共写一个数据目录会互踩（pid/锁/日志）；接管时机交给用户
+    # 共写一个数据目录会互踩（pid/锁/日志）；接管时机交给用户。守卫置于
+    # enable --now 之前（评审修订点①）：运行中实例重装只换盘上二进制+重写
+    # unit（app.go 启动即写 pid 文件，systemd 在跑的重装必命中守卫），跳过
+    # 拉起防双实例共写；failed/未在跑态守卫不命中照常拉起——既有 enabled
+    # unit 只差一条 start 的重装修复场景由此闭环
     if [ -f "$DATA_DIR/codecombo.pid" ] && kill -0 "$(cat "$DATA_DIR/codecombo.pid" 2>/dev/null)" 2>/dev/null; then
       say "检测到正在运行的 Codecombo 实例——服务已注册但【未启动】（避免双实例共写数据目录）"
-      say "停掉旧实例后执行：sudo systemctl start codecombo"
+      # 提示去 sudo 前缀（评审修订点③）：root 免 sudo 环境（${SUDO} 已空）
+      # 打印「sudo systemctl start」不可执行
+      say "停掉旧实例后执行：${SUDO:+sudo }systemctl start codecombo"
     else
-      sudo systemctl enable --now codecombo.service
+      ${SUDO} systemctl enable --now codecombo.service
       say "服务已启动：systemctl status codecombo"
     fi
     say "访问 http://localhost:${PORT}（首启设置锁密码）"
@@ -338,7 +426,7 @@ PKLA
   # 指引（免密 sudo 缺席时无法代装）
   say "并同装 polkit 放行规则（服务用户自重启授权，应用内自更新收尾与重启按钮依赖）："
   say "  /etc/polkit-1/rules.d/10-codecombo-restart.rules 放行 subject.user=unit 的 User= 重启 codecombo.service"
-  say "  （完整规则见本脚本 systemd 分支——有免密 sudo 的机器重跑本脚本自动补装）"
+  say "  （完整规则见本脚本 systemd 分支——有免密 sudo 或 root 身份的机器重跑本脚本自动补装）"
 fi
 
 if [ "$OS" = darwin ]; then

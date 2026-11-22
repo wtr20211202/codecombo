@@ -341,11 +341,16 @@ func Run(opts Options) {
 		})
 	}
 
-	// 长操作路由（push/pull/fetch/clone；远程文件上传/下载/互传）清零读写超时：
-	// 大文件传输轻松超过全局 WriteTimeout 60s，上传侧 ReadTimeout 30s 同样不够。
+	// 长操作路由（push/pull/fetch/clone；远程文件上传/下载/互传；快投递
+	// 多文件上行）清零读写超时：大文件传输轻松超过全局 WriteTimeout 60s，
+	// 上传侧 ReadTimeout 30s 同样不够。
 	// 中心分发拉取（apply-from-center）在请求内同步下载整包（客户端窗口 5 分钟），
 	// 慢链路超 60s 即被写超时截断——前端报失败而服务端照常换包（P-20261109-10；
-	// 自更新 /updates/apply 已异步化受理即返回，无须豁免）
+	// 自更新 /updates/apply 已异步化受理即返回，无须豁免）。
+	// 快投递访客页多文件上行（P-20261117-2-S1）：POST /drop/（multipart）在
+	// 2GB 总量配额下必须豁免 30s 读超时（≥68MB/s 才能过闸=必死）；写侧 60s
+	// 自请求头读毕起算，长传完成后的响应同样越窗——读写一并清零。GET /drop/
+	// 是零依赖单页不豁免
 	r.Use(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		longWrite := c.Request.Method == "POST" &&
@@ -355,10 +360,11 @@ func Run(opts Options) {
 		longTransfer := strings.Contains(path, "/files/upload") ||
 			strings.Contains(path, "/files/download") ||
 			strings.Contains(path, "/files/transfer")
-		if longWrite || longTransfer {
+		longUpload := c.Request.Method == "POST" && strings.HasPrefix(path, "/drop/")
+		if longWrite || longTransfer || longUpload {
 			rc := http.NewResponseController(c.Writer)
 			_ = rc.SetWriteDeadline(time.Time{})
-			if longTransfer {
+			if longTransfer || longUpload {
 				_ = rc.SetReadDeadline(time.Time{})
 			}
 		}

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NButton } from 'naive-ui'
 import BrandIcon from '../../common/BrandIcon.vue'
 import { useI18n } from '../../../composables/useI18n'
@@ -8,10 +9,12 @@ import { openSettingsTab } from '../../../utils/openSettings'
  * dsh 控制台嵌入体（P-20261001-20 从 DshConsoleView 拆出的渲染层）：
  * 提示条（仅本机/证书/降级）+ 令牌引导横幅 + iframe（保活）+ 加载态 + 未运行空态。
  * 探测与启动/重启逻辑在宿主，本组件 props 入 / emits 出。
+ * 空态可诊断化（P-20261118-4）：空态显示实际探测的 base/目标与失败归因，
+ * launching 时替换「未检测到」标题消解文案矛盾，外部实例检测态出设置直达入口。
  */
 const { t } = useI18n()
 
-defineProps<{
+const props = defineProps<{
   /** LAN 浏览器 + 未开放所有 IP：回环代理地址对该浏览器不可达 */
   localOnly: boolean
   /** 「一键开放」进行中 */
@@ -21,10 +24,15 @@ defineProps<{
   certAcceptUrl: string
   /** 反代监听失败（端口占用等） */
   proxyDegraded: boolean
+  /** 外部目标激活且反代关闭（P-20261118-6 ⑩）：直连嵌入缺帧头剥离/签发门/
+   *  混合内容硬阻断——显式警告引导启用反代 */
+  externalTargetProxyOff: boolean
   /** 令牌失效/未配置：不渲染 iframe，引导居中呈现 */
   tokenNeedsAuth: boolean
   tokenState: string
   activeTargetId: string
+  /** 激活目标的上游地址（空串 = 本机）：空态文案分支用（目标机 ≠ 本机） */
+  activeTargetBase: string
   /** 令牌重启动作进行中 */
   restarting: boolean
   /** 启动/重启的提示文案（空串 = 无） */
@@ -37,6 +45,10 @@ defineProps<{
   available: boolean | null
   /** 一键启动进行中 */
   launching: boolean
+  /** 探测诊断块（available=false 且后端携带时非 null；缺省 null 不渲染诊断行） */
+  probeDiag: { base?: string; target?: string; latencyMs?: number; errClass?: string; err?: string } | null
+  /** 检测到外部运行的 dsh 实例（空态显示令牌填写直达入口） */
+  launchExternalDetected: boolean
 }>()
 
 const emit = defineEmits<{
@@ -45,11 +57,42 @@ const emit = defineEmits<{
   (e: 'dismiss-cert-hint'): void
   /** 重启 dsh 进程捕获新令牌（仅本机目标可用） */
   (e: 'restart-for-token'): void
+  /** 打开目标管理器（外部目标的令牌编辑入口，P-20261118-6 ⑥） */
+  (e: 'open-target-manager'): void
   (e: 'refresh'): void
   /** 一键启动（后端拉起 dsh + 自动捕获令牌） */
   (e: 'launch'): void
   (e: 'iframe-load'): void
 }>()
+
+/** 诊断行失败归因：errClass 枚举映射可读文案（未知枚举回落 other 档） */
+const probeErrText = computed(() => {
+  switch (props.probeDiag?.errClass) {
+    case 'timeout': return t('dshConsole.probeErrTimeout')
+    case 'refused': return t('dshConsole.probeErrRefused')
+    case 'tls': return t('dshConsole.probeErrTls')
+    default: return t('dshConsole.probeErrOther')
+  }
+})
+
+/** 空态诊断行（P-20261118-4）：「已探测 <base>（目标 <id>）：<失败原因>」——
+ *  配置带偏（DshWebBase 被设置导入改写/目标选错）一眼可见；err 原文摘录为辅 */
+const probeDiagLine = computed(() => {
+  const d = props.probeDiag
+  if (!d?.base) return ''
+  const cls = probeErrText.value
+  const reason = d.err ? t('dshConsole.probeErrRaw', { cls, raw: d.err }) : cls
+  return t('dshConsole.probeDiagLine', { base: d.base, target: d.target || 'local', reason })
+})
+
+/** 外部目标空态文案（P-20261118-6 ⑥）：目标机 ≠ 本机、base ≠ 默认 3080、
+ *  令牌编辑在目标管理器不在设置页——「本机 dsh/默认端口/设置→终端」三处
+ *  误导对外部目标一次收口 */
+const offHint = computed(() => {
+  if (!props.activeTargetId) return t('dshConsole.notRunningHint')
+  const host = props.activeTargetBase.replace(/^https?:\/\//, '')
+  return t('dshConsole.notRunningHintTarget', { host: host || props.activeTargetId })
+})
 </script>
 
 <template>
@@ -96,6 +139,16 @@ const emit = defineEmits<{
     >
       {{ t('dshConsole.degradedHint') }}
     </div>
+    <!-- 外部目标 + 反代关闭（P-20261118-6 ⑩）：直连嵌入三重坏（dsh 帧策略
+         无剥离/https 主站 http 外链混合内容硬阻断/降级风险）——显式警告引导
+         启用反代通道，替代静默给出注定体验劣化的直连地址 -->
+    <div
+      v-if="externalTargetProxyOff"
+      class="dsh-hint warn"
+      data-test="dsh-external-proxy-off"
+    >
+      {{ t('dshConsole.externalTargetProxyOff') }}
+    </div>
     <!-- 令牌失效/未配置：dsh 鉴权页嵌入后仅有一行英文且无行动入口，
          此处给出可操作引导（一键启动捕获令牌 / 去设置手动填令牌）。
          该状态下不渲染 iframe——dsh 鉴权页是刺眼白底，与暗色主题割裂，
@@ -118,7 +171,19 @@ const emit = defineEmits<{
           >
             {{ t('dshConsole.restartBtn') }}
           </n-button>
+          <!-- 令牌编辑入口随目标（P-20261118-6 ⑥）：外部目标的令牌在目标
+               管理器维护，「打开设置」改的是本机 DshWebToken——指过去必误导 -->
           <n-button
+            v-if="activeTargetId"
+            size="tiny"
+            quaternary
+            data-test="dsh-open-target-manager"
+            @click="emit('open-target-manager')"
+          >
+            {{ t('dshConsole.openTargetManager') }}
+          </n-button>
+          <n-button
+            v-else
             size="tiny"
             quaternary
             @click="openSettingsTab('terminal')"
@@ -159,11 +224,20 @@ const emit = defineEmits<{
         name="dsh"
         :size="42"
       />
+      <!-- launching 时「未检测到」标题与「启动中」按钮并存矛盾消解：启动中替换标题 -->
       <div class="dsh-off-title">
-        {{ t('dshConsole.notRunning') }}
+        {{ launching ? t('dshConsole.launching') : t('dshConsole.notRunning') }}
       </div>
       <div class="dsh-off-hint">
-        {{ t('dshConsole.notRunningHint') }}
+        {{ offHint }}
+      </div>
+      <!-- 空态诊断行（P-20261118-4）：实际探测的 base/目标与失败归因——
+           配置带偏一眼可见；probe 缺省（旧后端/请求失败）不渲染 -->
+      <div
+        v-if="probeDiagLine"
+        class="dsh-off-diag"
+      >
+        {{ probeDiagLine }}
       </div>
       <div class="dsh-off-actions">
         <n-button
@@ -189,6 +263,25 @@ const emit = defineEmits<{
       >
         {{ launchHint }}
       </div>
+      <!-- 检测到外部运行实例：手动填令牌直达入口为主（不再引导重启）；
+           入口随目标分支（P-20261118-6 ⑥）——外部目标的令牌在目标管理器 -->
+      <n-button
+        v-if="launchExternalDetected && activeTargetId"
+        size="small"
+        quaternary
+        data-test="dsh-open-target-manager"
+        @click="emit('open-target-manager')"
+      >
+        {{ t('dshConsole.openTargetManager') }}
+      </n-button>
+      <n-button
+        v-else-if="launchExternalDetected"
+        size="small"
+        quaternary
+        @click="openSettingsTab('terminal')"
+      >
+        {{ t('dshConsole.openDshSettings') }}
+      </n-button>
     </div>
   </div>
 </template>
@@ -278,5 +371,18 @@ const emit = defineEmits<{
 }
 .dsh-off-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .dsh-off-hint { font-size: 12px; color: var(--text-secondary); max-width: 420px; text-align: center; line-height: 1.6; white-space: pre-line; }
+/* 空态诊断行：实际探测的 base 与失败归因（等宽呈现 base 便于逐字符比对） */
+.dsh-off-diag {
+  font-size: 12px;
+  color: var(--accent-orange);
+  max-width: 480px;
+  text-align: center;
+  line-height: 1.6;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-orange) 30%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-orange) 8%, transparent);
+  word-break: break-all;
+}
 .dsh-off-actions { display: flex; gap: 8px; }
 </style>

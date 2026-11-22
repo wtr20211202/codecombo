@@ -701,137 +701,6 @@ func ListShares(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
-// ── 终端只读直播分享（P-20261003-306） ──
-
-// liveWire 终端直播馈线接线口（liveterm.Hub 结构性满足；Module Start 注入、
-// Stop 摘除。nil = 未装配——创建仍成功，馈线在访客订阅时由 hub 惰性接通，
-// 语义不变只是首访多一次播种）。unfiltered 是 live 源参数（P-20261106-9）：
-// 取生效记录（幂等命中时是既有记录，非请求值）的 Unfiltered，模式不符的
-// 陈旧馈线由 hub 整条替换；Prune 供过期清理巡检按存活 token 集收口馈线
-type liveWiring interface {
-	Wire(token, sessionID string, unfiltered bool)
-	Unwire(token string)
-	Prune(keep map[string]bool) int
-}
-
-var liveWire liveWiring
-
-// setLiveWire 注入/摘除接线口（Module Start/Stop 调用；测试可直接置 nil）
-func setLiveWire(h liveWiring) { liveWire = h }
-
-// unfilteredEgressNote 未过滤分享（P-20261106-9）的审计/日志 Detail 后缀：
-// 敏感值遮蔽被显式关闭是出域安全事件的关键维度，审计台账必须一眼可辨
-func unfilteredEgressNote(unfiltered bool) string {
-	if unfiltered {
-		return ", UNFILTERED"
-	}
-	return ""
-}
-
-// createTerminalReq 终端直播分享请求
-type createTerminalReq struct {
-	// SessionID 终端会话 ID（必填；不限 shell/agent——直播的是输出不是控制权）
-	SessionID string `json:"sessionId" binding:"required"`
-	// TTLMinutes 可选有效期覆盖（分钟）；缺省/0 = store.TerminalLiveTTL 30 分钟，
-	// 上限钳到 store.TerminalLiveTTLMax（直播是临时暴露面，不提供永久档）
-	TTLMinutes int `json:"ttlMinutes"`
-	// Override 敏感会话出域警示的确认标记（P-20261003-155）：true = 用户已在
-	// 警示框确认仍要开直播（首次请求恒为 false；命中警示时响应不带 data，
-	// 创建被拦下）——与文件分享扫描的 override 同一契约
-	Override bool `json:"override"`
-	// Passphrase 可选访问口令（P-20261006-25，四形态统一守卫）：非空 = 直播
-	// 加口令门（访客页同门，stream 端点同守卫）；幂等命中既有直播时带新
-	// 口令=改门、不带=保持既有
-	Passphrase string `json:"passphrase"`
-	// Watermark 可选访客页溯源水印开关（P-20261005-193）：nil/缺省 = 开，
-	// 显式 false = 关
-	Watermark *bool `json:"watermark"`
-	// ViewOnce 显式拒绝位（P-20261006-27）：直播是持续流语义，「看一眼即焚」
-	// 不成立——传 true 一律 400（可编程感知，不静默吞）
-	ViewOnce bool `json:"viewOnce"`
-	// Unfiltered 敏感值遮蔽关闭开关（P-20261106-9）：缺省 false = 遮蔽开（安全
-	// 默认不可让步，旧客户端/agent 不带字段即遮蔽）；true = 直播 feeder 原样
-	// 转发（内网协作原样输出场景，访客页标注「未过滤」）。创建时定死：幂等
-	// 命中既有直播时以既有记录为准（改配置须结束直播后重开）
-	Unfiltered bool `json:"unfiltered"`
-}
-
-// CreateTerminalLive POST /api/share/terminal —— 终端只读直播分享（远程结对/
-// 教学/汇报场景）：token→会话锚点，访客经短链看遮蔽化只读输出流。
-// 幂等：同一会话重复开直播得到同一短链（倒计时不续期）；会话已关闭 → 404
-// （无可直播的源，不做「空直播」记录）。创建即接通馈线（tap 从此刻累积
-// 遮蔽尾流，先于任何访客订阅）。
-// 敏感出域闸门（P-20261003-155）：会话被人工标记敏感且未带 override 时不创建，
-// 响应仅带 warnings（shared.SensitiveSessionWarning）——创建被拦下，前端弹
-// 「确认出域」后带 override 二次请求才落库（文件分享扫描同流）
-func CreateTerminalLive(c *gin.Context) {
-	var req createTerminalReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		shared.Error(c, http.StatusBadRequest, "invalid request", err)
-		return
-	}
-	// 一次性不适用于直播（P-20261006-27⑤）：持续流无「看一眼」语义
-	if req.ViewOnce {
-		shared.Error(c, http.StatusBadRequest, "viewOnce is not supported for terminal live", nil)
-		return
-	}
-	if req.TTLMinutes < 0 {
-		shared.Error(c, http.StatusBadRequest, "ttlMinutes must be >= 0", nil)
-		return
-	}
-	sess := terminal.DefaultManager.GetSession(req.SessionID)
-	if sess == nil {
-		shared.Error(c, http.StatusNotFound, "terminal session not found", nil)
-		return
-	}
-	if shared.IsSessionSensitive(req.SessionID) && !req.Override {
-		slog.Info("terminal live share blocked by sensitive mark", "session", req.SessionID)
-		c.JSON(http.StatusOK, gin.H{"warnings": []string{shared.SensitiveSessionWarning}})
-		return
-	}
-	expiresAt := time.Time{}
-	if req.TTLMinutes > 0 {
-		expiresAt = time.Now().Add(time.Duration(req.TTLMinutes) * time.Minute)
-	}
-	// 口令门（P-20261006-25）：哈希先行，明文只存在于本请求内
-	passHash, err := hashPassphrase(req.Passphrase)
-	if err != nil {
-		shared.Error(c, http.StatusBadRequest, err.Error(), nil)
-		return
-	}
-	created, err := store.Get().Share.Create(store.Share{
-		Kind:           store.ShareKindTerminal,
-		TerminalID:     req.SessionID,
-		Name:           sess.Name,
-		ExpiresAt:      expiresAt,
-		PassphraseHash: passHash,
-		Watermark:      watermarkOrDefault(req.Watermark),
-		Unfiltered:     req.Unfiltered,
-	})
-	if err != nil {
-		shared.Error(c, http.StatusInternalServerError, "create terminal live share failed", err)
-		return
-	}
-	// 馈线即刻接通：分享创建到访客首连之间的输出也要进遮蔽尾流（否则那段
-	// 输出在访客页只以播种形式晚到，时序错乱）。幂等命中同链时 Wire no-op。
-	// 遮蔽模式取生效记录（P-20261106-9：幂等命中 = 既有记录的定死配置）
-	if liveWire != nil {
-		liveWire.Wire(created.Token, created.TerminalID, created.Unfiltered)
-	}
-	slog.Info("terminal live share created", "token", share.TokenSummary(created.Token),
-		"session", created.TerminalID, "ttl", time.Until(created.ExpiresAt).Round(time.Second),
-		"unfiltered", created.Unfiltered)
-	// 审计入账：终端输出暴露到匿名短链，创建即安全事件（与文件分享同族）
-	middleware.AuditAppend(c, store.AuditEvent{
-		Action: store.AuditShareCreate,
-		Result: store.AuditResultSuccess,
-		IP:     c.ClientIP(),
-		Detail: fmt.Sprintf("terminal live: %s (%s, ttl %s%s)", sess.Name, created.TerminalID,
-			time.Until(created.ExpiresAt).Round(time.Minute), unfilteredEgressNote(created.Unfiltered)),
-	})
-	c.JSON(http.StatusOK, gin.H{"data": shareResponse(*created)})
-}
-
 // createTerminalFrozenReq 终端输出冻结快照分享请求（P-20261005-205）
 type createTerminalFrozenReq struct {
 	// SessionID 终端会话 ID（必填）。快照在创建时刻定格——不要求会话持续
@@ -1295,8 +1164,8 @@ func DeleteShare(c *gin.Context) {
 	if shareSvc != nil {
 		shareSvc.RevokeDirect(token, "cascade")
 		// 可写上行级联清场（P-20261106-8）：记录死亡后访客面 404，上行桥
-		// 不能残留（连接断开+待批面清空+会话闸随连接 defer 解除）
-		shareSvc.WritableDown(token)
+		// 不能残留（全部连接断开+待批面清空+会话闸随连接 defer 经账本解除）
+		shareSvc.WritableDown(token, true)
 	}
 	// 陈旧状态摘除（P-20261114-3-S2 生命周期三件）：记录消亡即清标记与索引项
 	//（索引即刻失效，防死 token 无界累积）
@@ -1339,7 +1208,7 @@ func RotateShare(c *gin.Context) {
 	// 旧哈希不变，门语义不受轮换影响）
 	if shareSvc != nil {
 		shareSvc.RevokeDirect(token, "cascade")
-		shareSvc.WritableDown(token)
+		shareSvc.WritableDown(token, true)
 	}
 	// 陈旧状态迁键（P-20261114-3-S2 生命周期三件）：轮换换链不换内容——
 	// 陈旧认定随记录走新 token（徽标不闪断），旧 token 键摘除
@@ -1578,10 +1447,16 @@ type setExpiryReq struct {
 	ExpiresAt *time.Time `json:"expiresAt"`
 }
 
-// SetShareExpiry POST /api/share/:token/expiry —— 显式调整文件/目录分享的
-// 有效期。snippet 拒绝（400）：24h 倒计时是创建即定的固定安全边界，不开放
-// 调整；未知/已撤销/已过期 → 404（与轮换同口径）。调整是暴露窗口变更，
-// 与创建/撤销/轮换同族入审计（Detail 只记 token 与目标时点）
+// SetShareExpiry POST /api/share/:token/expiry —— 显式调整分享的有效期
+// （file/frozen/terminal 等；P-20261119-5 起 terminal 直播行同端点可改期）。
+// snippet 拒绝（400）：24h 倒计时是创建即定的固定安全边界，不开放
+// 调整；未知/已撤销/已过期 → 404（与轮换同口径）。terminal 允许双向
+// （null = 永久，与创建面 permanent 语义一致；显式时点由 store 钳
+// TerminalLiveTTLMax；unfiltered 记录的显式零值同样放行——【用户定向修订】
+// 2026-11-19，撤销兜底）；其余未过滤记录（frozen 落盘原文）null/越界仍由
+// store 钳 UnfilteredTTLMax。
+// 调整是暴露窗口变更，与创建/撤销/轮换同族入审计（Detail 记 token 与
+// 生效值——钳制后的值才是台账事实）
 func SetShareExpiry(c *gin.Context) {
 	token := c.Param("token")
 	var req setExpiryReq
@@ -1797,11 +1672,14 @@ func shareResponse(s store.Share) gin.H {
 		// 协作通道开关（P-20261024-1）：恒回传布尔（缺省 false = 关，端点
 		// 对访客恒 404）——管理列表行内开关的数据源
 		"collab": s.Collab,
-		// 直通输入档开关（P-20261024-1 第二档）：恒回传布尔；持权/申请态
+		// 访客输入·申请通道开关（P-20261121-1 统一收编，反向极性投影：
+		// guestInput=true=通道开/申请入口默认在场，false=owner 显式关——
+		// store 落 GuestInputOff 反向字段，管理列表行内开关的数据源；旧
+		// directInput 投影随双标志合并同 PR 移除，不留双读窗）。持权/申请态
 		// 单独投影（direct 字段，见下）
-		"directInput": s.DirectInput,
-		// 可写分享开关（P-20261106-8）：恒回传布尔（缺省 false = 关，WS 端点
-		// 对访客恒 404）——管理列表行内开关与批量多选的数据源
+		"guestInput": !s.GuestInputOff,
+		// 开放直入开关（P-20261106-8 可写分享，语义转正）：恒回传布尔（缺省
+		// false = 关，WS 端点对访客 404）——管理列表行内开关与批量多选的数据源
 		"writable": s.Writable,
 	}
 	if s.TerminalID != "" {

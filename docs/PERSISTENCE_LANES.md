@@ -174,6 +174,11 @@ token——rotate 换链副本不动；单份 200MB/总量 1GB 护栏 + 记录�
 级联清空；清单/内容经 GET /api/projects/:id/replace/backups 查询；P-20261004-66
 起同一内容以 base64 内嵌车道 1 `replacehist` 文档——artifacts 副本吃清账，
 内嵌副本承载产品内一键还原，还原端内嵌缺失时回落读本目录）；
+快投递多文件上行 `artifacts/quickdrop/<token>/`（P-20261117-2-S1，目录名 =
+现役 scd_ token 明文——token 单例，轮换/撤销即整树显式清盘 + GC 孤儿对账
+兜底〔目录名不过现役 token 校验即删〕；单 token 总配额 2GB + 文件/收件箱
+doc 同 24h TTL 双上界；可查询元数据 = 同目录 sidecar JSON（share DropMeta
+同形，P-20261117-3 增 `dropId` 归属链可选字段——收件箱 Add 后回填，把「收件箱条目 ↔ 落盘文件」钉在 sidecar 单一事实源上：清单投影/下载归属/摘除联动清账据此对账，缺链旧文件不进投影由 TTL GC 收尸），消费投影在车道 1 `quickdrops` doc 的 Content 元数据行 + 管理面 GET /api/quickdrop 的 files[] 投影）；
 审计归档 CSV `artifacts/audit-archive/`（P-20261003-277，auditlog-cleanup 每日
 巡更在时间窗清理前把将出窗事件转 CSV 留档，`audit-archive-<日期>.csv` 每日一
 文件追加制；膨胀防线 = 归档文件沿既有 `auditRetentionDays` 窗口随同一巡更
@@ -194,7 +199,7 @@ credential-helper 配置注入、tmux.conf / shellint 脚本、agent 技能安�
 
 > **范围边界声明（首轮修订⑤）**：本矩阵主面 = 前端 UI「保持语义」状态三项族——① uiState 命名空间（collect 收集轨 + saveXxx→patchNamespaces 专用读写器轨 + 退役档）、② localStorage/sessionStorage `sc.*` 键控面、③ usePanelLayout 内存态（临时档）。非 `sc.*` 前缀的同通道键（theme-settings / font-settings / terminal-theme-follow / notify-dnd / notify-dnd-manual / notify-sound / notify-simple / notify-scroll-read / ctx-warn-pct / ui-zoom-settings / graph-lane-settings / file-nesting-settings / editor-recent-files / home-recent-projects / clone-prefs / clone-url-history / runbook-params-history / locale（LOCALE_STORAGE_KEY）/ opsAtomPrefs ATOM_STORAGE_KEYS / theme early-init / updateCheck 版本记忆 / useSearchHistory / useSearchScope 等）为**存量族**：早于 `sc.*` 命名约定或独立约定，**不强制收编**（S1 审计 docs/ui-state-audit-20261114.md 三.3 边界定案维持）——新增同通道键应按 `sc.*` 约定命名并走登记纪律。
 
-> **登记与门禁**：登记号 = `web/src/persistence/uiStateLanes.json` 的 rows[].id，本矩阵三表与注册表**逐行逐格对应**（一致性单测 `web/src/__tests__/persistence/uiStateLanes.test.ts` 钉住：文档行=注册表行，单元格不一致即红）——改动先改注册表再同步本表对应行，`check:uistate-lanes` 门禁（挂 npm run check/check:fast 尾链）与单测双红强制同步。存量 `sc.*` 生产键（S2 门禁机械实勘 **48 逻辑键 / 47 豁免条目**——S1 审计口径「44 生产键」为引号字面量行去重统计，模板串/拼接前缀族的归并方式不同，门禁以提取面为准）逐条注缘由入注册表 legacyScKeys 豁免基线（键面已删报红强制修剪）；新键一律登记 rows[].keys（exact 或尾随 * 前缀形态，动态拼接族 `sc.agentQueue.draft.<sessionId>` 等按前缀登记）。
+> **登记与门禁**：登记号 = `web/src/persistence/uiStateLanes.json` 的 rows[].id，本矩阵三表与注册表**逐行逐格对应**（一致性单测 `web/src/__tests__/persistence/uiStateLanes.test.ts` 钉住：文档行=注册表行，单元格不一致即红）——改动先改注册表再同步本表对应行，`check:uistate-lanes` 门禁（挂 npm run check/check:fast 尾链）与单测双红强制同步。存量 `sc.*` 生产键（S2 门禁机械实勘 **48 逻辑键 / 47 豁免条目**——S1 审计口径「44 生产键」为引号字面量行去重统计，模板串/拼接前缀族的归并方式不同，门禁以提取面为准）逐条注缘由入注册表 legacyScKeys 豁免基线（键面已删报红强制修剪）；新键一律登记 rows[].keys（exact 或尾随 * 前缀形态，动态拼接族 `sc.agentQueue.draft.<sessionId>` 等按前缀登记）。唯一例外=键面字面量在 web/src 提取面之外（Go embed 的独立访客页脚本，ls.drop.history 先例）：登记行以 externalKey 显式声明键名（一致性单测按此放行，仍钉 sc.* 形态），不可入 keys——悬空检查只对账 web/src 字面量。
 
 > **多标签列注记（首轮修订④）**：同实例多标签页并存时，uiState 两轨以键级补丁（相对基底的脏键 diff，本页未动键零外发）+ 命名空间浅合并 + 即时写乐观推进落位——**后写赢**（最后落位者胜，关页 forceSave 走 keepalive 补丁同样只发本页变更键，A 页 boot 旧值不整包覆盖 B 页新值，P-20261002-8 核心语义）；localStorage 同设备多标签共享、同为此语义；sessionStorage 例外（标签页隔离）。
 
@@ -237,6 +242,7 @@ credential-helper 配置注入、tmux.conf / shellint 脚本、agent 技能安�
 
 | 登记号 | 状态项 | 车道 | 刷新 | 路由往返 | 多标签 | 换浏览器 | 换机器 | 清除语义 | 备注 |
 |---|---|---|---|---|---|---|---|---|---|
+| `ls.filePreview.mode` | sc.filePreview.mode.<ext>（统一双视图上次选择，per 扩展名偏好） | localStorage | ✓ 打开文件恢复（defaultViewMode 读 utils/filePreviewMode） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地偏好，remotePathMemory 同族口径不进车道 1） | —（无清除点：用户策展偏好，useLayoutReset 不波及） | P-20261119-4 统一双视图「原文件↔预览」：切换即写（toggleFileViewMode），打开链按 kind 缺省+偏好覆盖——GitHub/VS Code 记住上次选择惯例 |
 | `ls.fileTree.expanded` | sc.fileTree.expanded.<projectId>（树展开按项目真源，动态前缀族） | localStorage | ✓ FileTreeView 挂载自恢复；快照采集/应用读写（useWorkspaceSnapshot/useLayoutShell） | ✓ 保持（各消费域挂载自恢复） | 同设备共享（后写赢） | ✗（设备本地） | ✗（不随数据目录，设备本地） | useLayoutReset 重置清（清键对账） | uiState 的 fileTree.expandedDirs 退役后为唯一真源（FileTreeView watch 回写） |
 | `ls.fileTree.filters` | sc.fileTree.showHidden / hideIgnored（树过滤开关，模板形态 sc.fileTree.<toggle>） | localStorage | ✓ readFilterPref（FileTreeView 内读取） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | —（无清除点） | 裸读点在案豁免（渐进迁移不强制，健壮性红线在案） |
 | `ls.term.activeTabMap` | sc.term.activeTabMap（终端激活 tab 按项目映射） | localStorage | ✓ TerminalView 项目切换 recall + useTerminalReconnect | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 已关闭会话残留无害（恢复方校验，在案注释） | — |
@@ -272,6 +278,10 @@ credential-helper 配置注入、tmux.conf / shellint 脚本、agent 技能安�
 | `ls.morningBrief` | sc.morningBrief.<yyyy-MM-dd>（晨报当日已阅，动态前缀族） | localStorage | ✓ 同日读 | ✓ 保持（当日） | 同设备共享（后写赢） | ✗（设备本地） | ✗（设备本地） | 按日轮换自然失效（零清理负担，注释在案） | — |
 | `ls.clipRelay.device` | sc.clip-relay.device（剪贴板中继设备 id） | localStorage | ✓ clipRelay 读 | ✓ 保持 | 同设备共享 | ✗（设备本地） | ✗（设备本地） | —（设备标识，非 UI 偏好） | — |
 | `ls.debug.terminalClipboard` | sc.debug.terminalClipboard（终端剪贴板调试开关） | localStorage | ✓ 模块加载读 | ✓ 保持 | 同设备共享 | ✗（设备本地） | ✗（设备本地） | 手动清（调试后门，注释在案） | — |
+| `ls.quickdrop.url` | sc.quickdrop.url（快投递完整链接主人侧缓存，单键 JSON 载荷 { url, rotatedAt }） | localStorage | ✓ 管理面 setup 读（readQuickdropUrlCache） | ✓ 保持 | 同设备共享（后写赢） | ✗（设备本地——缓存面=已见过明文的同一浏览器，零新增暴露面） | ✗（设备本地） | 撤销成功/他处撤销（fetch Meta exists=false）/轮换覆盖 | P-20261117-1：服务端仅哈希落盘（store/quickdrop.go），明文仅生成/轮换响应显示一次——本机缓存复原「复制完整链接」出口；rotatedAt 与 Meta 比对防他处轮换死链，失配置灰（web/src/utils/quickdropCache.ts） |
+| `ls.drop.history` | sc.drop.history（快投递访客页投递历史，单键 JSON 数组上限 20） | localStorage | ✓ 访客页加载读（右上角历史角标+面板） | ✓ 保持（同一访客链接重开） | 同设备共享（后写赢） | ✗（设备本地——纯访客本机面，多访客互不可见） | ✗（设备本地） | 访客「清空」按钮 / 清浏览器缓存即消（无服务端账本） | P-20261117-2-S2：键面在 Go embed 访客页脚本（server/api/quickdrop/assets/app.js），web/src 提取面之外——注册表以 externalKey 显式登记，键名由 Go 侧 TestDropAssetRoute 标记断言钉住；单键 JSON 数组形状防御损坏回落空态（sc.quickdrop.url 单键载荷先例）；上限 20 FIFO；safeStorage 通道不在访客页可用（独立静态脚本，本地 try/catch 同防御） |
+| `ls.share.theme` | sc.share.theme（访客页族主题偏好：文件分享/终端直播/定格/回放/快投递页跨页共享） | localStorage | ✓ 访客页加载读（各页 head/init 期 initTheme 先设 data-theme 防闪白） | ✓ 保持（同一访客链接重开） | 同设备共享（后写赢；跨页切换器各自写同键） | ✗（设备本地——纯访客本机偏好面） | ✗（设备本地） | 清浏览器缓存即消（无服务端账本） | P-20261120-1：键面在 Go 访客页模板/注入件（server/share/theme.go guestThemeJS+server/api/quickdrop/assets/app.js），web/src 提取面之外——注册表以 externalKey 显式登记（ls.drop.history 先例同形）；键值五档枚举 auto/light/dark/one-dark/dracula，auto 缺省；键名由 Go 侧主题渲染断言钉住 |
+| `ls.ops.browserId` | sc.ops.browserId（ops 通道浏览器实例 id，frontend 设备定向路由键） | localStorage | ✓ 模块读（opsBrowserId——WS 握手 query + 会话创建请求头携带） | ✓ 保持 | 同浏览器共享（设备定向的亲和粒度=每浏览器，标签选举在其上裁决唯一执行标签） | ✗（设备本地——路由标签非安全边界，丢失代价=绑定/启发式暂时失准，服务端降级通知兜底） | ✗（设备本地） | —（设备标识，非 UI 偏好；脏值超服务端形态守卫即重生成） | P-20261117-4：随机 id 不含机器指纹（clipRelay ownClipDeviceId 同款每浏览器粒度先例，与 notesOriginNonce 每窗粒度两级互补）；禁 crypto.randomUUID（LAN http 非安全上下文 undefined——clipRelay 同款坑）；生成形态与 sc.clip-relay.device 同族（时间戳 base36 + 随机段） |
 
 ### ③ 临时态（定案不持久化）
 

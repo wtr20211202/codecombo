@@ -107,10 +107,23 @@ var dictZh = map[string]string{
 	"htmlScriptConfirmTitle": "运行页面脚本？",
 	"htmlScriptConfirmBody":  "脚本将在隔离沙箱中运行：不能读取本应用的登录态或数据、不能提交表单或打开弹窗，但仍可向网络发送请求，并可任意改动本页内容与外观。仅在你信任该页面来源时继续。",
 	"htmlScriptConfirmOk":    "仍要运行",
-	"csvTruncated":           "文件较大，仅渲染前 {n} 行",
-	"outline":                "大纲",
-	"snippetLabel":           "文本片段",
-	"snippetExpiresAt":       "该片段将于 {time} 自动过期",
+	// docx 嵌入 html 原型预览器壳页（P-20261118-3，页内 iframe 形态退役）：
+	// 注记条三态文案（静态/脚本运行/表单弹窗放开——末态即常驻风险提示）
+	// + 二级 toggle + scripts 风险确认 checkbox（零 JS 确认框形态钉死：
+	// confirm() 不可用，「风险确认 checkbox+应用按钮」两段式 form GET 承接
+	// 修订二显式确认语义；原 embedHtmlConfirm* 确认弹层三键随 confirm()
+	// 形态一并退役）
+	// 壳页诚实回落模式（P-20261118-7 ④）：附件结构抽不出正文时 ui=1 不再
+	// 静默弹下载框，改显性提示+下载出口；文案与 site faq/features 对齐
+	// 共用同句（评审建议e）
+	// 壳页开关区折叠状态徽标（P-20261119-1）：details/summary 收起态唯一
+	// 常驻告知面=summary 一行——三态徽标文案随开关级切换，StateHint 短警示
+	// 仅 full 档行内缀（最危险一档「请勿输入真实凭据」要点必须钉在常驻行，
+	// 修订三「风险提示常驻」在折叠形态下的保真位；完整注记仍在 details 体内）
+	"csvTruncated":     "文件较大，仅渲染前 {n} 行",
+	"outline":          "大纲",
+	"snippetLabel":     "文本片段",
+	"snippetExpiresAt": "该片段将于 {time} 自动过期",
 	// 冻结快照时点声明（P-20261005-168）：frozen 记录访客面的内容时点声明
 	// ——定格是特性不是错误，中性陈述语气。P-20261111-5 起全句不再直出横幅，
 	// 降为紧凑状态条（snapshotShort）的悬停 title 说明；live 记录无该段
@@ -254,10 +267,28 @@ var dictEn = map[string]string{
 	"htmlScriptConfirmTitle": "Run page scripts?",
 	"htmlScriptConfirmBody":  "Scripts will run in an isolated sandbox: they cannot read this app's sessions or data, submit forms, or open popups — but they can still make network requests and arbitrarily change this page's content and appearance. Continue only if you trust the page's source.",
 	"htmlScriptConfirmOk":    "Run anyway",
-	"csvTruncated":           "Large file: only the first {n} rows are rendered.",
-	"outline":                "Outline",
-	"snippetLabel":           "Text snippet",
-	"snippetExpiresAt":       "This snippet expires automatically at {time}.",
+	// docx embedded html prototype previewer shell (P-20261118-3; the in-page
+	// iframe form is retired): three-state note-bar copy (static / scripts
+	// running / forms & popups enabled — the last state doubles as the
+	// persistent risk hint) + second-level toggle + scripts risk-ack
+	// checkbox (zero-JS confirm form: confirm() is unavailable, a
+	// "risk checkbox + apply button" two-step form GET carries the explicit
+	// confirmation semantics; the old embedHtmlConfirm* dialog keys are
+	// retired with the confirm() form)
+	// Honest-fallback shell mode (P-20261118-7 ④): when the attachment's
+	// internal structure yields no previewable body, ui=1 shows this explicit
+	// notice with a download link instead of silently triggering a download;
+	// wording is kept aligned with site faq/features (review suggestion e)
+	// Shell collapsed-toggle state badge (P-20261119-1): with details/summary
+	// folded, the summary row is the only always-visible notice — a three-state
+	// badge follows the toggle level, and StateHint (short warning) is inlined
+	// at the full level only (the "never enter real credentials" point must
+	// stay on the persistent row at the most dangerous level); the full note
+	// remains visible inside the details body
+	"csvTruncated":     "Large file: only the first {n} rows are rendered.",
+	"outline":          "Outline",
+	"snippetLabel":     "Text snippet",
+	"snippetExpiresAt": "This snippet expires automatically at {time}.",
 	// Frozen-snapshot time declaration (P-20261005-168): content-time statement
 	// for frozen shares — freezing is a feature, not an error, so neutral wording.
 	// Since P-20261111-5 the full sentence is no longer a banner; it demotes to

@@ -11,6 +11,37 @@ import (
 
 var updateLogger *log.Logger
 
+// 双文件职责头注（P-20261116-1-S3，用户实测混淆案例——运维追「更新为什么回滚」
+// 时翻的是 update-restart.log，而该文件只是 bare 重启形态的进程输出，systemd
+// 形态进程输出走 journal、该文件根本不会被创建）：update.log=更新决策时间线
+// （换包/健康等待/回滚证据），update-restart.log=重启进程 stdout/stderr。两
+// 文件头各一行注记防再混；O_APPEND 多轮更新串接，头注仅首次创建时写防刷屏
+// （openAppendLog），故措辞面向「打开此文件的人」，中英混排以英文为主与既有
+// 日志行一致
+const (
+	updateLogHeader  = "# update.log — update decision timeline (backup/replace/health-wait/rollback evidence per update run). Restarted-process output lives in update-restart.log"
+	restartLogHeader = "# update-restart.log — restarted process stdout/stderr (bare/detached form only; systemd form logs to journal and this file is never created). Update decisions live in update.log"
+)
+
+// openAppendLog 打开 O_APPEND 日志文件，首次创建时写一行职责头注（P-20261116-1-S3）。
+// 「仅首次创建」探测=打开前 Stat 不在场即视为新建（并发双建至多重复一行头注，
+// 更新链单实例串行无此竞态面）；Stat 出非 NotExist 错误时不写（保守不刷屏），
+// 头注写失败忽略（best-effort 诊断面，绝不影响打开结果）
+func openAppendLog(path, header string) (*os.File, error) {
+	fresh := false
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		fresh = true
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, err
+	}
+	if fresh {
+		_, _ = f.WriteString(header + "\n")
+	}
+	return f, nil
+}
+
 // updateContext 更新子进程的上下文，避免函数间传递大量参数
 type updateContext struct {
 	currentBinary string
@@ -26,7 +57,7 @@ type updateContext struct {
 func initLogger(dd string) {
 	logDir := filepath.Join(dd, "logs")
 	_ = os.MkdirAll(logDir, 0755)
-	f, err := os.OpenFile(filepath.Join(logDir, "update.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := openAppendLog(filepath.Join(logDir, "update.log"), updateLogHeader)
 	if err != nil {
 		updateLogger = log.New(os.Stderr, "[update] ", log.LstdFlags)
 		return
@@ -143,11 +174,14 @@ func DoUpdate(currentBinary, newBinary string, port int, pid int) error {
 		return fmt.Errorf("start new version failed: %s", err)
 	}
 
-	// 健康检查走 PID 文件派生的明文地址：TLS 默认开启后主端口是 https（自签），
-	// 明文 GET 必失败导致更新误回滚；新进程启动后会重写 PID 文件，
-	// 第三行的明文回环辅助端口（仅 TLS 模式存在）即为本机可靠的明文入口
-	updateLogger.Printf("health check (timeout 15s)")
-	if err := ctx.waitForHealthy(15 * time.Second); err != nil {
+	// 健康等待活性驱动（P-20261116-1-S1，判据详见 waitForHealthy）：恢复时间
+	// 是用户环境的函数，不设时间死线；PID 基线播种防起点死旧 PID 误回滚（本
+	// 进程 PID=换包前旧 PID 作基线对照），变化 ≥2 判 crash-loop 秒级失败，
+	// 稳定存活持续等 /api/health，10 分钟 runaway 兜底原因未定。
+	// 地址派生：TLS 默认开启后主端口是 https（自签），明文 GET 必失败——新
+	// 进程重写 PID 文件后，第三行的明文回环辅助端口即本机可靠的明文入口
+	updateLogger.Printf("health check (liveness-driven wait, runaway guard %v)", healthRunawayGuard)
+	if err := ctx.waitForHealthy(pid); err != nil {
 		ctx.killAndRollback("health check failed: " + err.Error())
 		return err
 	}
@@ -207,16 +241,95 @@ func canonicalizeBinaryName(currentBinary string) {
 	updateLogf("canonical rename done: %s -> %s", base, newBase)
 }
 
+// restoreRenameFn 回滚盘面恢复的 rename 取值口（P-20261116-1-S2）：单测注入
+// rename 故障以验证 CopyFile 回退链与响亮失败路径——跨平台无法用纯文件系统
+// 手段可靠构造「rename 失败而复制可用」（两者同需目录写权限，Windows 映像
+// 句柄锁则连复制一起挡），默认即 os.Rename
+var restoreRenameFn = os.Rename
+
 // restoreBackup 回滚的盘面恢复段（旧二进制归位），rollback/killAndRollback
-// 共用——回滚 restartService 一律走形态路由（与正向启动同构），本函数只管盘面
-func (c *updateContext) restoreBackup() {
-	os.Remove(c.currentBinary)
-	_ = os.Rename(c.backup, c.currentBinary)
+// 共用——回滚 restartService 一律走形态路由（与正向启动同构），本函数只管盘面。
+// P-20261116-1-S2 加固（用户实测误回滚把 ExecStart 路径二进制整个弄丢的事故
+// 根治面）：
+//   - 防丢失窗顺序：坏新包先 rename 到 .stale-tmp（路径换名而非清空，任意
+//     时刻 ExecStart 路径都有文件），备份再 rename 归位，最后清 .stale-tmp
+//     ——旧实现先 Remove 再 Rename，两步之间路径空窗，且 Rename 失败被
+//     `_ =` 吞掉＝「无二进制」盘面无人知晓，重拉即 203/EXEC 且无法自愈
+//   - 备份归位 rename 失败不再静默：fallback CopyFile(.bak→当前)+Chmod 0755
+//     （CopyFile 不保权限位，显式补执行位）；copy 路径成功后 .bak 有意保留
+//     （复制语义弱于 rename——保住最后一份旧包，防复制内容损坏时无处可回；
+//     下轮更新的 backup rename 会覆盖旧 .bak，不撞名）
+//   - 备份缺席双态：当前文件在场＝上轮已恢复（收尾校验触发的再恢复轮），
+//     幂等成功；两者皆缺席＝事故盘面，响亮报错如实透出
+//
+// 失败返回错误由调用方并入 errMsg 随 saveResult 透出（结果落盘单一出口在
+// 调用方，本函数只留痕不写结果文件防覆盖）
+func (c *updateContext) restoreBackup() error {
+	if _, err := os.Stat(c.backup); err != nil {
+		if _, curErr := os.Stat(c.currentBinary); curErr == nil {
+			updateLogf("rollback restore: backup %s absent, %s present — already restored, nothing to do", c.backup, c.currentBinary)
+			return nil
+		}
+		err := fmt.Errorf("rollback restore failed: backup %s and ExecStart path %s both absent, no binary to restore", c.backup, c.currentBinary)
+		updateLogf("%v", err)
+		return err
+	}
+	// 坏新包挪开（失败不阻断：事故盘面当前文件本就缺席时照样继续归位备份；
+	// Windows 映像句柄锁定时本步与归位都会失败，原因经下方统一透出）
+	stale := c.currentBinary + ".stale-tmp"
+	if err := restoreRenameFn(c.currentBinary, stale); err != nil {
+		updateLogf("rollback restore: move swapped binary aside %s -> %s failed (%v) — continuing with backup restore", c.currentBinary, stale, err)
+	}
+	if err := restoreRenameFn(c.backup, c.currentBinary); err != nil {
+		updateLogf("rollback restore: rename %s -> %s failed (%v) — falling back to copy", c.backup, c.currentBinary, err)
+		if copyErr := CopyFile(c.backup, c.currentBinary); copyErr != nil {
+			err := fmt.Errorf("rollback restore failed: rename %s -> %s (%v) and copy fallback (%v) both errored — ExecStart path may be missing a runnable binary", c.backup, c.currentBinary, err, copyErr)
+			updateLogf("%v", err)
+			return err
+		}
+		if err := os.Chmod(c.currentBinary, 0755); err != nil {
+			err := fmt.Errorf("rollback restore failed: copied %s -> %s but chmod 0755 errored (%v)", c.backup, c.currentBinary, err)
+			updateLogf("%v", err)
+			return err
+		}
+	}
+	// 清挪开的坏包（best-effort：Windows 上坏包进程未退净时映像句柄锁定会
+	// 失败——残留 .stale-tmp 无害，备份名固定 .bak，后续更新与回滚不撞名）
+	if err := os.Remove(stale); err != nil && !os.IsNotExist(err) {
+		updateLogf("rollback restore: cleanup %s failed (%v) — leftover is harmless, nothing depends on that name", stale, err)
+	}
+	return nil
+}
+
+// ensureRollbackBinary 回滚收尾校验（P-20261116-1-S2）：restoreBackup 返回后
+// 以实盘状态为准收口——ExecStart 路径必须有存在且可执行（0755）的文件，是
+// 事故「误回滚后 ExecStart 二进制消失」的最后一道网。缺失时从备份再恢复一轮
+// （restoreBackup 幂等：备份已消耗且当前在场按已恢复）；在场即补 0755 归一
+// （Windows 上只影响只读位，三平台行为一致）。任何一步不达成都响亮留痕并把
+// 原因并回 errMsg，随调用方 saveResult 透出（「回滚盘面恢复失败」必须能在
+// 结果文件里读到，不再无声留坑）
+func (c *updateContext) ensureRollbackBinary(errMsg string) string {
+	if _, err := os.Stat(c.currentBinary); err != nil {
+		updateLogf("rollback verify: ExecStart path %s absent (%v) — re-restoring from backup %s", c.currentBinary, err, c.backup)
+		if rerr := c.restoreBackup(); rerr != nil {
+			return errMsg + "; " + rerr.Error()
+		}
+	}
+	if err := os.Chmod(c.currentBinary, 0755); err != nil {
+		msg := fmt.Sprintf("rollback restore failed: ExecStart path %s present but chmod 0755 errored (%v)", c.currentBinary, err)
+		updateLogf("%s", msg)
+		return errMsg + "; " + msg
+	}
+	return errMsg
 }
 
 func (c *updateContext) rollback(errMsg string) error {
 	updateLogger.Printf("rollback: %s", errMsg)
-	c.restoreBackup()
+	// 盘面恢复失败并入 errMsg 随结果文件透出（P-20261116-1-S2）：restoreBackup
+	// 不再静默，恢复失败时重拉大概率 203/EXEC——结果必须如实携带两层原因
+	if err := c.restoreBackup(); err != nil {
+		errMsg += "; " + err.Error()
+	}
 	// 形态路由重启（P-20261112-1-S2）：windows-service 恢复备份后再 sc start、
 	// launchd 交 KeepAlive、bare 原参数 spawn——与正向启动同一 restartService
 	_, _ = restartService(c.currentBinary, c.port, c.dd)
@@ -244,7 +357,12 @@ func (c *updateContext) killAndRollback(errMsg string) {
 		// 顺序关键：先恢复旧二进制再杀——launchd 检测到退出即刻重拉，杀完
 		// 再恢复会让重拉捡到坏新包；恢复后杀则重拉必捡旧包。杀完不再
 		// restartService（KeepAlive 是该形态唯一拉起者，重复 spawn 会赛跑抢端口）
-		c.restoreBackup()
+		if err := c.restoreBackup(); err != nil {
+			errMsg += "; " + err.Error()
+		}
+		// 收尾校验夹在恢复与击杀之间（校验耗时 stat+chmod 微秒级）：KeepAlive
+		// 重拉捡到的必是校验过的旧包
+		errMsg = c.ensureRollbackBinary(errMsg)
 		if pid := readRunningPid(c.dd); pid > 0 {
 			_ = killByPIDFn(pid)
 		}
@@ -255,7 +373,12 @@ func (c *updateContext) killAndRollback(errMsg string) {
 		// no-op），交由下方 restoreBackup + 形态路由收尾
 		_ = killByPIDFn(c.spawnedPID)
 	}
-	c.restoreBackup()
+	if err := c.restoreBackup(); err != nil {
+		errMsg += "; " + err.Error()
+	}
+	// 收尾校验在重拉之前：restartService 拉起的必是实盘校验过的旧包
+	// （P-20261116-1-S2——事故链里重拉 203/EXEC 的直接根治点之一）
+	errMsg = c.ensureRollbackBinary(errMsg)
 	spawned, err := restartService(c.currentBinary, c.port, c.dd)
 	if err == nil {
 		c.spawnedPID = spawned
@@ -263,6 +386,25 @@ func (c *updateContext) killAndRollback(errMsg string) {
 	c.saveResult("rolled_back", errMsg)
 }
 
+// logExecStartSnapshot 失败结案快照（P-20261116-1-S3）：把 ExecStart 路径实盘
+// 状态（存在/权限/大小）落一行 update.log——事故后一眼可诊（beta.7→beta.8
+// 事故若有此行，当时即知 ENOENT，不必进 shell stat）。与 S2 收尾校验衔接：
+// 各结案点（rollback/killAndRollback→saveResult）都在 restoreBackup/
+// ensureRollbackBinary 之后，快照天然反映恢复后的盘面终态
+func (c *updateContext) logExecStartSnapshot() {
+	info, err := os.Stat(c.currentBinary)
+	if err != nil {
+		updateLogf("case closed: ExecStart path %s ABSENT (%v)", c.currentBinary, err)
+		return
+	}
+	updateLogf("case closed: ExecStart path %s present, mode=%s size=%d bytes", c.currentBinary, info.Mode().Perm(), info.Size())
+}
+
 func (c *updateContext) saveResult(status, errMsg string) {
+	// 失败结案先落盘面快照再写结果文件（P-20261116-1-S3）：成功结案无盘面
+	// 疑点，不落（防每次更新噪声行）
+	if status != "success" {
+		c.logExecStartSnapshot()
+	}
 	_ = SaveUpdateResult(c.dd, &UpdateResult{Status: status, Version: c.version, PreviousVersion: c.prevVersion, Error: errMsg})
 }

@@ -58,6 +58,22 @@ if [ -n "$REF" ]; then
   echo "==> Export ref: $REF"
 fi
 
+# ---------- 前置条件：官网双门禁（P-20261115-3） ----------
+# 样式防乱（check-site-styles.sh）与内容防断链（check-site-content.sh）原为
+# pages-publishing.md 的文档纪律（agent 代改官网后「记得跑」），改 site/ 后忘跑
+# 照样导出发布——挂进发布链成强制前置：任一未过即 FATAL 拦截（fail-closed，无
+# --skip 逃生门，循既有 FATAL 前置条件零豁免先例；恢复路径短：门禁从工作树执行，
+# 热修门禁脚本/白名单即解）。显式守卫而非裸调用：set -euo pipefail 下裸失败会以
+# 门禁退出码静默终止、出不来 export 级 FATAL 行；exit 1 循骨架自检失败族（:254）。
+# 合计时耗 ~5.5s（win Git Bash 实测 styles ~2.2s + content ~3.3s），对照导出整体
+# 成本可忽略。此位是天然清单槽——后续新门禁续挂同一位置。
+# 近似边界：门禁查工作树 site/，git archive 导出的是提交树——「已提交红+工作树
+# 绿」或 --ref 导旧节点两态判的不是被导出的那棵树；主流程改→门禁→提交→导出下
+# 近似可接受，全保真需门禁支持对 DEST 树跑，属后续独立提案。
+echo "==> Pre-export gates: check-site-styles.sh + check-site-content.sh（合计 ~5.5s）"
+bash "$REPO_ROOT/scripts/check-site-styles.sh" || { echo "FATAL: 样式防乱门禁未过（上方 RED/FAIL 行）——修正后再导出" >&2; exit 1; }
+bash "$REPO_ROOT/scripts/check-site-content.sh" || { echo "FATAL: 内容对账门禁未过（上方 RED/FAIL 行）——修正后再导出" >&2; exit 1; }
+
 # ---------- 剔除决策清单（每条带缘由；命中即不导出） ----------
 # 返回 0 = 剔除；1 = 导出。
 excluded() {

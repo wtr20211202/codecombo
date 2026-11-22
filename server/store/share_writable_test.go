@@ -51,24 +51,27 @@ func TestShareStoreWritableToggle(t *testing.T) {
 
 func TestShareStoreWritableCreateFaceCleared(t *testing.T) {
 	st := newShareStoreForTest(t)
-	// 创建请求直接携带 Writable=true（模拟未来调用方绕过 API 直入 store）：
-	// 各形态创建面一律兜底清零——可写只能经 owner 动作面（confirm+口令门）
-	// 开启，从不悄悄出生
+	// 创建面语义（P-20261121-1 修订）：非 terminal 形态兜底清零（组合语义
+	// ——开放直入仅 live 形态有意义）；terminal 形态**保留请求值**（创建弹
+	// 层快捷选择 = owner 显式 opt-in，口令门强制在 API 面——「可写从不悄悄
+	// 出生」的实质是「不经 owner 显式选择不出现在请求里」，显式请求满足）
 	cases := []struct {
-		name string
-		in   store.Share
+		name    string
+		in      store.Share
+		wantOn  bool
 	}{
-		{"file", store.Share{ProjectID: "p1", ProjectName: "d", Path: "x.txt", Name: "x", Writable: true}},
-		{"snippet", store.Share{Kind: store.ShareKindSnippet, Name: "s", Content: "hello world", Writable: true}},
-		{"terminal", store.Share{Kind: store.ShareKindTerminal, TerminalID: "sess-w", Name: "live", Writable: true}},
+		{"file", store.Share{ProjectID: "p1", ProjectName: "d", Path: "x.txt", Name: "x", Writable: true}, false},
+		{"snippet", store.Share{Kind: store.ShareKindSnippet, Name: "s", Content: "hello world", Writable: true}, false},
+		{"terminal-optin", store.Share{Kind: store.ShareKindTerminal, TerminalID: "sess-w", Name: "live", Writable: true}, true},
+		{"terminal-default", store.Share{Kind: store.ShareKindTerminal, TerminalID: "sess-w2", Name: "live2"}, false},
 	}
 	for _, tc := range cases {
 		created, err := st.Create(tc.in)
 		if err != nil {
 			t.Fatalf("create %s: %v", tc.name, err)
 		}
-		if created.Writable {
-			t.Fatalf("%s share must clear writable at create face", tc.name)
+		if created.Writable != tc.wantOn {
+			t.Fatalf("%s share writable = %v, want %v", tc.name, created.Writable, tc.wantOn)
 		}
 	}
 }

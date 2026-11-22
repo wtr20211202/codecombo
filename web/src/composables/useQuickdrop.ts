@@ -27,6 +27,8 @@ import { terminalApi } from '../api/domains/terminal'
  *
  * 内容取数：payload 只携 id（审计/通知不含正文），点击后回查
  * GET /api/quickdrop 收件箱取明文；已过期/已摘除（24h TTL）如实提示。
+ * 文件投递（P-20261117-3）：转交内容在原文之后追加逐文件落盘绝对路径清单
+ * 段（dropPathSection）——防 Content 4KB 预算裁切丢明细，agent 按路径取件。
  * 提示走离散 message（useAgentFix 同范式，组合式不依赖祖先 NMessageProvider），
  * 文案不持有 jsdom 不可测依赖以外的东西（i18n 经 useI18n）
  */
@@ -35,6 +37,16 @@ import { terminalApi } from '../api/domains/terminal'
  *  面同源（fitByBytes 与 resolveTaskLaunchArgs 共用同一 build 形） */
 function buildDropPrompt(t: (key: string) => string): (c: string) => string {
   return (c) => [t('quickdrop.promptHead'), c].join('\n')
+}
+
+/** 文件条目的逐文件绝对路径清单段（P-20261117-3）：收件箱 Content 的文件
+ *  明细行在 4KB 预算裁切时可能缺失（buildFileDropContent「尽力填」语义），
+ *  本段把每个文件的落盘绝对路径（服务端 files[].absPath 投影，DropAbsPath
+ *  纪律——只在主人侧鉴权面出现）原样补在 content 之后，agent 按路径取件
+ *  不再依赖 Content 明细是否被裁。文本条目零改动（files 空 → 空串） */
+function dropPathSection(drop: QuickdropItem): string {
+  const files = drop.files ?? []
+  return files.length ? '\n' + files.map(f => f.absPath).join('\n') : ''
 }
 
 /** 从收件箱回查单条投递（清单 ≤20 条，单请求零 N+1）；已过期/已摘除 → null */
@@ -83,7 +95,7 @@ export function useQuickdrop() {
       return
     }
     try {
-      await terminalApi.broadcastWrite([activeId], drop.content + '\r')
+      await terminalApi.broadcastWrite([activeId], drop.content + dropPathSection(drop) + '\r')
       message.success(t('quickdrop.forwarded'))
     } catch {
       message.error(t('quickdrop.forwardFailed'))
@@ -101,7 +113,12 @@ export function useQuickdrop() {
       return
     }
     const tpl = buildDropPrompt(t)
-    const full = tpl(drop.content)
+    // 转交文本 = 投递原文 + 逐文件绝对路径段（P-20261117-3）——full 与装箱
+    // 输入必须同源：legacyFitted 若仍按裸 content 装箱，≤500B 直发分支会
+    // 静默丢掉路径段（实勘踩坑：>500B 走任务文件降级反而完整，小投递恰是
+    // 常态面）。fitByBytes 保尾裁头语义下路径段在尾部，预算紧时优先保留
+    const content = drop.content + dropPathSection(drop)
+    const full = tpl(content)
     if (containsSensitiveValue(full)) {
       const ok = await confirmDialog({
         title: t('agent.fix.sensitiveTitle'),
@@ -114,7 +131,7 @@ export function useQuickdrop() {
     const agentTerminal = useAgentTerminal()
     if (agentTerminal.busy.value) return
     // 超限降级：全文写项目根 .sc-task.md + 短引用指令（写失败退回装箱截断）
-    const plan = await resolveTaskLaunchArgs(projectStore.currentProjectId, full, fitByBytes(tpl, drop.content))
+    const plan = await resolveTaskLaunchArgs(projectStore.currentProjectId, full, fitByBytes(tpl, content))
     const info = await agentTerminal.create(undefined, { dir: dir || undefined, launchArgs: plan.launchArgs })
     if (!info) {
       message.error(t('quickdrop.newFailed'))

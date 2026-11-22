@@ -166,5 +166,6 @@ export function useOpenFiles(hooks?: OpenFileHooks) {
     previewDraftRestore: ctx.previewDraftRestore,
     // 远程文件编辑（P-20261003-15）：离线横幅重试
     retryRemoteFile: ctx.retryRemoteFile,
+    toggleFileViewMode: ctx.toggleFileViewMode,
   }
 }

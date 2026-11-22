@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from '@playwright/test'
 import { DEFAULT_PASSWORD } from '../../tests/helpers'
 
 /**
- * 分享协作通道（P-20261024-1）E2E——访客素材上行 + 直通输入档全路径：
+ * 分享协作通道（P-20261024-1）E2E——访客素材上行全路径：
  *   1. 开关生命周期：关闭恒 404（与端点不存在不可区分）→ 开启上传成功 →
  *      关闭即回收（再 404），存量已收素材保留可读（管理面清单不随开关断）
  *   2. 上传链：白名单内收件（png=image 档）+ 白名单外拒（.exe → rejected
@@ -10,12 +10,12 @@ import { DEFAULT_PASSWORD } from '../../tests/helpers'
  *      携绝对路径 + consume 消费语义（consumedAt 落投影）+ 单删幂等
  *   3. 通知入账：素材到达 titleKey=share.drop.notify.title（3s 攒批冲刷）
  *   4. 受限留言档：collab 开 1500 rune 放行（500 档会 400）→ 关回落 400
- *   5. 直通输入档：agent 会话限定（shell 分享批准 400）+ 握手全路径（申请 →
- *      列表行 pending 投影 → 批准 → 访客轮询 held → 输入批次 200 → 一键收回
- *      → 再输入 403）+ 访客页协作位挂载/卸载（collab 关零协作位）
- * 60s 申请时效 / 10min 持权时效的超时回收不在 e2e 时间预算内（单测
- * TestDirectRequestExpiry / TestDirectIdleExpiry 已覆盖）；级联回收同（
- * TestDirectCascadeRelease + 撤销端点 handlers 级联）。
+ *   5. 访客页协作位挂载/卸载（collab 关零协作位；cl-direct-* testid 随
+ *      P-20261121-1 直通位退役全页面不再出现）
+ * 直通/访客输入断言随 P-20261121-1 统一收编迁出至 share-guest-input.spec.ts
+ * （素材到达/留言板段保留本文件）；申请时效 / 持权时效的超时回收不在 e2e
+ * 时间预算内（单测 TestDirectRequestExpiry / TestDirectIdleExpiry 已覆盖）；
+ * 级联回收同（TestDirectCascadeRelease + 撤销端点 handlers 级联）。
  * 共享实例全局分享列表（workers=1 串行），beforeEach/afterEach 清空。
  */
 
@@ -257,126 +257,6 @@ test.describe('share-collab', () => {
     expect((await post()).status).toBe(400)
   })
 
-  test('直通输入档：agent 会话限定 + 握手全路径 + 一键收回 + 访客页协作位挂载', async ({ page, request }) => {
-    test.setTimeout(120_000)
-    const headers = await unlockHeaders(request)
-    const visitor = await getShareBase(request, headers)
-
-    // 两路直播分享：shell 会话（红线反例）+ agent 会话（正例）
-    const shell = await createTerminalShare(request, headers, 'shell', 'sh')
-    const agent = await createTerminalShare(request, headers, 'agent', 'ag')
-    createdSessions.push(shell.sessionId, agent.sessionId)
-    for (const t of [shell.token, agent.token]) {
-      expect((await setCollab(request, headers, t, true)).ok()).toBeTruthy()
-      const on = await request.post(`${BASE}/api/share/${t}/direct-input`, { headers, data: { on: true, confirm: true } })
-      expect(on.ok(), await on.text()).toBeTruthy()
-    }
-    // 缺 confirm 的开启调用被服务端硬闸拒绝（管理面摩擦双闸的服务端半边）
-    const noConfirm = await request.post(`${BASE}/api/share/${agent.token}/direct-input`, { headers, data: { on: true } })
-    expect(noConfirm.status()).toBe(400)
-
-    // 访客页与 API 侧共用同一 visitorId：页面首访生成 localStorage 随机 id
-    // （collabpage.go VID_KEY，单持有者握手的绑定键），API 驱动的申请/批准
-    // 必须持同一 id，页面 2s 轮询 /direct/state 才判 mine=true 收起申请钮换
-    // 输入位——addInitScript 预置后 goto，页面侧全路径（pending→held→发送
-    // →收回回 none）才可观测（spec 假败修复：原写法 API 用 'e2e-visitor-ui-1'
-    // 而页面自生成随机 id，held 后页面判 mine=false 永不出 textarea）
-    await page.addInitScript(() => localStorage.setItem('sc.share.visitorId', 'e2e-visitor-ui-1'))
-    await page.goto(`${visitor}/s/${agent.token}`)
-    await expect(page.getByTestId('cl-root')).toBeVisible()
-    // 协作条缺省收起（P-20261107-4：展开内容浮于终端区之上，不再进列流挤压
-    // 终端卡片）——展开后见上传位与直通位
-    await expect(page.getByTestId('cl-drop')).toBeHidden()
-    await page.getByTestId('cl-toggle').click()
-    await expect(page.getByTestId('cl-drop')).toBeVisible()
-    await expect(page.getByTestId('cl-direct-request')).toBeVisible()
-
-    // 无在途申请批准 → 409（批准无对象）
-    const empty = await request.post(`${BASE}/api/share/${agent.token}/direct/approve`, { headers, data: {} })
-    expect(empty.status()).toBe(409)
-
-    // agent 会话限定红线：同流程打 shell 分享 → 批准 400（匿名远程 shell 不做）
-    await fetch(`${visitor}/s/${shell.token}/direct/request`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visitorId: 'e2e-visitor-shell', nickname: '访客S' }),
-    })
-    const deny = await request.post(`${BASE}/api/share/${shell.token}/direct/approve`, { headers, data: {} })
-    expect(deny.status()).toBe(400)
-
-    // 握手全路径（agent 分享）：访客申请 → 列表行 pending 投影 → 批准
-    const visitorId = 'e2e-visitor-ui-1'
-    const req = await fetch(`${visitor}/s/${agent.token}/direct/request`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visitorId, nickname: '测试员甲' }),
-    })
-    expect(req.status).toBe(200)
-    let pendingSeen = false
-    for (let i = 0; i < 20 && !pendingSeen; i++) {
-      const list = ((await (await request.get(`${BASE}/api/share`, { headers })).json()) as { data?: Array<{ token: string; direct?: { pending?: boolean } }> }).data || []
-      pendingSeen = !!list.find(x => x.token === agent.token)?.direct?.pending
-      if (!pendingSeen) await new Promise(r => setTimeout(r, 300))
-    }
-    expect(pendingSeen, 'pending projection should surface in share list').toBeTruthy()
-    const approve = await request.post(`${BASE}/api/share/${agent.token}/direct/approve`, { headers, data: { visitorId } })
-    expect(approve.ok(), await approve.text()).toBeTruthy()
-    expect(((await approve.json()) as { data?: { nick?: string } }).data?.nick).toBe('测试员甲')
-
-    // 持权卡通知：授予即入账带「收回」行内动作的通知条目（回收四路入口
-    // 之二——payload=token 直达回收端点）
-    const notices = ((await (await request.get(`${BASE}/api/notifications`, { headers })).json()) as { data?: Array<{ action?: string; actionPayload?: string }> }).data || []
-    expect(
-      notices.some(n => n.action === 'shdirect-revoke' && n.actionPayload === agent.token),
-      'grant should create a hold card notice with revoke action',
-    ).toBeTruthy()
-
-    // 持权投影：管理面 direct 投影 held + 访客轮询 held(mine)
-    let heldSeen = false
-    for (let i = 0; i < 20 && !heldSeen; i++) {
-      const proj = ((await (await request.get(`${BASE}/api/share/${agent.token}/direct`, { headers })).json()) as { data?: { hold?: unknown } }).data
-      heldSeen = !!proj?.hold
-      if (!heldSeen) await new Promise(r => setTimeout(r, 300))
-    }
-    expect(heldSeen, 'hold projection should surface').toBeTruthy()
-    const state = await fetch(`${visitor}/s/${agent.token}/direct/state?visitorId=${encodeURIComponent(visitorId)}`)
-    const stateBody = (await state.json()) as { status?: string; mine?: boolean }
-    expect(stateBody).toMatchObject({ status: 'held', mine: true })
-
-    // 访客页直通位流转：2s 轮询内 textarea 出现 → 发送批次 → 「已送达会话」
-    const ta = page.getByTestId('cl-direct-text')
-    await expect(ta).toBeVisible({ timeout: 8000 })
-    await ta.fill('复现步骤：打开设置页点第三个开关就崩')
-    await page.getByTestId('cl-direct-send').click()
-    await expect(page.getByTestId('cl-direct-status')).toContainText('已送达会话')
-
-    // 输入批次全量审计（元数据口径）：审计导出按 action 过滤后含本分享 token
-    //（列表端点不支持 action 过滤，export CSV 是过滤面的既有出口）
-    let inputAudited = false
-    for (let i = 0; i < 20 && !inputAudited; i++) {
-      const audit = await request.get(`${BASE}/api/audit/export?action=${encodeURIComponent('share.direct.input')}`, { headers })
-      if (audit.ok()) {
-        inputAudited = (await audit.text()).includes(agent.token)
-      }
-      if (!inputAudited) await new Promise(r => setTimeout(r, 400))
-    }
-    expect(inputAudited, 'direct input batch should be audited').toBeTruthy()
-
-    // 一键收回（四路入口共用的回收端点）：幂等成功 → 再输入 403（权不在）
-    const revoke = await request.post(`${BASE}/api/share/${agent.token}/direct/revoke`, { headers, data: {} })
-    expect(revoke.ok()).toBeTruthy()
-    expect(((await revoke.json()) as { data?: { had: boolean } }).data?.had).toBe(true)
-    const input = await fetch(`${visitor}/s/${agent.token}/direct/input`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visitorId, text: '收回后还想输入' }),
-    })
-    expect(input.status).toBe(403)
-    // 幂等：再收回 had=false 也成功
-    const revoke2 = await request.post(`${BASE}/api/share/${agent.token}/direct/revoke`, { headers, data: {} })
-    expect(revoke2.ok()).toBeTruthy()
-    expect(((await revoke2.json()) as { data?: { had: boolean } }).data?.had).toBe(false)
-
-    // 访客页对账：轮询到 none 后 textarea 收起、申请钮回位
-    await expect(page.getByTestId('cl-direct-request')).toBeVisible({ timeout: 8000 })
-  })
 
   test('协作位缺省零挂载：未开协作的直播访客页无任何协作位（存量语义）', async ({ page, request }) => {
     test.setTimeout(90_000)
@@ -386,10 +266,13 @@ test.describe('share-collab', () => {
     createdSessions.push(live.sessionId)
     await page.goto(`${visitor}/s/${live.token}`)
     await expect(page.locator('.xterm-screen').last()).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByTestId('cl-root')).toHaveCount(0)
+    // collab 关：合并条内协作 chip 不渲染（count 0 语义=按钮级，评审必改5 裁定）；
+    // 直通位随 P-20261121-1 统一收编退役——cl-direct-* testid 全页面不再出现
+    await expect(page.getByTestId('cl-root-btn')).toHaveCount(0)
     await expect(page.getByTestId('cl-drop')).toHaveCount(0)
-    await expect(page.getByTestId('cl-direct-request')).toHaveCount(0)
+    await expect(page.locator('[data-testid^="cl-direct-"]')).toHaveCount(0)
   })
+
 
   test('素材富输入：协作条不挤压终端 → 文字素材成 .txt 直达收件区 → HTML 内联图片粘贴上行 → 只读页纯文字粘贴进素材框', async ({ page, request }) => {
     test.setTimeout(120_000)
@@ -401,7 +284,8 @@ test.describe('share-collab', () => {
 
     await page.goto(`${visitor}/s/${live.token}`)
     await expect(page.locator('#badge[data-state="live"]')).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByTestId('cl-root')).toBeVisible()
+    // 入口条合并（P-20261119-3）：协作入口在合并条内（cl-root-btn chip 形态）
+    await expect(page.getByTestId('cl-root-btn')).toBeVisible()
 
     // ③ 不挤压：展开协作浮层前后终端卡片高度不变（浮层覆于终端区之上，不进列流）
     const cardH = () => page.locator('.card').evaluate(el => el.getBoundingClientRect().height)

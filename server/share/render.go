@@ -6,51 +6,18 @@ import (
 	"path"
 	"regexp"
 	"strings"
-
-	"github.com/gomarkdown/markdown"
-	"github.com/gomarkdown/markdown/html"
-	"github.com/gomarkdown/markdown/parser"
-	"github.com/microcosm-cc/bluemonday"
 )
 
 // renderSnippetHTML 文本片段的访客面渲染：单一 <pre><code> 代码块形态
 // （等宽 + 页面主题变量由 .md-article 管线提供）。正文 html 转义——片段是
 // 任意用户文本，绝不能当 HTML 解释；裸片段（不经页面 JS 注入、直接访问
 // render 端点）同样安全。语言未知不加标注类（页面高亮管道对未标注块跳过，
-// 错误高亮比没有更糟）
+// 错误高亮比没有更糟）。
+// 片段语义属 share 访客面故不入 filepreview——md/docx 等富渲染管线在
+// filepreview（P-20261119-4），本文件只留片段直出与 /s/{token} 相对资源
+// 重写（NormalizeRelPath/端点形态均为 share 特有）
 func renderSnippetHTML(content string) string {
 	return "<pre><code>" + stdhtml.EscapeString(content) + "</code></pre>"
-}
-
-// renderMarkdownHTML markdown → 净化 HTML 片段（不带页面骨架）。
-// 渲染后过 bluemonday 白名单：分享内容是"任意用户文件"，必须假设其中
-// 含脚本/事件属性；外链统一 target=_blank（渲染 Flag），脚本由净化器 +
-// render 端点的 CSP sandbox 双保险拦截
-func renderMarkdownHTML(content []byte) string {
-	exts := parser.CommonExtensions | parser.AutoHeadingIDs | parser.NoEmptyLineBeforeBlock
-	doc := parser.NewWithExtensions(exts).Parse(content)
-	opts := html.RendererOptions{
-		Flags: html.CommonFlags | html.HrefTargetBlank,
-	}
-	body := markdown.Render(doc, html.NewRenderer(opts))
-	return string(sanitizer().SanitizeBytes(body))
-}
-
-// sanitizer 文档净化策略：UGC 白名单 + 表格/删除线/任务清单等 md 常用元素；
-// 外链保留渲染器写入的 target=_blank（只允许这一个值，避免 reverse tabnabbing
-// 面扩大），rel nofollow 由 UGCPolicy 默认附带。
-// 标题 id 必须放行：AutoHeadingIDs 生成的锚点 id 是文内目录（[xx](#xx)）的
-// 跳转目标——历史上 id 被净化器剥掉，目录点击全部静默失效
-func sanitizer() *bluemonday.Policy {
-	p := bluemonday.UGCPolicy()
-	p.AllowElements("del", "s", "input", "details", "summary")
-	p.AllowAttrs("type").OnElements("input")
-	p.AllowAttrs("align").OnElements("th", "td")
-	p.AllowAttrs("target").Matching(regexp.MustCompile(`^_blank$`)).OnElements("a")
-	// 标题锚点 id：仅允许常规 id 字符（字母/数字/下划线/连字符/点/空格/中文），
-	// 拒绝引号、尖括号、控制字符等可能破坏属性边界的输入
-	p.AllowAttrs("id").Matching(regexp.MustCompile(`^[\w\-. \p{L}\p{N}]+$`)).OnElements("h1", "h2", "h3", "h4", "h5", "h6")
-	return p
 }
 
 // ── 相对资源重写（md 预览的分享内图片/链接可达性） ──

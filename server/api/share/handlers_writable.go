@@ -110,9 +110,11 @@ func SetShareWritable(c *gin.Context) {
 		return
 	}
 	if !req.On && shareSvc != nil {
-		// 关闭即回收：上行连接即刻断开（各连接回落只读）+ 待批粘贴面清空
-		//（拒绝广播随清场发出）+ 会话侧输入闸随连接 defer 解除
-		shareSvc.WritableDown(token)
+		// 关闭即回收：开放直入上行连接即刻断开（各连接回落只读）+ 开放路径
+		// 待批粘贴面清空（拒绝广播随清场发出）+ 会话侧输入闸随连接 defer 经
+		// 账本解除。申请批准路径的持权与连接不受影响（两开关独立不互斥，
+		// all=false 选择性清场——持权访客的授权物是批准不是本开关）
+		shareSvc.WritableDown(token, false)
 	}
 	action := "off"
 	if req.On {
@@ -197,7 +199,8 @@ func BatchShareWritable(c *gin.Context) {
 			continue
 		}
 		if !req.On && shareSvc != nil {
-			shareSvc.WritableDown(token)
+			// 同单条：选择性断开（all=false——申请批准持权不受批量关闭影响）
+			shareSvc.WritableDown(token, false)
 		}
 		out = append(out, itemResult{Token: token, Ok: true, Reason: "ok", Name: cur.Name})
 	}

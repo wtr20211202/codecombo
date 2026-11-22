@@ -1,15 +1,17 @@
 // 分享地址计划（P-20261020-6 / P-20261020-2 统一实现）：结果卡、管理器复制/
 // 打开与二维码共用同一份 URL 计算。选址纯函数在 utils/shareAddress（阶段 A：
-// sharePublicBaseUrl > externalAccessUrl > 当前非回环 host > 局域网候选 >
+// sharePublicBaseUrl > externalAccessUrl > 当前非回环 host > 回环入口选址 >
 // 旧格式 host:sharePort；前四类走主应用同源 /s/）。设置/网络/子服务状态一次
 // 并行拉取，失败降级为不可达提示，不向调用方抛错（分享链接是低频交互，可
-// 重试即可）。回环入口下用户选择的局域网候选通过「重排候选首位」传给纯函数，
-// 避免复制/二维码与下拉选择各算各的。
+// 重试即可）。回环入口下（P-20261120-4）：selectedIP 空 = 「自动（浏览器
+// 地址）」态——链接即当前回环 origin；用户显式选择经 preferredIp 语义参数
+// 传给纯函数（不再「重排候选首位」——那是下拉与链接框不一致 bug 的根因），
+// 复制/二维码/链接框三方同源同一 baseOrigin。
 import { computed, ref, watch } from 'vue'
 import { shareApi, type ShareServiceStatus } from '../api/domains/share'
 import { networkApi, settingsApi } from '../api/domains/system'
 import { useI18n } from './useI18n'
-import type { NetworkAddress } from '../utils/networkAddress'
+import { loopbackSelfCandidates, type NetworkAddress } from '../utils/networkAddress'
 import {
   buildShareAddressPlan,
   buildShareBasePlan,
@@ -28,7 +30,12 @@ export function useShareAddressPlan() {
   const externalAccessUrl = ref('')
   const publicBaseUrl = ref('')
   const addresses = ref<NetworkAddress[]>([])
+  // '' = 「自动（浏览器地址）」态：回环入口下链接用当前 origin；显式选择后
+  // 存候选 ip。不再在加载时强制赋首项——那会让「默认=浏览器地址」永远不成立
   const selectedIP = ref('')
+
+  /** 回环合成候选（127.0.0.1/localhost）：不依赖后端枚举，label 随语言即时解析 */
+  const loopbackExtras = computed<NetworkAddress[]>(() => loopbackSelfCandidates(t('share.qr.selfLoopback')))
 
   /** 拉取选址上下文（分享外发基址/外部地址 + 本机网卡候选 + 子服务状态）。
    *  失败静默：弹层内以不可达/未就绪文案呈现，不再叠全局 toast */
@@ -67,45 +74,41 @@ export function useShareAddressPlan() {
     loading.value = false
   }
 
-  /** 原始上下文（候选顺序未调整）：用于生成候选清单与默认首项 */
+  /** 原始上下文（不含用户选择）：用于生成候选清单；回环合成项随语境注入 */
   const baseContext = computed<ShareAddressContext>(() => ({
     currentHref: currentHref.value,
     status: status.value,
     publicBaseUrl: publicBaseUrl.value,
     externalAccessUrl: externalAccessUrl.value,
     addresses: addresses.value,
+    loopbackExtras: loopbackExtras.value,
   }))
 
   const rawPlan = computed(() => buildShareBasePlan(baseContext.value))
   const candidates = computed(() => rawPlan.value.candidates)
 
-  // 候选变化（重载/切网）时把失效选择复位，保证下拉与链接一致
+  // 候选变化（重载/切网）时只把失效的显式选择复位回自动态，保证下拉与链接
+  // 一致；绝不强制赋首项（P-20261120-4 评审必改1：强制赋首项与「默认=浏览器
+  // 地址」互斥）
   watch(candidates, (list) => {
-    if (list.length === 0) {
+    if (selectedIP.value && !list.some(a => a.ip === selectedIP.value)) {
       selectedIP.value = ''
-      return
-    }
-    if (!list.some(a => a.ip === selectedIP.value)) {
-      selectedIP.value = list[0]?.ip ?? ''
     }
   }, { immediate: true })
 
+  /** 当前显式选中的候选；自动态为 null（不假装选中首项——hint 与链接必须
+   *  走同一份 baseOrigin，避免「hint 同步了链接没同步」的分叉复发） */
   const selectedAddress = computed<NetworkAddress | null>(() => {
-    const list = candidates.value
-    if (list.length === 0) return null
-    return list.find(a => a.ip === selectedIP.value) ?? list[0] ?? null
+    if (!selectedIP.value) return null
+    return candidates.value.find(a => a.ip === selectedIP.value) ?? null
   })
 
-  /** 用户选中的候选置首后交给纯函数：buildShareBasePlan 取 candidates[0]
-   *  作为回环入口的 baseOrigin，复制/二维码随下拉即时切换 */
-  const activeContext = computed<ShareAddressContext>(() => {
-    const sel = selectedAddress.value
-    if (!sel || candidates.value.length <= 1) return baseContext.value
-    return {
-      ...baseContext.value,
-      addresses: [sel, ...addresses.value.filter(a => a.ip !== sel.ip)],
-    }
-  })
+  /** 用户显式选择经 preferredIp 传给纯函数：baseOrigin 钉住所选候选 origin；
+   *  自动态（''）= 回环入口用浏览器地址栏 origin。链接/二维码/hint 同源 */
+  const activeContext = computed<ShareAddressContext>(() => ({
+    ...baseContext.value,
+    preferredIp: selectedIP.value,
+  }))
 
   const plan = computed(() => buildShareBasePlan(activeContext.value))
   const statusTone = computed(() => shareReachTone(plan.value.state))
@@ -127,6 +130,9 @@ export function useShareAddressPlan() {
         return networkFailed.value ? t('share.qr.hint.networkFailed') : t('share.qr.hint.unreachable')
       default:
         if (plan.value.source === 'legacy') return t('share.reach.hint.legacy')
+        // 回环本源（自动态默认/显式选回环）与显式选局域网候选是两种处境：
+        // 前者「要发给别人先在下面切地址」，后者「对方需同网」——双语境区分
+        if (plan.value.source === 'loopbackSelf') return t('share.qr.hint.loopbackSelf')
         return t('share.qr.hint.loopback', { ip: selectedAddress.value?.ip || '' })
     }
   })

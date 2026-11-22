@@ -132,6 +132,14 @@ func OpsNotify(c *gin.Context) {
 	if req.Type == opschannel.EventTaskProgress {
 		rememberLastProgress(c.GetHeader("X-Session-ID"), req.Payload)
 	}
+	// frontend 动词族设备定向（P-20261117-4）：设备效应原语不再无差别广播——
+	// 按会话浏览器绑定定向（含单浏览器启发式与降级通知化），其余事件族
+	// 全广播零变化（白名单 opschannel.IsDeviceEffectEvent）
+	if opschannel.IsDeviceEffectEvent(req.Type) {
+		deliverDeviceEffect(c, req.Type, req.Payload)
+		c.JSON(http.StatusOK, gin.H{"message": "event published"})
+		return
+	}
 	opschannel.BroadcastEvent(req.Type, req.Payload)
 	c.JSON(http.StatusOK, gin.H{"message": "event published"})
 }

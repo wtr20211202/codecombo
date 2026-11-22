@@ -133,6 +133,10 @@
             <code class="cmd-text">npm i -g codecombo@next</code><span class="qs-cmt"># or via npm (Node.js 18+)</span>
             <button class="copy-btn" type="button" data-copy="npm i -g codecombo@next" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
           </div>
+          <div class="cmd-row">
+            <code class="cmd-text">p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://ghproxy.net/https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o "$p" &amp;&amp; sh "$p"; rm -f "$p"</code><span class="qs-cmt" data-lang-en># or via mirror — when raw.githubusercontent.com is unreachable (CN networks)</span><span class="qs-cmt" data-lang-zh># 或走镜像——raw.githubusercontent.com 不可达时（CN 网络常见）</span>
+            <button class="copy-btn" type="button" data-copy="p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://ghproxy.net/https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o &quot;$p&quot; &amp;&amp; sh &quot;$p&quot;; rm -f &quot;$p&quot;" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
+          </div>
         </div>
         <!-- npm 特例（P-20261113-4-S2）：源=faq #upgrading 判别表 npm 行 + README §Install with npm，措辞循 faq 口径（steps aside / 恒为最新版）不新造 -->
         <div class="doc-note">
@@ -142,6 +146,26 @@
             build). Details in the <a href="faq.html#upgrading">FAQ</a>.</span>
             <span data-lang-zh><b>用 npm 安装的？</b>该安装形态的应用内更新器自动让位——更新 =
             重跑安装命令（恒为最新版）。详见<a href="faq.html#upgrading">常见问题</a>。</span>
+          </p>
+        </div>
+        <!-- 镜像回退注记（P-20261116-2-S1）：源=README §Quickstart 镜像回退段（改先改源）；信任边界两级如实——
+             哨兵自检+SHA256 防传输截断/损坏，不防镜像或链路恶意改写（正文改写保留尾哨兵可通过、清单与二进制
+             同走镜像时校验基准可被调包）；完整性敏感场景首选官方直连或 npm。Windows install.ps1 暂无对等镜像
+             形态（跟进项，S2 处理） -->
+        <div class="doc-note">
+          <p>
+            <span data-lang-en><b>Behind a restrictive network?</b> The last command rides the
+            <code>ghproxy.net</code> mirror prefix. The sentinel check + SHA256 verification protect
+            against truncated or corrupted transfers — not against a malicious mirror rewriting the
+            content (an altered script that keeps the trailing sentinel still passes; a
+            <code>SHA256SUMS</code> manifest fetched through the same mirror can be swapped too).
+            For integrity-sensitive setups prefer the official link or npm (the registry has
+            integrity mechanisms). The Windows one-liner has no mirror variant yet.</span>
+            <span data-lang-zh><b>网络受限？</b>最后一条命令走 <code>ghproxy.net</code> 镜像前缀。
+            哨兵自检 + SHA256 校验防传输截断/损坏——不防镜像恶意改写内容（正文被改但保留尾部
+            哨兵仍可通过校验；<code>SHA256SUMS</code> 清单同走镜像时校验基准可被一并调包）。
+            完整性敏感场景首选官方直连或 npm（registry 自带完整性机制）。Windows 一键命令
+            暂无镜像形态。</span>
           </p>
         </div>
         <p class="perm-note">

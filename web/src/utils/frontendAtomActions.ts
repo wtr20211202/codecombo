@@ -4,6 +4,7 @@ import i18n from '../i18n'
 import { clipApi } from '../api/domains/system'
 import { CLIP_MAX_BYTES, clipByteLength, ownClipDeviceId } from './clipRelay'
 import { copyText } from './clipboard'
+import { projectFileDownloadUrl, triggerDirectDownload } from './directDownload'
 import { maskSensitive } from './sensitiveMask'
 import { useNotificationStore } from '../stores/notification'
 import { useOpsAtomPrefs, type FrontendAtomId } from '../stores/opsAtomPrefs'
@@ -138,7 +139,8 @@ export function isHTTPExternalURL(url: string): boolean {
 /**
  * frontend.download：隐藏 `<a download>` 指向既有文件下载端点（同源，锁 token
  * 走 cookie 载体 P-20261020-1），点击即弹浏览器下载框——文件字节不经事件通道，
- * 下载管理器原生承接（大文件/断点续传免费获得）。
+ * 下载管理器原生承接（大文件/断点续传免费获得）。直链构造/程序化点击收口在
+ * utils/directDownload（P-20261117-4 降级通知的 download 动作同用一链）。
  * 返回 true = 已触发（含触顶/关闭被拒的可见反馈已给出），false = 载荷非法静默忽略
  */
 export function handleFrontendDownload(d: FrontendDownloadDetail, message: AtomMessage): boolean {
@@ -150,12 +152,7 @@ export function handleFrontendDownload(d: FrontendDownloadDetail, message: AtomM
   // 同源下载：Content-Disposition（服务端净化链）是文件名权威，download 属性
   // 只兜头缺失的形态；路径项目相对恒正斜杠，basename 用 split 即可
   const name = path.split('/').pop() || 'download'
-  const a = document.createElement('a')
-  a.href = `/api/projects/${encodeURIComponent(projectId)}/file/download?path=${encodeURIComponent(path)}`
-  a.download = name
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
+  triggerDirectDownload(projectFileDownloadUrl(projectId, path), name)
   message.success(atomToast(t('opsAtom.downloadStarted', { name }), 'ops-atom-download-toast'))
   return true
 }

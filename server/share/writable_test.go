@@ -2,6 +2,7 @@ package share
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -162,10 +163,18 @@ func TestWSUpgraderSameOrigin(t *testing.T) {
 
 func TestWritableToggleGate(t *testing.T) {
 	sink := &fakeWritableSink{}
-	// 开关关闭：WS 端点恒 404（存在性不可探测，drop 族同款语义）；状态端
-	// 如实回 false
+	// 双模式全关（Writable 关 + 申请通道显式关 GuestInputOff=true）：WS 端点
+	// 恒 404（存在性不可探测，drop 族同款语义）；状态端如实回 false。
+	// P-20261121-1 起单关 Writable 不再 404（申请通道缺省在场——hold 模式
+	// 接入，双模式准入见 writable_dualmode_test.go）
 	token := fixedToken("wrgate")
-	srv, _, _ := writableTestEnv(t, token, false, sink)
+	shares := fakeShares{token: {
+		Token: token, Kind: store.ShareKindTerminal, TerminalID: "sess-1",
+		Name: "live", GuestInputOff: true, // 两开关全关
+	}}
+	svc := NewService(shares, fakeRoots{byID: map[string]string{}}, nil).WithWritableSink(sink)
+	srv := httptest.NewServer(svc.Handler())
+	t.Cleanup(srv.Close)
 	res, body := getJSON(t, srv.URL, "/s/"+token+"/writable/state")
 	if res.StatusCode != http.StatusOK || body["writable"] != false {
 		t.Fatalf("state with writable off = %d %v", res.StatusCode, body)
@@ -340,8 +349,8 @@ func TestWritableDownAndCascade(t *testing.T) {
 	if svc.WritableState(token) != 1 {
 		t.Fatal("state must report 1 visitor")
 	}
-	// WritableDown：上行连接收到 writable_off 并断开
-	if !svc.WritableDown(token) {
+	// WritableDown（owner 开关方向 all=false）：开放连接收到 writable_off 并断开
+	if !svc.WritableDown(token, false) {
 		t.Fatal("writable down = false")
 	}
 	if f := c1.nextFrame(t, 2*time.Second); f["type"] != "writable_off" {
@@ -358,7 +367,7 @@ func TestWritableDownAndCascade(t *testing.T) {
 		t.Fatal("conns must be gone after WritableDown")
 	}
 	// 幂等：再 down 一次 = false
-	if svc.WritableDown(token) {
+	if svc.WritableDown(token, false) {
 		t.Fatal("second down must be false")
 	}
 
@@ -387,7 +396,7 @@ func TestWritableAuditWindow(t *testing.T) {
 	token := fixedToken("wraudit")
 	shares := fakeShares{token: {Token: token, Kind: store.ShareKindTerminal, TerminalID: "sess-1", Name: "live", Writable: true}}
 	svc := NewService(shares, fakeRoots{byID: map[string]string{}}, nil).WithWritableSink(sink)
-	c := &writableConn{token: token, sessionID: "sess-1", visitorID: "v-audit-12345", ip: "203.0.113.9"}
+	c := &writableConn{token: token, sessionID: "sess-1", visitorID: "v-audit-12345", ip: "203.0.113.9", open: true}
 	now := time.Now()
 	// 同窗口内两帧：不成账（余量在途）
 	if !svc.injectWritable(nil, c, "abc", now) {
@@ -418,6 +427,10 @@ func TestWritableAuditWindow(t *testing.T) {
 	}
 	if strings.Contains(detail, "abc") || strings.Contains(detail, "ghi") {
 		t.Fatalf("batch detail must not carry input text: %q", detail)
+	}
+	// 统一单键入批次事件（P-20261121-1 必改8）：Detail 带 mode 分档授权模式
+	if !strings.Contains(detail, "mode=open") {
+		t.Fatalf("batch detail must carry mode: %q", detail)
 	}
 	// 断开兜底：余量（无）不再成账
 	svc.flushConnAudit(c, true)
@@ -480,5 +493,258 @@ func TestWritableWriterCap(t *testing.T) {
 	// 已在场连接继续可用
 	if err := clients[0].conn.WriteMessage(websocket.BinaryMessage, []byte("echo hi\r")); err != nil {
 		t.Fatalf("send on existing conn: %v", err)
+	}
+}
+
+// ── 视口反喂 resize（P-20261120-8）控制面承接纪律锁 ──
+// 钳制域（评审必改3）/conn 级节流 ≥1s/token 合并窗 last-write-wins（必改4）/
+// TmuxExternal 拒绝（必改4）/审计+事件双出账（必改5）/WritableDown 清合并窗。
+
+// fakeWritableResizer WritableResizer 测试替身（记录应用值；allowed 旗标模拟
+// 装配层 TmuxExternal 判定）
+type fakeWritableResizer struct {
+	mu      sync.Mutex
+	applied []string // "cols x rows" 应用记录序
+	allowed bool
+}
+
+func (f *fakeWritableResizer) WritableResizeAllowed(sessionID string) bool { return f.allowed }
+
+func (f *fakeWritableResizer) WritableResize(sessionID string, cols, rows uint16) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.applied = append(f.applied, fmt.Sprintf("%dx%d", cols, rows))
+	return nil
+}
+
+func (f *fakeWritableResizer) got() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.applied...)
+}
+
+// writableResizeEnv 起一个带 resizer/事件捕获的可写子服务（writableTestEnv
+// 同构，补 P-20261120-8 两面装配）
+func writableResizeEnv(t *testing.T, token string, resizer *fakeWritableResizer) (*httptest.Server, *Service, *fakeWritableSink, *[]WritableResizeEvent) {
+	t.Helper()
+	sink := &fakeWritableSink{}
+	shares := fakeShares{token: {
+		Token: token, Kind: store.ShareKindTerminal, TerminalID: "sess-1",
+		Name: "live", Writable: true,
+	}}
+	svc := NewService(shares, fakeRoots{byID: map[string]string{}}, nil).
+		WithWritableSink(sink).WithWritableResizer(resizer)
+	var events []WritableResizeEvent
+	svc = svc.WithWritableResizeEvents(func(ev WritableResizeEvent) { events = append(events, ev) })
+	srv := httptest.NewServer(svc.Handler())
+	t.Cleanup(srv.Close)
+	return srv, svc, sink, &events
+}
+
+// waitApplied 轮询 resizer 应用记录直至出现期望值（合并窗 500ms + 回执异步）
+func waitApplied(t *testing.T, r *fakeWritableResizer, want []string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := r.got(); len(got) >= len(want) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("resizer applied = %v, want %v", r.got(), want)
+}
+
+func TestWritableResizeApplyClampThrottleAudit(t *testing.T) {
+	resizer := &fakeWritableResizer{allowed: true}
+	token := fixedToken("wrrsz1")
+	srv, svc, _, events := writableResizeEnv(t, token, resizer)
+	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/s/" + token + "/termws?visitorId=v1"
+	c := wsDial(t, url)
+	if f := c.nextFrame(t, 2*time.Second); f["type"] != "hello" {
+		t.Fatalf("first frame = %v, want hello", f)
+	}
+
+	sendResize := func(cols, rows int) {
+		payload, _ := json.Marshal(map[string]any{"type": "resize", "cols": cols, "rows": rows})
+		if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+			t.Fatalf("send resize: %v", err)
+		}
+	}
+
+	// 合法值：合并窗后应用 + resize_applied 回执 + 事件出账
+	sendResize(120, 40)
+	if f := c.nextFrame(t, 3*time.Second); f["type"] != "resize_applied" || f["cols"] != float64(120) || f["rows"] != float64(40) {
+		t.Fatalf("applied frame = %v", f)
+	}
+	waitApplied(t, resizer, []string{"120x40"})
+
+	// 非法值钳制（评审必改3）：cols=5→20、rows=9999→300——conn 节流 1s 内不发
+	// 第二帧，先等节流窗过
+	time.Sleep(1_100 * time.Millisecond)
+	sendResize(5, 9999)
+	if f := c.nextFrame(t, 3*time.Second); f["type"] != "resize_applied" || f["cols"] != float64(20) || f["rows"] != float64(300) {
+		t.Fatalf("clamped frame = %v", f)
+	}
+	waitApplied(t, resizer, []string{"120x40", "20x300"})
+
+	// conn 级节流（≥1s）：节流窗内的第二帧整帧丢弃（连合并窗都不进——1.1s
+	// 睡眠只放行了上面那一帧，这帧在其后 ~0ms 发出）
+	sendResize(100, 30)
+	time.Sleep(700 * time.Millisecond)
+	if got := resizer.got(); len(got) != 2 {
+		t.Fatalf("throttled frame must not apply, applied = %v", got)
+	}
+
+	// 协议误用容忍：非 resize 的 Text 帧忽略不关（连接仍活着）
+	time.Sleep(1_100 * time.Millisecond)
+	if err := c.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"hello"}`)); err != nil {
+		t.Fatalf("send stray text: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if err := c.conn.WriteMessage(websocket.PingMessage, []byte("x")); err != nil {
+		t.Fatalf("conn must stay alive after stray text frame: %v", err)
+	}
+
+	// 审计入账（评审必改5，元数据口径）：share.writableResize 动作 + 尺寸与
+	// visitor 摘要在 Detail
+	var audits []store.AuditEvent
+	n := svc.FlushViewAudits(func(e store.AuditEvent) { audits = append(audits, e) })
+	_ = n
+	found := false
+	for _, a := range audits {
+		if a.Action == store.AuditShareWritableResize && strings.Contains(a.Detail, "120x40") && strings.Contains(a.Detail, "v1") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("resize audit missing among %+v", audits)
+	}
+	// ops 事件（owner 侧最小可见性）
+	if len(*events) == 0 {
+		t.Fatal("writable resize events must fire on apply")
+	}
+	ev := (*events)[0]
+	if ev.Cols != 120 || ev.Rows != 40 || ev.TerminalID != "sess-1" || ev.VisitorTail == "" {
+		t.Fatalf("resize event = %+v", ev)
+	}
+}
+
+func TestWritableResizeMergeWindowLastWriteWins(t *testing.T) {
+	// 评审必改4：多访客并发 resize 的 token 合并窗——窗内两帧只应用最后上报
+	// 值（last-write-wins），突刺收敛为单次改格；回执广播两连接都收
+	resizer := &fakeWritableResizer{allowed: true}
+	token := fixedToken("wrrsz2")
+	srv, svc, _, _ := writableResizeEnv(t, token, resizer)
+	base := "ws" + strings.TrimPrefix(srv.URL, "http") + "/s/" + token + "/termws?visitorId="
+	a := wsDial(t, base+"va")
+	b := wsDial(t, base+"vb")
+	for _, cl := range []*wsClient{a, b} {
+		if f := cl.nextFrame(t, 2*time.Second); f["type"] != "hello" {
+			t.Fatalf("first frame = %v, want hello", f)
+		}
+	}
+	pa, _ := json.Marshal(map[string]any{"type": "resize", "cols": 100, "rows": 30})
+	pb, _ := json.Marshal(map[string]any{"type": "resize", "cols": 200, "rows": 50})
+	// 确定序：两帧走两条独立 TCP 连接，到达序不由发送序保证——先等 A 帧受理
+	//（pending 可观测且值为 A），再发 B 帧并等 pending 翻成 B（定时器仍在窗内），
+	// 此后合并窗到期必应用 B 值（last-write-wins 的确定性验证面）
+	if err := a.conn.WriteMessage(websocket.TextMessage, pa); err != nil {
+		t.Fatalf("send a: %v", err)
+	}
+	waitPending(t, svc, token, 100)
+	if err := b.conn.WriteMessage(websocket.TextMessage, pb); err != nil {
+		t.Fatalf("send b: %v", err)
+	}
+	waitPending(t, svc, token, 200)
+	// 两连接都收同一枚应用回执（广播面）
+	for name, cl := range map[string]*wsClient{"a": a, "b": b} {
+		if f := cl.nextFrame(t, 3*time.Second); f["type"] != "resize_applied" || f["cols"] != float64(200) {
+			t.Fatalf("conn %s applied frame = %v, want 200x50", name, f)
+		}
+	}
+	waitApplied(t, resizer, []string{"200x50"})
+	if got := resizer.got(); len(got) != 1 {
+		t.Fatalf("merge window must coalesce to one apply, applied = %v", got)
+	}
+}
+
+// waitPending 轮询合并窗 pending 直至出现期望列数（帧受理的确定性观测面）
+func waitPending(t *testing.T, svc *Service, token string, cols uint16) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.writable.mu.Lock()
+		st := svc.writable.resizes[token]
+		var got uint16
+		if st != nil {
+			got = st.cols
+		}
+		svc.writable.mu.Unlock()
+		if got == cols {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("pending resize never reached cols=%d", cols)
+}
+
+func TestWritableResizeExternalDenied(t *testing.T) {
+	// 评审必改4：TmuxExternal 外部接管会话禁用访客 resize——resize_denied 回执
+	// （访客页据此停驱动回落保真），零应用
+	resizer := &fakeWritableResizer{allowed: false}
+	token := fixedToken("wrrsz3")
+	srv, _, _, _ := writableResizeEnv(t, token, resizer)
+	c := wsDial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/s/"+token+"/termws?visitorId=v1")
+	if f := c.nextFrame(t, 2*time.Second); f["type"] != "hello" {
+		t.Fatalf("first frame = %v", f)
+	}
+	payload, _ := json.Marshal(map[string]any{"type": "resize", "cols": 120, "rows": 40})
+	if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if f := c.nextFrame(t, 3*time.Second); f["type"] != "resize_denied" || f["reason"] != "external_session" {
+		t.Fatalf("denied frame = %v", f)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got := resizer.got(); len(got) != 0 {
+		t.Fatalf("denied resize must not apply, applied = %v", got)
+	}
+}
+
+func TestWritableResizeDownCancelsPending(t *testing.T) {
+	// owner 杀开关清合并窗（WritableDown 四表清场）：pending 不越过开关时刻
+	// 生效——窗内撤销即零应用
+	resizer := &fakeWritableResizer{allowed: true}
+	token := fixedToken("wrrsz4")
+	srv, svc, _, _ := writableResizeEnv(t, token, resizer)
+	c := wsDial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/s/"+token+"/termws?visitorId=v1")
+	if f := c.nextFrame(t, 2*time.Second); f["type"] != "hello" {
+		t.Fatalf("first frame = %v", f)
+	}
+	payload, _ := json.Marshal(map[string]any{"type": "resize", "cols": 150, "rows": 45})
+	if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	// 等待帧已被读循环受理（pending 进合并窗可观测）——WriteMessage 只是投递，
+	// 立刻 Down 会与读循环赛跑（Down 先清空表、帧后到，pending 照常成立）
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		svc.writable.mu.Lock()
+		_, pending := svc.writable.resizes[token]
+		svc.writable.mu.Unlock()
+		if pending {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatal("resize pending never entered the merge window")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !svc.WritableDown(token, true) {
+		t.Fatal("writable down = false")
+	}
+	time.Sleep(900 * time.Millisecond) // 越过 500ms 合并窗
+	if got := resizer.got(); len(got) != 0 {
+		t.Fatalf("pending resize must be cancelled by WritableDown, applied = %v", got)
 	}
 }

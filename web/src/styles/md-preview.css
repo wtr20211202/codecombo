@@ -1,0 +1,71 @@
+/* markdown 预览排版全局样式（P-20261119-4 S3 必改2(a) 防漂移配套）：
+ * .md-preview-content 的排版规则自 EditorMdPreviewPane.vue scoped 块抽出
+ * 全局化——编辑器侧栏实时预览与统一预览视图（FilePreviewView）共用同一
+ * 渲染面排版，两处挂同一类即得同形，杜绝复制漂移。组件私有交互样式
+ * （列宽拖拽 col-handle/sc-cols-fixed、锚点高亮 md-anchor-hit）仍留各
+ * 组件 scoped。选择器走主题语义变量，六主题自适应零硬编码（主题适配红线）。 */
+
+.md-preview-content {
+  padding: 16px 24px;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 800px;
+}
+.md-preview-content h1 { font-size: 1.8em; border-bottom: 1px solid var(--border-default); padding-bottom: 8px; margin: 16px 0 12px; color: var(--text-primary); }
+.md-preview-content h2 { font-size: 1.4em; border-bottom: 1px solid var(--border-default); padding-bottom: 6px; margin: 14px 0 10px; color: var(--text-primary); }
+.md-preview-content h3 { font-size: 1.2em; margin: 12px 0 8px; color: var(--text-primary); }
+.md-preview-content h4 { font-size: 1.1em; margin: 10px 0 6px; color: var(--text-primary); }
+.md-preview-content p { margin: 8px 0; }
+.md-preview-content a { color: var(--accent-blue); text-decoration: none; }
+.md-preview-content a:hover { text-decoration: underline; }
+.md-preview-content code { background: var(--bg-panel); padding: 2px 6px; border-radius: 3px; font-family: var(--font-mono); font-size: 0.9em; color: var(--accent-orange); }
+.md-preview-content pre { background: var(--bg-panel); padding: 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; border: 1px solid var(--border-default); }
+.md-preview-content pre code { background: none; padding: 0; color: var(--text-primary); }
+.md-preview-content blockquote { border-left: 3px solid var(--accent-blue); padding: 4px 12px; color: var(--text-secondary); margin: 8px 0; background: color-mix(in srgb, var(--accent-blue) 6%, transparent); border-radius: 0 4px 4px 0; }
+.md-preview-content blockquote p { margin: 4px 0; }
+.md-preview-content ul, .md-preview-content ol { padding-left: 24px; margin: 8px 0; }
+.md-preview-content li { margin: 4px 0; }
+.md-preview-content li input[type="checkbox"] { margin-right: 6px; vertical-align: middle; accent-color: var(--brand-accent); }
+.md-preview-content table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.md-preview-content th, .md-preview-content td { border: 1px solid var(--border-default); padding: 6px 12px; text-align: left; }
+.md-preview-content th { background: var(--bg-panel); font-weight: 500; }
+/* ── md 表格列宽（P-20261010-1）：自动布局按内容分配，长文本列贪婪扩张会把
+   短列压到内容最小宽以下（中文无空格可断 →「待回复」逐字竖排）。
+   ① min-width 短列下限：四字以内短词（待回复/已完成等）在挤压下保证单行
+   （base.css 全局 border-box，calc 补回单元格 padding/边框壳——内容区 4em
+   才是短词单行的语义基准）；
+   ② overflow-wrap:anywhere 长列上限兜底：窄屏下长列仍可断行不撑破容器 ── */
+.md-preview-content th, .md-preview-content td { min-width: calc(4em + 26px); overflow-wrap: anywhere; }
+.md-preview-content th { position: relative; }
+.md-preview-content tr:nth-child(even) { background: color-mix(in srgb, var(--bg-panel) 50%, transparent); }
+/* height:auto（P-20261120-3）：md 源内 HTML <img> 可带显式 width/height 属性
+ * （DOMPurify 默认放行），max-width 只钳宽不钳高——height 属性把图定死成
+ * 巨条+容器 overflow:auto 切片（用户实测主诉）；补 height:auto 释放属性高度
+ * 随宽等比缩放。cursor:zoom-in 配套灯箱点击放大（下方 .md-lightbox） */
+.md-preview-content img { max-width: 100%; height: auto; border-radius: 4px; cursor: zoom-in; }
+.md-preview-content hr { border: none; border-top: 1px solid var(--border-default); margin: 16px 0; }
+.md-preview-content strong { color: var(--text-primary); font-weight: 600; }
+.md-preview-content em { color: var(--text-primary); }
+
+/* ── md 预览图片灯箱（P-20261120-3）：点击预览内图片全屏看原图，点击/Esc
+ * 关闭（分享访客页 openLightbox 同款移植，交互出口 utils/mdLightbox.ts）。
+ * 元素挂 document.body（组件树外），scoped 不可达故落全局本文件。颜色/阴影
+ * 走主题语义变量（主题适配红线）；z-index 1500 = 悬浮窗层：盖过应用主内容
+ * （侧栏抽屉 900）与 body 后挂的 DOM 序，naive 弹层（~2000）仍可叠于其上 ── */
+.md-lightbox {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-mask);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1500;
+  cursor: zoom-out;
+}
+.md-lightbox img {
+  max-width: 94%;
+  max-height: 92%;
+  border-radius: 8px;
+  box-shadow: var(--shadow-pop-xl);
+}

@@ -1,24 +1,21 @@
 package share
 
 // 分享访客页内联 CSS 段（P-20261007-22 纯搬运自 page.go 的 pageTmplSrc
-// 模板段，零逻辑改动）：pageTmplSrc 按「页头 + 本段 + body 开篇 + JS 三段 +
-// 收尾」常量拼接装配（见 page.go），段间零字节增减
+// 模板段，零逻辑改动）：pageTmplSrc 按「页头 + 本段 + 主题注入件 + </style>
+// + body 开篇 + JS 段（含主题注入件）+ 收尾」常量拼接装配（见 page.go）。
+// 主题段自 P-20261120-1 起切出 theme.go GuestThemeCSS（六页单一事实源），
+// 拼接在本段末尾、</style> 之前（本段尾不带 </style>——闭合随装配行）；
+// 本文件只留 auto 档媒体查询与页面自身规则
 
 const pageTmplCssSrc = `<style id="page-css">
 :root{--bg:#f4f6fb;--card:#ffffff;--text:#1b2437;--muted:#667085;--border:#e6e9f0;
 --accent:#3d7bfd;--accent2:#6a5cff;--hover:#f0f4ff;--chip:#eef2ff;--shadow:0 10px 30px rgba(23,43,99,.08)}
 @media (prefers-color-scheme: dark){:root{--bg:#0e1320;--card:#161d2f;--text:#e6eaf3;--muted:#8b94a9;
 --border:#263149;--hover:#1d2740;--chip:#1e2a4a;--shadow:0 10px 30px rgba(0,0,0,.35)}}
-/* 主题切换（跟随系统=auto 走上方媒体查询；显式主题覆盖全部变量，调色板对齐
-   主应用 themes/：GitHub Light / GitHub Dark / One Dark / Dracula） */
-html[data-theme="light"]{--bg:#f6f8fa;--card:#ffffff;--text:#1f2328;--muted:#59636e;--border:#d1d9e0;
---accent:#0969da;--accent2:#8250df;--hover:#eaf1f8;--chip:#ddf4ff;--shadow:0 10px 30px rgba(31,35,40,.08)}
-html[data-theme="dark"]{--bg:#0d1117;--card:#161b22;--text:#e6edf3;--muted:#9198a1;--border:#3d444d;
---accent:#4493f8;--accent2:#ab7df8;--hover:#151b23;--chip:#1c2a3a;--shadow:0 10px 30px rgba(0,0,0,.4)}
-html[data-theme="one-dark"]{--bg:#282c34;--card:#21252b;--text:#abb2bf;--muted:#7f848e;--border:#3e4451;
---accent:#61afef;--accent2:#c678dd;--hover:#2f333d;--chip:#2c313a;--shadow:0 10px 30px rgba(0,0,0,.4)}
-html[data-theme="dracula"]{--bg:#282a36;--card:#21222c;--text:#f8f8f2;--muted:#6272a4;--border:#44475a;
---accent:#bd93f9;--accent2:#ff79c6;--hover:#343746;--chip:#3b3d4f;--shadow:0 10px 30px rgba(0,0,0,.45)}
+/* 主题切换段已切出为访客页族共享注入件（P-20261120-1，theme.go 单一事实源
+   guestThemeCSS：四主题 data-theme 覆盖块 + 扩展 token 补行 + .theme-select
+   控件规则），经 page.go 拼接装配在本段之后（auto 档走上方媒体查询；显式
+   主题覆盖全部变量，调色板对齐主应用 themes/） */
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;color:var(--text);overflow:hidden;
@@ -58,9 +55,8 @@ color:#fff;font-weight:600}
 .icon-btn{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;
 border:1px solid var(--border);background:var(--card);color:var(--muted);border-radius:8px;cursor:pointer}
 .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
-.theme-select{flex:0 0 auto;border:1px solid var(--border);background:var(--card);color:var(--text);
-padding:5px 8px;border-radius:8px;font-size:12px;cursor:pointer;outline:none}
-.theme-select option{color:var(--text);background:var(--card)}
+/* .theme-select 控件基础规则已随主题段切出 theme.go guestThemeCSS（六页
+   同款）；本页仅保留「⋯」菜单内的全宽修饰（窄屏收菜单语义在 .more 段） */
 /* 「⋯」动作菜单：≤700px 时承接导出/复制/主题/全屏/新标签，桌面隐藏 */
 .more{position:relative;flex:0 0 auto;display:none}
 .more-btn{display:none;align-items:center;justify-content:center;min-width:40px;height:40px;
@@ -280,11 +276,14 @@ font-size: 12.5px; opacity: 0; pointer-events: none; transition: all .18s; z-ind
 /* 溯源水印（P-20261005-193）：对角双标低透明（4%），单角被裁剪另一角仍可
    归因；不做全屏平铺（不干扰阅读）。pointer-events:none 不挡交互、
    user-select:none 不进选中复制；z-index 高于灯箱（缩放查看的截图同样带
-   水印）、低于 toast/导出弹层。打印样式不隐藏——纸面外传同属归因范围 */
+   水印）、低于 toast/导出弹层。打印样式不隐藏——纸面外传同属归因范围。
+   色取常量中性灰（P-20261121-4，与终端三页逐段对齐、改动任一端须同步）：
+   var(--text) 在浅色档为深色、落在访客终端页恒深端面上 4% 不可见——中性灰
+   在浅/深两种面上同档隐现，文件页无端面但取齐同值 */
 .sc-wm{position:fixed;inset:0;pointer-events:none;z-index:65;
 -webkit-user-select:none;user-select:none}
 .sc-wm span{position:absolute;font-size:13px;font-weight:600;letter-spacing:.4px;
-color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
+color:#8b94a9;opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 .sc-wm .wm-a{top:16%;left:5%}
 .sc-wm .wm-b{bottom:16%;right:5%}
 /* 导出图片内的水印随图：容器形态（绝对定位于导出画布根，样式复用上层） */
@@ -310,6 +309,22 @@ background:var(--chip);color:var(--muted);border-radius:8px;font-size:12.5px}
 .doc-note .note-act{margin-left:10px;border:1px solid var(--accent);background:transparent;color:var(--accent);
 border-radius:999px;padding:2px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
 .doc-note .note-act:hover{background:var(--accent);color:#fff}
+/* docx 预览图片占位块（P-20261116-4）：悬空 rId/预算降级/非图字节的行内
+   提示——虚线框与文档正文区分，token 取色随主题 */
+.doc-img-missing{display:inline-block;max-width:100%;margin:4px 0;padding:4px 10px;
+border:1px dashed var(--border);border-radius:6px;background:var(--chip);
+color:var(--muted);font-size:.86em;overflow-wrap:anywhere}
+/* docx 嵌入对象下载块（P-20261116-7）：📎 附件的行内可点链接——视觉与
+   占位块同家族（虚线框），accent 取色示可点，随主题切换 */
+.doc-embed{display:inline-block;max-width:100%;margin:4px 0;padding:4px 10px;
+border:1px dashed var(--border);border-radius:6px;background:var(--chip);
+color:var(--accent);font-size:.86em;overflow-wrap:anywhere;text-decoration:none}
+.doc-embed:hover{border-color:var(--accent)}
+/* 可预览嵌入块（P-20261118-1 双动作，P-20261118-3 起单行新标签形态）：
+   span 容器承载「名·大小 + 预览|下载」——内层动作链接不带容器虚线框
+   （下划线示可点），预览一律 target=_blank（html/htm 进预览器壳页），
+   页内 iframe 形态随 .doc-embed-frame 族一并退役（阅读列恢复单行干净） */
+span.doc-embed a{color:var(--accent);text-decoration:underline;margin:0 2px}
 /* 访客确认弹层（脚本运行风险）：与导出弹层同视觉家族，只承载一段说明+二选 */
 .confirm-mask{position:fixed;inset:0;background:rgba(6,10,20,.62);display:flex;align-items:center;
 justify-content:center;z-index:95;padding:24px}
@@ -443,5 +458,4 @@ body{color:#000;background:#fff}
 .list th{position:static}
 }
 {{.BoardCSS}}
-</style>
 `

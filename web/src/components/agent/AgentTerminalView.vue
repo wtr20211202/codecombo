@@ -359,6 +359,18 @@ const directHolds = computed(() => {
   }
   return out
 })
+/** 会话行待批徽标的数据投影（P-20261121-2）：sessionId → {nick}——申请到达
+ *  的会话行出 amber 待批点，与「访客输入中」橙点（held）扫读可辨；处置入口
+ *  在分享管理器行内批准钮/通知中心申请卡（本树右键不重复养两路动作） */
+const directPends = computed(() => {
+  const src = directInputsApi.pendingBySession.value
+  if (!Object.keys(src).length) return undefined
+  const out: Record<string, { nick?: string }> = {}
+  for (const id of Object.keys(src)) {
+    out[id] = { nick: src[id]!.nick }
+  }
+  return out
+})
 /** 一键收回访客直通输入权（四路回收入口的会话侧）：token 键收回即解除会话
  *  只读闸（owner 键盘即时归还）；bump 即时对账摘徽标。P-20261106-8 起同表
  *  混入可写上行条目（writable 标记）——收回方向分流为 setWritable off
@@ -617,6 +629,7 @@ async function onProjectSessionRename(payload: { sessionId: string; name: string
         :collapsed-groups="collapsedGroups"
         :locate-dirs="dirBySessionId"
         :direct-holds="directHolds"
+        :direct-pends="directPends"
         :live-titles="liveTitles"
         @direct-revoke="onDirectRevoke"
         @capability-action="onCapabilityAction"

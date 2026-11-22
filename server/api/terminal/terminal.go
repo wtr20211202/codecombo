@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"codecombo/server/api/files"
+	"codecombo/server/api/opschannel"
 	shared "codecombo/server/api/shared"
 	mw "codecombo/server/middleware"
 	"codecombo/server/store"
@@ -30,6 +31,15 @@ import (
 // 的稳定原文（前端 KNOWN_ERROR_I18N 按原文映射 errors.known.invalidPath），
 // 改文案须两侧同步
 var errDirTraversal = errors.New("path traversal not allowed")
+
+// bindSessionBrowser 浏览器亲和初绑（P-20261117-4）：创建请求携 X-Browser-Id
+// 头（前端 opsBrowserId 生成，与 ops-channel WS 握手同一浏览器标识）——
+// frontend.* 设备效应原语「效应落在发起会话的浏览器」的路由依据；缺头/非法
+// = 无绑定（发布口按单浏览器启发式或降级通知兜底）。接管迁移（last-attach-
+// wins）在 ws_attach.go attach 点，非本函数职责
+func bindSessionBrowser(s *terminal.Session, c *gin.Context) {
+	s.BindBrowser(opschannel.SanitizeBrowserId(c.GetHeader("X-Browser-Id")))
+}
 
 // resolveSessionWorkDir 目录级终端（P-20261005-192）工作目录解析：
 //   - dir 空 = 项目根（既有行为零变化）
@@ -190,6 +200,7 @@ func CreateTerminal(c *gin.Context) {
 		shared.Error(c, http.StatusInternalServerError, "Terminal operation failed", err)
 		return
 	}
+	bindSessionBrowser(session, c)
 
 	// 产出视图元数据（B3）：项目终端同样落库（用户常在项目终端里跑 claude code
 	// 等智能体 CLI——此前只有 agent 会话有基线，点「会话产出」必 404）。异步不阻断。
@@ -329,6 +340,13 @@ func RenameTerminal(c *gin.Context) {
 	// 显示名落库（全后端）：tmux 重启恢复按 meta.Name 还原；native 后端无恢复
 	// 能力（Windows 等），落库供重启后新建会话的槽位名继承
 	saveSessionDisplayName(id, req.Name, session.Path, session.ProjectID, session.CreatedAt)
+	// 分享侧级联（P-20261118-9）：该会话的直播分享记录展示名同步新名——访客页
+	// 标题与管理面板分享名不再滞留旧名。尽力而为：级联失败不阻断改名主流程
+	//（失败态 = 分享侧暂留旧名，下轮同名重命名可再对齐）；frozen/cast/session
+	// 快照族不级联（定格语义，store 方法内过滤）
+	if err := store.Get().Share.RenameTerminalShares(id, req.Name); err != nil {
+		slog.Warn("rename terminal: share cascade failed", "session", id, "err", err)
+	}
 	broadcastTerminalsChanged()
 	// 同名警示（P-20261023-3）：显示名允许重名的既有语义不变（不阻断不回滚），
 	// 响应附同名会话摘要（id/名/创建时间/最近活动）做知情补全——同名错认 =

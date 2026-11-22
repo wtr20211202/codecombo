@@ -179,6 +179,22 @@ const (
 	// 看到真实命令才能裁决）。前端直通分发 sc-ops:share.paste-review →
 	// 审批卡（批准/拒绝两动作，60s 不决自动拒绝）
 	EventSharePasteReview = "share.paste-review"
+	// EventShareWritableResize 可写分享视口 resize（P-20261120-8）：访客经可写
+	// WS 控制面把视口尺寸反喂主机 PTY（「客户端窗口=终端宽度」语义，评审必改5
+	// owner 侧最小可见性——wtyping 徽标给出「访客在场」，本事件给出「改成了
+	// 什么格」）应用成功即广播，载荷 {token,shareName,terminalId,cols,rows,
+	// visitorTail,at}（仅元数据）。前端直通分发 sc-ops:share.wresize → toast
+	// 即时感知；agent 监听同一事件感知主机栅格被访客改动（轮询 Size 之外的
+	// 主动因说明）
+	EventShareWritableResize = "share.wresize"
+	// EventShareDirectRequest 直通输入申请到达（P-20261121-2）：访客经直通档
+	// 握手提交申请（POST /s/{token}/direct/request）登记成功即广播一次，载荷
+	// {token,shareName,terminalId?,nick?,visitorTail?,at}（仅元数据——visitorId
+	// 全串不上广播面）。前端直通分发 sc-ops:share.direct-request → toast 即时
+	// 感知 + 待批锚点表 bump（管理器行内批准/拒绝钮与通知中心条目双路消费面；
+	// 申请-批准握手此前 owner 侧零通知，用户实测「访客申请 owner 没收到」的
+	// 即时修复面）；agent 监听同一事件可感知「有访客在敲门」
+	EventShareDirectRequest = "share.direct-request"
 
 	// EventRemoteAccessStatus 远程接入（SSH 反向隧道）状态迁移（P-20261019-11）：
 	// 启动/停止/首次失败/断线重连/重连成功/重连失败每次迁移广播一次，载荷为

@@ -4,7 +4,8 @@
 //   - 投递原语 POST /api/quickdrop（公开路由注册，token 即凭据——agent 脚本/
 //     iOS 快捷指令 curl 直投；无效 token 恒 404，不暴露端点存在性）
 //   - 访客投递页 GET/POST /drop/:token（零依赖单页，与 Share 访客页同形态——
-//     见 page.go）
+//     见 page.go；P-20261117-2-S1 起 POST 支持 multipart 多文件上行——
+//     见 files.go）
 //   - 管理面 /api/quickdrop（token 生命周期 + 收件箱列表/摘除，组内鉴权面）
 //
 // 到达处理收口在本包 ingest：内容入车道 1 短 TTL 文档（store.Quickdrop，
@@ -81,31 +82,46 @@ func PostDrop(c *gin.Context) {
 }
 
 // ListDrops GET /api/quickdrop——收件箱清单（管理面，组内鉴权；新→旧，只含
-// 存活条目）。前端行内动作回查内容与分享区收件箱卡共用此面
+// 存活条目）。前端行内动作回查内容与分享区收件箱卡共用此面。
+// files 投影（P-20261117-3）：机器面结构化文件清单——磁盘 sidecar 是单一
+// 事实源（store.Quickdrop 五字段不扩的评审裁决），按 sidecar 批次链（dropId）
+// 归组到条目；绝对路径只在主人侧鉴权面投影（DropAbsPath 纪律）。文本投递
+// 与文件已清盘的条目 files 为空数组（形态判定 files.length 的消费面稳定）
 func ListDrops(c *gin.Context) {
-	drops, err := store.Get().Quickdrop.List()
+	st := store.Get()
+	drops, err := st.Quickdrop.List()
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, "list quickdrops failed", err)
 		return
 	}
+	filesByDrop := qdFilesByDrop(st)
 	type item struct {
 		store.Quickdrop
-		Size int `json:"size"`
+		Size  int          `json:"size"`
+		Files []qdFileItem `json:"files"`
 	}
 	out := make([]item, 0, len(drops))
 	for _, d := range drops {
-		out = append(out, item{Quickdrop: d, Size: len(d.Content)})
+		files := filesByDrop[d.ID]
+		if files == nil {
+			files = []qdFileItem{}
+		}
+		out = append(out, item{Quickdrop: d, Size: len(d.Content), Files: files})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 // DeleteDrop DELETE /api/quickdrop/:id——摘除单条（转发消费后手动清理；
-// 未知 id 幂等成功，与 dismiss 语义一致）
+// 未知 id 幂等成功，与 dismiss 语义一致）。摘除联动回收（P-20261117-3④）：
+// 落盘文件按 sidecar 批次链一并删除——即时回收 2GB token 配额 + 消除
+// 「已摘除条目的文件在 TTL 窗内不可见占盘」面；删除尽力而为，残留由
+// gcQuickdropFiles 的 24h TTL 对账兜底（摘除与 GC 是同一终态的两条路径）
 func DeleteDrop(c *gin.Context) {
 	if err := store.Get().Quickdrop.Delete(c.Param("id")); err != nil {
 		shared.Error(c, http.StatusInternalServerError, "delete quickdrop failed", err)
 		return
 	}
+	deleteDropFiles(store.Get(), c.Param("id"))
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": true}})
 }
 
@@ -116,23 +132,28 @@ func GetDropToken(c *gin.Context) {
 
 // CreateDropToken POST /api/quickdrop/token——生成/轮换凭据（明文仅本次响应
 // 返回一次，落盘只存哈希）。已存在即轮换：旧 token 立即失效（泄露应对与
-// agent token rotate 同语义）
+// agent token rotate 同语义）；旧凭据名下的文件隔离区随轮换显式清盘（P-
+// 20261117-2-S1——凭据终止 → 素材面一体失效，share DeleteDropsFor 同款语义；
+// 文本收件箱 doc 不随动：其内容与凭据无关，照常按 24h TTL 过窗）
 func CreateDropToken(c *gin.Context) {
 	plain, err := store.Get().QuickdropToken.Generate()
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, "generate quickdrop token failed", err)
 		return
 	}
+	purgeQuickdropFiles()
 	auditTokenAction(c, "generate")
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"token": plain, "meta": store.Get().QuickdropToken.Meta()}})
 }
 
-// RevokeDropToken DELETE /api/quickdrop/token——撤销凭据（投递页与端点即刻 404）
+// RevokeDropToken DELETE /api/quickdrop/token——撤销凭据（投递页与端点即刻
+// 404；文件隔离区随撤销显式清盘——同轮换语义）
 func RevokeDropToken(c *gin.Context) {
 	if err := store.Get().QuickdropToken.Revoke(); err != nil {
 		shared.Error(c, http.StatusInternalServerError, "revoke quickdrop token failed", err)
 		return
 	}
+	purgeQuickdropFiles()
 	auditTokenAction(c, "revoke")
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": true}})
 }

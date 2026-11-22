@@ -1,11 +1,19 @@
-// Package preview 分享预览能力注册表：文件名 → 预览描述符的唯一判定源。
+// Package filepreview 项目/分享两侧共用的文件预览渲染管线：文件名 → 预览
+// 描述符注册表 + 纯函数渲染面（markdown/docx/csv/xlsx 表格、文本编码规范化、
+// 嵌入对象抽取）+ 渲染产物的响应供给形态（嵌入 preview=1/ui=1 壳页）。
 //
-// 扩展模型：分享页与服务端都不硬编码"支持哪些后缀"，一切由描述符驱动——
-// 新增一类预览（如 csv 表格渲染、office 在线转换）= 注册一个后缀映射 +
-// 分享页为对应 Kind 增加一个渲染分支（页面分支集中且带默认信息卡兜底，
-// 后端只多一条映射）。未注册后缀一律回退 KindInfo（展示名称/大小/修改
-// 时间等信息卡 + 下载按钮），保证"任何格式都可分享"。
-package preview
+// P-20261119-4：自 server/share（render/table/sheet/office 渲染半边/
+// embedextract/preview 注册表）抽包下沉——渲染能力单点维护、分享访客面与
+// 主应用预览 API 两侧复用，修问题/扩展格式一处生效。share/api 只做各自的
+// 源解析与端点形态包装（/s/{token}/… vs /api/projects/:id/file/…），渲染
+// 与安全判定（净化链/魔数白名单/sandbox token 表）不再有第二份实现。
+//
+// 扩展模型（原 preview 包注释保真）：页面与服务端都不硬编码"支持哪些后缀"，
+// 一切由描述符驱动——新增一类预览（如 csv 表格渲染、office 在线转换）=
+// 注册一个后缀映射 + 消费侧为对应 Kind 增加一个渲染分支。未注册后缀一律
+// 回退 KindInfo（展示名称/大小/修改时间等信息卡 + 下载按钮），保证
+// "任何格式都可分享"。
+package filepreview
 
 import (
 	"path/filepath"
@@ -26,14 +34,19 @@ const (
 	// KindDocx Word 文档（docx 直解；doc 老格式 best-effort 抽取）：
 	// 服务端抽取文本结构渲染净化 HTML
 	KindDocx Kind = "docx"
-	// KindHTML 静态网页：经 /html 端点注入 <base> 后以 sandbox iframe 呈现，
-	// 相对 css/img 子资源经 /f/ 路由回源分享根（脚本默认被双层拦死；访客可
-	// 按文件显式 opt-in「运行脚本（隔离）」，sandbox 只加 allow-scripts，
-	// 绝不放宽 allow-same-origin——见 server/share/service.go handleHTMLDoc）
+	// KindHTML 静态网页：经 html 端点注入 <base> 后以 sandbox iframe 呈现，
+	// 相对 css/img 子资源经 rel 通配路由回源（分享侧 /s/{token}/f/…、主应用侧
+	// /api/projects/:id/file/rel/…）（脚本默认被双层拦死；访客/用户可按文件
+	// 显式 opt-in「运行脚本（隔离）」，sandbox 只加 allow-scripts，
+	// 绝不放宽 allow-same-origin——share service.go handleHTMLDoc 与 api files
+	// GetFileHtmlView 同款红线）
 	KindHTML Kind = "html"
 	// KindCSV 表格数据（csv/tsv）：服务端解析渲染为净化表格，超行数截断
-	KindCSV  Kind = "csv"
-	KindInfo Kind = "info" // 不支持内联预览：信息卡（名称/大小/修改时间）+ 下载
+	KindCSV Kind = "csv"
+	// KindSheet xlsx 表格（P-20261116-5-S1）：zip+xml 抽取首表渲染净化表格，
+	// 行/列上限与截断 note 同 csv 口径
+	KindSheet Kind = "sheet"
+	KindInfo  Kind = "info" // 不支持内联预览：信息卡（名称/大小/修改时间）+ 下载
 )
 
 // Descriptor 描述一个后缀如何被分享子服务呈现
@@ -41,6 +54,13 @@ type Descriptor struct {
 	Kind Kind
 	// MIME raw 端点的 Content-Type（含 charset 由服务端统一追加）
 	MIME string
+	// Known 标记「该格式是已注册的已知格式」——仅 Kind==KindInfo 时有语义
+	// （P-20261116-5-S2 显性化面）：已注册的无预览格式（xls/ppt/odt/字体…）
+	// 信息卡出「暂不支持在线预览，可下载查看」的显性提示；未注册后缀走
+	// ForFile 兜底恒 false，信息卡保持中性（不替访客猜测格式家族）。
+	// 判定源=registry：ForFile 命中注册表且 Kind==KindInfo 时置位，运行期
+	// Register 注册的 KindInfo 自动进显性化面，无需逐条目维护标志
+	Known bool
 }
 
 // Entry 单条注册项
@@ -65,7 +85,8 @@ func Register(ext string, d Descriptor) {
 // ForFile 按文件名解析预览描述符。未注册后缀 → KindInfo +
 // application/octet-stream（任何文件都可分享，展示信息卡）。
 // 后缀优先；无点文件名（Makefile）按整名兜底；点开头文件（.gitignore、
-// .probe-sample.docx）先整名、再按真实后缀——隐藏标记不吞类型
+// .probe-sample.docx）先整名、再按真实后缀——隐藏标记不吞类型。
+// 命中注册表且 Kind==KindInfo 时置位 Known（显性化判定源，见 Descriptor 注）
 func ForFile(name string) Descriptor {
 	lookup := func(key string) (Descriptor, bool) {
 		mu.RLock()
@@ -75,12 +96,21 @@ func ForFile(name string) Descriptor {
 	}
 	ext := strings.TrimPrefix(filepath.Ext(name), ".")
 	if d, ok := lookup(ext); ok && ext != "" {
-		return d
+		return markKnownInfo(d)
 	}
 	if d, ok := lookup(name); ok {
-		return d
+		return markKnownInfo(d)
 	}
 	return Descriptor{Kind: KindInfo, MIME: "application/octet-stream"}
+}
+
+// markKnownInfo 已注册且无内联预览（Kind==KindInfo）= 已知常见格式，
+// 进显性化面；其余 Kind 的 Known 无语义，保持零值不掺入
+func markKnownInfo(d Descriptor) Descriptor {
+	if d.Kind == KindInfo {
+		d.Known = true
+	}
+	return d
 }
 
 // builtin 内置映射表（声明一行 = 一类可预览格式；扩展点见包注释）
@@ -163,6 +193,7 @@ func builtin() []Entry {
 		//     经 /f/ 路由回源分享根；脚本默认被 sandbox+CSP 双层拦死，访客按
 		//     文件显式 opt-in allow-scripts 时两层同步放开且绝不叠加 same-origin）
 		//   csv/tsv → 服务端解析渲染为净化表格（超行数截断）
+		//   xlsx → 服务端抽取首表渲染净化表格（P-20261116-5-S1，行/列上限同 csv 口径）
 		//   xls/ppt 等其余办公格式维持信息卡，接转换器时覆盖注册即可
 		{Ext: "doc", Desc: Descriptor{Kind: KindDocx, MIME: "application/msword"}},
 		{Ext: "docx", Desc: Descriptor{Kind: KindDocx, MIME: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}},
@@ -171,9 +202,20 @@ func builtin() []Entry {
 		{Ext: "csv", Desc: Descriptor{Kind: KindCSV, MIME: "text/csv"}},
 		{Ext: "tsv", Desc: Descriptor{Kind: KindCSV, MIME: "text/tab-separated-values"}},
 		{Ext: "xls", Desc: Descriptor{Kind: KindInfo, MIME: "application/vnd.ms-excel"}},
-		{Ext: "xlsx", Desc: Descriptor{Kind: KindInfo, MIME: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}},
+		{Ext: "xlsx", Desc: Descriptor{Kind: KindSheet, MIME: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}},
 		{Ext: "ppt", Desc: Descriptor{Kind: KindInfo, MIME: "application/vnd.ms-powerpoint"}},
+		// pptx 幻灯片文本抽取明确不做（幻灯片是视觉形态，文本抽取价值低——
+		// 抽出来只剩残句，还不如诚实给下载）；留作扩展点：接渲染/转换器时
+		// 覆盖注册即可（P-20261116-5-S2 注记）
 		{Ext: "pptx", Desc: Descriptor{Kind: KindInfo, MIME: "application/vnd.openxmlformats-officedocument.presentationml.presentation"}},
+		// OpenDocument 家族与 epub（P-20261116-5-S2）：常见可交换文档格式，
+		// 显式注册进已知格式面（未注册时走 ForFile 兜底，访客面与真未知格式
+		// 不可区分、出不了显性提示）——暂无轻量内联解析路径，维持信息卡 +
+		// 「可下载查看」提示，接解析器时覆盖注册即可
+		{Ext: "odt", Desc: Descriptor{Kind: KindInfo, MIME: "application/vnd.oasis.opendocument.text"}},
+		{Ext: "ods", Desc: Descriptor{Kind: KindInfo, MIME: "application/vnd.oasis.opendocument.spreadsheet"}},
+		{Ext: "odp", Desc: Descriptor{Kind: KindInfo, MIME: "application/vnd.oasis.opendocument.presentation"}},
+		{Ext: "epub", Desc: Descriptor{Kind: KindInfo, MIME: "application/epub+zip"}},
 	}
 	for _, t := range textExts {
 		entries = append(entries, Entry{Ext: t.ext, Desc: Descriptor{Kind: KindText, MIME: t.mime}})

@@ -52,9 +52,10 @@ const (
 	dshDefaultBase  = "http://127.0.0.1:3080"
 	dshDefaultProxy = 3081
 	probeTimeout    = 1500 * time.Millisecond
-	// launchReadyTimeout 冷启动就绪上限：装新插件后的首次启动要加载整棵插件树，
-	// 实测可超 30s（dsh-web 脚本同款教训），给足 60s
-	launchReadyTimeout = 60 * time.Second
+	// probeRetryDelay UI 判活入口（/url、/status）单次探测失败后的重试间隔
+	// （P-20261118-4：重试一次覆盖冷启动/高负载窗口的单发误判；仅这两个
+	// 入口生效，不进 stopDsh/launchAndWait 内部环）
+	probeRetryDelay = 300 * time.Millisecond
 	// scTargetQuery / scTargetCookie 多目标路由：查询参数落 cookie（Path=/ 全站
 	// 生效），iframe 内部后续导航/WS 升级自动携带
 	scTargetQuery  = "scDshTarget"
@@ -63,6 +64,12 @@ const (
 	// 指定或缺省时走 DshWebBase 默认链路）
 	localTargetID = "local"
 )
+
+// launchReadyTimeout 冷启动就绪上限：装新插件后的首次启动要加载整棵插件树，
+// 实测可超 30s（dsh-web 脚本同款教训），给足 60s。var 非 const：双层判活
+//（P-20261118-6）的测试须收缩 deadline 才能在用例内走到 notReady 收口分支
+//（生产路径不改写）
+var launchReadyTimeout = 60 * time.Second
 
 // dshConfig 当前生效配置（base 规整 + 上游解析结果 + token + 代理端口）
 type dshConfig struct {

@@ -13,7 +13,6 @@ package share
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"html"
@@ -30,7 +29,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"codecombo/server/share/preview"
+	preview "codecombo/server/filepreview"
 	"codecombo/server/store"
 )
 
@@ -71,6 +70,9 @@ type LiveSubscription interface {
 	Done() <-chan struct{}
 	Ended() bool
 	Size() (cols, rows uint16)
+	// Name 会话当前显示名（P-20261118-9：hello/rename 帧源——主人侧改名后
+	// 访客页标题跟随；实时读会话，时延界与 Size 的 resize 对账完全同构）
+	Name() string
 	Release()
 }
 
@@ -83,15 +85,6 @@ type SnapshotDirs interface {
 	// 访客「路径敲错」的误导）
 	DirOf(sh *store.Share) (string, error)
 }
-
-// maxRenderBytes markdown 服务端渲染的字节上限（超出给 413 仅下载提示）。
-// 20MB 对齐前端文本预览上限：真实使用里大 README/导出文档在此量级常见，
-// 2MB 时代"能下载不能看"的抱怨集中于此；渲染耗时随体积线性，20MB 在
-// 秒级完成，内存峰值可控
-const maxRenderBytes = 20 << 20
-
-// maxDocxBytes docx 包文件的读取上限（zip 解压侧另有 64MB 独立上限）
-const maxDocxBytes = 128 << 20
 
 // Service 分享子服务（无状态；依赖经构造注入，便于测试）
 type Service struct {
@@ -136,17 +129,23 @@ type Service struct {
 	// share.drop 事件的发布口在装配层接线（本包不反向依赖 api 层，
 	// liveWire 同款回调注入先例）
 	dropEvents func(DropEvent)
-	// direct 直通输入档持权状态机（P-20261024-1 第二档，进程内短时效状态，
-	// 见 direct.go）
+	// direct 直通输入档持权状态机（P-20261024-1 第二档，P-20261121-1 统一
+	// 收编后为申请批准路径的授权面，进程内短时效状态，见 direct.go）
 	direct *directHub
-	// directLimit 直通握手/输入频控（参数与上传频控独立）
+	// directLimit 申请端点频控（参数与上传频控独立）
 	directLimit *ratePair
-	// directSink 直通输入落点（装配层适配 terminal 会话；nil = 输入端点
-	// 503 降级——测试/降级部署零 panic）
-	directSink DirectSink
-	// directOnRelease 持权回收回调（惰性超时/级联缘由；nil 安全）——装配层
-	// 据此解除会话侧只读闸与补审计，本包不感知 terminal
+	// gates 会话输入闸合并账本（P-20261121-1 必改3）：开放直入「连接在场」
+	// 与申请批准「持权在场」两来源统一记账，闸值经 writableSink 单点落
+	// （gateLedger 见 direct.go；两路直写同一 atomic 的组合开关竞态已收口）
+	gates *gateLedger
+	// directOnRelease 持权回收回调（惰性超时/级联/关通道缘由；nil 安全）——
+	// 装配层据此补非 owner 缘由的审计（会话侧输入闸的解除已收口进 Service
+	// 账本路径，回调不再管闸），本包不感知 terminal
 	directOnRelease func(token, sessionID, reason string)
+	// directRequestEvents 访客申请到达的广播回调（P-20261121-2 owner 可见性
+	// 四重缺失的即时面；nil = 不广播）——装配层接 opschannel，dropEvents
+	// 同款回调注入先例
+	directRequestEvents func(DirectRequestEvent)
 	// writable 可写分享上行状态机（P-20261106-8，进程内短时效状态，
 	// 见 writable.go 头注——连接表/待批粘贴面/帧率桶，重启即清）
 	writable *writableHub
@@ -163,6 +162,13 @@ type Service struct {
 	// pasteReviewEvents 粘贴审批卡广播回调（命中 danger 挂待批面时一次；
 	// 装配层接 opschannel 同上）
 	pasteReviewEvents func(PasteReviewEvent)
+	// writableResizer 视口 resize 落点（P-20261120-8，可选装配——nil = resize
+	// 帧静默忽略，键入链零影响；装配层桥 terminal.Session.Resize 与
+	// TmuxExternal 判定，WritableResizer 接口见 writable.go）
+	writableResizer WritableResizer
+	// writableResizeEvents 视口 resize 应用后的广播回调（owner 侧「终端被改格」
+	// 最小可见性面；装配层接 opschannel 同上）
+	writableResizeEvents func(WritableResizeEvent)
 }
 
 // shareCtxKey 守卫层已解析记录的上下文键（gateGuard 查过一次，handler 内
@@ -195,6 +201,7 @@ func NewService(shares ShareLookup, roots ProjectRoots, logger *slog.Logger) *Se
 		msgLimit: newMsgRateLimiter(), notes: &GuestNoteBuffer{}, retired: &RetiredHitTracker{},
 		dropLimit: newRatePair(dropMaxPerIP, dropMaxPerToken, dropWindow),
 		direct:    newDirectHub(), directLimit: newRatePair(directMaxPerIP, directMaxPerToken, directWindow),
+		gates:    newGateLedger(),
 		writable: newWritableHub()}
 }
 
@@ -224,16 +231,19 @@ func (s *Service) WithDropEvents(fn func(DropEvent)) *Service {
 	return s
 }
 
-// WithDirectSink 注入直通输入落点（链式；装配层适配 terminal 会话）
-func (s *Service) WithDirectSink(sink DirectSink) *Service {
-	s.directSink = sink
+// WithDirectRelease 注入持权回收回调（链式；惰性超时与级联/关通道缘由经此
+// 联动非 owner 缘由的审计——会话侧输入闸解除已收口进 Service 账本路径；
+// owner 缘由的审计在带请求上下文的 handler 落）
+func (s *Service) WithDirectRelease(fn func(token, sessionID, reason string)) *Service {
+	s.directOnRelease = fn
 	return s
 }
 
-// WithDirectRelease 注入持权回收回调（链式；惰性超时与级联缘由经此联动
-// 会话侧只读闸与审计——owner 缘由的审计在带请求上下文的 handler 落）
-func (s *Service) WithDirectRelease(fn func(token, sessionID, reason string)) *Service {
-	s.directOnRelease = fn
+// WithDirectRequestEvents 注入访客申请到达广播回调（链式；装配层接
+// opschannel——owner 侧 sc-ops:share.direct-request 直通分发的数据源，
+// P-20261121-2 申请-必达修复的即时感知面）
+func (s *Service) WithDirectRequestEvents(fn func(DirectRequestEvent)) *Service {
+	s.directRequestEvents = fn
 	return s
 }
 
@@ -260,6 +270,20 @@ func (s *Service) WithWritableEvents(fn func(WritableTypingEvent)) *Service {
 // WithPasteReviewEvents 注入粘贴审批卡广播回调（链式；装配层接 opschannel）
 func (s *Service) WithPasteReviewEvents(fn func(PasteReviewEvent)) *Service {
 	s.pasteReviewEvents = fn
+	return s
+}
+
+// WithWritableResizer 注入视口 resize 落点（链式；装配层桥 terminal——
+// P-20261120-8 可写视口反喂，nil = resize 控制面降级为静默忽略）
+func (s *Service) WithWritableResizer(r WritableResizer) *Service {
+	s.writableResizer = r
+	return s
+}
+
+// WithWritableResizeEvents 注入视口 resize 应用广播回调（链式；装配层接
+// opschannel——owner 侧 sc-ops:share.wresize 直通分发的数据源）
+func (s *Service) WithWritableResizeEvents(fn func(WritableResizeEvent)) *Service {
+	s.writableResizeEvents = fn
 	return s
 }
 
@@ -295,6 +319,14 @@ func (s *Service) Handler() http.Handler {
 	mux.Handle("GET /s/{token}/list", s.gateGuard(http.HandlerFunc(s.handleList)))
 	mux.Handle("GET /s/{token}/render", s.gateGuard(http.HandlerFunc(s.handleRender)))
 	mux.Handle("GET /s/{token}/raw", s.gateGuard(http.HandlerFunc(s.handleRaw)))
+	// docx 预览图片供给（P-20261116-6）：docx-media 端点按需流式出包内
+	// media 部件（m= 白名单等值匹配 rels 映射簿，语义见 office.go 端节）
+	mux.Handle("GET /s/{token}/docx-media", s.gateGuard(http.HandlerFunc(s.handleDocxMedia)))
+	// docx 预览嵌入对象下载（P-20261116-7）：docx-embed 端点恒 attachment
+	// 出包内 embeddings 部件（e= 白名单等值匹配同映射簿，语义见 office.go）；
+	// P-20261118-1 起 preview=1 走显式白名单分型（html/pdf/图片/text/md 直览，
+	// 白名单外忽略参数回归 attachment）
+	mux.Handle("GET /s/{token}/docx-embed", s.gateGuard(http.HandlerFunc(s.handleDocxEmbed)))
 	mux.Handle("GET /s/{token}/html", s.gateGuard(http.HandlerFunc(s.handleHTMLDoc)))
 	mux.Handle("GET /s/{token}/f/{name...}", s.gateGuard(http.HandlerFunc(s.handleRawPath)))
 	mux.Handle("GET /s/{token}/download", s.gateGuard(http.HandlerFunc(s.handleDownloadQuery)))
@@ -313,14 +345,15 @@ func (s *Service) Handler() http.Handler {
 	// 关闭恒 404；口令门继承 gateGuard，访客先过 passgate 再见上传位）
 	mux.Handle("POST /s/{token}/drop", s.gateGuard(http.HandlerFunc(s.handleGuestDropPost)))
 	mux.Handle("GET /s/{token}/drops", s.gateGuard(http.HandlerFunc(s.handleGuestDropsGet)))
-	// 直通输入档（P-20261024-1 第二档）：申请/状态/输入三端点（握手见
-	// direct.go 头注释——单持有者 + 短时效 + 审计 + agent 会话限定四闸）
+	// 访客输入·申请批准路径（P-20261024-1 直通档，P-20261121-1 统一收编）：
+	// 申请端点单条（状态对账与键入统一走 termws 控制帧/Binary 帧——旧
+	// direct/state 与 direct/input 两端点退役；握手见 direct.go 头注释——
+	// 单持有者 + 短时效 + 申请通道门禁）
 	mux.Handle("POST /s/{token}/direct/request", s.gateGuard(http.HandlerFunc(s.handleDirectRequest)))
-	mux.Handle("GET /s/{token}/direct/state", s.gateGuard(http.HandlerFunc(s.handleDirectState)))
-	mux.Handle("POST /s/{token}/direct/input", s.gateGuard(http.HandlerFunc(s.handleDirectInput)))
-	// 可写分享上行桥（P-20261106-8）：WS 键入注入 + 状态轮询（开关门禁在
-	// handler——关闭恒 404 与「端点不存在」不可区分；升级握手同过 gateGuard
-	// 口令门 + Origin 同源校验，防线全录 writable.go 头注）
+	// 访客输入 WS 上行桥（P-20261106-8 可写分享，P-20261121-1 统一双授权
+	// 模式）：WS 键入注入 + 状态轮询（准入门禁在 handler——开放直入或申请
+	// 通道任一在场即接入，全关恒 404 与「端点不存在」不可区分；升级握手同
+	// 过 gateGuard 口令门 + Origin 同源校验，防线全录 writable.go 头注）
 	mux.Handle("GET /s/{token}/termws", s.gateGuard(http.HandlerFunc(s.handleTermWS)))
 	mux.Handle("GET /s/{token}/writable/state", s.gateGuard(http.HandlerFunc(s.handleWritableState)))
 	mux.HandleFunc("GET /assets/{name}", s.handleAsset)
@@ -339,7 +372,8 @@ func (s *Service) Handler() http.Handler {
 		// SAMEORIGIN 基线，文档面显式 Set 覆盖。
 		// 例外：分享页自身会用 sandbox iframe 引用同源 /html 与 /raw（PDF）做
 		// 内嵌预览——这两个端点各自覆写为 SAMEORIGIN（见 serveRaw/handleHTMLDoc），
-		// 否则 DENY 会把页内预览一并拦死（沙箱属性挡的是脚本，不是嵌入本身）
+		// 否则 DENY 会把页内预览一并拦死（沙箱属性挡的是脚本，不是嵌入本身）；
+		// docx-embed 的 preview=1 分型同样覆写（P-20261118-1，见 serveEmbedPreview）
 		w.Header().Set("X-Frame-Options", "DENY")
 		// 私有内容缓存防线（P-20261002-121）：访客面全部响应 no-store（+
 		// Pragma 兜底旧代理）——短链常在共享/公共设备上打开，页面/元信息/
@@ -760,7 +794,7 @@ func (s *Service) handlePage(w http.ResponseWriter, r *http.Request) {
 	// 未过滤标记（P-20261106-9）随 boot 下发，横幅位换「未过滤」警示
 	if sh.Kind == store.ShareKindTerminal {
 		w.WriteHeader(http.StatusOK)
-		_ = renderTermPage(w, token, prefLang(r), sh.Name, wm, sh.Collab, sh.DirectInput, sh.Unfiltered, sh.Writable)
+		_ = renderTermPage(w, token, prefLang(r), sh.Name, wm, sh.Collab, !sh.GuestInputOff, sh.Unfiltered, sh.Writable)
 		return
 	}
 	// 终端输出冻结快照（P-20261005-205）：xterm 一次性写入定格 buffer 的
@@ -903,6 +937,11 @@ type entryJSON struct {
 	// Kind/Mime 仅文件条目携带（分享页据此选渲染分支）
 	Kind string `json:"kind,omitempty"`
 	Mime string `json:"mime,omitempty"`
+	// Known 仅 kind=info 时置位（P-20261116-5-S2 显性化面）：该后缀是
+	// registry 已注册的已知格式（xls/ppt/odt/字体…），信息卡出「暂不支持
+	// 在线预览，可下载查看」显性提示；未注册后缀缺省（omitempty），信息卡
+	// 保持中性——判定源在 preview.Descriptor.Known，此处只透传
+	Known bool `json:"known,omitempty"`
 }
 
 func entryFrom(name, relPath string, d fs.FileInfo) entryJSON {
@@ -917,6 +956,7 @@ func entryFrom(name, relPath string, d fs.FileInfo) entryJSON {
 		desc := preview.ForFile(name)
 		e.Kind = string(desc.Kind)
 		e.Mime = desc.MIME
+		e.Known = desc.Known
 	}
 	return e
 }
@@ -1134,15 +1174,16 @@ func (s *Service) handleRender(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind := preview.ForFile(res.info.Name()).Kind
-	if kind != preview.KindMarkdown && kind != preview.KindDocx && kind != preview.KindCSV {
+	if kind != preview.KindMarkdown && kind != preview.KindDocx &&
+		kind != preview.KindCSV && kind != preview.KindSheet {
 		writeJSONError(w, errUnrenderable)
 		return
 	}
-	// md/csv 20MB（超上限给 413 仅下载提示）；docx 128MB（解压侧另有独立
-	// 上限防 zip 炸弹）
-	limit := int64(maxRenderBytes)
-	if kind == preview.KindDocx {
-		limit = maxDocxBytes
+	// md/csv 20MB（超上限给 413 仅下载提示）；docx/xlsx 128MB（zip 容器，
+	// 解压侧另有独立上限防 zip 炸弹）
+	limit := int64(preview.MaxRenderBytes)
+	if kind == preview.KindDocx || kind == preview.KindSheet {
+		limit = preview.MaxDocxBytes
 	}
 	f, err := res.root.Open(res.rel)
 	if err != nil {
@@ -1165,7 +1206,7 @@ func (s *Service) handleRender(w http.ResponseWriter, r *http.Request) {
 	var body string
 	switch kind {
 	case preview.KindMarkdown:
-		body = renderMarkdownHTML(content)
+		body = preview.RenderMarkdownHTML(content)
 		if !utf8.Valid(content) {
 			// 非 UTF-8（GBK/Latin 旧文档常见）：前置提示而非静默乱码
 			body = encodingNoteHTML(r) + body
@@ -1181,12 +1222,27 @@ func (s *Service) handleRender(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(strings.ToLower(res.info.Name()), ".tsv") {
 			comma = '\t'
 		}
-		body = renderCSVHTML(content, comma)
+		body = preview.RenderCSVHTML(content, comma)
 		if !utf8.Valid(content) {
 			body = encodingNoteHTML(r) + body
 		}
+	case preview.KindSheet:
+		body, err = preview.RenderSheetHTML(content)
+		if err != nil {
+			// 解析失败（坏 zip/定位链断）：与 docx 同款错误卡，下载始终可用
+			tip := dictFor(prefLang(r))["unsupportedTip"]
+			body = `<div class="doc-err"><p>` + html.EscapeString(tip) + `</p></div>`
+		}
 	default:
-		body, err = renderDocHTML(content)
+		// MediaURLs 注入（P-20261119-4 评审建议1）：渲染面不再硬编码
+		// /s/{token} 前缀，token/vrel 由本侧闭包包装成 docx-media/embed 端点
+		// URL（vrel 为空 = 文件分享根目标，端点侧空 path= 解析回文件本身）
+		token, docPath := res.share.Token, res.vrel
+		urls := &preview.MediaURLs{
+			Media: func(m string) string { return docxMediaURL(token, docPath, m) },
+			Embed: func(e string) string { return docxEmbedURL(token, docPath, e) },
+		}
+		body, err = preview.RenderDocHTML(content, prefLang(r), urls)
 		if err != nil {
 			// 解析失败：净化片段内嵌可行动提示（页面注入后展示为错误卡，
 			// 下载始终可用）
@@ -1246,15 +1302,10 @@ func isFontMIME(mime string) bool {
 	return strings.HasPrefix(mime, "font/")
 }
 
-// rawContentType raw 响应的 Content-Type：仅文本族追加 charset——字体/图片/
-// 音视频不带 charset 参数（P-20261020-4 起 MIME 表含 font/*，二进制类型
-// 挂 charset 是无意义的元数据噪声）
+// rawContentType raw 响应的 Content-Type（P-20261119-4 起实现下沉
+// filepreview.RawContentType 单一事实源，本包一行委托零行为变化）
 func rawContentType(mime string) string {
-	if strings.HasPrefix(mime, "text/") || mime == "application/json" ||
-		mime == "application/javascript" || strings.HasSuffix(mime, "+xml") {
-		return mime + "; charset=utf-8"
-	}
-	return mime
+	return preview.RawContentType(mime)
 }
 
 // serveRaw raw 输出的公共尾段（Range/Content-Type/CSP 与两个端点共用）
@@ -1323,12 +1374,12 @@ func (s *Service) handleHTMLDoc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	content, err := io.ReadAll(io.LimitReader(f, maxRenderBytes+1))
+	content, err := io.ReadAll(io.LimitReader(f, preview.MaxRenderBytes+1))
 	if err != nil {
 		writeJSONError(w, errTargetMissing)
 		return
 	}
-	if int64(len(content)) > maxRenderBytes {
+	if int64(len(content)) > preview.MaxRenderBytes {
 		writeJSONError(w, errTooLarge)
 		return
 	}
@@ -1352,25 +1403,10 @@ func (s *Service) handleHTMLDoc(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(injectHTMLBase(content, base))
 }
 
-// injectHTMLBase 在 html 的 <head> 后插入 <base>（大小写不敏感；无 head
-// 时前置——浏览器容错解析同样生效）
+// injectHTMLBase 在 html 的 <head> 后插入 <base>（P-20261119-4 起实现下沉
+// filepreview.InjectHTMLBase 单一事实源，本包一行委托零行为变化）
 func injectHTMLBase(content []byte, base string) []byte {
-	tag := []byte(`<base href="` + html.EscapeString(base) + `">`)
-	lower := []byte(strings.ToLower(string(content)))
-	idx := strings.Index(string(lower), "<head")
-	if idx < 0 {
-		return append(tag, content...)
-	}
-	gt := strings.Index(string(lower[idx:]), ">")
-	if gt < 0 {
-		return append(tag, content...)
-	}
-	pos := idx + gt + 1
-	out := make([]byte, 0, len(content)+len(tag))
-	out = append(out, content[:pos]...)
-	out = append(out, tag...)
-	out = append(out, content[pos:]...)
-	return out
+	return preview.InjectHTMLBase(content, base)
 }
 
 // handleDownloadQuery 下载（查询参数形态，兼容旧链接）：?path= 相对路径
@@ -1486,181 +1522,6 @@ func (s *Service) doDownload(w http.ResponseWriter, r *http.Request, res resolve
 		// token 打摘要不打全值（P-20261002-95）——同包 TokenSummary
 		s.logger.Warn("share: zip streaming failed", "token", TokenSummary(res.share.Token), "path", res.rel, "err", err)
 	}
-}
-
-// ── 终端只读直播（P-20261003-306） ──
-
-// sseKeepaliveInterval SSE 保活注释帧周期：代理/LB 对静默连接的空闲裁剪
-// 通常在 30~60s，15s 注释帧（`: ping`）把连接钉在活跃侧；输出密集时该
-// ticker 空转（select 随机就绪，注释帧不挤占数据帧的推送及时性）
-const sseKeepaliveInterval = 15 * time.Second
-
-// sseSizePollInterval 主机尺寸对账周期（P-20261107-4 渲染保真）：主人调整窗口
-// 后访客栅格必须跟随（cols/rows 不符即 TUI 折行/光标定位错乱）。数据帧路径
-// 逐帧对账（resize 引发的 SIGWINCH 重绘必然带输出，新尺寸先于重绘字节到达
-// 访客），本 ticker 兜「调整后无输出」的静默窗口；Size 只是一次会话锁内读，
-// 单 token 访客 ≤5 路，1s 周期开销可忽略
-const sseSizePollInterval = time.Second
-
-// handleStream 终端只读推流（SSE）：hello（尺寸/终态）→ tail（订阅点前
-// 遮蔽尾流快照，base64）→ data*（实时遮蔽字节）→ end（馈线终结）；主机
-// 尺寸变化时插入 resize 帧（{"cols","rows"}，P-20261107-4——先于新尺寸下
-// 重绘的字节送达，访客按主机栅格渲染）。
-// 字节帧一律 base64：PTY 输出是任意字节流，多字节 UTF-8 字符可被 4KB 分片
-// 劈开，SSE 的 text 语义要求 UTF-8 合法——base64 让帧边界与字节边界解耦。
-// 访客额度（单 token 并发 ≤ MaxGuestsPerToken）由直播源把守，超限 429。
-// 严格只读：本端点只写不读（忽略请求体），终端输出流没有反向通道——
-// 访客面写入端点只触独立数据面（/gate 口令验证 P-20261006-25、/view 一次性
-// 确认 P-20261020-3、/messages 访客留言附表、/drop 素材上行与 /direct/*
-// 直通输入档 P-20261024-1——直通输入走独立的会话写入授权链，不经直播流；
-// 未开协作的分享无任何写入端点）
-func (s *Service) handleStream(w http.ResponseWriter, r *http.Request) {
-	sh, herr := s.lookup(r, r.PathValue("token"))
-	if herr != nil {
-		writeJSONError(w, herr)
-		return
-	}
-	if sh.Kind != store.ShareKindTerminal {
-		// 文件/片段分享没有流语义（不是 405——路由面语义上该端点存在，
-		// 是该记录形态不可直播）
-		writeJSONError(w, errUnrenderable)
-		return
-	}
-	if s.live == nil {
-		// 直播源未装配（测试/降级部署）：按已终结流语义收场，不 5xx
-		s.writeSSEEnd(w, r)
-		return
-	}
-	sub, err := s.live.Subscribe(sh.Token, sh.TerminalID, sh.Unfiltered)
-	if err != nil {
-		writeJSONErrorStatus(w, http.StatusTooManyRequests, "guest_limit")
-		return
-	}
-	defer sub.Release()
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeJSONErrorStatus(w, http.StatusInternalServerError, "streaming_unsupported")
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	// 禁代理缓冲（nginx 同名头约定），SSE 帧即时到达访客
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-
-	// 每帧一个写超时：半死连接的 Write 无 deadline 会永久阻塞
-	//（proxy/ws.go 泄漏事故同款教训），http.ResponseController 帧粒度控时，
-	// 不牵连整条连接的生命周期
-	rc := http.NewResponseController(w)
-	writeEvent := func(event, data string) bool {
-		_ = rc.SetWriteDeadline(time.Now().Add(30 * time.Second))
-		if _, err := io.WriteString(w, "event: "+event+"\ndata: "+data+"\n\n"); err != nil {
-			return false
-		}
-		flusher.Flush()
-		return true
-	}
-
-	// hello：终端尺寸 + 是否已终结（访客页据此初始化 xterm 网格/直接呈现
-	// 「已结束」）；tail：订阅点前快照。顺序先于实时订阅消费——订阅点登记
-	// 在 Subscribe 内部与快照同锁完成，快照与此后的实时通道无重叠无缝隙。
-	// struct 序列化定字段序（map 序列化按键序漂移，访客端解析虽无感，
-	// e2e 断言与日志对账都需要稳定帧形态）
-	type helloFrame struct {
-		Cols  uint16 `json:"cols,omitempty"`
-		Rows  uint16 `json:"rows,omitempty"`
-		Ended bool   `json:"ended"`
-	}
-	cols, rows := sub.Size()
-	hb, _ := json.Marshal(helloFrame{Cols: cols, Rows: rows, Ended: sub.Ended()})
-	if !writeEvent("hello", string(hb)) {
-		return
-	}
-	if len(sub.Tail()) > 0 {
-		if !writeEvent("tail", base64.StdEncoding.EncodeToString(sub.Tail())) {
-			return
-		}
-	}
-
-	// syncSize 主机尺寸对账（P-20261107-4）：与上次下发值不同即补 resize 帧；
-	// 0 尺寸（会话不可读）不下发——访客保持现栅格，不被打回默认网格
-	type sizeFrame struct {
-		Cols uint16 `json:"cols"`
-		Rows uint16 `json:"rows"`
-	}
-	syncSize := func() bool {
-		c, r := sub.Size()
-		if c == 0 || r == 0 || (c == cols && r == rows) {
-			return true
-		}
-		cols, rows = c, r
-		sb, _ := json.Marshal(sizeFrame{Cols: c, Rows: r})
-		return writeEvent("resize", string(sb))
-	}
-
-	keepalive := time.NewTicker(sseKeepaliveInterval)
-	defer keepalive.Stop()
-	sizePoll := time.NewTicker(sseSizePollInterval)
-	defer sizePoll.Stop()
-	for {
-		select {
-		case data, ok := <-sub.Live():
-			if !ok {
-				return
-			}
-			// 尺寸先于字节：resize 后的重绘按新栅格落屏
-			if !syncSize() {
-				return
-			}
-			if len(data) > 0 && !writeEvent("data", base64.StdEncoding.EncodeToString(data)) {
-				return
-			}
-		case <-sizePoll.C:
-			if !syncSize() {
-				return
-			}
-		case <-sub.Done():
-			// 馈线终结（会话关闭/撤销/慢消费踢出）：终结前的最后一批字节
-			// 可能仍在通道里，非阻塞排干再收场
-			for {
-				select {
-				case data, ok := <-sub.Live():
-					if ok && len(data) > 0 {
-						if !writeEvent("data", base64.StdEncoding.EncodeToString(data)) {
-							return
-						}
-						continue
-					}
-				default:
-				}
-				writeEvent("end", "{}")
-				return
-			}
-		case <-r.Context().Done():
-			return
-		case <-keepalive.C:
-			// SSE 注释帧保活（`: ping` 对 EventSource 透明）
-			_ = rc.SetWriteDeadline(time.Now().Add(30 * time.Second))
-			if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
-	}
-}
-
-// writeSSEEnd 直播源未装配时的降级流：一帧 hello(ended) + end 即关
-func (s *Service) writeSSEEnd(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeJSONErrorStatus(w, http.StatusInternalServerError, "streaming_unsupported")
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, "event: hello\ndata: {\"ended\":true}\n\n")
-	_, _ = io.WriteString(w, "event: end\ndata: {}\n\n")
-	flusher.Flush()
 }
 
 // handleCastFile 会话回放文本（P-20261004-103）：访客页回放引擎的取数端点，
