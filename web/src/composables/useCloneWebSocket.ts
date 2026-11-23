@@ -61,7 +61,8 @@ export function connectCloneWS(taskId: string, handlers: CloneWSHandlers = {}): 
         handlers.onDone?.(status, result)
       }
     } catch {
-      // 解析失败的消息直接丢弃，不影响后续合法消息处理
+      // silent-by-design: 解析失败的消息是服务端协议噪声，直接丢弃不影响
+      // 后续合法消息（连接失败另有 onerror → handlers.onError 回告链）
     }
   }
   ws.onerror = () => {

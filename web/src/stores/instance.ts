@@ -8,6 +8,7 @@ import { useConsoleStore } from './console'
 import { useErrorLogStore } from './errorLog'
 import { useNotificationStore } from './notification'
 import { matchEquivalentProject } from '../utils/projectMatch'
+import i18n from '../i18n'
 
 export interface Instance {
   id: string
@@ -168,6 +169,15 @@ export const useInstanceStore = defineStore('instance', () => {
     } catch {
       // 切换中途失败也要收起遮罩，避免全屏卡死
       if (seq === switchSeq) switching.value = false
+      // 非 axios 面的真静默收口（P-20261122-13）：路由跳转/上下文处置抛错时
+      // 遮罩虽收起，用户却停在旧界面上且零回告。纯前端事件走通知中心本地
+      // 入账（notification.addLocal 既有通道，与 WS 断线/1009 同款口径——
+      // axios 面失败已由拦截器独立 toast 与记账，此处不重复）
+      useNotificationStore().addLocal({
+        type: 'error',
+        category: 'system',
+        title: i18n.global.t('instance.switchFailed'),
+      })
     }
   }
 

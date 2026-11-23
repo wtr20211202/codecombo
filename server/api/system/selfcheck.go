@@ -129,15 +129,17 @@ func SelfCheckReport() []SelfCheckItem {
 	return items
 }
 
-// versionItem 应用构建信息：恒 ok（自检基线行，issue 环境信息的主体）
+// versionItem 应用构建信息：恒 ok（自检基线行，issue 环境信息的主体）。
+// P-20261122-9：尾缀生效日志级别（CC_LOG_LEVEL 装配后注入；未注入省略——
+// 「我设了 debug 却没有 debug 日志」时先看这里的实际生效值）
 func versionItem() SelfCheckItem {
 	v, commit, buildTime := BuildInfo()
-	return SelfCheckItem{
-		Item:   "version",
-		Status: "ok",
-		Detail: fmt.Sprintf("codecombo %s (%s) built %s, %s, %s/%s",
-			v, commit, buildTime, runtime.Version(), runtime.GOOS, runtime.GOARCH),
+	detail := fmt.Sprintf("codecombo %s (%s) built %s, %s, %s/%s",
+		v, commit, buildTime, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	if lvl := EffectiveLogLevel(); lvl != "" {
+		detail += ", log=" + lvl
 	}
+	return SelfCheckItem{Item: "version", Status: "ok", Detail: detail}
 }
 
 // gitItem git 工具链：缺失 = fail（clone/commit 等核心能力全不可用）

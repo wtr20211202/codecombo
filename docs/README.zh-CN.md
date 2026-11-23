@@ -72,9 +72,12 @@ p=$(mktemp) && curl -fsSL --retry 3 https://ghproxy.net/https://raw.githubuserco
 景首选官方直连或 npm 渠道（`npm i -g codecombo@next`——npm registry 自带
 完整性机制）。Windows 一键命令暂无对等镜像形态（已登记跟进项）。
 
-浏览器打开 **http://localhost:9999**，首启设置锁密码。版本全自动决策：
+浏览器打开 **https://localhost:9999**，首启设置锁密码。TLS 缺省启用——自签
+证书首启自动生成，浏览器首次访问需信任/继续；证书生成失败自动回落 http
+（服务日志可见）。版本全自动决策：
 有正式版装最新正式版；当前没有正式版时装最新 rc，没有 rc 才装最新 beta。
-端口、绑定地址、安装目录与数据目录均可指定——见下方[可选参数](#可选参数)。
+端口、绑定地址、安装目录与数据目录均可指定——见下方[可选参数](#可选参数)；
+默认开启的端口与各自作用见[默认端口](#默认端口)。
 
 **权限与服务运行账户。** 注册服务需要提权——Windows 用管理员 PowerShell，
 Linux 用 sudo（脚本内部提权写系统文件，服务仍以**当前用户**身份运行而非
@@ -159,6 +162,46 @@ $env:CODECOMBO_PORT='11000'; $env:CODECOMBO_DATA_DIR="$HOME\.codecombo-test"; $e
   重启回落 `~/.codecombo`（数据仍在自定义目录，只是实例不再读它）。
 - **远程部署装的实例禁止重跑脚本**（见[升级](#升级)）。
 
+#### 默认端口
+
+默认配置（主端口 `9999`）下，运行中的实例共开四个端口。各辅助口跟随主端口
+偏移（`+1` / `+2` / `+3`），除非另行配置：
+
+| 端口（默认） | 作用 |
+|---|---|
+| `9999` —— 主端口 | 唯一必用口：界面、API 与终端全走 **HTTPS/WSS**。TLS 缺省启用，自签证书首启自动生成（落数据目录 `certs/`，重启复用）——浏览器首次访问需信任/继续。关闭方式：`--no-tls` 或 `CC_TLS=0` |
+| `10000` —— 主端口+1 | 明文回环辅助口，仅绑 `127.0.0.1`：本机 CLI（`status`/`stop`/`restart`）与智能体回调在自签证书下继续用明文 HTTP。仅 TLS 启用时存在。改道：`loopbackPort` 配置键 |
+| `10001` —— 主端口+2 | 文件分享子服务——分享出去的 `/s/…` 链接开在这个口（绑定与主端口同地址）。改道：`sharePort` 配置键 |
+| `10002` —— 主端口+3 | 明文伴随口，绑主服务同地址（局域网可达）：给深度检测类网络（TLS 被拖慢）开箱即用的 http 访问面。该口凭据明文传输——关闭方式：`config.json` 配 `"httpPort": 0` |
+
+证书信任（把 `certs/cert.pem` 装入客户端信任库）、实例互联 TLS 与伴随口
+取舍的完整说明见部署文档：[deploy-linux.md §4.1](deploy-linux.md) 与
+[§8](deploy-linux.md)。
+
+**把服务形态改成明文 HTTP**（很少需要——安装器注册服务时不带 TLS 开关，
+服务按缺省 TLS 启用运行）：三平台各一处改动，改完重启：
+
+```bash
+# systemd：systemctl edit 写覆盖片段，[Service] 下加 Environment=CC_TLS=0
+sudo systemctl edit codecombo
+sudo systemctl restart codecombo
+```
+
+```bash
+# launchd：编辑 ~/Library/LaunchAgents/com.codecombo.plist，
+# ProgramArguments 里加一个 <string>--no-tls</string>，然后
+launchctl unload ~/Library/LaunchAgents/com.codecombo.plist
+launchctl load ~/Library/LaunchAgents/com.codecombo.plist
+```
+
+```powershell
+# Windows 服务：先读当前命令行，原样重设并追加 --no-tls
+#（--data-dir 等其余参数保持不动），然后
+sc.exe qc Codecombo
+sc.exe config Codecombo binPath= "<当前命令行> --no-tls"
+sc.exe start Codecombo
+```
+
 ### npm 安装
 
 ```bash
@@ -166,7 +209,8 @@ npm i -g codecombo
 codecombo start
 ```
 
-浏览器打开 **http://localhost:9999**，首启设置锁密码。需要 Node.js 18+——
+浏览器打开 **https://localhost:9999**，首启设置锁密码（TLS 缺省启用——自签
+证书，首次访问信任/继续即可；见[默认端口](#默认端口)）。需要 Node.js 18+——
 npm 包只是薄包装，npm 会按平台经 optionalDependencies 自动装上对应原生二进制
 （Windows / Linux / macOS，amd64 & arm64），零 postinstall 脚本。也可从
 [Releases](../../releases) 直接下载二进制。
@@ -194,11 +238,38 @@ npm 包只是薄包装，npm 会按平台经 optionalDependencies 自动装上�
 | `npm ls -g codecombo` 有结果 | npm | `npm i -g codecombo@latest`（应用内更新自动让位） |
 
 **① 应用内自更新（推荐形态）**：版本面板（设置 → 关于）「检查更新」从
-GitHub 拉取新版本、失败自动回滚。两个注意点：早于 v0.0.1-beta.3 的版本
+GitHub 拉取新版本、失败自动回滚。三个注意点：早于 v0.0.1-beta.3 的版本
 检查链有缺陷、应用内看不到新版本（v0.0.1-beta.3 已修复）——先按下方脚本/
 手工方式升一次；beta 期（尚无正式版）GitHub 正式通道恒为空，先在版本面板
-打开「**跟进预发布版本**」再检查。脚本装（systemd 托管）的实例：更新后
-服务若未自行拉起，`sudo systemctl restart codecombo` 收尾。
+打开「**跟进预发布版本**」再检查；macOS 上若曾用浏览器下载产物手工换入
+二进制，该文件带 `com.apple.quarantine` 隔离属性——后台 spawn 可能被静默
+拒绝，应用内更新的换包子进程起不来，更新无声卡死（应用不再回到新版本，
+也不报错）。macOS 手工换二进制不要用浏览器下载产物——用 `curl` 下载或
+`xattr -d com.apple.quarantine <二进制>` 清除属性；已处在此状态的实例先按
+下方路径升一次——脚本装实例重跑一键脚本安全，远程部署实例必须由中心实例
+重新远程部署（**禁止**重跑脚本——见上表与②的警示）。若隔离属性已清而症状
+不变，则本实例非此因——见下一段 launchd 进程组案。
+
+**macOS launchd 安装且版本为 v0.0.1-beta.9 或更早：应用内更新永远完不成。**
+launchd 在 job 主进程退出时会清理整个进程组（best-effort、无实时性保证），
+换包子进程在被杀之前连日志都来不及打开：应用静默回旧版本——不报错、无结果
+文件，`<数据目录>/logs/update.log` 从不创建。**从 v0.0.1-beta.10 起应用内
+更新可用**（换包子进程以独立进程组启动）。plist 侧的修复与二进制版本无关：
+重跑一键脚本会把 `AbandonProcessGroup=true` 写入 plist 并 load，立即生效——
+≤beta.9 的脚本装实例重跑后即可正常应用内升级；远程部署实例由中心实例重新
+远程部署写回同键（中心实例须 beta.10+）；手写 plist 的实例自行补上该键
+即可；两者都不适用则手工装 beta.10+。macOS 三种静默失败的判别式：
+- 服务日志（`<数据目录>/logs/codecombo-<日期>.log`）有
+  `start update process failed` → 子进程起不来（quarantine/权限）；
+- 无该行、`<数据目录>/logs/update.log` 不存在、且 `<数据目录>/tmp/update-*`
+  有完整下载产物 → launchd 组杀（本段所述形态）；
+- `update.log` 有 `waiting for old process` → 活性/等待链问题。
+
+自建 systemd unit 必须保留 `KillMode=process`：systemd 默认（`control-group`）
+会在主进程退出时同样清理换包子进程——同一种静默失败。
+
+脚本装（systemd 托管）的实例：更新后服务若未自行拉起，
+`sudo systemctl restart codecombo` 收尾。
 
 换包收尾按当前监管形态路由——更新前后各形态的行为差异（排障参考）：
 
@@ -211,10 +282,18 @@ GitHub 拉取新版本、失败自动回滚。两个注意点：早于 v0.0.1-be
   `sc.exe start Codecombo` 拉回，无需人工干预；健康检查失败自动回滚（先
   优雅停服再恢复旧二进制重拉，服务随即回到旧版本继续运行）；
 - **macOS launchd**（install.sh 装）：换包完成后不另起进程，由 launchd
-  KeepAlive 自动拉起新版本；更新健康等待为活性驱动（P-20261116-1，恢复再
-  慢都等、不设时间死线：PID 基线播种防起点死旧 PID 误判、PID 连续变化 ≥2
-  判崩溃循环秒级回滚、稳定存活持续探测、10 分钟失控兜底）——回滚时先恢复
-  旧二进制再按 PID 文件结束重拉进程，KeepAlive 随即拉回旧版本；
+  KeepAlive 自动拉起新版本；更新健康等待为活性驱动（恢复再慢都等、不设
+  时间死线：PID 基线播种防起点死旧 PID 误判、PID 连续变化 ≥2
+  判崩溃循环秒级回滚、稳定存活持续探测、10 分钟失控兜底）。本版起换包后
+  会先终结 KeepAlive 在换包窗口重拉起的旧实例（约一次短暂闪断，
+  随后由 KeepAlive 拉起新版本）——旧实例常驻时新版永远上不了线（此前症状
+  是「等待新版本就绪」卡住、或闪断后仍显示旧版本）；健康判定同时要求
+  `/api/health` 通过 **且** PID 文件中的版本号等于目标版本（旧版本实例不写
+  该行），故升级到本版之后的版本时无需任何手工操作；回滚时先恢复旧二进制
+  再由 KeepAlive 拉回旧版本；本版起 plist 增
+  `AbandonProcessGroup=true`（launchd 不再在主进程退出时清理同进程组，与
+  二进制版本无关；换包子进程同时以 Setpgid 脱组，双层防组杀——≤beta.9 的
+  launchd 实例组杀形态见 ① 段后的版本边界说明）；
 - **`start` 后台守护 / `--serve` 前台**（手动启动、远程部署「直接进程」
   方式）：更新完成后以**原启动参数**重新拉起并转后台守护——`--host`/
   `--data-dir`/TLS 等旗标原样保留（不再静默丢失），且脱离原终端会话：
@@ -302,7 +381,8 @@ build.bat             # Windows
 ./dist/codecombo start        # 后台守护进程方式启动
 ```
 
-浏览器打开 **http://localhost:9999**，首启设置锁密码，添加本地 Git 项目或克
+浏览器打开 **https://localhost:9999**，首启设置锁密码（TLS 缺省启用——自签
+证书，首次访问信任/继续即可），添加本地 Git 项目或克
 隆远程仓库。Windows / Linux / macOS（amd64 & arm64）预编译二进制见
 [Releases](../../releases)。
 
@@ -325,7 +405,9 @@ go run main.go                         # Go 后端 :9999（第二个终端）
 codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.json 的 server.host）
 ```
 
-然后在其他设备打开 `http://<本机IP>:9999`。首启设置的锁密码就是访问闸门
+然后在其他设备打开 `https://<本机IP>:9999`（TLS 缺省启用——首次访问信任
+自签证书即可；深度检测网络拖慢 TLS 时有明文伴随口兜底，见
+[默认端口](#默认端口)）。首启设置的锁密码就是访问闸门
 ——请只在可信网络下绑定 `0.0.0.0`。
 
 ## 新手上路
@@ -334,8 +416,9 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 产出，每一步都是既有能力，细节见[工具箱一览](#工具箱一览)与
 [特色能力](#特色能力)。
 
-**1. 打开工作台，设好锁。** 浏览器打开 **http://localhost:9999**，首启设置
-锁密码——它是每次访问的闸门，另有闲置自锁兜底。
+**1. 打开工作台，设好锁。** 浏览器打开 **https://localhost:9999**，首启设置
+锁密码（TLS 缺省启用——自签证书，首次访问信任/继续即可）——它是每次访问的
+闸门，另有闲置自锁兜底。
 
 **2. 添加项目——这件事也可以交给智能体。** 在主页添加本地 Git 仓库（或直接
 克隆一个）。也可以整步跳过——工作台为你准备的捷径：先开一个**智能体会话**
@@ -442,6 +525,18 @@ codecombo start --host 0.0.0.0        # 或 -H 0.0.0.0（旗标优先于 config.
 
 文件、目录、文本片段、甚至实时终端，一键生成分享链接——TTL / 口令 / 阅后即焚 /
 定格快照各是一个开关；访客侧零账号。
+
+实时终端分享默认只读并经开遮蔽处理；分享者可额外开启**访客输入**（开放直入或
+申请-批准）。该可写模式页面常驻**「上传文件/图片」按钮**——全浏览器与移动端
+可用：图片压缩、类型与大小白名单同链，落盘后把路径键入终端。**点击终端聚焦
+后 Ctrl+V 已可用**：文件走上上传链，纯文本经终端输入通道粘贴（与键入同一条
+命令审批/审计链）。取舍是 Ctrl+V 不再作为字面 `^V` 转发给主机，终端内绑定该
+键的程序（如 Vim 块选择）不再收到它。Ctrl+V 送文件仍取决于浏览器：Firefox
+从文件管理器复制文件不会填充 `clipboardData.files`，iOS Safari 无法粘贴文件，
+桌面 Safari 灰显，Android Chrome 受剪贴板权限影响；剪贴板里确有图片时页面还会
+额外尝试一次显式剪贴板读取作兜底。移动端或其余浏览器另可在分享者已开启协作时
+使用协作素材入口（拍照 / 选择文件）；可写页上的拖拽不会上传任何文件——页面会
+拦截缺省导航并提示改用上传按钮或 Ctrl+V。
 
 ![分享弹层](img/share-dialog.png)
 

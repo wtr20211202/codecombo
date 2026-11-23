@@ -94,7 +94,8 @@ export async function compressPasteImage(file: File): Promise<File> {
       bitmap.close()
     }
   } catch {
-    // 解码/画布/编码任一失败：压缩是增强不是门槛，降级原图照常上传
+    // silent-by-design: 压缩是增强不是门槛，解码/画布/编码任一失败都降级
+    // 原图照常上传（用户可见结果不变，无信息丢失）
     return file
   }
 }

@@ -376,6 +376,8 @@ function onPaneMouseUp(e: MouseEvent): void {
   window.setTimeout(() => {
     const inst = termInstances.get(sid)
     if (!inst || !inst.term.hasSelection()) return
+    // silent-by-design: 选中即复制是连选连续动作，逐次 toast 会刷屏；显式复制
+    // 入口（Ctrl+C/右键复制/复制为代码块）均按返回结果提示成功/失败
     void writeClipboard(inst.term.getSelection())
   }, 0)
 }

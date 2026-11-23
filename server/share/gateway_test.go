@@ -38,12 +38,17 @@ func TestSameOriginHandlerPublishAndClear(t *testing.T) {
 
 func TestAssetNamesWhitelist(t *testing.T) {
 	names := AssetNames()
-	// xterm 三件 + unicode11 宽度表 + JetBrains Mono 双字重（P-20261107-4 渲染保真）
+	// xterm 三件 + unicode11 宽度表 + JetBrains Mono 双字重（P-20261107-4 渲染
+	// 保真）+ 观看侧四件（P-20261122-1：web-links/search/webgl/image）
 	want := map[string]string{
 		"xterm.js":                    "application/javascript; charset=utf-8",
 		"addon-fit.js":                "application/javascript; charset=utf-8",
 		"xterm.css":                   "text/css; charset=utf-8",
 		"addon-unicode11.js":          "application/javascript; charset=utf-8",
+		"addon-web-links.js":          "application/javascript; charset=utf-8",
+		"addon-search.js":             "application/javascript; charset=utf-8",
+		"addon-webgl.js":              "application/javascript; charset=utf-8",
+		"addon-image.js":              "application/javascript; charset=utf-8",
 		"JetBrainsMono-Regular.woff2": "font/woff2",
 		"JetBrainsMono-Bold.woff2":    "font/woff2",
 	}

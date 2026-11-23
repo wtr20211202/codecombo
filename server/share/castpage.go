@@ -135,6 +135,9 @@ type castPageData struct {
 	// 事实源——CSS 进 <style>，JS 在 head 先行 initTheme 防闪白）
 	ThemeCSS template.CSS
 	ThemeJS  template.JS
+	// DragJS 访客页族拖拽导航守卫注入件（P-20261122-20，dragguard.go 单一
+	// 事实源——document 级 dragover/drop 仅拦含 Files 载荷的缺省导航）
+	DragJS template.JS
 }
 
 // 模板与 termpage.go/termpagefrozen.go 同族（头/横幅/卡片/主题化样式逐段
@@ -252,7 +255,7 @@ color:#8b94a9;opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
    之后才能覆盖）：终端按录制 cols×rows 精确渲染、字号收缩装进舞台，录制栅格窄
    于舞台时宽度优先放大（scFitGrid 放大段与直播页同口径，xterm 元素按栅格定宽
    居中）；列放宽只多留白——流式下限收回 1180，录制更宽才随 --term-need 放宽；
-   字号到下限仍装不下时舞台内滚动查看（不折行不裁切，纵向超出走 overset 钉底） */
+   字号到下限仍装不下时舞台内滚动查看（不折行不裁切，纵向超出走 overset 外层滚动面） */
 :root{--col-floor:1180px}
 </style>
 <script>{{.ThemeJS}}</script>
@@ -302,8 +305,13 @@ const SC = {{.Boot}};
 // 终端访客页共用布局件（P-20261106-9 / P-20261107-4，termlayout.go 单一事实源：
 // 渲染常量 SC_TERM_*、scTermOptions、scFitGrid 等）
 {{.LayoutJS}}
+// 访客页族拖拽导航守卫（P-20261122-20，dragguard.go 单一事实源）
+{{.DragJS}}
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
+// 拖拽导航守卫注册（P-20261122-20）：回放页无协作位恒注册——拖入本地文件的
+// 缺省动作是导航到 file://，整页被替换、回放视图丢失；提示用守卫自带文案
+scDragGuard();
 // 标签页标题 = 分享名（P-20261118-9 去品牌前缀；<title> 已是分享名，此处校准）
 document.title = SC.name || document.title;
 $('badgeText').textContent = t('loadingTip');
@@ -351,9 +359,10 @@ function openTerm(){
   if (termOpened) return;
   term.open($('termBox'));
   term.onData(() => {}); // 只读保险丝：不存在把输入送回服务端的路径
-  // 滚轮路由（scWheelRoute，P-20261118-9）：overset 态放行滚轮给 term-box，
-  // fits 态 xterm 照常 scrollback 导航——双滚动条收敛的 JS 半边
-  scWheelRoute(term, $('termBox'));
+  // 滚动面（P-20261123-2）：scWheelCapture 捕获相接管 overset 滚轮（单面化，
+  // 取代 P-9 的 scWheelRoute 放行）；scTermDiag 在 ?term=diag 时开诊断环形缓冲
+  scWheelCapture($('termBox'), term);
+  scTermDiag(term, $('termBox'));
   termOpened = true;
 }
 // 录制栅格 + 舞台尺寸驱动的重排（舞台/章节区/窗口任何变化都按栅格重新定字号）
@@ -430,10 +439,10 @@ function drain(){
     term.write(events[cursor].text);
     cursor++;
   }
-  // 批尾一次钉（P-20261119-2）：勿逐 write 挂回调——100ms tick 批量写面，钉底
-  // 判定读的是 term-box 几何（el 高度由 scFitGrid 定死，与批内写入数无关）；
-  // 钉到回放推进中的光标行（最新输出），回放超过一屏时即贴底
-  scPinBottom($('termBox'), false, scCursorRowY(term));
+  // 批尾一次跟随（P-20261123-2，取代 P-20261119-2 每批钉底）：回放写入不改外层
+  // 几何，follow 态下把光标行（最新输出）留在窗内即最小滚动；用户上滚后
+  // follow=false 不拽回，seek/重播再复位（见 seekTo）
+  scEnsureCursorVisible($('termBox'), term);
   syncChapter();
 }
 function syncChapter(){
@@ -503,6 +512,12 @@ function finish(){
 function seekTo(v){
   if (!termOpened) return;
   term.reset();
+  // seek/重播重置屏幕 → follow 复位（P-20261123-2）：回放从新屏重放到目标点，
+  // 既有阅读位置无意义；force 把光标行作新屏默认位（重放前缀写完后光标即目标
+  // 时刻位置）——只复位 follow 不复位滚动位的话，旧阅读位会留在格底，回放到
+  // 短前缀时窗口停在空白区
+  scFollowReset($('termBox'));
+  scEnsureCursorVisible($('termBox'), term, true);
   cursor = 0;
   elapsed = Math.max(0, Math.min(v, duration));
   drain();
@@ -631,5 +646,6 @@ func renderCastPage(w io.Writer, token, lang, title, wm string) error {
 		LayoutJS:  template.JS(termLayoutJS),
 		ThemeCSS:  template.CSS(GuestThemeCSS),
 		ThemeJS:   template.JS(guestThemeJS),
+		DragJS:    template.JS(guestDragGuardJS),
 	})
 }

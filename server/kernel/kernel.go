@@ -98,7 +98,7 @@ func New(logger *slog.Logger) *StdKernel {
 	}
 	return &StdKernel{
 		byName:    make(map[string]*ModuleInfo),
-		bus:       NewEventBus(),
+		bus:       NewEventBusWithLogger(logger),
 		scheduler: NewScheduler(logger),
 		logger:    logger,
 	}

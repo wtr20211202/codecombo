@@ -96,10 +96,22 @@ func isolateDataDir(t *testing.T) string {
 }
 
 // writePidFile 落两行形态 PID 文件（首行=pid 为 readRunningPid 读取目标；第三行
-// 回环口缺省 → waitForHealthy 探测主端口=健康桩端口）
+// 回环口缺省 → waitForHealthy 探测主端口=健康桩端口）。四行无版本行 = 本版之前
+// 构建的旧实例形态（P-20261122-6 起版本行是健康成功判据的一部分，成功期望的
+// 用例须用 writePidFileVersion 落新实例形态）
 func writePidFile(t *testing.T, dd string, pid int) {
 	t.Helper()
 	content := strconv.Itoa(pid) + "\n9999\n"
+	if err := os.WriteFile(filepath.Join(dd, "codecombo.pid"), []byte(content), 0644); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+}
+
+// writePidFileVersion 落带第五行版本的新实例形态 PID 文件（P-20261122-6 起
+// 新二进制启动即写此行——健康 200 之外的第二重证据）
+func writePidFileVersion(t *testing.T, dd string, pid int, version string) {
+	t.Helper()
+	content := strconv.Itoa(pid) + "\n9999\n0\nhttp\n" + version
 	if err := os.WriteFile(filepath.Join(dd, "codecombo.pid"), []byte(content), 0644); err != nil {
 		t.Fatalf("write pid file: %v", err)
 	}
@@ -149,8 +161,9 @@ func TestWaitForHealthyBaselineSeedsBeforeAnyFailure(t *testing.T) {
 	default:
 	}
 
-	// 存活新 PID 播种基线（留痕），随后健康翻绿放行
-	writePidFile(t, dd, os.Getpid())
+	// 存活新 PID 播种基线（留痕），随后健康翻绿放行。新进程重写的 PID 文件
+	// 带第五行版本（P-20261122-6 证据性门控：健康 200 之外还须版本行在场）
+	writePidFileVersion(t, dd, os.Getpid(), "0.0.2-new")
 	waitLogContains(t, buf, "baseline seeded pid="+strconv.Itoa(os.Getpid()), 3*time.Second)
 	healthy.Store(true)
 	select {

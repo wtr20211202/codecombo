@@ -11,16 +11,22 @@ import (
 
 var updateLogger *log.Logger
 
-// 双文件职责头注（P-20261116-1-S3，用户实测混淆案例——运维追「更新为什么回滚」
-// 时翻的是 update-restart.log，而该文件只是 bare 重启形态的进程输出，systemd
-// 形态进程输出走 journal、该文件根本不会被创建）：update.log=更新决策时间线
-// （换包/健康等待/回滚证据），update-restart.log=重启进程 stdout/stderr。两
-// 文件头各一行注记防再混；O_APPEND 多轮更新串接，头注仅首次创建时写防刷屏
-// （openAppendLog），故措辞面向「打开此文件的人」，中英混排以英文为主与既有
-// 日志行一致
+// 三文件职责头注（P-20261116-1-S3 双文件版 → P-20261122-9 升三文件；用户实测
+// 混淆案例——运维追「更新为什么回滚」时翻的是 update-restart.log，而该文件只是
+// bare 重启形态的进程输出，systemd 形态进程输出走 journal、该文件根本不会被
+// 创建）：update.log=更新决策时间线（换包/健康等待/回滚证据），
+// update-subprocess.log=换包子进程 stdout/stderr + 父进程活性裁决行（P-20261122-9；
+// initLogger 之前的 runtime/迁移/panic 输出落这里），update-restart.log=重启进程
+// stdout/stderr。三文件头各一行注记防再混；O_APPEND 多轮更新串接，头注仅首次
+// 创建时写防刷屏（openAppendLog），故措辞面向「打开此文件的人」，中英混排以
+// 英文为主与既有日志行一致
 const (
-	updateLogHeader  = "# update.log — update decision timeline (backup/replace/health-wait/rollback evidence per update run). Restarted-process output lives in update-restart.log"
-	restartLogHeader = "# update-restart.log — restarted process stdout/stderr (bare/detached form only; systemd form logs to journal and this file is never created). Update decisions live in update.log"
+	updateLogHeader = "# update.log — update decision timeline (backup/replace/health-wait/rollback evidence per update run). Swap-subprocess stdout/stderr + parent verdicts live in update-subprocess.log; restarted-process output lives in update-restart.log"
+	// updateSubprocessLogHeader 换包子进程诊断面头注（P-20261122-9）：与 update.log
+	// 严格分离，runbook #26/#27 的「update.log 不存在 ⇒ 组杀/未进 DoUpdate」
+	// 判别式依赖 update.log 保持纯决策时间线
+	updateSubprocessLogHeader = "# update-subprocess.log — swap-subprocess stdout/stderr (runtime/migration/panic bytes before initLogger) + parent liveness verdict lines. Update decisions live in update.log; restarted-process output lives in update-restart.log"
+	restartLogHeader          = "# update-restart.log — restarted process stdout/stderr (bare/detached form only; systemd form logs to journal and this file is never created). Update decisions live in update.log; swap-subprocess output lives in update-subprocess.log"
 )
 
 // openAppendLog 打开 O_APPEND 日志文件，首次创建时写一行职责头注（P-20261116-1-S3）。
@@ -55,9 +61,8 @@ type updateContext struct {
 }
 
 func initLogger(dd string) {
-	logDir := filepath.Join(dd, "logs")
-	_ = os.MkdirAll(logDir, 0755)
-	f, err := openAppendLog(filepath.Join(logDir, "update.log"), updateLogHeader)
+	_ = os.MkdirAll(filepath.Join(dd, "logs"), 0755)
+	f, err := openAppendLog(updateLogPath(dd), updateLogHeader)
 	if err != nil {
 		updateLogger = log.New(os.Stderr, "[update] ", log.LstdFlags)
 		return
@@ -172,6 +177,22 @@ func DoUpdate(currentBinary, newBinary string, port int, pid int) error {
 	if err != nil {
 		_ = ctx.rollback("start new version failed: " + err.Error())
 		return fmt.Errorf("start new version failed: %s", err)
+	}
+
+	// launchd 正向路径独占动作（P-20261122-6）：restartService 的 launchd 分支
+	// 不 spawn，KeepAlive 才是拉起者——但它在换包窗口已经无条件重拉过一次旧盘
+	// 上二进制，那个旧实例正占着全部端口常驻。不终结它，新版永不上线（健康
+	// 探测的 200 恒来自内存旧版：误判成功或误回滚，两条都到不了新版）。
+	// 落点刻意在此而非 restartService：该函数被 rollback/killAndRollback 共用，
+	// 回滚时 KeepAlive 拉起的旧实例是期望终态，放进分支会误杀健康旧实例
+	if form == superviseLaunchd {
+		// 判据两项入参（P-20261122-8）：目标版本 + 换包前版本——「版本 == 目标
+		// 才跳过」，中心链（目标恒字面量 "center"）以 prevVersion 否决
+		if err := terminateStaleLaunchdInstance(dd, ctx.version, ctx.prevVersion); err != nil {
+			// 旧实例仍活=旧版在跑的安全态，按回滚链如实收口（恢复盘面 + 结果文件）
+			_ = ctx.rollback("terminate stale launchd instance failed: " + err.Error())
+			return fmt.Errorf("terminate stale launchd instance failed: %s", err)
+		}
 	}
 
 	// 健康等待活性驱动（P-20261116-1-S1，判据详见 waitForHealthy）：恢复时间
@@ -331,8 +352,13 @@ func (c *updateContext) rollback(errMsg string) error {
 		errMsg += "; " + err.Error()
 	}
 	// 形态路由重启（P-20261112-1-S2）：windows-service 恢复备份后再 sc start、
-	// launchd 交 KeepAlive、bare 原参数 spawn——与正向启动同一 restartService
-	_, _ = restartService(c.currentBinary, c.port, c.dd)
+	// launchd 交 KeepAlive、bare 原参数 spawn——与正向启动同一 restartService。
+	// 重拉失败=服务停在「盘面已回旧版但没有进程在跑」，必须留痕（P-20261122-12
+	// 审计）：errMsg 仍只承载原始失败原因（结果文件语义与既有测试契约不变），
+	// 二次失败落 update.log 供事故追溯
+	if _, rerr := restartService(c.currentBinary, c.port, c.dd); rerr != nil {
+		updateLogf("rollback: relaunch after restore failed: %v — service is down until next supervisor restart", rerr)
+	}
 	c.saveResult("rolled_back", errMsg)
 	return fmt.Errorf("%s", errMsg)
 }
@@ -364,14 +390,22 @@ func (c *updateContext) killAndRollback(errMsg string) {
 		// 重拉捡到的必是校验过的旧包
 		errMsg = c.ensureRollbackBinary(errMsg)
 		if pid := readRunningPid(c.dd); pid > 0 {
-			_ = killByPIDFn(pid)
+			// 击杀失败=坏新进程仍占端口，而结果文件只会写 rolled_back 本因
+			// （P-20261122-12 审计）：二次失败必须进 update.log 才能区分
+			// 「回滚成功」与「盘面已回旧版但坏进程还在跑」
+			if kerr := killByPIDFn(pid); kerr != nil {
+				updateLogf("rollback: kill stale new-version process %d failed: %v — it may still hold the port", pid, kerr)
+			}
 		}
 		c.saveResult("rolled_back", errMsg)
 		return
 	default:
 		// bare/systemd：bare 击杀本子进程 spawn 的坏新进程（systemd 时恒 0
-		// no-op），交由下方 restoreBackup + 形态路由收尾
-		_ = killByPIDFn(c.spawnedPID)
+		// no-op），交由下方 restoreBackup + 形态路由收尾；击杀失败留痕同
+		// launchd 分支（P-20261122-12）
+		if kerr := killByPIDFn(c.spawnedPID); kerr != nil {
+			updateLogf("rollback: kill spawned new-version process %d failed: %v", c.spawnedPID, kerr)
+		}
 	}
 	if err := c.restoreBackup(); err != nil {
 		errMsg += "; " + err.Error()
@@ -382,6 +416,9 @@ func (c *updateContext) killAndRollback(errMsg string) {
 	spawned, err := restartService(c.currentBinary, c.port, c.dd)
 	if err == nil {
 		c.spawnedPID = spawned
+	} else {
+		// 同 rollback：回滚后重拉失败=服务无进程，留痕（P-20261122-12）
+		updateLogf("rollback: relaunch after restore failed: %v — service is down until next supervisor restart", err)
 	}
 	c.saveResult("rolled_back", errMsg)
 }
@@ -406,5 +443,10 @@ func (c *updateContext) saveResult(status, errMsg string) {
 	if status != "success" {
 		c.logExecStartSnapshot()
 	}
-	_ = SaveUpdateResult(c.dd, &UpdateResult{Status: status, Version: c.version, PreviousVersion: c.prevVersion, Error: errMsg})
+	// 结果文件是整条更新观察链的唯一事实源（主进程/前端只读它判定结局），
+	// 写失败必须留痕（P-20261122-12）：否则用户只能看到「更新无结局」而
+	// update.log 里没有任何解释——与结果文件丢失同形态的静默失败
+	if err := SaveUpdateResult(c.dd, &UpdateResult{Status: status, Version: c.version, PreviousVersion: c.prevVersion, Error: errMsg}); err != nil {
+		updateLogf("write update result failed (status=%s): %v — update outcome will not be observable via update-result.json", status, err)
+	}
 }

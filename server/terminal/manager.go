@@ -1259,6 +1259,18 @@ func (s *Session) DetachClient() {
 	s.mu.Unlock()
 }
 
+// AttachedClients 当前附着的交互 WS 客户端数（P-20261122-16 owner 附着门读口）。
+// 只统计 HandleTerminalWS 建连的 AttachClient/DetachClient——share 的 /termws
+// 上行桥、SSE 直播馈线与录制 tap 都不计数（它们不代表「主人在本机开着这个会话
+// 的终端」）。消费方是访客视口反喂的准入判定：owner 的 xterm 只在首连时按视口
+// resize 一次，之后访客改 PTY 尺寸不会通知它 → 主人附着期间以主机栅格为准。
+// 锁内一次读，量级可忽略（非热路径）
+func (s *Session) AttachedClients() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.clients
+}
+
 // Detach 释放会话的服务端附着连接（空闲超时自动分离 P-192）。
 // 只关 ptmx 这一层，语义按后端分叉：
 //   - tmux：attach 子进程退出 → attachExited，底层 tmux session 存活，

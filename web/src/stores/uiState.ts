@@ -606,7 +606,7 @@ export const useUIStateStore = defineStore('uiState', () => {
         body: JSON.stringify({ [id]: rec }),
         keepalive: true,
       })
-    } catch { /* silent */ }
+    } catch { /* silent-by-design: 关页同步保存路径，页面即将卸载无法再回告；失败键留在 unsentKeys 由存续会话兜底重试 */ }
   }
 
   /** 命名空间级即时补丁（saveXxx 低频写端共用）：只发携带的键，服务端浅合并

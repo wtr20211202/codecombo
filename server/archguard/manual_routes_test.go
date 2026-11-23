@@ -85,6 +85,13 @@ var manualWhitelist = map[string]string{
 	"/assets/addon-unicode11.js":          "分享访客页 vendored 资产（xterm addon-unicode11 宽度表）",
 	"/assets/JetBrainsMono-Regular.woff2": "分享访客页 vendored 资产（终端字体 JetBrains Mono，OFL）",
 	"/assets/JetBrainsMono-Bold.woff2":    "分享访客页 vendored 资产（终端字体 JetBrains Mono 粗体，OFL）",
+	// P-20261122-1 观看侧四件（web-links/search/webgl/image）：终端直播访客页
+	// 通用/条件挂载的浏览器渲染资源（授权模式无关裁定 D/ImageAddon 遮蔽闸）——
+	// 同为访客渲染资源非 agent 能力端点（xterm 系豁免口径同上）
+	"/assets/addon-web-links.js": "分享访客页 vendored 资产（xterm addon-web-links 链接可点）",
+	"/assets/addon-search.js":    "分享访客页 vendored 资产（xterm addon-search 搜索条）",
+	"/assets/addon-webgl.js":     "分享访客页 vendored 资产（xterm addon-webgl 渲染）",
+	"/assets/addon-image.js":     "分享访客页 vendored 资产（xterm addon-image 图片协议，SC.unfiltered 条件挂载）",
 	// 快投递访客页自持脚本（P-20261117-2-S2）：enforcing CSP script-src 'self'
 	// 下唯一脚本面——浏览器渲染资源非 agent 能力端点（share vendored 资产同款
 	// 豁免口径；访客页入口 GET /drop/<token> 已在手册 quickdrop 节登记）

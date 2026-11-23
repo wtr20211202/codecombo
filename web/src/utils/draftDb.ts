@@ -10,7 +10,9 @@
  * 防御语义（safeStorage 同款思路）：隐私模式/无 indexedDB/建连或事务失败
  * 一律静默降级（写入返回 false、读取返回 null），功能失效不报错——草稿是
  * 纯增益能力，绝不能因它打断编辑主流程。首次建连失败后置 disabled，
- * 避免每次击键防抖都重试建连。
+ * 避免每次击键防抖都重试建连。降级本身不弹提示，但「环境不可用」这一事实
+ * 经 isDraftDbDisabled() 暴露给写路径：persist 域据此一次性回告用户
+ * 「草稿不会自动保存」（否则用户以为有 hot-exit 兜底，关页即丢，P-20261122-13）
  *
  * 跨标签同步：写路径成功分支广播 localStorage 信标（P-20261006-8，见下方
  * 信标节注释），接收与重载判定在 persist 域。
@@ -63,7 +65,7 @@ export interface DraftSavedBeacon {
 function emitDraftSavedBeacon(projectId: string, path: string, savedAt: number): void {
   try {
     safeStorage.setItem(DRAFT_SAVED_BEACON_KEY, JSON.stringify({ project: projectId, path, savedAt }))
-  } catch { /* 序列化异常静默：信标是纯增益，草稿本体已落库 */ }
+  } catch { /* silent-by-design: 信标是纯增益（跨标签同步的提示），草稿本体已落库 */ }
 }
 
 /** 单文件草稿上限（按字符数近似 2MB 文本）：超大文件不进 DB，防止把配额塞爆 */
@@ -90,12 +92,22 @@ function openDb(): Promise<IDBDatabase | null> {
         req.onerror = () => { disabled = true; resolve(null) }
         req.onblocked = () => { disabled = true; resolve(null) }
       } catch {
+        // silent-by-design: 降级事实经 isDraftDbDisabled() 暴露给写路径，
+        // 由 persist 域一次性回告用户（见文件头防御语义注）
         disabled = true
         resolve(null)
       }
     })
   }
   return dbPromise
+}
+
+/** 草稿库是否已因环境不可用（无 indexedDB/隐私模式/建连失败）被永久降级。
+ *  只读探测口：持久化写路径据此把「降级」一次性回告用户（见 persist 域）。
+ *  事务级偶发失败不置 disabled（只让本次写入返回 false），故本口为 false 时
+ *  的写入失败按瞬时故障处理，不提示。 */
+export function isDraftDbDisabled(): boolean {
+  return disabled
 }
 
 function draftKey(projectId: string, path: string): string {
@@ -147,7 +159,7 @@ export async function removeDraft(projectId: string, path: string): Promise<void
   try {
     const tx = db.transaction(STORE, 'readwrite')
     tx.objectStore(STORE).delete(draftKey(projectId, path))
-  } catch { /* 静默降级 */ }
+  } catch { /* silent-by-design: 草稿清理失败（DB 关闭/事务异常）不影响主流程，陈旧草稿恢复侧按 baseHash 判陈旧 */ }
 }
 
 /** 清空某项目全部草稿（项目删除时）：主键 \u0000 前缀范围删除 */
@@ -158,7 +170,7 @@ export async function removeProjectDrafts(projectId: string): Promise<void> {
     const range = IDBKeyRange.bound(`${projectId}\u0000`, `${projectId}\u0000\uffff`)
     const tx = db.transaction(STORE, 'readwrite')
     tx.objectStore(STORE).delete(range)
-  } catch { /* 静默降级 */ }
+  } catch { /* silent-by-design: 项目删除时的草稿清账失败不影响删除本身，残留草稿按项目键隔离不再被读到 */ }
 }
 
 // ── 陈旧对账（P-20261003-152）：文件已删除的草稿永久滞留（恢复探测只在文件

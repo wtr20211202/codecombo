@@ -138,9 +138,28 @@ async function retryUpdate(): Promise<void> {
     </div>
     <div
       v-if="outcome.phase === 'unknown'"
-      class="upd-row"
+      class="upd-row upd-unknown-hint"
     >
-      <span class="upd-value muted">{{ t('update.progressInfo.unknownHint') }}</span>
+      <!-- unknown 结局两形态（P-20261122-5）：服务可达且运行旧版本=更新未完成
+           （明示现状+手动升级出口，用户实测案「超时判 unknown 却仍 beta.8」的
+           收口面）；不可达/版本无法比对回落通用文案不误报 -->
+      <template v-if="progress.unknownStillOld">
+        <span
+          class="upd-value muted"
+          data-testid="version-update-unknown-still-old"
+        >{{ t('update.progressInfo.unknownStillOld', { version: progress.snapshot?.buildVersion }) }}</span>
+        <a
+          class="upd-manual-link"
+          data-testid="version-update-manual-link"
+          href="https://github.com/wtr20211202/codecombo/releases"
+          target="_blank"
+          rel="noopener"
+        >{{ t('update.progressInfo.manualUpgrade') }}</a>
+      </template>
+      <span
+        v-else
+        class="upd-value muted"
+      >{{ t('update.progressInfo.unknownHint') }}</span>
     </div>
     <template v-if="outcome.phase === 'success'">
       <div class="upd-row">
@@ -212,6 +231,10 @@ async function retryUpdate(): Promise<void> {
 .upd-outcome--success { border-left-color: var(--status-success); }
 .upd-outcome--waiting { border-left-color: var(--status-waiting); }
 .upd-outcome-phase { font-weight: 600; }
+/* unknown「仍为旧版本」块：明示文案换行为主体、手动升级链接独立一行可点 */
+.upd-unknown-hint { flex-direction: column; align-items: flex-start; gap: 4px; }
+.upd-manual-link { font-size: 12px; color: var(--accent-blue); text-decoration: none; }
+.upd-manual-link:hover { text-decoration: underline; }
 .upd-btn {
   width: 100%; padding: 8px 0; border: 1px solid var(--border-default); border-radius: 6px;
   background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer;

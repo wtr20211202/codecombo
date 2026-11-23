@@ -57,13 +57,37 @@ function expectNoRowOverlap(list: Box[], label: string): void {
   }
 }
 
-/** 进项目页（金态项目卡）并等文件树操作钮就绪 */
+/** 进项目页（金态项目卡）并等文件树操作钮就绪。
+ *  文件树面板开合是服务端 uiState（跨用例共享）：前序 spec（activity-bar-drag
+ *  收尾把侧栏收起等）可能留下 showSidePanel:false，此时树按钮盒恒 0×0；且
+ *  「默认开 → bootstrap 异步恢复关」的首帧窗口会让单纯 waitFor(visible) 误通过
+ *  （P-20261122-15 定向验证实锚：树按钮宽 0 红）。先等 bootstrap 的 uiState GET
+ *  响应落地，再按 rail active 类（registry 定义 = 侧栏开且 files 视图）归一化，
+ *  最后以非零盒轮询兜住恢复时序——不假定面板开态。 */
 async function enterProject(page: Page): Promise<void> {
   await fixedLocale(page)
   await gotoAndUnlock(page, `${API_BASE}/`)
+  // uiState 恢复 GET 在项目页 Layout 挂载时发起：先挂等待再进项目，避免
+  // 在恢复落地前用首帧默认态做归一化（等待失败不阻断，后续轮询兜底）
+  const uiStateRestored = page.waitForResponse(
+    r => r.url().includes('/api/ui-state') && r.request().method() === 'GET',
+    { timeout: 8000 },
+  ).catch(() => null)
   await projectCardByName(page, 'simple-coding').first().click()
   await page.waitForURL('**/project')
-  await expect(page.locator('.tree-action-btn').first()).toBeVisible({ timeout: 10000 })
+  await uiStateRestored
+
+  const railFiles = page.locator('[data-testid="rail-files"]')
+  const firstTreeBtn = page.locator('.tree-action-btn').first()
+  for (let i = 0; i < 3; i++) {
+    if (await railFiles.evaluate(el => el.classList.contains('active')).catch(() => false)) break
+    await railFiles.click()
+    await page.waitForTimeout(250)
+  }
+  await expect
+    .poll(async () => (await firstTreeBtn.boundingBox().catch(() => null))?.width ?? 0, { timeout: 10000 })
+    .toBeGreaterThan(0)
+  await expect(firstTreeBtn).toBeVisible({ timeout: 10000 })
 }
 
 /** 打开 Git 面板并归一化到可见基线（面板开关是 toggle 语义，跑序可能已开） */

@@ -3,6 +3,7 @@ package agentcron
 import (
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -163,7 +164,7 @@ func (r *runner) runDue(crons []store.AgentCron, now time.Time) {
 				if rec := recover(); rec != nil {
 					// 泄漏守卫：panic 是发起链的 bug 场景（正常错误走 trigger
 					// 返回值），只记日志围堵，不伪装成业务失败入账
-					slog.Error("agentcron trigger panicked", "id", d.t.ID, "name", d.t.Name, "panic", rec)
+					slog.Error("agentcron trigger panicked", "id", d.t.ID, "name", d.t.Name, "panic", rec, "stack", string(debug.Stack()))
 				}
 			}()
 			if _, err := r.trigger(d.t, d.slot); err != nil {

@@ -52,7 +52,7 @@ var termDictZh = map[string]string{
 	"connecting":       "连接中…",
 	"maskBanner":       "输出已经敏感值遮蔽（sc 令牌 / password 赋值 / 云密钥 key → ***）。遮蔽靠模式启发式，非绝对——不要在终端里打印高敏凭据。",
 	"unfilteredBanner": "未过滤：分享者已关闭敏感值遮蔽，输出原样直播（可能含令牌 / 密码 / 密钥等敏感信息）。请勿转发本链接，看完即可关闭页面。",
-	"readonlyTip":      "只读直播：输出只可观看；如需键入，点击「申请输入」提交申请（分享者批准后生效）",
+	"readonlyTip":      "只读直播：输出只可观看；如需键入或粘贴图片/文件，点击「申请输入」提交申请（分享者批准后生效）",
 	"guestLimit":       "同时在线的访客已达上限，请稍后再试",
 	"endedTip":         "直播已结束（会话关闭或分享被撤销）",
 	"reconnecting":     "连接断开，重连中…",
@@ -80,7 +80,7 @@ var termDictZh = map[string]string{
 	// 协作位（P-20261024-1）：素材上行 + 直通输入（collabpage.go 单一事实源）
 	"clUpTitle":   "协作素材",
 	"clUpHint":    "直达会话收件区，主人可一键交给智能体",
-	"clDropHint":  "粘贴 / 拖入文件到页面任意位置，或点击下方按钮上传",
+	"clDropHint":  "拖入文件到页面任意位置，或点击下方按钮上传",
 	"clPickFiles": "选择文件",
 	"clCamera":    "拍照 / 相册",
 	"clUpNote":    "图片 ≤10MB，文件 ≤20MB，单次 ≤5 个",
@@ -94,7 +94,7 @@ var termDictZh = map[string]string{
 	"clUploading":      "上传中 {i}/{n}…",
 	"clReceivedN":      "已收 {n} 份",
 	"clSomeFailed":     "有素材上传失败，展开查看",
-	"clDragHint":       "松开即上传为协作素材",
+	"clDragHint":       "松开即上传为协作素材（发到终端请 Ctrl+V）",
 	"clTextTitle":      "文字素材",
 	"clTextHint":       "输入或粘贴的文字会作为一份 .txt 素材送达收件区",
 	"clTextPh":         "写下或粘贴要交给分享者的文字（日志、报错、复现步骤…）",
@@ -105,12 +105,18 @@ var termDictZh = map[string]string{
 	"clPasteRemoteImg": "剪贴板里只有网页图片链接，无法直接读取：请在图片上右键「复制图片」后再粘贴，或保存后用「选择文件」上传",
 	// 访客输入位（P-20261106-8 可写分享，P-20261121-1 统一双授权模式）：
 	// WS 上行输入位文案（writablepage.go 单一事实源；clDirect* 词表随直通位
-	// 退役并入 wr*——申请/等待/持权三态与开放直入同位呈现）
-	"wrOn":        "可写模式 · 你的输入将直达主人的终端（主人可随时收回）",
-	"wrTip":       "可写模式：你的键入会实时进入主人的终端，请谨慎操作",
+	// 退役并入 wr*——申请/等待/持权三态与开放直入同位呈现）。wrOn/wrTip 出域
+	// 警示如实提及粘贴上传（P-20261122-1：open 模式持链接即可上传，泄露半径
+	// 与键入同等——评审风险注记的诚实呈现）
+	"wrOn":        "可写模式 · 你的输入与粘贴上传将直达主人的终端（主人可随时收回）",
+	"wrTip":       "可写模式：你的键入与粘贴上传会实时进入主人的终端，请谨慎操作",
 	"wrThrottled": "输入太快，部分输入被暂时拦截，请稍慢一点",
 	"wrReview":    "粘贴块包含高危命令，已提交主人审批（未批不会执行）…",
 	"wrDenied":    "主人未批准（或已超时）该粘贴块，输入被丢弃",
+	// 拖拽导航守卫（P-20261122-14 必改1）：拖拽上传经用户定向裁撤，collab 关
+	// 的 writable 页拦下拖放缺省导航后提示改走粘贴链（writablepage.go 消费）；
+	// P-20261122-18 起补上传按钮出口（Ctrl+V 文件投递分浏览器，按钮是保底）
+	"wrDragNoUpload": "拖拽不发送文件，请点「上传文件/图片」按钮或 Ctrl+V 粘贴",
 	// 申请批准路径（P-20261121-1 统一收编：申请通道默认在场，申请-批准握手
 	// 三态——与开放直入共用状态条与键入通道）
 	"wrRequest": "申请输入",
@@ -119,6 +125,11 @@ var termDictZh = map[string]string{
 	"wrOther":   "其他访客正在输入",
 	"wrRevoked": "输入权已被收回（可重新申请）",
 	"wrClosed":  "申请通道未开放或分享已结束",
+	// 生命周期公告（P-20261122-19 ③）：独立 notice 承载收回/关闭/停止原因
+	//（wr-strip 会被重连清掉，原因必须活过重连）；waiting 上限复用 guestLimit
+	"wrOwnerOff":    "主人已关闭可写模式",
+	"wrGone":        "分享已结束或链接已失效",
+	"wrPassExpired": "口令校验已失效，正在返回口令页…",
 	// 可写页头部副标题（P-20261119-3 sub 所有权二分）：可写页 sub 由
 	// writablepage 在 WS hello（键入通道开通）时写入本键、teardown 时恢复
 	// readonlyTip——termpage 的 ES hello 在 SC.writable 下不触 sub（到达顺序
@@ -127,6 +138,40 @@ var termDictZh = map[string]string{
 	// 视口反喂 resize 诚实回执（P-20261120-8 必改6）：服务端 resize_applied 后
 	// 状态条右段的即时反馈——访客视口已反喂为主机终端宽度（文字按视口折行）
 	"wrResized": "已按你的视口同步终端尺寸（文字按窗口折行）",
+	// 反喂让位原因（P-20261122-16 ③/④）：主人在本机开着该会话的终端时拒绝访客
+	// 反喂（owner 的 xterm 不随 PTY 改格重排），状态条后缀给出可见原因——画布
+	// 以主机栅格为准，主人离开后 30s 退避到期自动恢复反喂
+	"wrOwnerActive": "主人在本机操作，画布以主机为准",
+	// 粘贴上传链（P-20261122-1 必改2）：访客页 paste 事件接管的进度与结果文案
+	//（writablepage.go 单一事实源；429/403 复用 clLimited/wrRevoked 既有文案）。
+	// P-20261122-18 增三键：常驻上传按钮（跨浏览器文件投递保底）/「剪贴板无
+	// 文件」提示（无文件且无文本才出，30s 限频）/无键入资格时先申请提示
+	"puUploading":   "上传粘贴文件 {i}/{n}…",
+	"puDone":        "已落盘 {n} 个文件，路径已贴入终端",
+	"puTooMany":     "单次最多上传 {n} 个文件，超出部分已忽略",
+	"puUnsupported": "不支持的文件类型：{name}",
+	"puFailOne":     "上传失败：{name}",
+	"puFailed":      "上传失败，请重试",
+	"puUploadBtn":   "上传文件/图片",
+	"puNoFile":      "剪贴板里没有可发送的文件，请点「上传文件/图片」按钮",
+	"puNeedHold":    "先申请输入权限，获批后再上传",
+	// 闸前粘贴可见化（P-20261123-1 ②）：带文件粘贴落在页内输入框（搜索框/
+	// 留言昵称/协作素材框）且有键入资格——文件只能走终端粘贴链，提示先聚焦
+	// 终端；不 preventDefault（输入框语义与去向都不变）
+	"puFocusTerm": "请先点击终端区域再粘贴文件",
+	// 选区复制（P-20261122-1 必改4）：Ctrl+Shift+C 与复制钮的反馈文案
+	//（cpCopy 是按钮 label 兼 title/aria-label；terminalOsc52Clipboard
+	// copyText 降级链先例——失败文案如实「浏览器未放行」）
+	"cpCopy":       "复制选中",
+	"cpCopied":     "已复制选中文本",
+	"cpCopyFailed": "复制失败（浏览器未放行）",
+	// 极简搜索条（P-20261122-1 必改6）：观看侧可写页的搜索面文案（addon-search）
+	"seToggle":   "搜索",
+	"seSearch":   "搜索终端内容…",
+	"sePrev":     "上一个匹配",
+	"seNext":     "下一个匹配",
+	"seClose":    "关闭搜索",
+	"seNoResult": "无匹配",
 }
 
 var termDictEn = map[string]string{
@@ -136,7 +181,7 @@ var termDictEn = map[string]string{
 	"connecting":       "Connecting…",
 	"maskBanner":       "Output is masked for sensitive values (sc tokens / password assignments / cloud keys → ***). Masking is heuristic, not absolute — avoid printing high-value credentials in this terminal.",
 	"unfilteredBanner": "Unfiltered: the sharer turned off sensitive-value masking — output is streamed verbatim and may contain tokens, passwords or keys. Do not forward this link; close the page when you are done.",
-	"readonlyTip":      "Read-only live: output is view-only; to type, click \"Request input access\" below (takes effect after owner approval)",
+	"readonlyTip":      "Read-only live: output is view-only; to type or paste images/files, click \"Request input access\" below (takes effect after owner approval)",
 	"guestLimit":       "Concurrent guest limit reached, try again later",
 	"endedTip":         "Live has ended (session closed or share revoked)",
 	"reconnecting":     "Connection lost, reconnecting…",
@@ -163,7 +208,7 @@ var termDictEn = map[string]string{
 	// 协作位（P-20261024-1）：素材上行（collabpage.go 单一事实源）
 	"clUpTitle":   "Shared materials",
 	"clUpHint":    "Go straight to the session inbox — hand them to the agent in one click",
-	"clDropHint":  "Paste or drop files anywhere on the page, or use the buttons below",
+	"clDropHint":  "Drop files anywhere on the page, or use the buttons below",
 	"clPickFiles": "Choose files",
 	"clCamera":    "Camera / photos",
 	"clUpNote":    "Images ≤10MB, files ≤20MB, up to 5 per batch",
@@ -177,7 +222,7 @@ var termDictEn = map[string]string{
 	"clUploading":      "Uploading {i}/{n}…",
 	"clReceivedN":      "{n} received",
 	"clSomeFailed":     "Some uploads failed — expand to see",
-	"clDragHint":       "Drop to upload as shared material",
+	"clDragHint":       "Drop to upload as shared material (Ctrl+V to send to the terminal)",
 	"clTextTitle":      "Text material",
 	"clTextHint":       "Typed or pasted text is delivered to the inbox as a .txt file",
 	"clTextPh":         "Type or paste text for the share owner (logs, errors, repro steps…)",
@@ -188,11 +233,13 @@ var termDictEn = map[string]string{
 	"clPasteRemoteImg": "The clipboard only holds a link to a web image, which can't be read directly: right-click the image and choose “Copy image”, or save it and use “Choose files”",
 	// 访客输入位（P-20261106-8 可写分享，P-20261121-1 统一双授权模式，
 	// 注释见中文表同键条目）
-	"wrOn":        "Writable mode · your keystrokes go straight to the owner's terminal (owner can revoke anytime)",
-	"wrTip":       "Writable mode: your typing enters the owner's terminal live — operate with care",
+	"wrOn":        "Writable mode · your input and paste uploads go straight to the owner's terminal (owner can revoke anytime)",
+	"wrTip":       "Writable mode: your typing and paste uploads enter the owner's terminal live — operate with care",
 	"wrThrottled": "Typing too fast — some input was temporarily dropped, slow down a little",
 	"wrReview":    "Pasted block contains a high-risk command — submitted for owner approval (nothing executes until approved)…",
 	"wrDenied":    "The owner did not approve (or timed out) that pasted block — input was dropped",
+	// 拖拽导航守卫（P-20261122-14 必改1，注释见中文表同键条目）
+	"wrDragNoUpload": "Dragging does not send files — use “Upload files/images” or Ctrl+V",
 	// 申请批准路径（P-20261121-1 统一收编，注释见中文表同键条目）
 	"wrRequest": "Request input access",
 	"wrWaiting": "Requested — waiting for owner approval… (valid for 10 minutes)",
@@ -200,10 +247,39 @@ var termDictEn = map[string]string{
 	"wrOther":   "Another visitor is typing",
 	"wrRevoked": "Input access was revoked (you can request again)",
 	"wrClosed":  "Request channel is closed or the share has ended",
+	// 生命周期公告（P-20261122-19 ③，注释见中文表同键条目）
+	"wrOwnerOff":    "The owner turned off writable mode",
+	"wrGone":        "This share has ended or the link is no longer valid",
+	"wrPassExpired": "Passphrase session expired — returning to the passphrase page…",
 	// 可写页头部副标题（P-20261119-3 sub 所有权二分，注释见中文表同键条目）
 	"wrSubLive": "Writable live: keystrokes go to the owner's terminal",
 	// 视口反喂 resize 诚实回执（P-20261120-8 必改6，注释见中文表同键条目）
 	"wrResized": "Terminal size synced to your viewport (text wraps to the window)",
+	// 反喂让位原因（P-20261122-16，注释见中文表同键条目）
+	"wrOwnerActive": "Owner is working on this machine — canvas follows the host grid",
+	// 粘贴上传链（P-20261122-1 必改2，注释见中文表同键条目）
+	"puUploading":   "Uploading paste files {i}/{n}…",
+	"puDone":        "Saved {n} file(s) — path(s) pasted into the terminal",
+	"puTooMany":     "Up to {n} files per paste — extra files were ignored",
+	"puUnsupported": "Unsupported file type: {name}",
+	"puFailOne":     "Upload failed: {name}",
+	"puFailed":      "Upload failed, try again",
+	"puUploadBtn":   "Upload files/images",
+	"puNoFile":      "No file in the clipboard — use the “Upload files/images” button",
+	"puNeedHold":    "Request input access first — uploads unlock after approval",
+	// 闸前粘贴可见化（P-20261123-1 ②，注释见中文表同键条目）
+	"puFocusTerm": "Click the terminal area first, then paste files",
+	// 选区复制（P-20261122-1 必改4，注释见中文表同键条目）
+	"cpCopy":       "Copy selection",
+	"cpCopied":     "Selection copied",
+	"cpCopyFailed": "Copy failed (browser blocked it)",
+	// 极简搜索条（P-20261122-1 必改6，注释见中文表同键条目）
+	"seToggle":   "Search",
+	"seSearch":   "Search terminal…",
+	"sePrev":     "Previous match",
+	"seNext":     "Next match",
+	"seClose":    "Close search",
+	"seNoResult": "No matches",
 }
 
 func termDictFor(lang string) map[string]string {
@@ -244,6 +320,10 @@ type termPageData struct {
 	// 设 data-theme 防闪白，xterm.js 加载之前）
 	ThemeCSS template.CSS
 	ThemeJS  template.JS
+	// DragJS 访客页族拖拽导航守卫注入件（P-20261122-20，dragguard.go 单一
+	// 事实源——document 级 dragover/drop 仅拦含 Files 载荷的缺省导航；本页
+	// 只在 !SC.collab 时注册，collab 开时收件箱 drop 是唯一语义）
+	DragJS template.JS
 }
 
 const termPageTmplSrc = `<!doctype html>
@@ -354,13 +434,29 @@ color:#8b94a9;opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 <script src="/assets/xterm.js"></script>
 <script src="/assets/addon-fit.js"></script>
 <script src="/assets/addon-unicode11.js"></script>
+<!-- 观看侧通用件（P-20261122-1 必改5/6/7/8）：web-links 链接可点、search 搜索、
+     webgl 渲染、image 图片协议——直播页通用挂载或条件挂载（授权模式无关裁定 D
+     /SC.unfiltered 遮蔽闸），frozen/cast 定格页明确排除出范围（评审裁定 D 防蔓延） -->
+<script src="/assets/addon-web-links.js"></script>
+<script src="/assets/addon-search.js"></script>
+<script src="/assets/addon-webgl.js"></script>
+<script src="/assets/addon-image.js"></script>
 <script>
 const SC = {{.Boot}};
 // 终端访客页共用布局件（P-20261106-9 / P-20261107-4，termlayout.go 单一事实源：
 // 渲染常量 SC_TERM_*、scTermOptions、scFitGrid 等）
 {{.LayoutJS}}
+// 访客页族拖拽导航守卫（P-20261122-20，dragguard.go 单一事实源）
+{{.DragJS}}
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
+// 拖拽导航守卫注册（P-20261122-20）：原只生在可写位且 writable/guestInput 双关
+// 早退——只读直播拖入本地文件仍被浏览器导航到 file:// 整页丢失。本页 collab
+// 关时注册（拦缺省动作 + 提示改走 Ctrl+V 粘贴链，词表键 wrDragNoUpload 复用不
+// 新增）；collab 开时零注册——collabpage 整页 drop=协作收件箱唯一语义（双收口
+// 会同一次投放双上传）。提示面用守卫自带 .drag-tip，可写位 .pu-tip 专属粘贴
+// 上传链，两桶互不遮蔽（无双提示）
+scDragGuard({ enabled: !SC.collab, tip: t('wrDragNoUpload') });
 // 标签页标题 = 分享名（P-20261118-9 去品牌前缀：h1 与标签页都呈现会话本身，
 // 「Codecombo 终端 N」「终端直播」泛称双重误导同根）。<title> 已是分享名，
 // 此处用 SC.name 校准一次并供 rename 帧复用；name 缺席保持 <title> 原值
@@ -412,6 +508,28 @@ function termTheme(){
 scTermUnicode(term);
 const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
+// ── 观看侧通用件挂载（P-20261122-1 必改5/7/8，授权模式无关裁定 D——同一张页
+// addon 挂载与可写与否无关，只读+可写同享）──
+// WebLinks：http(s) 链接 hover 可点、点击新标签打开（noopener 语义由 addon 内
+// URL 构造保证；CSP 已放行同源脚本，链接动作是浏览器导航非脚本注入面）
+try { term.loadAddon(new WebLinksAddon.WebLinksAddon()); } catch (e) { /* 老浏览器缺 URL 构造：降级无链接 */ }
+// ImageAddon 条件件（必改8，评审裁定保）：SC.unfiltered 才挂载——Sixel/IIP/
+// Kitty 图片像素不在 mask.Masker 模式表内，遮蔽开（缺省）时挂载 = 绕过文本
+// 遮蔽的真实语义漏洞，故遮蔽开=禁用（诚实边界：遮蔽本来只作用文本流）
+if (SC.unfiltered) { try { term.loadAddon(new ImageAddon.ImageAddon()); } catch (e) {} }
+// WebGL 渲染（必改7）：大流量输出性能显著优于 DOM renderer。navigator.webdriver
+// 跳过惯例沿用主应用 useTerminalAddons（自动化环境 loadAddon 不抛错但 canvas
+// 实际不渲染——保 Playwright DOM 渲染断言面，share-terminal-live spec 依赖）；
+// 上下文丢失（活跃 WebGL 上下文 ~16 个上限被驱逐）= dispose 降级 DOM renderer
+//（官方支持路径，功能完好大流量性能略降）。访客页无 toast 体系、状态条由协议
+// 驱动——降级是透明损耗不播报（单终端单上下文，驱逐风险远低于主人端多 pane）
+if (navigator.webdriver !== true) {
+  try {
+    const webgl = new WebglAddon.WebglAddon();
+    webgl.onContextLoss(() => { try { webgl.dispose(); } catch (e) {} });
+    term.loadAddon(webgl);
+  } catch (e) { /* 软件 WebGL/老设备：DOM renderer 保底 */ }
+}
 // 只读保险丝：即便 disableStdin 被未来升级松动，页面也不存在任何
 // 把输入发回服务端的代码路径（无 POST/WS 写通道可挂）
 term.onData(() => {});
@@ -420,13 +538,14 @@ function doFit(){ try { fit.fit(); } catch (e) { /* 容器未布局完成时忽�
 // 主机栅格（P-20261107-4 渲染保真）：hello/resize 帧给出主机 cols×rows 时按其
 // 精确渲染——不让 fit 按访客容器改写列数（栅格与主机不符即 TUI 折行/光标定位
 // 错乱），字号收缩装进容器、主机栅格窄于容器时宽度优先放大（P-20261119-2，
-// 上限 3×产品字号；放大致纵向超容器走 overset 钉底跟随）；主机尺寸未知（会话
+// 上限 3×产品字号；放大致纵向超容器走 overset 外层滚动面 + follow 跟随）；主机尺寸未知（会话
 // 从未 resize 过）回落容器 fit。重排由终端容器尺寸驱动（横幅/可写条/页底浮层
 // 引起的容器变化都会重排，不再底部裁切）
 let hostCols = 0, hostRows = 0;
-// 视口反喂回声钩子（P-20261120-8）：SSE resize 帧到达时通知可写页驱动对账——
-// 匹配自源上报值即回声清账，不匹配即主人侧动作（进抑制窗不回踩）。只读页
-// 无驱动，函数保持 null 零开销；writablepage 在 hello 后覆写本钩子
+// 视口反喂回声钩子（P-20261120-8，P-20261122-16 起带棘轮语义）：SSE resize 帧
+// 到达时通知可写页驱动对账——匹配在途请求值即自源回声清账，不匹配即主人侧
+// 动作（进抑制窗 + 「画布以主机为准」棘轮，访客自己改窗口才解除）。只读页
+// 无驱动，函数保持 null 零开销；writablepage 在挂载时覆写本钩子
 let wrHostResize = null;
 // 视口反喂几何钩子（P-20261120-8）：容器几何变化（窗口拖拽/横幅折行/页底浮
 // 层）经既有 layout 重排点同步 kick 驱动重算目标——复用 scObserve 的观测链，
@@ -453,17 +572,18 @@ function setHost(cols, rows){
   // 栅格立即换尺寸（随后到达的字节按主机栅格落屏）
   scTermNeed(hostCols, term.options.fontSize);
   if (term.cols !== hostCols || term.rows !== hostRows) term.resize(hostCols, hostRows);
-  // 栅格重排改变 rows·cell.h（P-20261119-2）：尾部同钉——先按旧几何立起钉底态
-  // （rAF 间隙到达的写回调按钉底态贴底），rAF 重排里 scFitGrid 强制回钉兜新几何
-  scPinBottom($('termBox'), true, scCursorRowY(term));
+  // 滚动位不在此处写（P-20261123-2）：栅格重排的默认位由 scFitGrid 的几何真变
+  // 检测驱动 scEnsureCursorVisible(force)——同一几何的 1s 对账帧不拽回用户上滚
+  // 阅读位置；follow=false 时任何重排都不写
   relayout();
 }
 // 产品同款字体就绪再 open（xterm 在 open 时测字宽）；字体晚到则重测重排。
-// open 后挂滚轮路由（scWheelRoute，P-20261118-9）：overset 态放行滚轮给
-// term-box，fits 态 xterm 照常 scrollback 导航——双滚动条收敛的 JS 半边
+// open 后装滚动面（P-20261123-2）：scWheelCapture 捕获相接管 overset 滚轮
+// （单面化），scTermDiag 在 ?term=diag 时开诊断环形缓冲
 scFontsReady(() => {
   term.open($('termBox'));
-  scWheelRoute(term, $('termBox'));
+  scWheelCapture($('termBox'), term);
+  scTermDiag(term, $('termBox'));
   layout();
 }, () => { scRemeasure(term); relayout(); });
 
@@ -475,6 +595,9 @@ function setBadge(state, text){
 }
 function showState(title, desc){
   $('termBox').style.display = 'none';
+  // 可写位观看侧 UI（P-20261122-1：动作排/搜索条，writablepage 挂载）随直播
+  // 结束收起——终端区已被结束态卡片替换，复制/搜索无对象；元素缺席即空转
+  document.querySelectorAll('.wr-actions,.wr-search,.pu-tip').forEach(function(el){ el.style.display = 'none'; });
   const box = $('stateBox');
   box.style.display = '';
   box.replaceChildren();
@@ -520,6 +643,11 @@ es.addEventListener('hello', (ev) => {
   setPageName(m.name);
   setHost(m.cols, m.rows);
   relayout();
+  // hello 后的首帧定位（P-20261123-2）：首载与 EventSource 重连都经 hello 重播种，
+  // 此处 force 把光标行作默认滚动位（重连同几何时 setHost 无几何真变、不触发
+  // scFitGrid 的 force，靠这一处兜）；follow=false 时不写（scEnsureCursorVisible
+  // 内部守卫）
+  scEnsureCursorVisible($('termBox'), term, true);
 });
 // 会话重命名（P-20261118-9）：与 resize 帧同一 1s 对账 tick（syncName），
 // 分享侧改名即达访客——页面加载早于改名的存量连接同享；EventSource 未知
@@ -539,10 +667,12 @@ es.addEventListener('resize', (ev) => {
   term.write('', () => setHost(m.cols, m.rows));
   if (wrHostResize) wrHostResize(m.cols, m.rows);
 });
-// data/tail 写回调钉底（P-20261119-2）：overset 态钉到最新输出行（光标行）使
-// 提示符可见、用户上滚即解钉不拽回（条件钉底语义见 termlayout scPinBottom 头注）
-es.addEventListener('tail', (ev) => { term.write(b64bytes(ev.data), () => scPinBottom($('termBox'), false, scCursorRowY(term))); });
-es.addEventListener('data', (ev) => { term.write(b64bytes(ev.data), () => scPinBottom($('termBox'), false, scCursorRowY(term))); });
+// data/tail 写回调跟随（P-20261123-2，取代 P-20261119-2 每写钉底）：写入不改外层
+// 几何（scrollHeight 由 scFitGrid 定死），只需 follow 态下让光标行留在窗内——
+// scEnsureCursorVisible 最小滚动、rAF 合并（服务端 8ms 合帧写入即每帧一次量测），
+// 用户上滚后 follow=false 绝不拽回
+es.addEventListener('tail', (ev) => { term.write(b64bytes(ev.data), () => scEnsureCursorVisible($('termBox'), term)); });
+es.addEventListener('data', (ev) => { term.write(b64bytes(ev.data), () => scEnsureCursorVisible($('termBox'), term)); });
 es.addEventListener('limit', () => {
   setBadge('ended', t('connecting'));
   showState(t('guestLimit'), '');
@@ -555,8 +685,10 @@ es.onerror = () => {
   setBadge('connecting', t('reconnecting'));
 };
 es.onopen = () => {
-  // 重连成功（首轮 open 也走这里，hello 尚未到、仅清屏无害）
-  if (!ended) term.reset();
+  // 重连成功（首轮 open 也走这里，hello 尚未到、仅清屏无害）。follow 复位
+  // （P-20261123-2）：重播种后的内容从新屏开始，之前的阅读位置已无意义——等
+  // 随后的 hello 经 scEnsureCursorVisible(force) 定位到光标行
+  if (!ended) { term.reset(); scFollowReset($('termBox')); }
 };
 
 // 合并入口条（P-20261119-3）：协作/留言两条独立入口条并单条双入口的条壳
@@ -616,5 +748,6 @@ func renderTermPage(w io.Writer, token, lang, title, wm string, collab, guestInp
 		EntryJS:     template.JS(entryBarJS),
 		ThemeCSS:    template.CSS(GuestThemeCSS),
 		ThemeJS:     template.JS(guestThemeJS),
+		DragJS:      template.JS(guestDragGuardJS),
 	})
 }

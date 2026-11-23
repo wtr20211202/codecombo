@@ -353,6 +353,11 @@ func (d *CodecomboDeployer) Deploy(ctx context.Context, p DeployParams) error {
 		_, _ = p.SSH.Exec(ctx, execOpts(
 			`launchctl unload ` + legacyPlist + ` 2>/dev/null; rm -f ` + legacyPlist), nil)
 		plist := plistDir + "/com.codecombo.plist"
+		// P-20261122-7：AbandonProcessGroup=true 是纵深防御——launchd 在 job
+		// 主进程死亡时 best-effort 清理同进程组的剩余进程（默认口径），换包子
+		// 进程会被连带杀掉、活不到写 update.log；本键让 launchd 放手。远程部署
+		// 是 mac 实例唯一的自救通道（重跑装脚本被禁用），故本写入点不可省；
+		// 代码侧另有 Setpgid 脱组（server/update newUpdateCmd），两处同意图
 		if _, err := p.SSH.Exec(ctx, execOpts(fmt.Sprintf(
 			`mkdir -p %s && cat > %s << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -364,6 +369,7 @@ func (d *CodecomboDeployer) Deploy(ctx context.Context, p DeployParams) error {
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>AbandonProcessGroup</key><true/>
 </dict></plist>
 PLIST`, plistDir, plist, binPath, port, bindHost)), nil); err != nil {
 			log.LogKV("installService", LevelFail, "deploy.log.codecombo.uploadUnitFailed",

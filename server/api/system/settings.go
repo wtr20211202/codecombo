@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -47,6 +48,29 @@ func SetBuildInfo(v, c, t string) {
 // 匿名返回值：命名结果 buildTime 会遮蔽同名包级变量，返回恒空串
 func BuildInfo() (string, string, string) {
 	return buildVersion, buildCommit, buildTime
+}
+
+// 生效日志级别（P-20261122-9 必改C）：app.Run 日志装配后注入一次（SetBuildInfo
+// 同款包级注入惯例，读写用锁防启动期注入与请求读并发）。空串=未注入
+// （单测/极早期路径），消费方按缺席处理。只读面=selfcheck 版本条目——排障
+// 第一问「现在是什么级别」，级别靠 CC_LOG_LEVEL 控制（零设置页字段）
+var (
+	logLevelMu        sync.RWMutex
+	effectiveLogLevel string
+)
+
+// SetEffectiveLogLevel 注入生效日志级别（debug|info|warn|error）
+func SetEffectiveLogLevel(level string) {
+	logLevelMu.Lock()
+	effectiveLogLevel = level
+	logLevelMu.Unlock()
+}
+
+// EffectiveLogLevel 读取生效日志级别（未注入返回空串）
+func EffectiveLogLevel() string {
+	logLevelMu.RLock()
+	defer logLevelMu.RUnlock()
+	return effectiveLogLevel
 }
 
 // GetSettings 获取设置

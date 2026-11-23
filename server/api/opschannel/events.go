@@ -196,6 +196,16 @@ const (
 	// 即时修复面）；agent 监听同一事件可感知「有访客在敲门」
 	EventShareDirectRequest = "share.direct-request"
 
+	// EventSharePasteUpload 可写分享访客粘贴上传落盘（P-20261122-1）：访客经
+	// 可写分享的粘贴上传端点（POST /s/{token}/paste-upload）落盘成功即广播
+	// 一次，载荷 {token,shareName,terminalId?,name,size,mode,nick?,visitorTail?,
+	// at}（仅元数据——文件内容与落盘绝对路径不上广播面，路径访客侧自持且将
+	// 经其键入通道进入终端回显）。前端直通分发 sc-ops:share.paste-upload →
+	// toast 即时感知（owner 侧「访客上传了什么」的最小可见性面；与键入徽标
+	// /粘贴审批卡同族的即时层）；agent 监听同一事件可感知「主机临时目录多了
+	// 访客提供的文件」（配合读终端回显里的路径消费）
+	EventSharePasteUpload = "share.paste-upload"
+
 	// EventRemoteAccessStatus 远程接入（SSH 反向隧道）状态迁移（P-20261019-11）：
 	// 启动/停止/首次失败/断线重连/重连成功/重连失败每次迁移广播一次，载荷为
 	// ReverseStatus 快照 + at——前端设置·远程接入分区即时刷新状态与最近错误，

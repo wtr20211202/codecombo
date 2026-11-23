@@ -4,7 +4,7 @@
 // 同级导航（P-20261002-128）：非末段（目录段）可点击，弹出该目录单层子项
 // （VS Code 式两次点击切深层同级），选目录→文件树定位展开、选文件→打开
 import { computed, inject, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { NIcon } from 'naive-ui'
+import { NIcon, useMessage } from 'naive-ui'
 import { ChevronDownOutline, ChevronForwardOutline, CopyOutline, FolderOpenOutline, DocumentTextOutline, TerminalOutline } from '@vicons/ionicons5'
 import { useI18n } from '../../composables/useI18n'
 import { copyText } from '../../utils/clipboard'
@@ -34,6 +34,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const message = useMessage()
 
 interface Crumb { name: string; path: string; isLast: boolean; isCompare?: boolean; isRemote?: boolean }
 
@@ -167,7 +168,13 @@ function onCrumbContextMenu(e: MouseEvent, seg: Crumb) {
 }
 
 function copyFull() {
-  if (effectivePath.value) void copyText(effectivePath.value)
+  // copyText 返回真实结果（execCommand 降级路径同样可能失败）：静默吞掉会让
+  // 「右键 → 复制路径」看起来成功而剪贴板为空——失败必须回告
+  if (effectivePath.value) {
+    void copyText(effectivePath.value).then(ok => {
+      if (!ok) message.error(t('common.copyFailed'))
+    })
+  }
   closeMenu()
 }
 
@@ -176,7 +183,9 @@ function copyRelative() {
   const segs = segments.value.filter(s => !s.isCompare)
   if (segs.length === 0) return
   const start = Math.max(0, segs.length - 3)
-  void copyText(segs.slice(start).map(s => s.name).join('/'))
+  void copyText(segs.slice(start).map(s => s.name).join('/')).then(ok => {
+    if (!ok) message.error(t('common.copyFailed'))
+  })
   closeMenu()
 }
 

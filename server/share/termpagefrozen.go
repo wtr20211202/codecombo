@@ -115,6 +115,9 @@ type termFrozenPageData struct {
 	// 事实源——CSS 进 <style>，JS 在 head 先行 initTheme 防闪白）
 	ThemeCSS template.CSS
 	ThemeJS  template.JS
+	// DragJS 访客页族拖拽导航守卫注入件（P-20261122-20，dragguard.go 单一
+	// 事实源——document 级 dragover/drop 仅拦含 Files 载荷的缺省导航）
+	DragJS template.JS
 	// Unfiltered 未过滤标记（P-20261106-9）：横幅位服务端直出 .unfiltered 类
 	Unfiltered bool
 }
@@ -227,8 +230,13 @@ const SC = {{.Boot}};
 // 终端访客页共用布局件（P-20261106-9 / P-20261107-4，termlayout.go 单一事实源：
 // 渲染常量 SC_TERM_*、scTermOptions、scTermNeed/scTextCols 等）
 {{.LayoutJS}}
+// 访客页族拖拽导航守卫（P-20261122-20，dragguard.go 单一事实源）
+{{.DragJS}}
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
+// 拖拽导航守卫注册（P-20261122-20）：定格页无协作位恒注册——拖入本地文件的
+// 缺省动作是导航到 file://，整页被替换、快照视图丢失；提示用守卫自带文案
+scDragGuard();
 // 标签页标题 = 分享名（P-20261118-9 去品牌前缀；<title> 已是分享名，此处校准）
 document.title = SC.name || document.title;
 $('badgeText').textContent = t('loadingTip');
@@ -348,6 +356,7 @@ func renderTermFrozenPage(w io.Writer, token, lang, title, wm string, collab, un
 		LayoutJS:   template.JS(termLayoutJS),
 		ThemeCSS:   template.CSS(GuestThemeCSS),
 		ThemeJS:    template.JS(guestThemeJS),
+		DragJS:     template.JS(guestDragGuardJS),
 		Unfiltered: unfiltered,
 	})
 }

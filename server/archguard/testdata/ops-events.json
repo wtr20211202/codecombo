@@ -235,6 +235,21 @@
     ],
     "source": "server"
   },
+  "share.paste-upload": {
+    "source": "server",
+    "payload": [
+      "at",
+      "mode",
+      "name",
+      "nick",
+      "shareName",
+      "size",
+      "terminalId",
+      "token",
+      "visitorTail"
+    ],
+    "anchor": "share.paste-upload"
+  },
   "share.drop": {
     "anchor": "share.drop",
     "payload": [

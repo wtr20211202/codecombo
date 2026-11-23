@@ -201,11 +201,15 @@ func (r *agentTokenRepo) Rotate() (string, error) {
 		return "", err
 	}
 	if old != nil {
-		// 保留最初创建时间，仅刷新轮换时间
+		// 保留最初创建时间，仅刷新轮换时间。令牌本体已由 generateLocked 写盘，
+		// 本步只回写 CreatedAt（失败时盘上 CreatedAt=轮换时刻，属元信息偏差非
+		// 令牌失效）——P-20261122-12 审计：原丢弃使该偏差永远不可诊断，补 Warn
 		t := r.load()
 		t.CreatedAt = old.CreatedAt
 		data, _ := json.Marshal(t)
-		_ = r.doc.Update("agenttokens", "active", data)
+		if err := r.doc.Update("agenttokens", "active", data); err != nil {
+			slog.Warn("agent token created-at restore failed", "err", err)
+		}
 	}
 	return plain, nil
 }

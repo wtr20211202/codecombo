@@ -349,7 +349,7 @@ if ($isAdmin) {
   Write-Host "     $Bin start$fgArgs"
   Write-Host '  (re-run in an elevated PowerShell to register the Windows service)'
 }
-Write-Host "==> Open http://localhost:$Port (set your lock password on first start)"
+Write-Host "==> Open https://localhost:$Port (set your lock password on first start; TLS is on by default with a self-signed certificate generated on first start - your browser will ask you to trust/continue on the first visit; if certificate generation fails the service falls back to plain HTTP - see the service log)"
 Write-Host '==> Updates: in-app "check update" (GitHub releases, automatic rollback)'
 # Integrity sentinel, same string as install.sh (kept in sync by the
 # check-install-ps.sh gate). The entry self-check reads the file tail back to

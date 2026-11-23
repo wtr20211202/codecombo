@@ -31,6 +31,7 @@ import {
   TERMINAL_PENDING_WRITE_LIMIT,
   createWriteStormTracker,
 } from './terminalWriteBackpressure'
+import { maybeToastTerminalReject } from './terminalRejectFrames'
 
 // OSC 133 帧处理纯函数、addon 装配与快捷键接线已按区块拆出
 // （P-20261002-27 巨型组件拆分第二批：terminalOscFrames / useTerminalAddons /
@@ -67,8 +68,14 @@ const sharedEncoder = new TextEncoder()
 // TextMessage 整类是服务端控制帧（JSON）；本码是 {type:"input_rejected"} 帧的
 // code 字段稳定契约（服务端 api/terminal wsInputRejectFrame 同名对账，定向
 // e2e 断言钉死）。接管会话（origin=external）默认只读的服务端闸拒绝绕过前端
-// 锁的程序化写入——前端 pane 锁定时不发输入，正常使用不会见到本帧
-export const TERMINAL_WS_REJECT_READONLY_EXTERNAL = 'readonly_external'
+// 锁的程序化写入——前端 pane 锁定时不发输入，正常使用不会见到本帧。
+// P-20261122-17 起另一码 input_held_by_share（分享持权让位 owner 键盘）——
+// code→文案映射收口在 terminalRejectFrames.ts，本文件 re-export 保持导入面
+export {
+  TERMINAL_WS_REJECT_READONLY_EXTERNAL,
+  TERMINAL_WS_REJECT_INPUT_HELD_BY_SHARE,
+  terminalRejectToastKey,
+} from './terminalRejectFrames'
 
 /** 终端 WS 文本控制帧解析：TextMessage = 控制帧（JSON），非 JSON 文本按旧
  * 字节链路处理（前向兼容，不消费）。返回 null = 非控制帧 */
@@ -79,26 +86,11 @@ function parseTerminalControlFrame(data: unknown): { type: string; code?: string
     if (parsed && typeof parsed.type === 'string') {
       return { type: parsed.type, code: typeof parsed.code === 'string' ? parsed.code : undefined }
     }
-  } catch { /* 非 JSON 文本帧：不当控制帧 */ }
+  } catch { /* silent-by-design: 非 JSON 文本帧是协议噪声，不当控制帧（服务端文本帧解析面） */ }
   return null
 }
 
-// 只读闸拒绝 toast 去重（按会话 4s 一条——服务端已 1s 防抖，多 pane 同会话
-// 与 agent 灌输入场景再压一档，不刷屏）。message/t 由调用方传入：useMessage/
-// useI18n 必须在组件 setup 上下文调用，WS onmessage 回调里注入会失败
-const lastReadonlyRejectToastAt = new Map<string, number>()
-function maybeToastReadonlyReject(
-  sessionId: string,
-  message: ReturnType<typeof useMessage>,
-  t: (key: string) => string,
-): void {
-  const now = Date.now()
-  if (now - (lastReadonlyRejectToastAt.get(sessionId) ?? 0) < 4000) return
-  lastReadonlyRejectToastAt.set(sessionId, now)
-  // 何时展示：接管会话服务端只读闸拒绝了本连接的输入帧（agent 直调写链被拒
-  // 时人正好盯着的 pane），提示解锁路径
-  message.warning(t('terminal.inputLock.rejectedServer'))
-}
+// 只读/持权拒绝 toast（去重与文案分义在 terminalRejectFrames.ts）
 
 // 已收到过服务端输出的会话集合：writeTermDataDirect 是全部 WS 字节的唯一汇入点，
 // 在此记账。供「纯 SFTP 主机无 shell → 终端长时间无输出」的延迟提示判定
@@ -698,7 +690,7 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
       // 路径（重挂 connect 自会建新连接拿全量重放）
       try {
         ws.close()
-      } catch { /* ignore */ }
+      } catch { /* silent-by-design: 半开 socket 拆除，close 抛错无处置价值（纯拆除类） */ }
       headless = false
     } else {
       headless = true
@@ -959,7 +951,7 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
         try {
           stale.close()
         } catch {
-          /* 已断开时 close 抛错可忽略 */
+          /* silent-by-design: 已断开时 close 抛错可忽略（纯拆除类） */
         }
       }
     }
@@ -1051,7 +1043,7 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
       try {
         instance.ws.close()
       } catch {
-        /* 已断开时 close 抛错可忽略 */
+        /* silent-by-design: 已断开时 close 抛错可忽略（纯拆除类） */
       }
     }
     if (instance?.reconnectTimer) {
@@ -1203,12 +1195,13 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
     }
     wsConn.onmessage = (event) => {
       // 服务端控制帧（TextMessage 整类，P-20261008-17）：PTY 输出恒为
-      // BinaryMessage，文本帧不落 xterm——只读闸拒绝帧展示 toast（agent 直调
-      // 写链被拒时人盯着的 pane 有感知），未知控制类型静默消费
+      // BinaryMessage，文本帧不落 xterm——input_rejected 拒绝帧按稳定 code
+      // 分义 toast（readonly_external=解锁可输入 / input_held_by_share=分享
+      // 持权，P-20261122-17），未知控制类型静默消费
       const ctrl = parseTerminalControlFrame(event.data)
       if (ctrl) {
-        if (ctrl.type === 'input_rejected' && ctrl.code === TERMINAL_WS_REJECT_READONLY_EXTERNAL) {
-          maybeToastReadonlyReject(sessionId, message, t)
+        if (ctrl.type === 'input_rejected') {
+          maybeToastTerminalReject(sessionId, message, t, ctrl.code)
         }
         return
       }
@@ -1332,7 +1325,7 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
       try {
         inst.ws.close()
       } catch {
-        /* ignore */
+        /* silent-by-design: 重连前拆除旧 socket，抛错无处置价值（纯拆除类） */
       }
     }
     inst.reconnectAttempts = 0
@@ -1391,7 +1384,7 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
       try {
         evictedWs.close()
       } catch {
-        /* 已断开时 close 抛错可忽略 */
+        /* silent-by-design: 已断开时 close 抛错可忽略（纯拆除类） */
       }
       evictedWs = null
     }

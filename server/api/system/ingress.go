@@ -35,23 +35,22 @@ func activeShareCount(shares []store.Share, now time.Time) int {
 	return active
 }
 
-// IngressOverview GET /api/system/ingress-overview —— 入口面总览（纯只读聚合）。
-// 管理面鉴权：挂在全局 api 组（LockMiddleware + TokenAuthMiddleware）之下
-func IngressOverview(c *gin.Context) {
+// IngressProjection 入口面只读投影（IngressOverview 与诊断包共用同一份聚合，
+// 零新增暴露面：诊断包不允许另造一条读路径——两处形态漂移会让「总览卡看到的」
+// 与「诊断包里写的」互相打脸）
+func IngressProjection() (gin.H, error) {
 	shares, err := store.Get().Share.List()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "internal", "msg": err.Error()})
-		return
+		return nil, err
 	}
 	hosts, err := store.Get().RemoteHost.List()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "internal", "msg": err.Error()})
-		return
+		return nil, err
 	}
 
 	lockCfg := store.Get().Lock.GetConfig()
 	failIPs, failTotal, failBlocked := middleware.LockUnlockFailureSnapshot()
-	c.JSON(http.StatusOK, gin.H{
+	return gin.H{
 		"lock": gin.H{
 			"enabled":    lockCfg.Enabled,
 			"needsSetup": !store.Get().Lock.HasConfig(),
@@ -70,5 +69,16 @@ func IngressOverview(c *gin.Context) {
 		"remoteHosts": gin.H{
 			"count": len(hosts), // 只出数量：主机清单走远程分区列表接口（响应剥敏感字段）
 		},
-	})
+	}, nil
+}
+
+// IngressOverview GET /api/system/ingress-overview —— 入口面总览（纯只读聚合）。
+// 管理面鉴权：挂在全局 api 组（LockMiddleware + TokenAuthMiddleware）之下
+func IngressOverview(c *gin.Context) {
+	projection, err := IngressProjection()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"err": "internal", "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, projection)
 }

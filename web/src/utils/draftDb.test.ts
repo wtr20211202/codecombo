@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import {
   saveDraft, readDraft, removeDraft, removeProjectDrafts, DRAFT_MAX_CHARS,
   saveUntitledDraft, listUntitledDrafts, removeUntitledDraft,
-  listFileDrafts, removeDrafts, type DraftRecord,
+  listFileDrafts, removeDrafts, isDraftDbDisabled, type DraftRecord,
 } from '@/utils/draftDb'
 
 /**
@@ -44,6 +44,11 @@ describe('draftDb（无 indexedDB 环境静默降级）', () => {
     await expect(listFileDrafts('p1')).resolves.toEqual([])
     await expect(removeDrafts('p1', ['/a.ts', '/b.ts'])).resolves.toBeUndefined()
     await expect(removeDrafts('p1', [])).resolves.toBeUndefined()
+  })
+
+  it('环境不可用经 isDraftDbDisabled() 暴露（P-20261122-13：写路径据此一次性回告）', async () => {
+    // 上面的用例已触发 openDb 失败 → disabled 锁置位
+    expect(isDraftDbDisabled()).toBe(true)
   })
 })
 
@@ -219,6 +224,8 @@ describe('draftDb（内存 IDB 桩：读写链路）', () => {
     breakTransactions = true
     await expect(db.saveDraft('p1', '/x.ts', rec('x'))).resolves.toBe(false)
     await expect(db.readDraft('p1', '/x.ts')).resolves.toBeNull()
+    // 事务级偶发失败属瞬时故障，不置 disabled——写路径不据此提示用户
+    expect(db.isDraftDbDisabled()).toBe(false)
   })
 
   // ── 跨标签信标（P-20261006-08）：写路径成功分支广播、失败/拒写静默 ──

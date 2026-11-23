@@ -17,7 +17,7 @@ import (
 //   - file 形态（paste 事件 Files）：白名单扩展名落盘 sc-paste-*.<ext>、内容一致
 //   - image 形态（截图 blob）既有语义回归：Content-Type 白名单 → .png，旧前端兼容
 //   - 白名单外扩展名 / 双字段全缺 400；validatePasteFile 大小上限（纯函数，免造 20MB 体）
-//   - createUniquePasteFile 同名碰撞 -1 后缀步进 + O_EXCL 不覆盖既有文件
+//   - 独占创建语义（O_EXCL 碰撞步进）随实现下沉 server/pastetmp，见 pastetmp_test.go
 
 func setupPasteUpload(t *testing.T) *gin.Engine {
 	t.Helper()
@@ -140,24 +140,6 @@ func TestValidatePasteFile(t *testing.T) {
 	}
 }
 
-func TestCreateUniquePasteFileCollision(t *testing.T) {
-	dir := t.TempDir()
-	taken := filepath.Join(dir, "sc-paste-1700000000000.png")
-	if err := os.WriteFile(taken, []byte("occupied"), 0600); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	f, full, err := createUniquePasteFile(dir, "sc-paste-1700000000000.png")
-	if err != nil {
-		t.Fatalf("createUniquePasteFile: %v", err)
-	}
-	defer f.Close()
-	defer os.Remove(full)
-	if full != filepath.Join(dir, "sc-paste-1700000000000-1.png") {
-		t.Fatalf("collision should step to -1 suffix, got %s", full)
-	}
-	// O_EXCL：不覆盖既有文件（occupied 内容原样）
-	got, err := os.ReadFile(taken)
-	if err != nil || string(got) != "occupied" {
-		t.Fatalf("existing file must not be overwritten: %v %q", err, got)
-	}
-}
+// 独占创建（O_EXCL 碰撞步进）语义随实现下沉 server/pastetmp（P-20261122-1
+// 访客粘贴上传链共用同一事实源），行为面由 server/pastetmp/pastetmp_test.go
+// 就地覆盖；本包保留上传端点的落盘形态断言（前缀/扩展名/内容一致）

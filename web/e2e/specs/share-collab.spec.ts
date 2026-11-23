@@ -335,4 +335,82 @@ test.describe('share-collab', () => {
     await expect(page.getByTestId('cl-panel')).toBeVisible()
     await expect(page.getByTestId('cl-text')).toHaveValue('pasted-into-material-box')
   })
+
+  // 并开 paste 仲裁（P-20261122-1 必改3）：SC.collab 与 SC.writable 可并开，
+  // canType 时文件粘贴归终端落盘链（writablepage 捕获相监听 preventDefault+
+  // stopPropagation 抢先，collab 冒泡监听收不到）——协作收件箱零误收、路径
+  // 入 PTY。无键入资格方向（collab 开、writable 关）的既有语义由上方
+  // 「素材富输入」用例持续守护（HTML 内联图片粘贴进收件区），两方向合起来
+  // 钉死仲裁不翻车
+  test('并开 paste 仲裁：canType 时文件粘贴归终端落盘链，协作收件箱零误收', async ({ page, request }) => {
+    test.setTimeout(150_000)
+    const headers = await unlockHeaders(request)
+    const visitor = await getShareBase(request, headers)
+    const live = await createTerminalShare(request, headers, 'shell', 'arbit')
+    createdSessions.push(live.sessionId)
+    expect((await setCollab(request, headers, live.token, true)).ok()).toBeTruthy()
+    // 可写开启（强制口令门）——open 模式 hello 即 canType
+    const WRITABLE_PASS = 'collab-arbit-pass'
+    expect((await request.post(`${BASE}/api/share/${live.token}/passphrase`, {
+      headers, data: { passphrase: WRITABLE_PASS },
+    })).ok()).toBeTruthy()
+    expect((await request.post(`${BASE}/api/share/${live.token}/writable`, {
+      headers, data: { on: true, confirm: true, passphrase: WRITABLE_PASS },
+    })).ok()).toBeTruthy()
+
+    await page.goto(`${visitor}/s/${live.token}`)
+    await page.locator('input[name="passphrase"]').fill(WRITABLE_PASS)
+    await page.locator('.field button').click()
+    await page.waitForURL(`${visitor}/s/${live.token}`)
+    // 键入资格在场（wr-strip on 形态）= 仲裁取「终端链」的前提
+    await expect(page.getByTestId('wr-strip')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('wr-text')).toContainText(/可写模式|Writable mode/)
+
+    // 文件粘贴：捕获相抢先归终端落盘链（若仲裁失效走 collab 链，收件区会
+    // 多出素材而终端收不到路径——双向断言钉死）
+    await page.locator('.xterm-screen').click()
+    await page.evaluate(() => {
+      const dt = new DataTransfer()
+      dt.items.add(new File([new TextEncoder().encode('collab arbit body')], 'arbit-paste.txt', { type: 'text/plain' }))
+      const ta = document.querySelector('.xterm-helper-textarea')
+      ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    })
+    // 路径入 PTY：落盘名恒为 sc-paste-<unixms>.<ext>（主人端同款命名——原始名
+    // 不进路径，按前缀+扩展名断言；本文件归属另经审计 share.pasteUpload 的
+    // Detail 携净化原始名证明，避免「任何粘贴都能过」的弱断言）
+    const sbDeadline = Date.now() + 15_000
+    let sbText = ''
+    while (Date.now().valueOf() < sbDeadline) {
+      const res = await request.get(`${BASE}/api/terminals/${live.sessionId}/scrollback`, { headers })
+      if (res.ok()) {
+        sbText = await res.text()
+        if (sbText.includes('sc-paste-') && sbText.includes('.txt')) break
+      }
+      await new Promise(r => setTimeout(r, 300))
+    }
+    expect(sbText, 'arbitrated file paste must land in the terminal chain').toContain('sc-paste-')
+    expect(sbText).toContain('.txt')
+    // 归属证据：原始名只在审计 Detail（与收件箱清单）出现——审计 share.pasteUpload
+    // 携 arbit-paste.txt 即证明进终端链的就是本文件（3s 攒批，轮询窗口给足）
+    let audited = ''
+    for (let i = 0; i < 20; i++) {
+      const res = await request.get(`${BASE}/api/audit?limit=500`, { headers })
+      const events = ((await res.json()) as { data?: Array<{ action: string; detail?: string }> }).data || []
+      audited = events.filter(e => e.action === 'share.pasteUpload')
+        .map(e => e.detail || '').filter(d => d.includes(live.token)).join('\n')
+      if (audited.includes('arbit-paste')) break
+      await new Promise(r => setTimeout(r, 400))
+    }
+    expect(audited, 'audit should record the uploaded file by original name').toContain('arbit-paste.txt')
+    // 协作收件箱零误收（上传有 3s 攒批窗口 + 落盘时差——轮询窗口给足）
+    let inboxLeak = ''
+    for (let i = 0; i < 15; i++) {
+      const res = await request.get(`${BASE}/api/share/${live.token}/drops`, { headers })
+      const list = ((await res.json()) as { data?: Array<{ name: string }> }).data || []
+      inboxLeak = list.map(d => d.name).join(',')
+      if (inboxLeak.includes('arbit-paste')) break
+      await new Promise(r => setTimeout(r, 400))
+    }
+    expect(inboxLeak, 'arbitrated file paste must NOT reach the collab inbox').not.toContain('arbit-paste')
+  })
 })

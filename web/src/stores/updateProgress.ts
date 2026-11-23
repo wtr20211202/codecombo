@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { updateApi, type UpdateStatusPayload } from '../api/client'
 import { openVersionPanel } from '../utils/openSettings'
+import { isNewerVersion } from '../utils/version'
 import { useLockStore } from './lock'
 
 /**
@@ -34,6 +35,11 @@ export interface UpdateOutcome {
   error: string
   /** 结果文件落盘时刻（RFC3339，服务端时钟）；内存态失败为空 */
   at: string
+  /** 收口时刻最后一轮轮询是否拿到快照（P-20261122-5，unknown 结局消费）：
+   *  「服务可达但版本<目标=更新未完成仍为旧版本」判定的可达性依据——超时收口
+   *  可能发生在失联（此刻快照只是退出前旧进程的，不得据其断言现势）；非 unknown
+   *  结局不消费本字段 */
+  serverSeen?: boolean
 }
 
 /** update.phase.* 已登记的全态（服务端 9 态 + 前端推断 reconnecting/unknown） */
@@ -84,6 +90,11 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
   // 进入收尾阶段的时刻（0 = 未在收尾）
   let finishingSince = 0
   let initialized = false
+  // 最后一次轮询是否拿到快照（P-20261122-5）：unknown 结局判定「服务可达」的
+  // 唯一依据——超时收口可能发生在失联（快照还是退出前旧进程的，buildVersion
+  // 恒旧，不能据此断言「仍为旧版本」）或重启后旧版本重拉（快照是新进程实况）
+  // 两种终局，记账区分
+  let lastPollSeen = false
 
   const inFlight = computed(() => tracking.value && !outcome.value)
 
@@ -131,6 +142,21 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
   /** 全局徽标在场：跟踪中或有未关闭的本会话终局 */
   const badgeVisible = computed(() => tracking.value || !!outcome.value)
 
+  /**
+   * unknown 结局「更新未完成，仍为旧版本」判定（P-20261122-5）：服务可达
+   * （收口时刻最后一轮轮询拿到快照，记进 outcome.serverSeen）且其 buildVersion
+   * 严格旧于目标版本。用户 mac 实测案的最终盘面即此形态——监管者重拉旧版本、
+   * 前端超时判 unknown，此前只给「结果未知」通用文案，用户不知升级已失败、
+   * 也不知下一步。isNewerVersion 对无法解析的版本（中心链目标 version="center" /
+   * dev 构建）恒 false——宁可回落通用文案不误报
+   */
+  const unknownStillOld = computed(() => {
+    const o = outcome.value
+    if (!o || o.phase !== 'unknown' || !o.serverSeen) return false
+    const current = snapshot.value?.buildVersion || ''
+    return !!current && isNewerVersion(o.version, current)
+  })
+
   function stopTimer() {
     if (timer) {
       clearTimeout(timer)
@@ -155,6 +181,7 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
     reconnecting.value = false
     outcome.value = null
     finishingSince = 0
+    lastPollSeen = false
     if (version) targetVersion.value = version
     schedule()
   }
@@ -165,7 +192,7 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
     tracking.value = false
     reconnecting.value = false
     finishingSince = 0
-    outcome.value = { phase: phaseName, version: version || targetVersion.value, error, at }
+    outcome.value = { phase: phaseName, version: version || targetVersion.value, error, at, serverSeen: lastPollSeen }
   }
 
   function markFinishing() {
@@ -198,6 +225,8 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
       locked = isLockedError(e)
     }
     if (gen !== generation) return
+    // 可达性记账（P-20261122-5）：本轮拿到快照与否，供 unknown 结局判定
+    lastPollSeen = !!s
     if (!s) {
       if (locked) {
         if (finishingSince) finishingSince = Date.now()
@@ -345,6 +374,7 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
     snapshot.value = null
     targetVersion.value = ''
     finishingSince = 0
+    lastPollSeen = false
     void sync()
   }
 
@@ -354,7 +384,7 @@ export const useUpdateProgressStore = defineStore('updateProgress', () => {
 
   return {
     snapshot, tracking, reconnecting, outcome, targetVersion,
-    inFlight, phase, percent, resumedBytes, lastOutcome, badgeVisible,
+    inFlight, phase, percent, resumedBytes, lastOutcome, badgeVisible, unknownStillOld,
     init, sync, start, retry, dismiss, acknowledge, resetForInstance, openPanel,
   }
 })

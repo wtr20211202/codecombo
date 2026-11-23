@@ -473,6 +473,147 @@ func TestTokenBucketRate(t *testing.T) {
 	}
 }
 
+// TestTokenBucketByteRate 字节桶语义（P-20261122-18 ⑤）：字节单位取令牌、
+// 不足不消耗（整帧丢弃语义的底座）、持续速率 + 突发上限同帧桶
+func TestTokenBucketByteRate(t *testing.T) {
+	now := time.Now()
+	b := newTokenBucket(wsUpConnByteRate, wsUpConnByteBurst, now)
+	if wsUpConnByteBurst != 2<<20 || wsUpConnByteRate != 1<<20 {
+		t.Fatalf("byte bucket params = %d/%d, want 1MiB/s + 2MiB burst", wsUpConnByteRate, wsUpConnByteBurst)
+	}
+	// 突发 2MiB：两帧各 1MiB 放行（逐帧调用有副作用——不用 || 连写，
+	// staticcheck SA4000 会把两次同参调用误报为重复表达式），第三帧拒绝
+	for i := 0; i < 2; i++ {
+		if !b.allowN(now, float64(1<<20)) {
+			t.Fatalf("burst frame %d (1MiB) must pass within 2MiB burst", i)
+		}
+	}
+	if b.allowN(now, float64(1<<20)) {
+		t.Fatal("third 1MiB frame must be rejected (burst = 2MiB)")
+	}
+	// 拒绝不消耗令牌：1s 后恰补 1MiB，一帧放行、下一帧拒绝
+	later := now.Add(time.Second)
+	if !b.allowN(later, float64(1<<20)) {
+		t.Fatal("1MiB refilled after 1s must pass")
+	}
+	if b.allowN(later, float64(1<<20)) {
+		t.Fatal("second frame right after refill must be rejected")
+	}
+	// 小帧（按键）在补充后放行——字节折算不误伤正常键入
+	if !b.allowN(later.Add(time.Second), 32) {
+		t.Fatal("small key frame must pass after refill")
+	}
+	// 不足额请求整份不消耗：60 通过后，60 拒绝、40 仍可放行
+	b2 := newTokenBucket(1, 100, now)
+	if !b2.allowN(now, 60) {
+		t.Fatal("60 of 100 must pass")
+	}
+	if b2.allowN(now, 60) {
+		t.Fatal("60 over remaining 40 must reject")
+	}
+	if !b2.allowN(now, 40) {
+		t.Fatal("rejected request must not consume tokens: 40 still available")
+	}
+}
+
+// TestWritableBigFrameNoBridgeBreak 大文本单帧不再断桥（P-20261122-18 ⑤）：
+// 旧 16KiB 读上限下 xterm.onData 的整块粘贴必被 gorilla 以 1009 关闭；1MiB
+// 上限下 40KiB 帧正常注入，且连接继续可用（不是「收下后断」）
+func TestWritableBigFrameNoBridgeBreak(t *testing.T) {
+	sink := &fakeWritableSink{}
+	token := fixedToken("wrbig")
+	srv, _, _ := writableTestEnv(t, token, true, sink)
+	c := wsDial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/s/"+token+"/termws?visitorId=vbig")
+	if f := c.nextFrame(t, 2*time.Second); f["type"] != "hello" {
+		t.Fatalf("first frame = %v, want hello", f)
+	}
+	// 40KiB 纯文本（无换行/危险模式）：一帧 — 旧上限 16KiB 下这里就是断桥
+	payload := strings.Repeat("a", 40<<10)
+	if err := c.conn.WriteMessage(websocket.BinaryMessage, []byte(payload)); err != nil {
+		t.Fatalf("send 40KiB frame: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if got := sink.wrote(); len(got) == 1 && strings.Contains(got[0], payload) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("40KiB frame not injected, wrote=%d", len(sink.wrote()))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// 连接仍活：后续按键帧照常注入（无 1009 断桥/无 input_throttled）
+	if err := c.conn.WriteMessage(websocket.BinaryMessage, []byte("x")); err != nil {
+		t.Fatalf("send after big frame: %v", err)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		if got := sink.wrote(); len(got) == 2 && strings.HasSuffix(got[1], "\x00x") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("connection unusable after big frame, wrote=%d", len(sink.wrote()))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestWritableFrameAboveReadLimitCloses 1MiB 读上限仍成立：超限帧由 gorilla
+// 以 1009 关闭（上限是防线不是目标——不做客户端分片，见 wsUpFrameMaxBytes 注）。
+// wsDial 的读 goroutine 是唯一读者（gorilla 单读约束），这里以「控制帧通道
+// 关闭」观察服务端读循环退出（对端收到 1009 后返回，通道随之关闭）
+func TestWritableFrameAboveReadLimitCloses(t *testing.T) {
+	sink := &fakeWritableSink{}
+	token := fixedToken("wrbigx")
+	srv, _, _ := writableTestEnv(t, token, true, sink)
+	c := wsDial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/s/"+token+"/termws?visitorId=vbigx")
+	if f := c.nextFrame(t, 2*time.Second); f["type"] != "hello" {
+		t.Fatalf("first frame = %v, want hello", f)
+	}
+	_ = c.conn.WriteMessage(websocket.BinaryMessage, []byte(strings.Repeat("a", (1<<20)+1)))
+	select {
+	case _, ok := <-c.frames:
+		if ok {
+			// 超限帧不应产生任何控制帧（输入在预检前就被读上限截断）
+			t.Fatal("over-limit frame must not yield control frames")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("over-limit frame must tear down the connection (1009)")
+	}
+	if got := sink.wrote(); len(got) != 0 {
+		t.Fatalf("over-limit frame must not reach the sink, wrote=%d", len(got))
+	}
+}
+
+// TestWritableByteBucketThrottles 字节桶与帧桶并行：2MiB 突发后第三帧
+// 1MiB 整帧丢弃 + input_throttled，连接保持（不做部分注入）
+func TestWritableByteBucketThrottles(t *testing.T) {
+	sink := &fakeWritableSink{}
+	token := fixedToken("wrbyte")
+	srv, _, _ := writableTestEnv(t, token, true, sink)
+	c := wsDial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/s/"+token+"/termws?visitorId=vbyte")
+	if f := c.nextFrame(t, 2*time.Second); f["type"] != "hello" {
+		t.Fatalf("first frame = %v, want hello", f)
+	}
+	frame := []byte(strings.Repeat("b", 1<<20))
+	for i := 0; i < 3; i++ {
+		if err := c.conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+			t.Fatalf("send frame %d: %v", i, err)
+		}
+	}
+	if f := c.nextFrame(t, 5*time.Second); f["type"] != "input_throttled" {
+		t.Fatalf("third frame reply = %v, want input_throttled", f)
+	}
+	// 仅前两帧注入：触限帧整帧丢弃（无部分注入），审计也只见两批
+	deadline := time.Now().Add(3 * time.Second)
+	for len(sink.wrote()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := sink.wrote(); len(got) != 2 {
+		t.Fatalf("injected batches = %d, want 2 (throttled frame must be dropped whole)", len(got))
+	}
+}
+
 func TestWritableWriterCap(t *testing.T) {
 	// 并发输入护栏：单 token 上行连接上限 MaxWritersPerToken（多人混打允许
 	// 在上限内、超出拒绝——修订点4定案的执行面）
@@ -500,15 +641,25 @@ func TestWritableWriterCap(t *testing.T) {
 // 钳制域（评审必改3）/conn 级节流 ≥1s/token 合并窗 last-write-wins（必改4）/
 // TmuxExternal 拒绝（必改4）/审计+事件双出账（必改5）/WritableDown 清合并窗。
 
-// fakeWritableResizer WritableResizer 测试替身（记录应用值；allowed 旗标模拟
-// 装配层 TmuxExternal 判定）
+// fakeWritableResizer WritableResizer 测试替身（记录应用值；deny 非空模拟装配层
+// 准入拒绝原因："" 允许 / "external_session" / "owner_active"）
 type fakeWritableResizer struct {
 	mu      sync.Mutex
 	applied []string // "cols x rows" 应用记录序
-	allowed bool
+	deny    string
 }
 
-func (f *fakeWritableResizer) WritableResizeAllowed(sessionID string) bool { return f.allowed }
+func (f *fakeWritableResizer) WritableResizeDenyReason(sessionID string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.deny
+}
+
+func (f *fakeWritableResizer) setDeny(reason string) {
+	f.mu.Lock()
+	f.deny = reason
+	f.mu.Unlock()
+}
 
 func (f *fakeWritableResizer) WritableResize(sessionID string, cols, rows uint16) error {
 	f.mu.Lock()
@@ -555,7 +706,7 @@ func waitApplied(t *testing.T, r *fakeWritableResizer, want []string) {
 }
 
 func TestWritableResizeApplyClampThrottleAudit(t *testing.T) {
-	resizer := &fakeWritableResizer{allowed: true}
+	resizer := &fakeWritableResizer{}
 	token := fixedToken("wrrsz1")
 	srv, svc, _, events := writableResizeEnv(t, token, resizer)
 	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/s/" + token + "/termws?visitorId=v1"
@@ -578,14 +729,16 @@ func TestWritableResizeApplyClampThrottleAudit(t *testing.T) {
 	}
 	waitApplied(t, resizer, []string{"120x40"})
 
-	// 非法值钳制（评审必改3）：cols=5→20、rows=9999→300——conn 节流 1s 内不发
-	// 第二帧，先等节流窗过
+	// 非法值钳制（评审必改3 + P-20261122-16 ⑤）：cols 下限钳 80（访客路径专属
+	// ——手机视口算出 <80 列时前端不反喂，直连 WS 由服务端同域钳制兜底；主人
+	// PUT 的 20 下限不走本路径）、rows=9999→300。conn 节流 1s 内不发第二帧，
+	// 先等节流窗过
 	time.Sleep(1_100 * time.Millisecond)
 	sendResize(5, 9999)
-	if f := c.nextFrame(t, 3*time.Second); f["type"] != "resize_applied" || f["cols"] != float64(20) || f["rows"] != float64(300) {
+	if f := c.nextFrame(t, 3*time.Second); f["type"] != "resize_applied" || f["cols"] != float64(80) || f["rows"] != float64(300) {
 		t.Fatalf("clamped frame = %v", f)
 	}
-	waitApplied(t, resizer, []string{"120x40", "20x300"})
+	waitApplied(t, resizer, []string{"120x40", "80x300"})
 
 	// conn 级节流（≥1s）：节流窗内的第二帧整帧丢弃（连合并窗都不进——1.1s
 	// 睡眠只放行了上面那一帧，这帧在其后 ~0ms 发出）
@@ -632,7 +785,7 @@ func TestWritableResizeApplyClampThrottleAudit(t *testing.T) {
 func TestWritableResizeMergeWindowLastWriteWins(t *testing.T) {
 	// 评审必改4：多访客并发 resize 的 token 合并窗——窗内两帧只应用最后上报
 	// 值（last-write-wins），突刺收敛为单次改格；回执广播两连接都收
-	resizer := &fakeWritableResizer{allowed: true}
+	resizer := &fakeWritableResizer{}
 	token := fixedToken("wrrsz2")
 	srv, svc, _, _ := writableResizeEnv(t, token, resizer)
 	base := "ws" + strings.TrimPrefix(srv.URL, "http") + "/s/" + token + "/termws?visitorId="
@@ -691,7 +844,7 @@ func waitPending(t *testing.T, svc *Service, token string, cols uint16) {
 func TestWritableResizeExternalDenied(t *testing.T) {
 	// 评审必改4：TmuxExternal 外部接管会话禁用访客 resize——resize_denied 回执
 	// （访客页据此停驱动回落保真），零应用
-	resizer := &fakeWritableResizer{allowed: false}
+	resizer := &fakeWritableResizer{deny: "external_session"}
 	token := fixedToken("wrrsz3")
 	srv, _, _, _ := writableResizeEnv(t, token, resizer)
 	c := wsDial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/s/"+token+"/termws?visitorId=v1")
@@ -711,10 +864,48 @@ func TestWritableResizeExternalDenied(t *testing.T) {
 	}
 }
 
+// TestWritableResizeOwnerActiveDeniedAtFire 合并窗到期前的准入复核（P-20261122-16
+// ④ 二审必改②）：收帧时允许、窗内 owner 刚附着（AttachedClients 0→1）也必须在
+// **应用前**拒绝——owner 的 xterm 不随 PTY 改格重排，窗内改格=主人视图整屏错位。
+// 拒绝可恢复：owner 离开后同连接重发即正常应用（不是永久停驱动）
+func TestWritableResizeOwnerActiveDeniedAtFire(t *testing.T) {
+	resizer := &fakeWritableResizer{}
+	token := fixedToken("wrrsz5")
+	srv, svc, _, _ := writableResizeEnv(t, token, resizer)
+	c := wsDial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/s/"+token+"/termws?visitorId=v1")
+	if f := c.nextFrame(t, 2*time.Second); f["type"] != "hello" {
+		t.Fatalf("first frame = %v", f)
+	}
+	send := func(cols, rows int) {
+		payload, _ := json.Marshal(map[string]any{"type": "resize", "cols": cols, "rows": rows})
+		if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+			t.Fatalf("send resize: %v", err)
+		}
+	}
+	send(120, 40)
+	// 帧已进合并窗（pending 可观测）后翻转准入：模拟窗内 owner 打开系统内终端
+	waitPending(t, svc, token, 120)
+	resizer.setDeny("owner_active")
+	if f := c.nextFrame(t, 3*time.Second); f["type"] != "resize_denied" || f["reason"] != "owner_active" {
+		t.Fatalf("denied frame = %v", f)
+	}
+	if got := resizer.got(); len(got) != 0 {
+		t.Fatalf("owner-active deny must not apply, applied = %v", got)
+	}
+	// owner 离开（解除准入拒绝）后重发：conn 节流窗过后正常应用
+	resizer.setDeny("")
+	time.Sleep(1_100 * time.Millisecond)
+	send(130, 42)
+	if f := c.nextFrame(t, 3*time.Second); f["type"] != "resize_applied" || f["cols"] != float64(130) {
+		t.Fatalf("applied-after-owner-left frame = %v", f)
+	}
+	waitApplied(t, resizer, []string{"130x42"})
+}
+
 func TestWritableResizeDownCancelsPending(t *testing.T) {
 	// owner 杀开关清合并窗（WritableDown 四表清场）：pending 不越过开关时刻
 	// 生效——窗内撤销即零应用
-	resizer := &fakeWritableResizer{allowed: true}
+	resizer := &fakeWritableResizer{}
 	token := fixedToken("wrrsz4")
 	srv, svc, _, _ := writableResizeEnv(t, token, resizer)
 	c := wsDial(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/s/"+token+"/termws?visitorId=v1")

@@ -356,6 +356,75 @@
           </div>
         </details>
         <details class="faq-item">
+          <summary><span data-lang-en>Manually replaced the binary on macOS? Don't use browser downloads</span><span data-lang-zh>macOS 手工换过二进制？别用浏览器下载产物</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>A release artifact downloaded in a browser carries the
+              <code>com.apple.quarantine</code> attribute — background spawn may be silently
+              refused, so an instance whose binary was replaced that way cannot start its
+              in-app update's swap subprocess and the update dies without a visible error
+              (the app just never comes back). Download binaries with <code>curl</code>, or
+              clear the attribute with
+              <code>xattr -d com.apple.quarantine &lt;binary&gt;</code>; an instance already
+              stuck there upgrades once via the paths in the table above (script installs
+              may re-run the install script; remote-deployed instances must <b>never</b>
+              re-run it). If the attribute was already cleared and the symptom is
+              unchanged, this is <b>not</b> the cause — see the launchd process-group case
+              below.</span>
+              <span data-lang-zh>浏览器下载的发布产物带 <code>com.apple.quarantine</code> 隔离
+              属性——后台 spawn 可能被静默拒绝，手工这样换过二进制的实例起不来应用内更新的
+              换包子进程，更新无声卡死（应用不再回来、也不报错）。二进制用 <code>curl</code>
+              下载，或用 <code>xattr -d com.apple.quarantine &lt;二进制&gt;</code> 清除属性；
+              已卡在该状态的实例先按上方判别表的路径升一次（脚本装可重跑安装脚本；远程部署装
+              <b>禁止</b>重跑）。若隔离属性已清而症状不变，则<b>非</b>此因——见下方 launchd
+              进程组案。</span>
+            </p>
+          </div>
+        </details>
+        <!-- macOS launchd 组杀案（P-20261122-7）：源=README §Upgrading 版本边界段（改先改源） -->
+        <details class="faq-item">
+          <summary><span data-lang-en>macOS: in-app update never completes — which case is it?</span><span data-lang-zh>macOS 应用内更新永远完不成——是哪一种？</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en><b>launchd installs on v0.0.1-beta.9 or older:</b> launchd
+              cleans up the job's whole process group when the main process exits, so the
+              update's swap subprocess is killed before it can even open its log — the app
+              silently stays on the old version (no error, no result file,
+              <code>logs/update.log</code> never created). <b>From v0.0.1-beta.10 on,
+              in-app update works.</b> The plist side of the fix does not depend on the
+              binary: re-running the install script writes
+              <code>AbandonProcessGroup=true</code> and reloads the agent, so a
+              script-installed ≤beta.9 instance upgrades in-app right after the re-run;
+              remote-deployed instances get the key from a fresh remote deploy (central
+              instance on beta.10+); otherwise install beta.10+ by hand. Tell the three
+              silent-failure shapes apart: (1) the service log has
+              <code>start update process failed</code> → the subprocess cannot start
+              (quarantine/permissions); (2) no such line, <code>logs/update.log</code>
+              does not exist and <code>tmp/update-*</code> holds a complete downloaded
+              artifact → launchd process-group kill; (3) <code>update.log</code> contains
+              <code>waiting for old process</code> → the liveness/wait chain stalled.
+              Self-built systemd units must keep <code>KillMode=process</code> — the
+              systemd default cleans up the swap subprocess the same way. All paths are
+              relative to the data directory (the <code>CC_DATA_DIR</code> the service
+              was started with; the product default otherwise).</span>
+              <span data-lang-zh><b>launchd 安装且版本 ≤ v0.0.1-beta.9：</b>launchd 在 job
+              主进程退出时清理整个进程组，换包子进程连日志都来不及打开就被杀——应用静默
+              停在旧版本（不报错、无结果文件、<code>logs/update.log</code> 从不创建）。
+              <b>从 v0.0.1-beta.10 起应用内更新可用。</b>plist 侧修复与二进制无关：重跑
+              一键脚本会写入 <code>AbandonProcessGroup=true</code> 并重载代理，≤beta.9 的
+              脚本装实例重跑后即可正常应用内升级；远程部署实例由中心实例重新远程部署写回
+              （中心实例须 beta.10+）；否则手工装 beta.10+。三种静默失败判别式：（1）服务
+              日志有 <code>start update process failed</code> → 子进程起不来
+              （quarantine/权限）；（2）无该行、<code>logs/update.log</code> 不存在且
+              <code>tmp/update-*</code> 有完整下载产物 → launchd 组杀；（3）
+              <code>update.log</code> 有 <code>waiting for old process</code> →
+              活性/等待链问题。自建 systemd unit 必须保留 <code>KillMode=process</code>
+              ——systemd 默认同样会清理换包子进程。以上路径均相对数据目录（服务启动时的
+              <code>CC_DATA_DIR</code>，未显式指定时为产品默认目录）。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
           <summary><span data-lang-en>Why must remote-deployed instances never re-run the install script?</span><span data-lang-zh>为什么远程部署装的实例禁止重跑安装脚本？</span></summary>
           <div class="faq-body">
             <p>
@@ -568,6 +637,47 @@
               从哪个入口进，该入口就必须转发 <code>/s/*</code>（外加三个访客静态资产）。只转发主
               端口静态页的反代不够；要完整转发主端口（SSE 终端直播需关缓冲）。指到专用分享域名的
               链接则必须能到达分享子服务端口。</span>
+            </p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <!-- 可写分享的文件交付口径（P-20261122-14 / P-20261122-18 / P-20261123-3，
+              源=server/share/writablepage.go 粘贴链+collabpage.go 素材上行位/CLAUDE.md
+               「可写分享访客粘贴上传落盘链」条：P-18 起页面常驻「上传文件/图片」按钮=
+               跨浏览器保底；P-23-3 起聚焦终端后的 Ctrl+V 由页面 custom key handler
+               放行浏览器原生粘贴（文件走上上传链、文本走输入通道，不再向主机发字面
+               ^V）；其余浏览器对 clipboardData.files 的暴露差异仍在，文案不得承诺
+               「所有浏览器 Ctrl+V 送文件已修复」；拖拽上传经用户定向裁撤，collab 关时
+               仅拦导航并提示上传按钮/Ctrl+V；改先改源） -->
+          <summary><span data-lang-en>How does a visitor send a file into a writable shared terminal — and which browsers work?</span><span data-lang-zh>访客怎么把文件送进可写分享终端？哪些浏览器能用？</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>The writable page carries a persistent <b>Upload files/images</b>
+              button that works in every browser and on mobile — images are compressed, the same
+              type and size limits apply, and the saved path is typed into the terminal. With the
+              terminal focused, <b>Ctrl+V</b> is handled by the page (native browser paste is
+              allowed through): files upload as above and plain text is pasted through the
+              terminal input channel — Ctrl+V is no longer forwarded to the host as a literal
+              <code>^V</code>. Pasting files with <b>Ctrl+V</b> still depends on the browser:
+              Firefox does not populate
+              <code>clipboardData.files</code> when files are copied from the file manager,
+              pasting files is not available in iOS Safari, Safari on the desktop greys the
+              option out, and Android Chrome depends on clipboard permissions. When the clipboard
+              really holds an image the page also tries an explicit clipboard read as a fallback.
+              On mobile or any other browser you can additionally use the collaboration-material
+              entry (camera / choose files — available when the share owner has enabled
+              collaboration); dropping files onto a writable page does not upload anything — the
+              page blocks the default navigation and points you to the upload button or Ctrl+V.</span>
+              <span data-lang-zh>可写页常驻<b>「上传文件/图片」按钮</b>——全浏览器与移动端可用：
+              图片压缩、类型与大小白名单同链，落盘后把路径键入终端。点击终端聚焦后
+              <b>Ctrl+V</b> 由页面放行浏览器原生粘贴：文件走上上传链，纯文本经终端输入
+              通道写入——Ctrl+V 不再作为字面 <code>^V</code> 转发给主机。<b>Ctrl+V</b>
+              送文件仍取决于浏览器：Firefox 从文件管理器复制文件不会填充
+              <code>clipboardData.files</code>，iOS Safari 无法粘贴文件，桌面 Safari 灰显，
+              Android Chrome 受剪贴板权限影响；剪贴板里确有图片时页面还会额外尝试一次显式
+              剪贴板读取作兜底。移动端或其余浏览器另可在分享者已开启协作时使用协作素材入口
+              （拍照 / 选择文件）；可写页上的拖拽不会上传任何文件——页面会拦截缺省导航并
+              提示改用上传按钮或 Ctrl+V。</span>
             </p>
           </div>
         </details>

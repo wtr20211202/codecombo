@@ -3,7 +3,9 @@ package main
 import (
 	"codecombo/server/app"
 	"codecombo/server/config"
+	"codecombo/server/diagnostics"
 	"codecombo/server/git/auth"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"embed"
@@ -240,14 +242,19 @@ func main() {
 	if err := config.EnsureDataDirMigrated(); err != nil {
 		if len(os.Args) >= 2 && os.Args[1] == "--serve" {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			// 启动期致命退出落盘（P-20261122-9 必改3）：日志系统在 app.Run 内，
+			// 此路径 never 到达——launchd/SCM 形态 stderr 是黑洞，不落盘=零诊断
+			bootstrapLog("ERROR", "serve startup aborted: data dir migration refused: %v", err)
 			os.Exit(1)
 		}
 		fmt.Fprintf(os.Stderr, "warning: data dir migration deferred: %v\n", err)
+		bootstrapLog("WARN", "data dir migration deferred (non-serve command): %v", err)
 	}
 	// SC_ 旧名回落告警（兼容期可见性）：显式 SC_DATA_DIR 指到外部路径时本进程
 	// 以回落形态运行——用户必须知道，否则兼容层移除时数据面"神秘换目录"
 	if config.LegacyEnvUsed() {
 		fmt.Fprintln(os.Stderr, "warning: SC_DATA_DIR legacy env detected — rename it to CC_DATA_DIR (SC_ compat reads are scheduled for removal)")
+		bootstrapLog("WARN", "SC_DATA_DIR legacy env detected — rename it to CC_DATA_DIR (SC_ compat reads are scheduled for removal)")
 	}
 
 	// 内部标记：实际运行服务器（装配流程已下沉 server/app 组合根）
@@ -313,6 +320,8 @@ func main() {
 		cmdUninstall()
 	case "reset-lock":
 		cmdResetLock()
+	case "diagnostics":
+		cmdDiagnostics()
 	case "version", "-v", "--version":
 		printVersion()
 	case "help", "-h", "--h", "-help", "--help":
@@ -342,6 +351,11 @@ Commands:
   update      Trigger an update via a running server (verified, auto-rollback; npm installs: npm i -g codecombo@latest)
   uninstall   Remove all codecombo data
   reset-lock  Reset global lock config (use when password is forgotten)
+  diagnostics Collect a diagnostics bundle (logs + runtime + platform) into a zip;
+              works without the service running
+              --out FILE   output path (default: codecombo-diagnostics-<timestamp>.zip)
+              --days N     daily log days to include (default: 3)
+              --no-mask    do NOT mask sensitive values (forensics only)
   version     Show version information
   help        Show this help message
 
@@ -583,7 +597,7 @@ func cmdStop() {
 	// 优雅停机优先（A8）：回环关机端点让服务走 srv.Shutdown（在途请求收尾、
 	// 模块 Stop 钩子执行）；旧版本二进制无此端点或已卡死时回退 Kill
 	if gracefulStop(pid) {
-		removePIDFile()
+		removePIDFileIfStopped(pid)
 		fmt.Printf("codecombo stopped gracefully (PID %d)\n", pid)
 		return
 	}
@@ -594,7 +608,7 @@ func cmdStop() {
 		// 复核一次，进程确实消失即视为停止成功
 		time.Sleep(500 * time.Millisecond)
 		if !isProcessAlive(pid) {
-			removePIDFile()
+			removePIDFileIfStopped(pid)
 			fmt.Printf("codecombo stopped (PID %d)\n", pid)
 			return
 		}
@@ -622,7 +636,7 @@ func cmdStop() {
 		}
 	}
 
-	removePIDFile()
+	removePIDFileIfStopped(pid)
 	fmt.Printf("codecombo stopped (PID %d)\n", pid)
 }
 
@@ -789,6 +803,92 @@ func cmdUninstall() {
 	fmt.Println("codecombo uninstalled successfully")
 }
 
+// ==================== diagnostics ====================
+
+// cmdDiagnostics 离线诊断包采集（P-20261122-10 S2a）：服务起不来时
+// GET /api/system/diagnostics/export 不可达——本命令用**同一套收集器**
+// （server/diagnostics）在本地打包，保证「命令一行输出都没有」的场景仍然
+// 拿得到完整证据链。
+//
+// 与 API 形态的差别（如实标注，不假装等价）：
+//   - store 派生面（selfcheck / update-status / ingress / egress）跳过——
+//     离线进程没有装配 store，凭空读盘会造出假数据；runtime.json 与
+//     state/selfcheck.json 里写明 skipped；
+//   - 其余完全一致：按日日志（默认 3 天）/更新链日志/dsh-web.log/crash.log/
+//     PID 文件/数据目录清点/平台基线/脱敏/截断/预算。
+//
+// 用法：codecombo diagnostics [--out FILE] [--days N] [--no-mask]
+func cmdDiagnostics() {
+	if hasFlag("--help") || hasFlag("-h") {
+		fmt.Println(`Usage: codecombo diagnostics [--out FILE] [--days N] [--no-mask]
+
+Collects a diagnostics bundle (all-module logs + update chain + platform baseline
++ platform deep sampling + storage stats + basic runtime state) into a zip.
+Works without the service running.
+
+  --out FILE   output path (default: codecombo-diagnostics-<timestamp>.zip)
+  --days N     daily log days to include (default: 3)
+  --no-mask    do NOT mask sensitive values (forensics only)`)
+		return
+	}
+	out, _ := findFlag("--out", "-o")
+	out = strings.TrimSpace(out)
+	if out == "" {
+		out = "codecombo-diagnostics-" + time.Now().Format("20060102-150405") + ".zip"
+	}
+	days := 3
+	if v, ok := findFlag("--days", ""); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			days = n
+		}
+	}
+	// mask 默认开（诊断包是外发物；--no-mask 仅取证对账档）
+	maskOn := !hasFlag("--no-mask")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	bundle, err := diagnostics.Plan(ctx, diagnostics.Options{
+		DataDir: config.DataDir(),
+		Version: version,
+		LogDays: days,
+		Mask:    maskOn,
+		Source:  "cli",
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: diagnostics collection failed: %v\n", err)
+		os.Exit(1)
+	}
+	f, err := os.Create(out)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot create %s: %v\n", out, err)
+		os.Exit(1)
+	}
+	writeErr := bundle.WriteZip(f)
+	closeErr := f.Close()
+	if writeErr != nil {
+		// 半截 zip 不是证据是陷阱：写失败即删，别让用户拿着残包去求助
+		_ = os.Remove(out)
+		fmt.Fprintf(os.Stderr, "error: writing %s: %v\n", out, writeErr)
+		os.Exit(1)
+	}
+	if closeErr != nil {
+		fmt.Fprintf(os.Stderr, "error: closing %s: %v\n", out, closeErr)
+		os.Exit(1)
+	}
+	if abs, aerr := filepath.Abs(out); aerr == nil {
+		out = abs
+	}
+	t := bundle.Manifest.Totals
+	var size int64
+	if info, serr := os.Stat(out); serr == nil {
+		size = info.Size()
+	}
+	fmt.Printf("diagnostics bundle written: %s (%d bytes)\n", out, size)
+	fmt.Printf("entries=%d included=%d omitted=%d absent=%d truncated=%d masked=%t days=%d\n",
+		t.Entries, t.IncludedBytes, t.OmittedBytes, t.Absent, t.Truncated, maskOn, days)
+	fmt.Println("note: selfcheck/update-status/terminal-sessions are skipped in offline CLI mode (start the service and use GET /api/system/diagnostics/export for the full set)")
+}
+
 // ==================== reset-lock ====================
 
 // cmdResetLock 重置全局锁配置
@@ -922,6 +1022,27 @@ func removePIDFile() {
 	_ = os.Remove(pidFilePath())
 }
 
+// removePIDFileIfStopped 仅当 PID 文件首行仍等于刚停掉的 pid 时才删除
+// （P-20261122-2 条件删除，CLI 停机侧口径）。竞态面：gracefulStop/Kill 确认
+// 旧进程死亡到本次删除之间，在途页面重启（P-20261106）拉起的新实例可能已
+// 重写 PID 文件——无条件删除会抹掉新实例的记账，此后 stop/status 便找不到它；
+// 内容不符=文件已归新实例所有，保留。服务端侧口径（server/app removePIDFile
+// 比对 os.Getpid）在 CLI 侧不适用：CLI 与服务是异进程，比对恒 false 会把
+// stale 清理一并废掉——两口径各守各的进程身份。读-比对-删仍有微秒级 TOCTOU
+// 窗：单用户本机场景可接受，不建锁（跨平台文件锁语义成本不值）。
+// cmdStop 的 stale 分支与 cmdStatus 维持无条件删除：两处先验死再删（删除前
+// PID 已判死），口径按评审裁定维持现状
+func removePIDFileIfStopped(pid int) {
+	data, err := os.ReadFile(pidFilePath())
+	if err != nil {
+		return // 文件已不在：删除目标已达成
+	}
+	line := strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)[0]
+	if got, perr := strconv.Atoi(line); perr == nil && got == pid {
+		removePIDFile()
+	}
+}
+
 func isRunning() bool {
 	pid, err := readPID()
 	if err != nil {
@@ -1000,6 +1121,10 @@ func cmdDoUpdate() {
 
 	if err := update.DoUpdate(currentBinary, newBinary, port, pid); err != nil {
 		fmt.Fprintf(os.Stderr, "update failed: %s\n", err)
+		// 换包子进程末错的 durable 面（P-20261122-9 必改3）：stderr 在
+		// launchd/SCM 形态是黑洞；update.log/update-subprocess.log 之外再落一行
+		// 当天服务日志，保证「子进程最终还是失败了」在主日志可见
+		bootstrapLog("ERROR", "update subprocess failed: %v", err)
 		os.Exit(1)
 	}
 }

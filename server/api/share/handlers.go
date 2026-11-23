@@ -678,6 +678,12 @@ func ListShares(c *gin.Context) {
 	}
 	total, perToken, uerr := share.SnapshotUsage()
 	health := newShareHealthProbe(store.Get())
+	// 会话输入闸自愈对账（P-20261122-17）：管理面是 owner 最常触达的入口，
+	// 借这次触达把残账扫掉（内部 5s 节流；DirectState 每行只做投影不重复
+	// 对账）。未装配访客面（测试）零开销
+	if shareSvc != nil {
+		shareSvc.ReconcileGates()
+	}
 	out := make([]gin.H, 0, len(list))
 	for _, s := range list {
 		row := shareResponse(s)

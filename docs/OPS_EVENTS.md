@@ -571,14 +571,19 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
   `WithWritableResizeEvents` 回调——可写分享（P-20261106-8）的访客经 WS 控制
   面把视口尺寸反喂主机 PTY（P-20261120-8「客户端窗口=终端宽度」语义）应用
   成功后一次；服务端承接链=钳制→conn 节流 ≥1s→token 合并窗 500ms
-  last-write-wins，TmuxExternal 外部接管会话拒绝并回 resize_denied）
+  last-write-wins→**应用前准入复核**（P-20261122-16：`WritableResizeDenyReason`
+  空=允许，`external_session` 外部接管会话 / `owner_active` 主人本机有交互
+  WS 客户端附着（`Session.AttachedClients()`，share `/termws` 不计数）/
+  `session_missing` 会话不在——非空即回 `resize_denied{reason}` 零应用）
 - **payload**：`{token, shareName, terminalId, cols, rows, visitorTail?, at}`
-  （仅元数据；cols/rows 是应用后的终端栅格尺寸）
+  （仅元数据；cols/rows 是应用后的终端栅格尺寸；访客路径 cols 钳 ≥80）
 - **消费方**：owner 工作台 toast 即时感知（`useLayoutShell.ts` onShareWResize
   ——「终端被无形改格」的最小可见性面：wtyping 徽标给出访客在场，本事件给出
-  改成了什么格）；agent 监听同一事件可感知「锚定终端栅格被访客改动」（主人
-  PUT resize 之外主动因说明，TUI 布局错乱类报障的归因输入）；审计同批次入账
-  `share.writableResize`（元数据口径）
+  改成了什么格；**P-20261122-16 起同 terminalId 5s 去重**，合并窗外残余的多
+  访客/多连接帧只播首条，终值以访客侧 wr-strip 与审计为准）；agent 监听同一
+  事件可感知「锚定终端栅格被访客改动」（主人 PUT resize 之外主动因说明，TUI
+  布局错乱类报障的归因输入）；审计同批次入账 `share.writableResize`（元数据
+  口径）
 
 ### share.direct-request
 
@@ -596,6 +601,25 @@ TS 接口），新事件先在那里落常量再消费；服务端 type 常量�
   onShareDirectRequest → `useDirectInputShares` pendingByToken 即时对账——
   分享管理器行内批准钮与会话行待批徽标即现）；agent 监听同一事件可感知
   「有访客在敲门」（申请面元数据，不含输入内容）
+
+### share.paste-upload
+
+- **window 事件**：`sc-ops:share.paste-upload`（`OPS_SHARE_PASTE_UPLOAD`，直通分发）
+- **广播点**：`server/api/share/module.go`（Module.Start 装配
+  `WithPasteUploadEvents` 回调——访客经可写分享的粘贴上传端点（POST
+  /s/{token}/paste-upload，P-20261122-1 能力对齐件：主人端 Ctrl+V 粘图片/
+  文件→压缩→上传落盘→路径入输入行的访客侧对齐链）落盘成功后一次；
+  mode-aware 门禁在 handler（open 即准入 / hold 须持权 / 全关恒 404），
+  落系统临时目录 sc-paste-* 与主人端共享 paste-cleaner 生命周期）
+- **payload**：`{token, shareName, terminalId?, name, size, mode, nick?,
+  visitorTail?, at}`（仅元数据——文件内容与落盘绝对路径不上广播面，路径
+  访客侧自持且将经其键入通道进入终端回显；mode ∈ `open|hold`；name 是
+  净化后的原始文件名）
+- **消费方**：owner 工作台 toast 即时感知（`useLayoutShell.ts`
+  onSharePasteUpload——「主机多了一个访客提供的文件」的最小可见性面）；agent
+  监听同一事件可感知「主机临时目录多了访客提供的文件」（配合读终端回显里的
+  路径消费）；审计同批次入账 `share.pasteUpload`（元数据口径）；通知中心仅在
+  文件名命中敏感模式（IsSensitiveName）时另有入账条目——逐文件 note 过噪
 
 ### notes.updated
 

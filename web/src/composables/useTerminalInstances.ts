@@ -86,7 +86,7 @@ export function disposeInstance(tabId: string, ownerTerm?: Terminal): void {
   try {
     inst.ws.close()
   } catch {
-    // ws 可能已 closed
+    // silent-by-design: 实例销毁时 ws 可能已 closed，纯拆除无处置价值
   }
   inst.term.dispose()
   termInstances.delete(tabId)

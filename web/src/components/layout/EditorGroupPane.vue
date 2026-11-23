@@ -584,7 +584,7 @@ function readForeignTabPayload(e: DragEvent): { fromGi: number; path: string } |
     if (raw.groupId === props.groupIndex) return null
     return { fromGi: raw.groupId, path: raw.path }
   } catch {
-    return null // 非本系统载荷（伪造/残缺）：静默忽略不落任何操作
+    return null // silent-by-design: 非本系统载荷（伪造/残缺）——静默忽略不落任何操作
   }
 }
 

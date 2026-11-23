@@ -4,7 +4,11 @@ package share
 // 的 pageTmplSrc 模板段，零逻辑改动）——面包屑/目录表格/文件渲染/错误页/
 // nav/refresh 主循环与页底访客留言板挂载（{{.BoardJS}} 注入点在段尾）
 
-const pageTmplJsNavSrc = `function crumbs(current){
+const pageTmplJsNavSrc = `// 拖拽导航守卫（P-20261122-20，dragguard.go 单一事实源，本页在 page.go 以
+// core 之后拼接注入）：文件分享页无上传面，拖入本地文件拦缺省导航（缺省
+// 动作是跳到 file:// 整页替换）并给守卫自带提示
+scDragGuard();
+function crumbs(current){
   const bar = el('div', 'crumbs');
   const parts = current ? current.split('/') : [];
   // 返回上级（业界文件管理器惯例）：非根层级显示 ↑ 按钮

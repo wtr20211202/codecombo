@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -85,6 +87,13 @@ type Options struct {
 // 声明式模块注册（modules.go）→ StartAll → HTTP 服务（roadmap M2.3）。
 // 各业务模块的装配细节全部在各自包的 Module.Init/Start 内完成
 func Run(opts Options) {
+	// 崩溃转储先行（P-20261122-9 必改B）：早于 config.Load 与日志系统，覆盖
+	// pre-logger 崩溃；debug.SetCrashOutput 是唯一覆盖非主 goroutine panic 与
+	// fatal runtime error 的机制（详见 observability.go），且绕开 launchd/SCM
+	// 的 stderr 黑洞。打开失败不阻断服务（stderr 告警后继续）
+	if crashLog, crashErr := installCrashOutput(config.DataDir()); crashErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: crash log unavailable at %s: %v\n", crashLog, crashErr)
+	}
 	cfg := config.Load()
 	// CLI 覆盖：与 main.applyCLIOverrides 同语义（cmdStart 探测与守护参数用它，运行侧在此生效）
 	if opts.Port > 0 {
@@ -171,16 +180,36 @@ func Run(opts Options) {
 
 	// 日志先行：内核与后续模块装配日志统一落按天滚动文件。
 	// P-20261025-1 起新前缀 codecombo；旧前缀文件（迁移随目录整体搬来）由
-	// CleanOldLogs 双前缀清理与 servicelogs 双前缀读取兜底，一个保留期后自然消失
+	// CleanOldLogs 双前缀清理与 servicelogs 双前缀读取兜底，一个保留期后自然消失。
+	// P-20261122-9 必改C：级别由 CC_LOG_LEVEL 控制（LevelVar 动态读取，默认 info）
+	logLevel, logLevelErr := resolveLogLevel(os.Getenv(envLogLevel))
 	h := &dailyHandler{
 		logDir: filepath.Join(config.DataDir(), "logs"),
 		prefix: "codecombo",
 		maxAge: 15,
-		level:  slog.LevelInfo,
+		level:  logLevel,
 	}
 	defer h.Close()
 	h.CleanOldLogs()
 	slog.SetDefault(slog.New(h))
+	// 主 goroutine panic 兜底（必改B 补充面，仅结构化留痕）：先落当天日志再
+	// re-panic 保留原崩溃语义（runtime 打印 + crash.log 转储 + 退出码 2）。
+	// 只护本 goroutine——其他 goroutine 的 panic 由 crash.log 兜；不逐个包
+	// recover（会掩盖 bug）。注册在 defer h.Close() 之后 → LIFO 先于关文件执行
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("fatal: panic in main goroutine", "panic", r, "stack", string(debug.Stack()))
+			panic(r)
+		}
+	}()
+	if logLevelErr != nil {
+		// 非法值回落 Info 并把原始值写进启动日志（静默回落=新的无痕疑案）
+		slog.Warn("ignoring invalid "+envLogLevel+" — using info", "value", os.Getenv(envLogLevel))
+	} else if raw := strings.TrimSpace(os.Getenv(envLogLevel)); raw != "" {
+		slog.Info("log level configured from env", "level", logLevel.Level().String(), "env", envLogLevel+"="+raw)
+	}
+	// 生效级别进 selfcheck（必改C 的低成本收益：排障第一问「现在是什么级别」）
+	system.SetEffectiveLogLevel(logLevel.Level().String())
 
 	// 转发 gin 请求日志到 slog
 	gin.DefaultWriter = &slogWriter{level: slog.LevelInfo}
@@ -285,7 +314,10 @@ func Run(opts Options) {
 	// cookie 才能在 iframe 内携带
 	config.SetTLSEnabled(useTLS)
 
-	writePIDFileScheme(cfg.Server.Port, loopbackPortFor(useTLS, cfg.Server.Port, loopbackOverride), schemeFor(useTLS))
+	// 第五行构建版本（P-20261122-6）：更新子进程据此确认「健康检查的应答者
+	// 就是换包后的新二进制」——launchd 形态 KeepAlive 重拉起的旧实例也回 200，
+	// 没有版本证据时健康判定会把「内存旧版+盘上新版」误判为成功
+	writePIDFileScheme(cfg.Server.Port, loopbackPortFor(useTLS, cfg.Server.Port, loopbackOverride), schemeFor(useTLS), opts.Version)
 
 	// Agent Guard 审批通知回调（B4 阶段 2）：middleware 不直接依赖 api 层
 	//（import 环），经组合根把审批创建事件桥到 ops-channel 广播；
@@ -553,7 +585,32 @@ func Run(opts Options) {
 	update.SetRestartHook(shutdownFn)
 
 	// 页面重启（P-20261106）：真正需要重启的少数设置（监听器类）与人工兜底。
-	// 按运行形态分链——能由监管者拉起的不自 spawn（防孤儿进程与端口竞争）：
+	// 按运行形态分链——能由监管者拉起的不自 spawn（防孤儿进程与端口竞争）。
+	//
+	// 重启链与进程退出同步（P-20261122-2 实测赛跑）：重启动作在端点 202 派生的
+	// goroutine 里跑，而 Serve 在 Shutdown **开始关监听时**即刻返回——main 收尾
+	// 路径（closeAll→removePIDFile→return=进程退出）与重启链 shutdownFn 之后的
+	// 关键动作（wrapper 分支 os.Exit(75) 交还重启所有权 / 裸兜底分支 spawn 新
+	// 进程）是真实并发赛跑，main 先到=进程以 0 退出（wrapper 看码不 respawn，
+	// 应用死了）或 spawn 未及执行（裸兜底没起新进程）——两者都是「重启后没启动
+	// 起来」的形态（开发期两形态 e2e 曾复现：update-restart.log 建了、新进程从未
+	// 出现）。处置：**只有需要链内收口的两个分支**（npm wrapper 75 / 裸兜底
+	// spawn）在 shutdownFn 前 close(exitSync)，spawn 完成后 close(done)；main
+	// 退出侧见 exitSync 已关则等 done 再收尾——wrapper 分支的 os.Exit(75) 在
+	// shutdownFn 后立即发生（进程直接终止，main 的等待被 os.Exit 抢占），兜底
+	// 分支的 spawn 同步完成后 done 关闭。封顶 10s=shutdown ctx 5s（链内 drain
+	// 最坏耗时）+spawn 余量，链被异常卡死时退出侧不至永久挂起。
+	// 刻意不把同步做成「链一启动就等」：systemd/SCM/launchd 三分支的重启由外部
+	// 监管者完成，退出越早越快拉起，等链只会白拖（systemd 形态按 unit 语义推演：
+	// install.sh unit 为 KillMode=process 只向主进程发 SIGTERM，systemctl restart
+	// 客户端在等主进程退出——若 main 等链，链在等 systemctl，互等到 10s 封顶才
+	// 退出，页面重启由 ~1s 劣化为 ~10s）；这三支 main 正常收尾退出 0，不进入等待
+	restartChainExitSync := make(chan struct{})
+	restartChainDone := make(chan struct{})
+	// 重复请求防 panic（restart 端点无在途闸，连点两次=两条链并发）：通道只能
+	// close 一次——Once 护住两个收口点；并发链本身在 shutdownFn/spawn 面的竞态
+	// 是既有形态（双击重启），本次不放大
+	var chainSyncOnce, chainDoneOnce sync.Once
 	system.RegisterRestart(func() {
 		time.Sleep(300 * time.Millisecond) // HTTP 202 响应先写出
 		if servicectx.IsService() {
@@ -577,11 +634,29 @@ func Run(opts Options) {
 			shutdownFn()
 			return
 		}
-		// 前台/裸进程：先释放监听再以原参数 spawn 自身（新进程即时可绑）
+		// 以下两分支必须保证链内动作先于进程退出（见上方注释）：先亮同步信号
+		chainSyncOnce.Do(func() { close(restartChainExitSync) })
+		if update.WrapperRestartRequested() {
+			// npm wrapper 前台形态（P-20261122-2）：双守卫（env 下发 wrapper
+			// PID + ppid==该值）通过=wrapper 循环监管者在场，交还重启所有权
+			//——优雅停机后以 RestartExitCode 退出，wrapper 重 resolve 平台
+			// 二进制同参数重 spawn（npm/cli/bin/codecombo.js）。不自 spawn：
+			// wrapper 循环之外再起一份实例=孤儿抢端口。守护（codecombo start
+			// 经 cmdStart 绕过 wrapper）/旧 wrapper/裸进程守卫判否，落下方自
+			// spawn 兜底——混合版本三态由守卫兜住
+			slog.Info("restart: npm wrapper foreground form — exiting for wrapper respawn", "exitCode", update.RestartExitCode)
+			shutdownFn()
+			os.Exit(update.RestartExitCode)
+		}
+		// 前台/裸进程：先释放监听再以原参数 spawn 自身（新进程即时可绑）；
+		// RestartSelfExe 已脱会话（daemonProcAttr+日志落盘），前台重启转后台
+		// 后关终端不再连带新进程死。spawn 在本 goroutine 内同步完成后 close(done)
+		// 放行 main 收尾（上方同步通道契约）
 		shutdownFn()
-		if err := update.RestartSelfExe(); err != nil {
+		if err := update.RestartSelfExe(config.DataDir()); err != nil {
 			slog.Warn("restart: respawn failed — process will exit, manual start required", "err", err)
 		}
+		chainDoneOnce.Do(func() { close(restartChainDone) })
 	})
 
 	var serveErr error
@@ -600,6 +675,23 @@ func Run(opts Options) {
 		slog.Error("server error", "err", serveErr)
 	}
 	closeAll()
+
+	// 页面重启链收口等待（P-20261122-2，赛跑分析与分支范围见 RegisterRestart
+	// 处注释）：仅当链已进入「必须链内收口」的两分支（npm wrapper 75 / 裸兜底
+	// spawn）时等待——exitSync 由这两支在 shutdownFn 前关闭，故 Serve 因该
+	// shutdownFn 返回时必已可见。systemd/SCM/launchd 三支（外部监管者拉起）与
+	// 信号停机/监听失败等非重启退出零等待，立即收尾退出（提早退出=提早拉起）。
+	// wrapper 分支的 os.Exit(75) 紧随 shutdownFn，会先于这里超时抢占进程；
+	// 兜底分支 spawn 同步完成后 done 关闭，此处放行
+	select {
+	case <-restartChainExitSync:
+		select {
+		case <-restartChainDone:
+		case <-time.After(10 * time.Second): // 链被异常卡死时退出侧不至永久挂起
+		}
+	default:
+		// 无需链内收口的分支或非重启退出：不等
+	}
 
 	removePIDFile()
 	slog.Info("codecombo stopped")
@@ -778,19 +870,25 @@ func lnPort(addr string) int {
 
 // ==================== PID 文件 ====================
 // 格式与 main 的 readPID/readPIDPort 约定一致：
-// "pid\nport[\nloopbackPort][\nscheme]"（无尾换行）。
+// "pid\nport[\nloopbackPort][\nscheme][\nversion]"（无尾换行）。
 // 第三行 loopbackPort 仅 TLS 启用时存在（>0），本机 CLI 据此走明文回环端口；
 // 第四行 scheme 是实际监听协议（http/https）——CLI status 展示用它而非
 // 重猜配置（SC_TLS env / CLI 覆盖不落盘，配置文件猜出的 scheme 会骗人）。
-// 旧版本 CLI 读到多余行会被 SplitN 截断忽略，向后兼容
+// 第五行 version 是本进程构建版本（P-20261122-6，自更新子进程确认健康应答者
+// 是换包后新二进制的证据；旧版本实例不写此行——「有版本行」即证明运行的是
+// 本版之后构建的二进制）。前四行之外的旧版本 CLI 读到多余行会被 SplitN
+// 截断忽略，向后兼容；version 行刻意依附 scheme 行（scheme 恒非空，位置确定）
 
-func writePIDFileScheme(port, loopbackPort int, scheme string) {
+func writePIDFileScheme(port, loopbackPort int, scheme, version string) {
 	content := fmt.Sprintf("%d\n%d", os.Getpid(), port)
 	if loopbackPort > 0 {
 		content += fmt.Sprintf("\n%d", loopbackPort)
 	}
 	if scheme != "" {
 		content += fmt.Sprintf("\n%s", scheme)
+		if version != "" {
+			content += fmt.Sprintf("\n%s", version)
+		}
 	}
 	// P-20261025-1 起新名 codecombo.pid；旧名残留启动期清理（RemoveLegacyPidFile，
 	// 迁移把旧目录整体搬来时旧 pid 文件随之而来，留着会误导旧版 CLI 兜底扫描）
@@ -823,8 +921,24 @@ func selinuxStatus() (enabled, enforcing bool) {
 	return true, strings.TrimSpace(string(b)) == "1"
 }
 
+// removePIDFile 仅当 PID 文件仍记着本进程时删除（P-20261122-2 条件删除）：
+// 页面重启自 spawn 链上新进程可能在旧进程 serve 收尾前已重写 PID 文件（spawn
+// 与本进程退出是并发窗），无条件删除会抹掉新进程的记账——此后 CLI stop/status
+// 便找不到它；监听失败路径同理（端口被占时文件里可能还是存活旧实例的 PID，
+// 无条件删除会误清他者记账）。内容非本进程 PID 视为文件已归他者所有，保留。
+// 读-比对-删仍有微秒级 TOCTOU 窗：单用户本机场景可接受，不建锁（跨平台文件锁
+// 语义成本不值）。CLI 侧停机口径是「文件内容==我实际停掉的那个 PID」（main 包
+// removePIDFileIfStopped）——本进程身份比对在异进程 CLI 恒 false，两口径各守
+// 各的进程身份
 func removePIDFile() {
-	_ = os.Remove(filepath.Join(config.DataDir(), "codecombo.pid"))
+	path := filepath.Join(config.DataDir(), "codecombo.pid")
+	if b, err := os.ReadFile(path); err == nil {
+		line := strings.SplitN(strings.TrimSpace(string(b)), "\n", 2)[0]
+		if pid, perr := strconv.Atoi(line); perr == nil && pid > 0 && pid != os.Getpid() {
+			return
+		}
+	}
+	_ = os.Remove(path)
 }
 
 // cleanupOrphanKinds 删除功能已移除但数据目录残留的孤儿 kind 目录
@@ -937,7 +1051,10 @@ type dailyHandler struct {
 	// 每次清理执行时取最新配置，调整 settings.logRetentionDays 次日巡更生效
 	// 无需重启；未注入（启动初期 settings 未就绪的首轮兜底清理）回落 maxAge
 	maxAgeFn func() int
-	level    slog.Level
+	// level 指针形态（P-20261122-9 必改C）：CC_LOG_LEVEL 解析结果挂 LevelVar，
+	// Enabled 每记录读一次 Level()——切换级别无需重建 handler/重启之外的机制，
+	// 也给「诊断模式短窗开启」留下运行期调整口（当前入口仅 env，评审拒绝设置页）
+	level *slog.LevelVar
 }
 
 // legacyLogPrefix 旧版日志文件名前缀（P-20261025-1 标识切换前的存量文件）。
@@ -954,7 +1071,14 @@ func (h *dailyHandler) effectiveMaxAge() int {
 	return h.maxAge
 }
 
-func (h *dailyHandler) Enabled(_ context.Context, l slog.Level) bool { return l >= h.level }
+// Enabled 级别过滤：读 LevelVar（必改C），nil 兜底 Info——零值 handler 的
+// 测试构造不因新增指针字段而 panic
+func (h *dailyHandler) Enabled(_ context.Context, l slog.Level) bool {
+	if h.level == nil {
+		return l >= slog.LevelInfo
+	}
+	return l >= h.level.Level()
+}
 
 func (h *dailyHandler) Handle(_ context.Context, r slog.Record) error {
 	h.mu.Lock()

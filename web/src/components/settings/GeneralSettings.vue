@@ -17,6 +17,7 @@ import {
 import { useContextWarnStore, CONTEXT_WARN_MIN, CONTEXT_WARN_MAX } from '../../stores/contextWarn'
 import { LOW_REMAINING_PCT } from '../../utils/sessionRelay'
 import { normalizeExternalAccessUrl } from '../../utils/networkAddress'
+import { copyText } from '../../utils/clipboard'
 import { OPS_ATOM_IDS, useOpsAtomPrefs, type FrontendAtomId } from '../../stores/opsAtomPrefs'
 import { confirmDialog } from '../../composables/useDialog'
 import CustomAgentsManager from './CustomAgentsManager.vue'
@@ -225,11 +226,14 @@ async function installInTerminal(name: string) {
 async function copyInstallCmd(name: string) {
   const cmd = installCmd(name)
   if (!cmd) return
-  try {
-    await navigator.clipboard.writeText(cmd)
-    copiedRuntime.value = name
-    setTimeout(() => { copiedRuntime.value = '' }, 1500)
-  } catch { /* 剪贴板不可用静默 */ }
+  // copyText 内含安全上下文降级（局域网 http 下 navigator.clipboard 为 undefined，
+  // 裸调 writeText 会静默失败）；失败必须回告，否则「点了复制没反应」无解释
+  if (!await copyText(cmd)) {
+    message.error(t('common.copyFailed'))
+    return
+  }
+  copiedRuntime.value = name
+  setTimeout(() => { copiedRuntime.value = '' }, 1500)
 }
 const agentProviderOptions = ref<{ label: string; value: string }[]>([])
 

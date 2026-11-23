@@ -38,9 +38,13 @@ func stopWindowsService() error {
 	return errors.New("windows-service supervise form is windows-only")
 }
 
-// daemonProcAttr bare/前台形态 spawn 的进程属性：与 main 包 setDaemonAttrs
-// （daemon_unix.go）同款——子进程落独立进程组（Setpgid），脱离启动它的终端
-// 会话（前台形态关窗后不在终端前景进程组，不随 SIGHUP 退出）
+// daemonProcAttr bare/前台形态 + 换包子进程 spawn 的进程属性：与 main 包
+// setDaemonAttrs（daemon_unix.go）同款——子进程落独立进程组（Setpgid），
+// 脱离启动它的终端会话（前台形态关窗后不在终端前景进程组，不随 SIGHUP
+// 退出；换包子进程另获 launchd 组杀逃生门——launchd 只清理 job 主进程死亡时
+// 同进程组的剩余进程，见 newUpdateCmd 注释）。
+// 注：darwin 上 Setpgid 与 Setsid 可共存但仅当 Pgid==0；将来若真需要
+// Setsid 必须连 Pgid 一并确认（launchd.plist(5) 语义按 pgid 判定）
 func daemonProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		Setpgid: true,

@@ -358,6 +358,32 @@ export interface ShareDirectRequestDetail {
   at?: number
 }
 
+// 可写分享访客粘贴上传落盘（P-20261122-1）：访客经可写分享的粘贴上传端点
+// （POST /s/{token}/paste-upload）落盘成功即服务端广播。前端消费 = toast
+// 即时感知（owner 侧「访客上传了什么」的最小可见性面——文件内容与落盘绝对
+// 路径不上广播面，路径将经访客键入通道进入终端回显）。直通分发语义同
+// share.drop（sc-ops:share.paste-upload）
+export const OPS_SHARE_PASTE_UPLOAD = 'sc-ops:share.paste-upload'
+
+/** OPS_SHARE_PASTE_UPLOAD 事件 detail（服务端 share.PasteUploadEvent 广播载荷） */
+export interface SharePasteUploadDetail {
+  token?: string
+  shareName?: string
+  terminalId?: string
+  /** 净化后的原始文件名（展示面） */
+  name?: string
+  /** 字节数 */
+  size?: number
+  /** 授权模式：open（开放直入）| hold（申请批准持权） */
+  mode?: string
+  /** 访客自报昵称（缺省 = 匿名） */
+  nick?: string
+  /** 访客摘要（visitorId 前 8 位——全串不上广播面） */
+  visitorTail?: string
+  /** 时刻（epoch ms） */
+  at?: number
+}
+
 // frontend 动词族（P-20261023-4 首批三原子 + P-20261111-3 整页·视图重载）：
 // 协议从「引导注意力」升维「替用户执行浏览器动作」——下载框弹出 / 剪贴板
 // 直写 / 新标签开外链 / 整页·当前视图重载。族内原子都是用户设备上的即时

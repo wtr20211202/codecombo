@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -178,8 +179,12 @@ func fillApprovalImpact(pattern, op, target, lang string) (imp *store.ApprovalIm
 	if ImpactFiller == nil {
 		return nil
 	}
+	// 降级语义不变（impact=nil 走无徽标老形态），但 panic 必须留痕
+	//（P-20261122-9 必改2：静默 recover 让影响面计算 bug 永久无痕）
 	defer func() {
-		if recover() != nil {
+		if r := recover(); r != nil {
+			slog.Error("agentguard: impact filler panicked — falling back to no-impact card",
+				"op", op, "panic", r, "stack", string(debug.Stack()))
 			imp = nil
 		}
 	}()

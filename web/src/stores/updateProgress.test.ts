@@ -25,7 +25,7 @@ import {
 import zhCN from '../locales/zh-CN'
 import enUS from '../locales/en-US'
 
-function status(s: Partial<{ status: string; progress: number; total: number; version: string; error: string; result: string; resultError: string; resultAt: string; resumedBytes: number }>) {
+function status(s: Partial<{ status: string; progress: number; total: number; version: string; error: string; result: string; resultError: string; resultAt: string; resumedBytes: number; buildVersion: string }>) {
   return { data: { status: 'idle', progress: 0, total: 0, version: '', ...s } }
 }
 
@@ -103,7 +103,8 @@ describe('updateProgress store', () => {
     api.status.mockResolvedValueOnce(status({ status: 'idle', result: 'success', version: '9.9.9', resultAt: '2026-11-09T00:00:00Z' }))
     await poll()
     expect(store.tracking).toBe(false)
-    expect(store.outcome).toEqual({ phase: 'success', version: '9.9.9', error: '', at: '2026-11-09T00:00:00Z' })
+    // serverSeen（P-20261122-5）：收口前轮询在线即记账（unknown 结局消费）
+    expect(store.outcome).toEqual({ phase: 'success', version: '9.9.9', error: '', at: '2026-11-09T00:00:00Z', serverSeen: true })
     expect(store.phase).toBe('success')
     expect(store.badgeVisible).toBe(true)
 
@@ -195,6 +196,51 @@ describe('updateProgress store', () => {
     await vi.advanceTimersByTimeAsync(RESTART_GIVE_UP_MS + 2 * POLL_INTERVAL_MS)
     expect(store.outcome?.phase).toBe('unknown')
     expect(store.tracking).toBe(false)
+  })
+
+  // unknown 结局「仍为旧版本」明示（P-20261122-5）：服务可达且运行旧版本 =
+  // 更新未完成（用户 mac 实测案的最终盘面）；不可达/版本已新/目标版本不可解析
+  // 三态回落通用文案不误报
+  describe('unknownStillOld（P-20261122-5）', () => {
+    async function settleUnknown(
+      target: string,
+      statusShape: Partial<{ status: string; version: string; buildVersion: string }> | 'unreachable',
+    ) {
+      api.apply.mockResolvedValue({ version: target })
+      if (statusShape === 'unreachable') {
+        api.status.mockRejectedValue(networkError)
+      } else {
+        api.status.mockResolvedValue(status({ status: 'idle', version: target, ...statusShape }))
+      }
+      const store = useUpdateProgressStore()
+      await store.start(target)
+      await vi.advanceTimersByTimeAsync(RESTART_GIVE_UP_MS + 2 * POLL_INTERVAL_MS)
+      expect(store.outcome?.phase).toBe('unknown')
+      return store
+    }
+
+    it('服务可达且版本<目标：明示更新未完成仍为旧版本', async () => {
+      // 用户实测案盘面：换包重启后监管者重拉旧版本（idle 无结果文件，buildVersion=旧）
+      const store = await settleUnknown('0.0.1-beta.9', { buildVersion: '0.0.1-beta.8' })
+      expect(store.outcome).toMatchObject({ serverSeen: true })
+      expect(store.unknownStillOld).toBe(true)
+    })
+
+    it('服务不可达（失联收口）：回落通用文案不误报', async () => {
+      const store = await settleUnknown('0.0.1-beta.9', 'unreachable')
+      expect(store.outcome).toMatchObject({ serverSeen: false })
+      expect(store.unknownStillOld).toBe(false)
+    })
+
+    it('服务可达且版本已新（结果文件迟到）：回落通用文案', async () => {
+      const store = await settleUnknown('0.0.1-beta.9', { buildVersion: '0.0.1-beta.9' })
+      expect(store.unknownStillOld).toBe(false)
+    })
+
+    it('目标版本不可解析（中心链 version="center"）：回落通用文案', async () => {
+      const store = await settleUnknown('center', { buildVersion: '0.0.1-beta.8' })
+      expect(store.unknownStillOld).toBe(false)
+    })
   })
 
   it('下载阶段长时间进行不触发放弃判定', async () => {

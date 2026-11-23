@@ -65,7 +65,10 @@ ReadWritePaths=/var/lib/codecombo
 PrivateTmp=false
 # KillMode=process 只杀主进程：脱管的 tmux server（含其中的智能体进程）
 # 随服务重启存活，重启后终端可重新 attach；默认 control-group 会整组清扫，
-# "终端会话重启存活"即失效。注意： systemctl stop 不会再杀 tmux 子进程，
+# "终端会话重启存活"即失效。同键还保护应用内更新的换包子进程：主进程交接
+# 退出时默认 control-group 会把它一并清理（静默失败形态，与 macOS launchd
+# 组杀同构，P-20261122-7）——自建 unit 必须保留本键。
+# 注意： systemctl stop 不会再杀 tmux 子进程，
 # 需彻底清理时执行 tmux -L codecombo kill-server（旧部署是 tmux -L simple-coding）
 KillMode=process
 
@@ -510,6 +513,7 @@ plist 模板（`launchctl load` 生效）：
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>AbandonProcessGroup</key><true/>
 </dict></plist>
 ```
 
@@ -523,12 +527,24 @@ launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 注意：Darwin 版本需在 mac 上构建（`./build.sh`）；升级同样先 `launchctl unload`
 再替换二进制。
 
-应用内自更新在 launchd 形态的行为（P-20261112-1）：换包完成后更新子进程
-不另起进程，由上述 plist 的 `KeepAlive` 自动拉起新版本；更新健康等待为活
-性驱动（P-20261116-1，恢复再慢都等、不设时间死线——PID 基线播种防起点死
-旧 PID 误判、PID 连续变化 ≥2 判崩溃循环秒级回滚、10 分钟失控兜底）——
-回滚时先恢复旧二进制再按数据目录 PID 文件结束重拉进程，KeepAlive 随即拉
-回旧版本（无需手动 `launchctl` 收尾；各形态差异总表见 README「升级」节）。
+应用内自更新在 launchd 形态的行为（P-20261112-1 / P-20261122-6）：换包完成后
+更新子进程不另起进程，由上述 plist 的 `KeepAlive` 自动拉起新版本；但 KeepAlive
+只在进程退出时重拉，换包窗口它已无条件重拉起**旧二进制**并占住端口——故换包
+后更新子进程会先终结该旧实例（SIGTERM 优雅关停，约一次短暂闪断；等不到退出
+则 SIGKILL），再由 KeepAlive 拉起新版本；旧实例常驻时新版永远上不了线（此前
+症状为「等待新版本就绪」卡住或闪断后仍是旧版本）。更新健康等待为活性驱动
+（P-20261116-1，恢复再慢都等、不设时间死线——PID 基线播种防起点死旧 PID 误判、
+PID 连续变化 ≥2 判崩溃循环秒级回滚、10 分钟失控兜底），且成功判据要求
+`/api/health` 通过 **且** PID 文件第五行版本号等于目标版本（旧版本实例不写该行
+=天然可分辨）；回滚时先恢复旧二进制再由 KeepAlive 拉回旧版本（无需手动
+`launchctl` 收尾；各形态差异总表见 README「升级」节）。进程组清理面
+（P-20261122-7）：launchd 在 job 主进程死亡时会 best-effort 清理**同一进程组**
+的剩余进程（launchd.plist(5)）——换包子进程默认与主进程同组，主进程交接退出后
+会连同被清理、活不到写 `update.log`（mac 在线升级静默失败的代码层根因）。两层
+修复：①上述模板的 `AbandonProcessGroup=true`（launchd 层放手，**与二进制版本
+无关**——≤beta.9 的实例重跑装脚本/重新远程部署写回该键即生效）；②beta.10 起
+换包子进程 spawn 时 Setpgid 脱组（二进制层，bare/前台形态同受益）。自建 plist
+漏写该键时 ≤beta.9 二进制仍会复现组杀，beta.10+ 由 Setpgid 兜底。
 
 ## 7. 故障速查
 
@@ -540,7 +556,9 @@ launchctl load ~/Library/LaunchAgents/com.codecombo.plist
 | 设密 429 | 同 IP 限流中 | 60s 后重试 |
 | `Text file busy` | 运行中覆盖二进制 | 先 `systemctl stop` 再替换（§6c） |
 | `systemctl status` 显示 `status=203/EXEC`，服务反复重启失败 | systemd 无法执行 ExecStart 指向的二进制 | `journalctl -u codecombo -n 30 --no-pager` 看 "Failed to execute" 后的具体错误：`Permission denied`=缺 exec 位（`chmod 0755 <bin>`）/ SELinux 标签（`restorecon -v <bin>`，§5）/ 二进制所在挂载点 noexec；`Exec format error`=架构不符或文件不完整（拿错资产/下载中断——对体积与 SHA256，§6c）；`No such file or directory`=ExecStart 路径不对（对照 `systemctl cat codecombo` 与 `ls -l`；动态链接库缺失时同样报此错，本产品发布二进制为静态链接，出现该错优先查路径） |
-| 应用内自更新后 203/EXEC **且 ExecStart 路径二进制消失**，update.log 末尾见 `rolled_back` | 在线更新误回滚 + 回滚丢文件的组合缺陷（**P-20261116-1 修复前版本**：15s 健康死线把慢恢复〔如大量会话恢复〕误判为新版本失败而回滚，回滚又先删后 rename 留路径空窗且失败被静默吞——现行版本已活性驱动等待 + 回滚防丢失窗三步序根治，不再产生此盘面） | 恢复：重跑 install.sh（§6b）或手工配方（§6c）把二进制装回 ExecStart 路径后 `systemctl start`；诊断：数据目录 `logs/update.log`（更新决策时间线）——结案行 `case closed: ExecStart path …` 即盘面快照（存在/权限/大小，`ABSENT`=文件确丢），配合每 10s 健康等待证据行可完整还原事故链；注意 `logs/update-restart.log` 只是 bare 重启形态的进程输出（systemd 形态进程输出走 journal、该文件不会创建），追更新决策勿翻错文件——两文件头注即职责说明 |
+| 应用内自更新后 203/EXEC **且 ExecStart 路径二进制消失**，update.log 末尾见 `rolled_back` | 在线更新误回滚 + 回滚丢文件的组合缺陷（**P-20261116-1 修复前版本**：15s 健康死线把慢恢复〔如大量会话恢复〕误判为新版本失败而回滚，回滚又先删后 rename 留路径空窗且失败被静默吞——现行版本已活性驱动等待 + 回滚防丢失窗三步序根治，不再产生此盘面） | 恢复：重跑 install.sh（§6b）或手工配方（§6c）把二进制装回 ExecStart 路径后 `systemctl start`；诊断：数据目录 `logs/update.log`（更新决策时间线）——结案行 `case closed: ExecStart path …` 即盘面快照（存在/权限/大小，`ABSENT`=文件确丢），配合每 10s 健康等待证据行可完整还原事故链。**追更新问题勿翻错文件（P-20261122-9 三文件职责表）**：`update.log`=更新决策时间线；`update-subprocess.log`=换包子进程 stdout/stderr（initLogger 之前的 runtime/迁移/panic 字节）+ 父进程活性裁决行（`[parent] handshake failed pid=… outcome=exited(<state>)/alive but silent`，`.1`=上一次）；`update-restart.log`=换包成功后重启进程的 stdio（**仅** bare/守护形态；systemd 形态进程输出走 journal、该文件不会创建）。三文件头注即职责说明，互不并入是判别式的前提 |
+| 服务启动即退出/反复重启，且想知道「为什么死的」 | 启动期致命路径（数据目录迁移拒绝等）发生在日志系统就绪之前；launchd/SCM 形态 stderr 不落盘 | 先看 `logs/codecombo-YYYY-MM-DD.log`（启动期致命退出由 main 的 bootstrap 写入口落当天文件）；数据目录不可写/不存在时回落系统临时目录的 `codecombo-bootstrap.log`（Linux `/tmp`、mac `$TMPDIR`），stderr 会打印该路径。进程级崩溃（非主 goroutine panic、fatal runtime error）看 `logs/crash.log`（启动 >1MiB 轮转 `.1`）；systemd 形态另看 `journalctl -u codecombo -n 50 --no-pager`。诚实边界：SIGKILL/无 recover 的 C 层崩溃不可捕获 |
+| 想看更详细的日志（诊断短窗） | 默认级别 info，Debug 日志默认不可见 | `CC_LOG_LEVEL=debug` 进 unit 的 `Environment=` 后 `systemctl restart codecombo`（临时可前台 `CC_LOG_LEVEL=debug <bin> --serve -p 9999`）；生效值见 `GET /api/selfcheck` version 条目尾缀 `log=<level>`。诊断模式请短窗开启：watch/dropstats 类子系统会明显放大日志量 |
 | `systemctl status` 的 Memory 远大于 `free` 的 used | cgroup 记账含 page cache：tmux/claude 等子进程读写的工作区文件缓存都记在此 cgroup（§3 KillMode=process 下子进程留在组内），并非真实占用 | 正常现象；验证构成：`grep -E '^(anon\|file) ' /sys/fs/cgroup/system.slice/simple-coding.service/memory.stat`，anon=进程真实内存，file=可回收缓存 |
 
 ## 8. TLS 慢（深度检测网络）：明文伴随端口

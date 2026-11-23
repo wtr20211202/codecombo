@@ -67,6 +67,7 @@ const (
 	AuditShareWritableInput  = "share.writableInput"      // 访客输入键入批次·统一单事件（P-20261106-8，P-20261121-1 起 share.direct.input 批次并入本键：Detail 加 mode=open|hold 分档授权模式；quickdrop 同口径只记长度/visitorId 摘要/IP 元数据，文本不入账；camelCase 扁平键沿 retiredHit 先例——嵌套点分键会与可写开关动作的 locale 树冲突）
 	AuditShareWritablePaste  = "share.writablePaste"      // 可写分享粘贴审批（P-20261106-8；Detail 记批准/拒绝/超时决策与模式摘要元数据，粘贴块不入账）
 	AuditShareWritableResize = "share.writableResize"     // 可写分享访客视口 resize（P-20261120-8；Detail 记目标尺寸/visitor 摘要/IP 元数据——与可写输入同口径不入敏感账，camelCase 扁平键同款理由）
+	AuditSharePasteUpload    = "share.pasteUpload"        // 可写分享访客粘贴上传落盘（P-20261122-1；Detail 记分享/净化名/大小/visitor 摘要/IP/会话元数据，内容不入账——quickdrop 同口径；camelCase 扁平键同款理由）
 	AuditWorkspaceExport     = "workspace.export"         // 工作区状态备份导出
 	AuditClaudeExport        = "claude.export"            // Claude 会话导出 Markdown（数据出域）
 	AuditClaudeBatchZip      = "claude.export_batch"      // Claude 会话批量导出 zip（多选归档，数据出域）
@@ -98,6 +99,7 @@ const (
 	AuditGitChangelistDelete = "git.changelist.delete"    // 变更列表删除（P-20261007-19）
 	AuditGitChangelistShelve = "git.changelist.shelve"    // 变更列表搁置（stash --cached 同链，P-20261007-19）
 	AuditLogExport           = "audit.export"             // 审计日志 CSV 导出（窗口全量出域留档）
+	AuditDiagnosticsExport   = "diagnostics.export"       // 诊断包导出（P-20261122-10：日志原文+运行态出域留档；Detail 只记字节/条目/天数/遮蔽开关元数据）
 	AuditLogArchive          = "audit.archive"            // 审计窗口滚动自动归档（过期前转 CSV 落 artifacts，P-20261003-277）
 	AuditApprovalExport      = "approval.export"          // 审批裁决历史 CSV 导出（P-20261003-247，裁决留档出域）
 	AuditApprovalMode        = "approval.mode"            // 审批档位变更（P-20261005-162 三写点：设置页 PUT / 审批卡 resolve / 24h 到期巡检回 ask——安全姿态变化可追认）

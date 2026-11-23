@@ -13,7 +13,7 @@ import (
 // web/node_modules 不入 git——唯一落点是随 Go 二进制 embed 的提交态副本。
 // 只 serve 白名单精确名，目录本身不暴露列表
 //
-//go:embed assets/xterm.js assets/addon-fit.js assets/xterm.css assets/addon-unicode11.js assets/JetBrainsMono-Regular.woff2 assets/JetBrainsMono-Bold.woff2
+//go:embed assets/xterm.js assets/addon-fit.js assets/xterm.css assets/addon-unicode11.js assets/addon-web-links.js assets/addon-search.js assets/addon-webgl.js assets/addon-image.js assets/JetBrainsMono-Regular.woff2 assets/JetBrainsMono-Bold.woff2
 var assetsFS embed.FS
 
 // vendoredAsset 白名单条目：名称 + 响应 Content-Type（单一事实源，同时供
@@ -28,6 +28,12 @@ var vendoredAssets = []vendoredAsset{
 	{name: "addon-fit.js", contentType: "application/javascript; charset=utf-8"},
 	{name: "xterm.css", contentType: "text/css; charset=utf-8"},
 	{name: "addon-unicode11.js", contentType: "application/javascript; charset=utf-8"},
+	// P-20261122-1 观看侧四件（web-links/search/webgl/image——直播页通用挂载
+	// 或条件挂载，见 termpage.go/writablepage.go；与 xterm 同仓同提交）
+	{name: "addon-web-links.js", contentType: "application/javascript; charset=utf-8"},
+	{name: "addon-search.js", contentType: "application/javascript; charset=utf-8"},
+	{name: "addon-webgl.js", contentType: "application/javascript; charset=utf-8"},
+	{name: "addon-image.js", contentType: "application/javascript; charset=utf-8"},
 	{name: "JetBrainsMono-Regular.woff2", contentType: "font/woff2"},
 	{name: "JetBrainsMono-Bold.woff2", contentType: "font/woff2"},
 }

@@ -47,11 +47,14 @@ func stopWindowsService() error {
 	return exec.Command("sc.exe", "stop", windowsServiceName).Run()
 }
 
-// daemonProcAttr bare/前台形态 spawn 的进程属性：与 main 包 setDaemonAttrs
-// （daemon_windows.go）同款——CREATE_NO_WINDOW 让守护进程获得独立隐藏控制台，
-// 脱离启动它的终端窗口生命周期（仅 CREATE_NEW_PROCESS_GROUP 时守护进程仍挂接
-// 父控制台，关窗即收到 CTRL_CLOSE_EVENT）；不用 DETACHED_PROCESS（完全无控制台
-// 的进程派生控制台子进程时每个子进程各弹一个新窗口）
+// daemonProcAttr bare/前台形态 + 换包子进程 spawn 的进程属性：与 main 包
+// setDaemonAttrs（daemon_windows.go）同款——CREATE_NO_WINDOW 让守护进程获得
+// 独立隐藏控制台，脱离启动它的终端窗口生命周期（仅 CREATE_NEW_PROCESS_GROUP
+// 时守护进程仍挂接父控制台，关窗即收到 CTRL_CLOSE_EVENT）；不用
+// DETACHED_PROCESS（完全无控制台的进程派生控制台子进程时每个子进程各弹一个
+// 新窗口）。换包子进程侧无 launchd 组清理等价语义（Windows 服务形态子进程
+// 本就活得过父进程自退，P-20261112-1-S2 实锚），该属性在此只提供终端信号
+// 隔离，无行为回归面
 func daemonProcAttr() *syscall.SysProcAttr {
 	// 0x08000000 = CREATE_NO_WINDOW（syscall 包未定义该常量，main 包
 	// daemon_windows.go 同款字面量口径）

@@ -68,8 +68,10 @@ package share
 //     门会话）。
 //   - 上行限流新定档（令牌桶）：连接级 40 帧/秒持续 / 120 帧瞬发 + token
 //     全局 120 帧/秒持续 / 240 帧瞬发（≤ MaxWritersPerToken 条连接的合计
-//     护栏），单帧 16KiB 读上限——防 PTY 刷屏；触限帧丢弃并回
-//     input_throttled 控制帧（访客侧提示「输入太快」）。
+//     护栏）+ **连接级字节桶**（1MiB/s 持续 / 2MiB 瞬发，P-20261122-18 ⑤），
+//     单帧 1MiB 读上限（与主人端同参）——帧桶管帧数、字节桶管字节量，防
+//     PTY 刷屏；触限帧整帧丢弃并回 input_throttled 控制帧（访客侧提示
+//     「输入太快」）。
 //   - 断连语义：**开放直入 WS 断开即释放连接**（末条开放连接断开即经账本
 //     解除会话输入闸，owner 键盘即时归还——方向安全的取态；可写键入没有
 //     可恢复的队列态，重连即重新接入并重过全部门禁）。**申请批准路径的
@@ -129,15 +131,28 @@ const (
 	// 观看不受影响）。导出常量：管理面响应投影与文档共用同一取值
 	MaxWritersPerToken = 3
 
-	// wsUpFrameMaxBytes 单帧字节读上限（16KiB）：键入单帧（含 IME 成句）
-	// 远低于此，容纳大粘贴块；超限 gorilla 自动 1009 关闭——与「粘贴走
-	// 整块预检」的协议面一致，超大块不该从帧边界悄悄漏过
-	wsUpFrameMaxBytes = 16 << 10
+	// wsUpFrameMaxBytes 单帧字节读上限（1MiB，P-20261122-18 ⑤）：与主人端
+	// WSReadLimitInput 同参（server/api/shared/ws.go）。xterm.onData 把一次
+	// 粘贴整块交给一个 WebSocket 帧——旧值 16KiB 下大段文本粘贴（长命令/
+	// 日志/代码块）超限即被 gorilla 以 1009 关闭，访客只看到断桥、内容
+	// 丢失。上限之下另设连接级**字节桶**（wsUpConnByteRate/Burst）做速率面
+	// 收口；明确不做客户端分片：分片会让一条危险命令跨帧逃过 commandrisk
+	// 预检（服务端按单帧 ≥WritablePasteReviewBytes 或含换行判定），并让
+	// 帧桶丢弃无 ACK 的分片造成 PTY 收到缺块命令（半条命令比不执行更危险）
+	wsUpFrameMaxBytes = 1 << 20
 
 	// 连接级帧率令牌桶（帧/秒）：人类键入 ≤15 帧/秒，粘贴是少量大帧；
 	// 40/120 对真实交互零误伤，防的是脚本灌帧
 	wsUpConnFrameRate  = 40
 	wsUpConnFrameBurst = 120
+
+	// 连接级字节桶（字节/秒，P-20261122-18 ⑤）：帧率桶只管「帧数」，1MiB
+	// 帧上限放开后单帧可携大量字节——两桶并行才封住「少量超大帧刷屏」。
+	// 1MiB/s 持续 + 2MiB 突发：人类粘贴（含连按 Ctrl+V）远低于此，大文件
+	// 走 REST upload 不占本桶；超限整帧丢弃并回 input_throttled（PTY 输入流
+	// 没有「部分注入」的安全语义）
+	wsUpConnByteRate  = 1 << 20
+	wsUpConnByteBurst = 2 << 20
 
 	// token 全局帧率令牌桶：≤ MaxWritersPerToken 条连接的合计护栏
 	//（连接级桶相加的理论上限已封顶，全局桶防未来连接数上调后的合流刷屏）
@@ -182,10 +197,13 @@ const (
 	// 兜底防 PSReadLine banner 重发污染，terminal/manager.go Resize 注记）
 	wsResizeMergeWindow = 500 * time.Millisecond
 
-	// 访客上报尺寸的服务端钳制域（评审必改3）：与主人侧前端初连 resize 的合法
-	// 域（useTerminalSession cols≥20/rows≥2）和访客页栅格钳制（termpage setHost
-	// cols≤500/rows≤300）对齐——两端同域则应用值恒等于请求值，不产生钳制差振荡
-	writableResizeMinCols = 20
+	// 访客上报尺寸的服务端钳制域（评审必改3）：与访客页栅格钳制（termpage
+	// setHost cols≤500/rows≤300）对齐——两端同域则应用值恒等于请求值，不产生
+	// 钳制差振荡。**cols 下限 80（P-20261122-16 ⑤）**：访客视口算出 <80 列时
+	// 前端直接不反喂（手机硬喂窄列只会把主人终端压成窄条+访客页横滚），服务端
+	// 同域钳制是直连 WS 绕过的兜底；**只动访客路径**——Session.Resize 全局与
+	// 主人侧 PUT resize 的 ≥20 下限不受影响（主人自己可以要窄终端）
+	writableResizeMinCols = 80
 	writableResizeMaxCols = 500
 	writableResizeMinRows = 2
 	writableResizeMaxRows = 300
@@ -206,13 +224,19 @@ type WritableSink interface {
 
 // WritableResizer 可写视口 resize 落点（可选装配，P-20261120-8——与 WritableSink
 // 分面注入：resize 权随可写让渡，但落点能力独立（测试桩不必实现；nil = resize
-// 帧静默忽略，键入链零影响）。装配层桥 terminal.Session.Resize 与 TmuxExternal
-// 判定，本包不 import terminal）
+// 帧静默忽略，键入链零影响）。装配层桥 terminal.Session.Resize 与
+// TmuxExternal/owner 附着判定，本包不 import terminal）
 type WritableResizer interface {
-	// WritableResizeAllowed 会话是否允许访客视口 resize：TmuxExternal 外部接管
-	// 会话禁用（评审必改4——真机 tmux 客户端的 window-size 交互未定义，访客改格
-	// 会与用户本机 tmux 客户端互相踩踏）；会话不在同禁（apply 路径按会话不在收场）
-	WritableResizeAllowed(sessionID string) bool
+	// WritableResizeDenyReason 会话是否允许访客视口 resize（P-20261122-16 ④，
+	// 由 P-20261120-8 的 bool 准入升级为可观测原因）：空串 = 允许；非空 =
+	// 拒绝原因，随 resize_denied 帧下发给访客页据此回落/退避：
+	//   - "external_session" 外部接管会话（TmuxExternal，真机 tmux 客户端
+	//     window-size 交互未定义，访客改格会与其互相踩踏）——驱动停用不重试；
+	//   - "owner_active"     主人在本机有交互客户端附着（owner 的 xterm 不随
+	//     PTY 改格重排，访客反喂会让主人视图错位）——30s 退避后重试，画布
+	//     以主机为准；
+	//   - "session_missing"  会话不在（落点会报错，原因面在准入口如实区分）
+	WritableResizeDenyReason(sessionID string) string
 	// WritableResize 调整锚定会话 PTY 尺寸（语义=视口反喂，rows×cols 与
 	// terminal.Session.Resize 同序）。不判 directInputHold——闸拦的是键入方向
 	// （owner 键盘让位），画布尺寸是可写让渡面的一部分
@@ -233,11 +257,16 @@ type WritableResizeEvent struct {
 }
 
 // pendingResize 合并窗内的一段待应用 resize（token 键一条，last-write-wins；
-// timer 到期由 fireWritableResize 取走应用）
+// timer 到期由 fireWritableResize 取走应用）。open/visitorID 是提交时点的
+// 授权身份定格（P-20261122-17）：fire 前复核——open 需仍有开放连接且记录
+// 仍开着 Writable，hold 需持权仍绑同一 visitorId；否则整段丢弃（授权物收回
+// 后旧 resize 不得再落到 PTY——收回后 500ms 内仍应用旧值是与 P-20261120-8
+// 语义相悖的窗口）
 type pendingResize struct {
 	cols, rows uint16
 	visitorID  string
 	ip         string
+	open       bool
 	timer      *time.Timer
 }
 
@@ -298,16 +327,18 @@ type pendingPaste struct {
 // conn/bucket/open 在接入时定格，此后只读；audit* 走自身 mu）。open =
 // 接入时点的授权模式定格（true=开放直入 sh.Writable；false=申请批准——
 // 两开关独立不互斥，字段翻转不断开既有连接，本连接的键入资格判定按定格
-// 模式走）
+// 模式走）。byteBucket 是连接级字节桶（P-20261122-18 ⑤）——帧桶的字节
+// 维度并行闸，接入时建、随连接消亡
 type writableConn struct {
-	token     string
-	sessionID string
-	visitorID string
-	nick      string
-	ip        string
-	conn      *wssafe.Conn
-	bucket    *tokenBucket
-	open      bool
+	token      string
+	sessionID  string
+	visitorID  string
+	nick       string
+	ip         string
+	conn       *wssafe.Conn
+	bucket     *tokenBucket
+	byteBucket *tokenBucket
+	open       bool
 
 	// audit 聚合器（5s 窗口一条批次事件，断开兜底冲一次——粒度见
 	// pasteAuditWindow 注记）
@@ -323,10 +354,11 @@ type writableConn struct {
 	lastResize time.Time
 }
 
-// tokenBucket 令牌桶（帧率限流的最小实现）：middleware.RateLimiter 是滑窗
-// 事件计数（访客 HTTP 面语义），帧率闸需要「持续速率 + 瞬发余量」的桶
-// 语义，就地 30 行实现不引依赖（passgate 复用 RateLimiter 的先例针对的
-// 是「次数」维度，本处是「速率」维度，不可同构套用）
+// tokenBucket 令牌桶（速率限流的最小实现）：middleware.RateLimiter 是滑窗
+// 事件计数（访客 HTTP 面语义），帧率/字节闸需要「持续速率 + 瞬发余量」的桶
+// 语义，就地 40 行实现不引依赖（passgate 复用 RateLimiter 的先例针对的
+// 是「次数」维度，本处是「速率」维度，不可同构套用）。令牌单位由调用方
+// 定义：帧桶 1 枚 = 1 帧（allow），字节桶 1 枚 = 1 字节（allowN）
 type tokenBucket struct {
 	mu     sync.Mutex
 	rate   float64 // 每秒补充令牌
@@ -339,18 +371,28 @@ func newTokenBucket(rate, burst int, now time.Time) *tokenBucket {
 	return &tokenBucket{rate: float64(rate), burst: float64(burst), tokens: float64(burst), last: now}
 }
 
-// allow 取一枚令牌；桶空 = 本帧触限（调用方丢弃帧并回告）
-func (b *tokenBucket) allow(now time.Time) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (b *tokenBucket) refillLocked(now time.Time) {
 	if d := now.Sub(b.last).Seconds(); d > 0 {
 		b.tokens = min(b.burst, b.tokens+d*b.rate)
 		b.last = now
 	}
-	if b.tokens < 1 {
+}
+
+// allow 取一枚令牌；桶空 = 本帧触限（调用方丢弃帧并回告）
+func (b *tokenBucket) allow(now time.Time) bool {
+	return b.allowN(now, 1)
+}
+
+// allowN 取 n 枚令牌（字节桶用：n = 本帧字节数）。不足则**不消耗**直接
+// 拒绝——调用方整帧丢弃，不回补半份（PTY 输入无部分注入语义）
+func (b *tokenBucket) allowN(now time.Time, n float64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.refillLocked(now)
+	if b.tokens < n {
 		return false
 	}
-	b.tokens--
+	b.tokens -= n
 	return true
 }
 
@@ -368,6 +410,13 @@ var wsUpgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
 	u, err := url.Parse(origin)
 	return err == nil && u.Host == r.Host
 }}
+
+// shareWSReadTimeout 可写上行 WS 读超时（P-20261122-17）：对照主人终端 WS
+// 的 60s 读超时 + pong 续期（api/terminal ws_attach）。半开连接（休眠/拔网
+// 线，TCP 层不报错）会让读循环永久阻塞，开放连接在场使 "ws:" 闸来源滞留、
+// owner 键盘被永久让位。只解决半开检测，不替代 direct 授权闸（持权时效
+// 独立）。var 仅供测试注入 1s 短窗钉住语义（replayChunkDeadline 同款）
+var shareWSReadTimeout = 60 * time.Second
 
 // writableHub 可写上行状态机（Service 持有一枚）：连接表（token → conns）+
 // 待批粘贴面（pasteID 键全局表）+ token 全局帧率桶 + 视口 resize 合并窗
@@ -597,7 +646,8 @@ func (h *writableHub) tokensOf() []string {
 //	                                        点推送，见 direct.go）
 //	  {"type":"direct_revoked","reason":r}  本访客持权被收回/过期/关通道
 //	                                        （连接将关闭，可重新申请）
-//	  {"type":"input_throttled"}       帧率触限，本帧已丢弃（访客侧提示稍候）
+//	  {"type":"input_throttled"}       帧率/字节桶触限，本帧已丢弃（整帧语义，
+//	                                        访客侧提示稍候）
 //	  {"type":"input_denied","reason":"no_hold"}  申请批准连接无持权键入帧
 //	                                        被拒（客户端应停发——服务端仍兜底）
 //	  {"type":"paste_review","id":p}   粘贴命中 danger，待 owner 审批（未注入）
@@ -606,8 +656,11 @@ func (h *writableHub) tokensOf() []string {
 //	  {"type":"resize_applied","cols","rows"}  视口 resize 已应用（P-20261120-8，
 //	                                           诚实回执——SSE resize 帧 ≤1s
 //	                                           到达同值对账）
-//	  {"type":"resize_denied","reason":r}      视口 resize 被拒（r=external_
-//	                                           session 外部接管会话禁用）
+//	  {"type":"resize_denied","reason":r}      视口 resize 被拒（P-20261122-16：
+//	                                           r=owner_active 主人本机有交互
+//	                                           客户端附着/以主机为准；r=
+//	                                           external_session 外部接管会话
+//	                                           禁用；r=session_missing 会话不在）
 //	  {"type":"ended"}                 会话已关（锚定终端不在，连接将关闭）
 //	  {"type":"writable_off"}          主人已关闭开放直入（仅开放连接收到，
 //	                                   连接将关闭，回落只读观看；申请批准
@@ -644,16 +697,26 @@ func (s *Service) handleTermWS(w http.ResponseWriter, r *http.Request) {
 	}
 	rawConn.SetReadLimit(wsUpFrameMaxBytes)
 	conn := wssafe.New(rawConn)
+	// 读超时 + pong 续期（P-20261122-17，与主人终端 WS 同口径）：StartPing
+	// 发出的 ping 由对端 pong 续期；无 pong（半开/死端）至多 60s 即退出读
+	// 循环，defer 释放 ws 闸来源。脚本客户端不自动 pong 会在空闲 60s 后被
+	// 断开——诚实边界（协议层活跃检测），重连即恢复
+	_ = rawConn.SetReadDeadline(time.Now().Add(shareWSReadTimeout))
+	rawConn.SetPongHandler(func(string) error {
+		_ = rawConn.SetReadDeadline(time.Now().Add(shareWSReadTimeout))
+		return nil
+	})
 
 	c := &writableConn{
-		token:     sh.Token,
-		sessionID: sh.TerminalID,
-		visitorID: visitorID,
-		nick:      sanitizeGuestNickname(r.URL.Query().Get("nickname")),
-		ip:        clientIPOf(r),
-		conn:      conn,
-		bucket:    newTokenBucket(wsUpConnFrameRate, wsUpConnFrameBurst, time.Now()),
-		open:      open,
+		token:      sh.Token,
+		sessionID:  sh.TerminalID,
+		visitorID:  visitorID,
+		nick:       sanitizeGuestNickname(r.URL.Query().Get("nickname")),
+		ip:         clientIPOf(r),
+		conn:       conn,
+		bucket:     newTokenBucket(wsUpConnFrameRate, wsUpConnFrameBurst, time.Now()),
+		byteBucket: newTokenBucket(wsUpConnByteRate, wsUpConnByteBurst, time.Now()),
+		open:       open,
 	}
 	openFirst, ok := s.writable.addConn(c, time.Now())
 	if !ok {
@@ -666,8 +729,10 @@ func (s *Service) handleTermWS(w http.ResponseWriter, r *http.Request) {
 		s.flushConnAudit(c, true)
 		if c.open && openRemain == 0 {
 			// 末条开放连接断开：账本摘除 ws 来源（另一模式来源在场则闸保持
-			// ——gateLedger 注记）+ 输入中广播摘除。回调均锁外执行
-			s.gateRelease(sh.TerminalID, "ws:"+sh.Token)
+			// ——gateLedger 注记）+ 输入中广播摘除。按来源释放（P-20261122-17：
+			// 记录可能已撤销/轮换，会话锚点不可靠；ws 来源的唯一在场依据
+			// 就是开放连接数）。回调均锁外执行
+			s.gateReleaseSource("ws:" + sh.Token)
 			s.emitWritableTyping(sh, 0, false)
 		}
 	}()
@@ -727,6 +792,13 @@ func (s *Service) handleTermWS(w http.ResponseWriter, r *http.Request) {
 		// 回告让访客侧主动降速
 		tb := s.writable.tokenBucketOf(c.token)
 		if !c.bucket.allow(now) || tb == nil || !tb.allow(now) {
+			s.writeControl(c, "input_throttled", nil)
+			continue
+		}
+		// 字节桶（P-20261122-18 ⑤）：帧桶放开了 1MiB 单帧，字节维度必须
+		// 并行收口——按本帧字节数取令牌，不足整帧丢弃并回告（与帧桶同语义：
+		// 不做部分注入；不做客户端分片，见 wsUpFrameMaxBytes 注记）
+		if !c.byteBucket.allowN(now, float64(len(msg))) {
 			s.writeControl(c, "input_throttled", nil)
 			continue
 		}
@@ -812,9 +884,10 @@ func (s *Service) handleTextControl(sh *store.Share, c *writableConn, msg []byte
 				return
 			}
 		}
-		// 服务端钳制（访客上报值不可信）：钳到主人终端同款合法域（与前端
-		// useTerminalSession 初连 resize 的 ≥20/≥2 门槛和访客页栅格 ≤500/≤300
-		// 逐字对齐——两端同域防钳制差振荡）
+		// 服务端钳制（访客上报值不可信）：钳到访客路径合法域（cols ≥80 /
+		// rows ≥2，上限 500/300 与访客页栅格钳制逐字对齐——两端同域防钳制差
+		// 振荡；cols 下限 80 见 writableResizeMinCols 注记，主人 PUT 的 20
+		// 下限不走本路径）
 		cols := uint16(max(writableResizeMinCols, min(writableResizeMaxCols, int(fr.Cols))))
 		rows := uint16(max(writableResizeMinRows, min(writableResizeMaxRows, int(fr.Rows))))
 		// conn 级独立节流（≥1s）：与键入帧率桶分离——控制面低频指令不该也不需要
@@ -853,6 +926,7 @@ func (s *Service) scheduleWritableResize(sh *store.Share, c *writableConn, cols,
 		s.writable.resizes[c.token] = st
 	}
 	st.cols, st.rows, st.visitorID, st.ip = cols, rows, c.visitorID, c.ip
+	st.open = c.open
 	if st.timer != nil {
 		// 窗口已在跑：只覆盖 pending，定时器不动（trailing debounce 语义）
 		s.writable.mu.Unlock()
@@ -864,7 +938,8 @@ func (s *Service) scheduleWritableResize(sh *store.Share, c *writableConn, cols,
 
 // fireWritableResize 合并窗到期：应用 pending 的最终尺寸（last-write-wins 的
 // 收口）。落点未装配（测试/降级）或记录已撤销/过期时静默丢弃——resize 是幂
-// 等指令，访客侧下一次视口变化自然重发；应用成功即广播 resize_applied 回执
+// 等指令，访客侧下一次视口变化自然重发；**应用前复核准入**（P-20261122-16 ④）
+// 拒绝即下发 resize_denied 原因、零应用；应用成功即广播 resize_applied 回执
 // + 审计入账（元数据口径：尺寸/visitor 摘要/IP——新增指令类型不入敏感值账）
 // + sc-ops:share.wresize（owner 侧最小可见性，评审必改5）
 func (s *Service) fireWritableResize(token string) {
@@ -884,10 +959,28 @@ func (s *Service) fireWritableResize(token string) {
 	if err != nil || sh.Kind != store.ShareKindTerminal || sh.TerminalID == "" {
 		return
 	}
-	if !s.writableResizer.WritableResizeAllowed(sh.TerminalID) {
-		// 外部接管会话（TmuxExternal）禁用访客 resize（评审必改4）：诚实回执
-		// 让访客页停用驱动回落保真，不静默丢帧让访客以为是节流
-		s.broadcastControl(token, "resize_denied", map[string]any{"reason": "external_session"})
+	// 应用前复核授权物（P-20261122-17）：合并窗最长 500ms，期间持权可能被
+	// 收回/过期/换人、开放直入可能被关闭或最后一条连接已断——旧 resize 不
+	// 得越过授权物存续时刻生效。hold 路径不要求连接在场（visitorId 恢复
+	// 语义），但要求持权仍绑定提交者
+	now := time.Now()
+	if st.open {
+		if !sh.Writable || s.writable.openCountOf(token) == 0 {
+			return
+		}
+	} else {
+		hold := s.direct.holdOf(token, sh.TerminalID, now)
+		s.flushReleasedHolds(sh) // holdOf 可能触发惰性回收，快照就地收口
+		if hold == nil || st.visitorID == "" || hold.VisitorID != st.visitorID {
+			return
+		}
+	}
+	// 应用前复核准入（P-20261122-16 ④ 二审必改②）：只在收帧时查不够——500ms
+	// 合并窗内 owner 可能刚附着（打开系统内终端）或会话刚被外部接管，窗到期
+	// 照旧改格就会在「主人正看着」的时刻把 PTY 改掉。拒绝原因如实下发，访客页
+	// 据此回落主机栅格（owner_active 30s 退避重试，external_session 停用）
+	if reason := s.writableResizer.WritableResizeDenyReason(sh.TerminalID); reason != "" {
+		s.broadcastControl(token, "resize_denied", map[string]any{"reason": reason})
 		return
 	}
 	if err := s.writableResizer.WritableResize(sh.TerminalID, st.cols, st.rows); err != nil {
@@ -1047,7 +1140,11 @@ func (s *Service) auditPasteExpired(p *pendingPaste) {
 // 撤销/过期/轮换后记录死亡）：全部连接断开（访客面已 404，上行桥不能
 // 残留）。各连接 defer 经账本解除闸+冲审计；待批面广播拒绝；合并窗
 // pending 在全清时摘除（有 hold 连接残留时保留——持权访客的 resize 请求
-// 仍合法）。幂等（无动作返回 false）
+// 仍合法）。幂等（无动作返回 false）。
+// P-20261122-17 纪律：本方法**不显式释放 ws 闸来源**——Close() 只是发起
+// 关闭，读循环退出后的连接 defer 才持有「末条开放连接」原子事实；在关闭
+// 前抢放会让访客键入窗口内的 owner 键盘提前回位。无连接可断的 early-return
+// 交给 ReconcileGates 兜底（ws 来源只在开放连接数为 0 时释放）
 func (s *Service) WritableDown(token string, all bool) bool {
 	s.writable.mu.Lock()
 	set := s.writable.conns[token]

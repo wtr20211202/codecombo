@@ -3030,6 +3030,16 @@ export default {
       pasteDenied: 'Denied — the pasted block was not injected',
       // Viewport-fed resize (P-20261120-8): toast for sc-ops:share.wresize
       resized: 'Visitor resized the "{name}" terminal to {cols}×{rows} (viewport sync)',
+      // Paste upload (P-20261122-1): toast for sc-ops:share.paste-upload;
+      // notify.* are the server-side sensitive-name notification templates
+      // (only sent on sensitive-name hits — per-file notes would be noise)
+      pasteUploaded: 'A visitor uploaded {file} to "{name}" ({nick})',
+      notify: {
+        pasteUpload: {
+          title: 'Visitor paste-uploaded a sensitive-named file',
+          body: '"{name}": {nick} uploaded {file} ({size}) to the host temp directory',
+        },
+      },
     },
     // Retired-link leak watch (P-20261008-2): alert + badge for retired links
     // still being accessed after rotation — a zero-false-positive leak signal;
@@ -3537,6 +3547,9 @@ export default {
       // Server-side readonly gate (P-20261008-17): WS write rejected by the
       // server on taken-over sessions / lock-state sync failure
       rejectedServer: 'Input rejected: session is server-side read-only (taken-over sessions default to read-only); unlock to type',
+      // Share-hold rejection (P-20261122-17): a guest is typing through a
+      // share, so the owner keyboard yields; recover from the share center
+      rejectedShare: 'Input rejected: a guest is typing through a share. Revoke their input or end the share in the share center',
       syncFailed: 'Failed to sync input lock state to the server; local lock state kept',
     },
     backendNativeShort: 'Native',
@@ -4529,6 +4542,8 @@ export default {
     source: 'Source',
     preview: 'Preview',
     sourcePreview: 'Source + Preview',
+    // Draft DB unavailable (P-20261122-13): IndexedDB is unusable in private mode / quota exhaustion, so unsaved drafts cannot be auto-saved — warn once instead of failing silently
+    draftStorageUnavailable: 'Browser storage is unavailable, so unsaved drafts cannot be auto-saved — please save manually before closing',
     // Cursor position badge (P-20261004-141): Ln/Col are universal abbreviations,
     // not i18n'd (same as VS Code); only the selected text and click tip get keys
     cursorPos: {
@@ -5924,6 +5939,8 @@ export default {
     added: 'Remote instance {name} added',
     selfRef: 'Instance URL cannot point to this server itself (the local server)',
     urlCopied: 'Instance URL copied',
+    // Switch failure (P-20261122-13): no more silent stay on the old view when router/context switch throws
+    switchFailed: 'Failed to switch instance, please try again',
     manage: 'Manage Instances',
     testConnection: 'Test Connection',
     testing: 'Testing...',
@@ -6076,6 +6093,11 @@ export default {
       at: 'At: {time}',
       lastOutcome: 'Last update',
       unknownHint: 'The service has not come back for a while, so the result is unknown — check the service status or refresh later',
+      // Unknown outcome, "still on the old version" variant (P-20261122-5): shown
+      // when the service is reachable and running an older version, with a manual
+      // upgrade exit replacing the generic copy
+      unknownStillOld: 'The update did not complete — the service is still running the old version v{version}; this automatic update never took effect',
+      manualUpgrade: 'Download the new version manually from the releases page',
       refreshHint: 'The new version is live; this page still runs the previous UI — refresh to load the new one',
       refreshNow: 'Refresh page',
       // One-click retry on the failed outcome (P-20261110-1-S2): reuses the
@@ -7319,6 +7341,8 @@ export default {
     filterPlaceholder: 'Filter tasks…',
     recentSection: 'Recent',
     noMatch: 'No matching tasks',
+    // Start failure (P-20261122-13): server returned no session id / command-injection WS unreachable — previously silent, leaving an empty terminal
+    startFailed: 'Failed to start task: terminal channel unavailable, please retry',
     source: {
       npm: 'npm scripts',
       make: 'Make targets',
@@ -7712,7 +7736,13 @@ export default {
       noMatch: 'No matching lines',
       loading: 'Loading…',
       loadFailed: 'Failed to read logs — try again',
-      footnote: 'Shows the tail window of recent writes; full files rotate daily under the data directory logs/',
+      // Diagnostics bundle (P-20261122-10 S2a): all-module logs + update chain + platform + runtime in one zip
+      diagExport: 'Export diagnostics',
+      diagTip: 'Bundle all-module logs + update chain + platform info + runtime state (line-masked, credentials excluded); previews the size before downloading',
+      diagStarted: 'Diagnostics download started ({size} of raw logs, smaller once compressed)',
+      diagFailed: 'Diagnostics export failed — click to retry',
+      diagSize: '~{size} · {files} files',
+      footnote: 'Shows the tail window of recent writes; full files rotate daily under the data directory logs/ (the diagnostics bundle takes the whole set)',
     },
     // Disk usage (P-20261002-12): panel card + watchdog notification templates
     disk: {
@@ -8478,6 +8508,7 @@ export default {
         writableInput: 'Visitor typing batch (mode-tagged)',
         writablePaste: 'Writable paste review',
         writableResize: 'Visitor viewport resize',
+        pasteUpload: 'Visitor paste upload',
       },
       workspace: {
         export: 'Export workspace backup',
@@ -8531,6 +8562,9 @@ export default {
         export: 'Export audit CSV',
         prune: 'Audit capacity prune (automatic)',
         archive: 'Audit auto-archive (system)',
+      },
+      diagnostics: {
+        export: 'Export diagnostics bundle',
       },
       approval: {
         export: 'Export decision history CSV',

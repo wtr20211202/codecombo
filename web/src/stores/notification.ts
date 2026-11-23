@@ -101,7 +101,8 @@ export const useNotificationStore = defineStore('notification', () => {
           remountIds.add(n.id)
         }
       } catch {
-        // 非 JSON 消息忽略
+        // silent-by-design: 非 JSON 消息是 WS 协议噪声，忽略；断线/长退避
+        // 另有 addLocal 显式入账（backendDisconnected / wsMessageTooBig）
       }
     },
     onOpen: (attempts) => {
@@ -337,7 +338,7 @@ export const useNotificationStore = defineStore('notification', () => {
           const name = path.split('/').pop() || 'download'
           triggerDirectDownload(projectFileDownloadUrl(projectId, path), name)
         }
-      } catch { /* 非 JSON 载荷静默忽略 */ }
+      } catch { /* silent-by-design: actionPayload 是服务端写入的历史载荷，畸形（旧版/伪造）时落点未知——不猜动作也不弹无行动价值的提示 */ }
       return
     }
     // 版本面板（P-20261109-10 自更新开始/失败/回滚通知「查看详情」）：设置弹窗

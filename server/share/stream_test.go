@@ -432,14 +432,19 @@ func TestTerminalGuestPage(t *testing.T) {
 	if !strings.Contains(body, `"name":"直播会话"`) {
 		t.Fatalf("boot state must carry the share name: %q", body)
 	}
-	// 双滚动条收敛面（P-20261118-9）：overset 标记/滚轮路由/viewport 死槽
-	// 收敛的注入件在页面在场
+	// 滚动单面化面（P-20261123-2，取代 P-9 双滚动条收敛）：overset 标记/捕获相
+	// 滚轮接管/外层滚动条归属/死槽收敛的注入件在页面在场
 	for _, marker := range []string{
-		"data-overset", "scWheelRoute", "scrollbar-width:none",
+		"data-overset", "scWheelCapture", "scrollbar-gutter:stable",
+		".xterm-scrollable-element > .scrollbar{display:none}",
 	} {
 		if !strings.Contains(body, marker) {
 			t.Fatalf("term page missing scroll-convergence marker %q", marker)
 		}
+	}
+	// 旧放行式路由退役（假放行：事件仍被 SmoothScrollableElement 消费）
+	if strings.Contains(body, "scWheelRoute") {
+		t.Fatalf("term page must not carry the retired wheel route: %q", body)
 	}
 	// foot-note 并入 footer 单行（P-20261118-9）：单行形态在场（roTip 左 /
 	// powered 右），独立版权行不再存在

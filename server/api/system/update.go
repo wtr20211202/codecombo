@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -153,6 +154,14 @@ func ApplyUpdate(c *gin.Context) {
 
 // GetUpdateStatus 查询更新状态
 func GetUpdateStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": updateStatusData()})
+}
+
+// updateStatusData 更新状态全字段投影（GET /updates/status 与诊断包共用——
+// 诊断包不另造更新状态读路径，两处形态天然同源）。
+// 终态或空闲时并读结果文件（update-result.json 的 Status/Error/Timestamp/
+// Version 覆盖内存态）：结果文件是跨重启的持久证据，内存态只在本次进程内有效
+func updateStatusData() model.UpdateStatusResponse {
 	mgr := update.GetManager()
 	st := mgr.GetStatus()
 
@@ -166,6 +175,9 @@ func GetUpdateStatus(c *gin.Context) {
 		// 安装形态旗标（P-20261113-4-S1）：面板只消费 check 响应，status 面为
 		// agent 经状态端点感知安装形态留口（npm 形态更新请走包管理器）
 		NpmManaged: mgr.NpmManaged(),
+		// 当前运行版本（P-20261122-5）：前端 unknown 结局据此判定「服务可达但
+		// 版本<目标=更新未完成仍为旧版本」
+		BuildVersion: buildVersion,
 	}
 
 	// 终态或空闲时检查结果文件
@@ -178,8 +190,7 @@ func GetUpdateStatus(c *gin.Context) {
 			resp.Version = result.Version
 		}
 	}
-
-	c.JSON(http.StatusOK, gin.H{"data": resp})
+	return resp
 }
 
 // GetUpdateProxyStatus 更新链出站档位只读透出（P-20261110-1 S6）：对更新目标
@@ -205,7 +216,15 @@ func DeleteUpdateStatus(c *gin.Context) {
 		shared.Error(c, http.StatusConflict, fmt.Sprintf("update already in progress: %s", st.Status), nil)
 		return
 	}
-	_ = update.ClearUpdateResult(config.DataDir())
+	// 结果文件清不掉=下次 GET /updates/status 仍读到它（用户「已确认」后横幅
+	// 复活，再点还是清不掉）；前端两处调用点都静默吞错，服务端日志是唯一
+	// 诊断面（P-20261122-12 审计）。如实 500 而非假 200：受理闸门/mgr 状态
+	// 一律不动（不声称已清除）。shared.Error 对非空 err 落 slog.Error，
+	// 日志与响应一次收口（不重复打两行）
+	if err := update.ClearUpdateResult(config.DataDir()); err != nil {
+		shared.Error(c, http.StatusInternalServerError, "clear update result failed", err)
+		return
+	}
 	mgr.Reset()
 	c.JSON(http.StatusOK, gin.H{"message": "update status cleared"})
 }
@@ -303,7 +322,9 @@ func ApplyUpdateFromCenter(c *gin.Context) {
 
 	// 保存到临时文件
 	tmpDir := filepath.Join(config.DataDir(), "tmp", "update-from-center")
-	_ = os.MkdirAll(tmpDir, 0755)
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		slog.Warn("create update temp dir failed", "dir", tmpDir, "err", err)
+	}
 	exePath := getExePath()
 	newBinary := filepath.Join(tmpDir, filepath.Base(exePath))
 	out, err := os.Create(newBinary)
@@ -318,7 +339,11 @@ func ApplyUpdateFromCenter(c *gin.Context) {
 		return
 	}
 	out.Close()
-	_ = os.Chmod(newBinary, 0755)
+	if err := os.Chmod(newBinary, 0755); err != nil {
+		// POSIX 上无执行位的新二进制会让换包子进程起不来（现象是活性握手
+		// 秒死，根因被掩盖）——此处留痕直指 chmod（P-20261122-12）
+		slog.Warn("chmod update binary failed", "path", newBinary, "err", err)
+	}
 
 	cfg := store.Get().Settings.Get()
 	port := cfg.Server.Port
@@ -327,9 +352,24 @@ func ApplyUpdateFromCenter(c *gin.Context) {
 	}
 
 	pid := os.Getpid()
-	if err := update.LaunchUpdateSubprocess(exePath, newBinary, port, pid, config.DataDir(), "center", buildVersion); err != nil {
+	// 活性握手（P-20261122-5）随 LaunchUpdateSubprocess 内置：spawn 后最多等
+	// subprocessHandshakeDefault（10s）的证据窗——本请求同步承受该窗（失败路径
+	// 最长约 10s，远低于前端该端点 5 分钟超时）。握手失败即中止：不触发下方
+	// RestartViaHook（主进程不退出=服务维持安全态），500 带原因；devMode 下 err
+	// 详情含 outcome 与 darwin quarantine 自救指引原文。
+	// publicMsg 不写死「exited immediately」（P-20261122-9）：握手失败两形态——
+	// 子进程已退出（exited(exit status N)/signal）与窗满仍无声（alive but silent，
+	// 慢盘/大目录 EnsureDataDirMigrated 递归 merge 足以越过 10s）。写死前者是假话，
+	// 统一按「未确认启动」措辞（真实死因在 err 详情与 update-subprocess.log）。
+	// durable 判死留痕（主日志 + update-subprocess.log 裁决行）在
+	// LaunchUpdateSubprocess 单一裁决点完成，本链与自更新链共用
+	if err := launchSubprocessFn(exePath, newBinary, port, pid, config.DataDir(), "center", buildVersion); err != nil {
 		os.Remove(newBinary)
-		shared.Error(c, http.StatusInternalServerError, "start update process failed: failed", err)
+		msg := "start update process failed: failed"
+		if errors.Is(err, update.ErrSubprocessDied) {
+			msg = "update subprocess did not confirm startup: failed"
+		}
+		shared.Error(c, http.StatusInternalServerError, msg, err)
 		return
 	}
 
@@ -344,6 +384,12 @@ func ApplyUpdateFromCenter(c *gin.Context) {
 // serveBinaryParamRe serve-binary 的 os/arch 查询参数白名单：仅字母数字，
 // 杜绝把参数拼进本地分发路径时的路径穿越
 var serveBinaryParamRe = regexp.MustCompile(`^[a-zA-Z0-9]{1,16}$`)
+
+// launchSubprocessFn 中心链换包子进程拉起取值口（默认
+// update.LaunchUpdateSubprocess，活性握手 P-20261122-5 内置）：单测替换以覆盖
+// 「握手失败中止」路径——测试绝不真实 spawn 换包进程（护栏同 update 包
+// launchUpdateSubprocessFn 注入先例，manager_retry_test.go）
+var launchSubprocessFn = update.LaunchUpdateSubprocess
 
 // localServeBinary 返回本地已有的对应平台二进制路径（不存在返回空串）。
 // 查找顺序：
@@ -429,7 +475,9 @@ func ServeBinary(c *gin.Context) {
 	}
 
 	cacheDir := filepath.Join(config.DataDir(), "tmp", fmt.Sprintf("serve-%s-%s", osParam, archParam))
-	_ = os.MkdirAll(cacheDir, 0755)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		slog.Warn("create serve-binary cache dir failed", "dir", cacheDir, "err", err)
+	}
 	// 缓存文件名随正名（临时缓存可再生，CleanServeCache 滚动清理；旧名缓存
 	// 文件成为孤儿后自然过期）
 	cacheFile := filepath.Join(cacheDir, fmt.Sprintf("codecombo-v%s", info.Version))
@@ -442,7 +490,16 @@ func ServeBinary(c *gin.Context) {
 			shared.Error(c, http.StatusInternalServerError, "download failed", nil)
 			return
 		}
-		_ = os.Rename(tmpFile, cacheFile)
+		if err := os.Rename(tmpFile, cacheFile); err != nil {
+			os.Remove(tmpFile)
+			// 下载成功但缓存落位失败：继续 c.File(cacheFile) 只会给出无解释的
+			// 404（用户以为下载失败）——如实 500。日志含目标平台（rename 语义
+			// 随平台异：Windows 跨卷/占用、POSIX 目录占位），响应侧传 nil err
+			// 防同一失败打两行（P-20261122-12）
+			slog.Error("serve-binary cache place failed", "targetOs", osParam, "arch", archParam, "err", err)
+			shared.Error(c, http.StatusInternalServerError, "cache binary failed", nil)
+			return
+		}
 	}
 
 	c.Header("Content-Type", "application/octet-stream")

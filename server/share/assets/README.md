@@ -8,9 +8,13 @@
 | `xterm.css` | `@xterm/xterm`（css） | 6.0.0 | MIT |
 | `addon-fit.js` | `@xterm/addon-fit`（lib UMD 构建） | 0.11.0 | MIT |
 | `addon-unicode11.js` | `@xterm/addon-unicode11`（lib UMD 构建） | 0.9.0 | MIT |
+| `addon-web-links.js` | `@xterm/addon-web-links`（lib UMD 构建，P-20261122-1 访客页链接可点） | 0.12.0 | MIT |
+| `addon-search.js` | `@xterm/addon-search`（lib UMD 构建，P-20261122-1 访客页极简搜索条） | 0.16.0 | MIT |
+| `addon-webgl.js` | `@xterm/addon-webgl`（lib UMD 构建，P-20261122-1 访客页 WebGL 渲染+上下文丢失降级） | 0.19.0 | MIT |
+| `addon-image.js` | `@xterm/addon-image`（lib UMD 构建，P-20261122-1 ImageAddon 条件件：SC.unfiltered 才挂载，遮蔽开=禁用） | 0.9.0 | MIT |
 | `JetBrainsMono-Regular.woff2` / `JetBrainsMono-Bold.woff2` | `web/public/fonts/` 同一份字体文件（JetBrains Mono） | 同 web 侧 | SIL OFL 1.1（`LICENSE-JetBrainsMono.txt`） |
 
-xterm 三个包同出 xterm.js 单仓同一提交（各 package.json 的 `commit` 字段一致），
+xterm 各包（xterm / addon-*）同出 xterm.js 单仓同一提交（各 package.json 的 `commit` 字段一致），
 升级时成组覆盖，不要单件混搭版本。
 
 为何 vendor：分享子服务是独立端口的零外部依赖单文件页（CSP 锁死外部资源，

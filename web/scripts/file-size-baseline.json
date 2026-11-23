@@ -28,8 +28,8 @@
   "reason": "存量遗留，拆分收敛另行立项"
  },
  "src/composables/useLayoutShell.ts": {
-  "lines": 1108,
-  "reason": "存量遗留，拆分收敛另行立项（P-20261120-8 可写视口反喂 owner 可见性 +17 行放宽 1050→1067；P-20261121-2 直通申请到达感知 +41 行放宽 1067→1108——onShareDirectRequest toast+bump 直通消费/shdirectApprove+shdirectDeny 通知动作 handler/常量与 detail 类型导入，同族直通分发消费面非新子系统）"
+  "lines": 1131,
+  "reason": "存量遗留，拆分收敛另行立项（P-20261120-8 可写视口反喂 owner 可见性 +17 行放宽 1050→1067；P-20261121-2 直通申请到达感知 +41 行放宽 1067→1108——onShareDirectRequest toast+bump 直通消费/shdirectApprove+shdirectDeny 通知动作 handler/常量与 detail 类型导入，同族直通分发消费面非新子系统；P-20261122-1 粘贴上传落盘感知 +18 行放宽 1108→1126——onSharePasteUpload toast 直通消费/常量与 detail 类型导入/两行监听注册，同族直通分发消费面非新子系统；P-20261122-16 share.wresize toast 去噪 +5 行放宽 1126→1131——onShareWResize 复用 utils/toastDedupe.shouldShowToast 做同 terminalId 5s 去重，反喂状态机修复后多访客/多连接残余帧不再把 owner 屏幕刷成 toast 流，同族直通分发消费面的去噪修正非新子系统）"
  },
  "src/composables/useLayoutViews.ts": {
   "lines": 898,

@@ -12,10 +12,19 @@
   flex-shrink: 0;
   cursor: default;
   user-select: none;
+  /* 窄侧栏兜底（P-20261122-15）：标题/项目名/按钮组一行排不下时换行——
+     默认 280 已有 2 行标题的现状即触发面，不再只限 coarse 指针档 */
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
-.tree-title { font-weight: 500; color: var(--text-secondary); }
+/* 标题不参与收缩且整体不断行：侧栏拖窄时逐字折行（280 两行/240 四行）
+   比让按钮组换行更坏——标题是面板身份，按钮组是操作面 */
+.tree-title { font-weight: 500; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; }
 .tree-project { color: var(--text-muted); font-size: max(var(--fs-meta-min, 11.5px), 0.85em); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-actions { display: flex; gap: 2px; flex-shrink: 0; }
+/* flex-shrink:0 保留（按钮不压扁，28px 热区底线）+ max-width:100% 让按钮组
+   在窄侧栏内二次换行而不是溢出裁切（缺此条时 180 下固定 208px 仍有 2 键
+   落在 overflow:hidden 之外）；margin-left:auto 维持右对齐 */
+.tree-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; flex-shrink: 0; margin-left: auto; max-width: 100%; }
 .tree-action-btn {
   border: none; background: transparent; color: var(--text-secondary); cursor: pointer;
   padding: 2px 4px; border-radius: 3px; display: flex; align-items: center; justify-content: center;
@@ -33,12 +42,9 @@
 .tree-action-btn:disabled { color: var(--text-muted); opacity: 0.45; cursor: not-allowed; }
 .tree-action-btn:disabled:hover, .tree-action-btn:disabled:active { background: transparent; transform: none; }
 /* 热区放大后的窄栏兜底（P-20261019-5）：coarse 档 7 个按钮 ×40px 超出侧栏
-   宽度，允许换行并补 gap——压扁/裁切按钮比换行更坏（40px 是触屏底线）；
-   细指针档 7×28 + 2px gap 在默认 280px 侧栏内排得下，只剩极端拖窄时的既有
-   溢出行为不变 */
+   宽度，按钮组间距同步放大防误触（换行已提升为全指针档基线，见上） */
 @media (pointer: coarse) {
-  .tree-header { flex-wrap: wrap; row-gap: 4px; }
-  .tree-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .tree-actions { gap: 6px; }
 }
 
 /* 搜索栏 */

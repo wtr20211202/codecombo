@@ -47,6 +47,13 @@ var replayChunkDeadline = 5 * time.Second
 // 连接不关：输出流与解锁后的写入都要继续走同一条连接
 const wsInputRejectFrame = `{"type":"input_rejected","code":"readonly_external"}`
 
+// 分享持权拒绝帧（P-20261122-17）：owner 键盘被分享的访客输入让位时的
+// 专属稳定码——此前与真接管只读共用 readonly_external，用户看到「解锁后
+// 可输入」文案但解锁无效（闸的真实来源是分享持权，input-lock 只管
+// serverReadOnly）。新码是加法契约（agent 可编程区分两类拒绝），连接同
+// 样不关
+const wsInputHeldByShareFrame = `{"type":"input_rejected","code":"input_held_by_share"}`
+
 // wsRejectCoalesceMs 拒绝帧防抖窗口：同连接 1s 一帧（agent 灌输入时拒绝帧与
 // 输入 1:1 无放大，但前端 toast 不必逐键刷）
 const wsRejectCoalesceMs = int64(1000)
@@ -279,12 +286,21 @@ func HandleTerminalWS(c *gin.Context) {
 			// P-189 批注③分层），不受本闸。
 			// 直通输入持权闸（P-20261024-1）：访客持权期间 owner 侧输入一律
 			// 拒（单持有者语义的强制面——与 external 条件正交叠加，会话形态
-			// 不限：agent 会话被授予直通时 owner 键盘让位），收回/超时即解除
-			if (session.Origin == terminal.OriginExternal && session.ServerReadOnly()) || session.DirectInputHeld() {
+			// 不限：agent 会话被授予直通时 owner 键盘让位），收回/超时即解除。
+			// 拒绝码分义（P-20261122-17）：分享持权优先回 input_held_by_share
+			// （恢复路径在分享中心收回/结束分享，input-lock 不解此闸）；仅
+			// 真接管只读才回 readonly_external
+			rejectFrame := ""
+			if session.DirectInputHeld() {
+				rejectFrame = wsInputHeldByShareFrame
+			} else if session.Origin == terminal.OriginExternal && session.ServerReadOnly() {
+				rejectFrame = wsInputRejectFrame
+			}
+			if rejectFrame != "" {
 				if now := time.Now().UnixMilli(); now-lastRejectAt >= wsRejectCoalesceMs {
 					lastRejectAt = now
 					_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-					_ = conn.WriteMessage(websocket.TextMessage, []byte(wsInputRejectFrame))
+					_ = conn.WriteMessage(websocket.TextMessage, []byte(rejectFrame))
 				}
 				continue
 			}

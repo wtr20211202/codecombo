@@ -43,6 +43,10 @@
     "GET /assets/addon-fit.js": "分享访客页 vendored 资产（P-20261020-2）——xterm addon，同上",
     "GET /assets/xterm.css": "分享访客页 vendored 资产（P-20261020-2）——访客页 <link> 直载，同上",
     "GET /assets/addon-unicode11.js": "分享访客页 vendored 资产（P-20261107-4 渲染保真）——xterm unicode11 宽度表，访客页 <script> 直载，同上",
+    "GET /assets/addon-web-links.js": "分享访客页 vendored 资产（P-20261122-1 观看侧四件）——xterm web-links，直播访客页 <script> 直载，同上",
+    "GET /assets/addon-search.js": "分享访客页 vendored 资产（P-20261122-1 观看侧四件）——xterm search（可写页搜索条），同上",
+    "GET /assets/addon-webgl.js": "分享访客页 vendored 资产（P-20261122-1 观看侧四件）——xterm webgl 渲染，同上",
+    "GET /assets/addon-image.js": "分享访客页 vendored 资产（P-20261122-1 观看侧四件，SC.unfiltered 条件挂载）——xterm image 协议，同上",
     "GET /assets/JetBrainsMono-Regular.woff2": "分享访客页 vendored 终端字体（P-20261107-4，OFL）——访客页 @font-face 直载，同上",
     "GET /assets/JetBrainsMono-Bold.woff2": "分享访客页 vendored 终端字体粗体（P-20261107-4，OFL）——同上",
     "GET /api/share/:token/direct": "申请批准路径状态投影（P-20261024-1，P-20261121-1 统一收编后语义=申请通道在场/在途申请/持权）——agent 可编程消费面（管理面轮询走 GET /api/share 行 direct.* 投影，shareApi.getDirect 客户端方法已删）"

@@ -5,7 +5,7 @@
 // 运行历史（P-20261002-120）：按次记录于 uiState，行内「重跑」以原任务定义
 // 快照走同一执行链路一键再跑（新终端新记录，旧记录保留）
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { NIcon, NEmpty, NSpin, NInput } from 'naive-ui'
+import { NIcon, NEmpty, NSpin, NInput, useMessage } from 'naive-ui'
 import {
   CloseOutline, PlayOutline, TimeOutline, RefreshOutline,
   CubeOutline,       // npm
@@ -33,6 +33,7 @@ const emit = defineEmits<{
 const projectStore = useProjectStore()
 const uiStateStore = useUIStateStore()
 const { t } = useI18n()
+const message = useMessage()
 
 const loading = ref(false)
 const allTasks = ref<TaskItem[]>([])
@@ -107,7 +108,9 @@ async function runTask(task: TaskItem) {
     const res: any = await terminalApi.create(projectStore.currentProjectId, name)
     const termId = res.data?.id
     if (!termId) {
+      // 服务端受理但未回会话 id：任务实际未跑，静默返回等于「点了运行没反应」
       startingKeys.value.delete(key)
+      message.error(t('taskRunner.startFailed'))
       return
     }
     // 激活新建的任务终端：TerminalView 的对账只追加 tab 不设激活态，若不
@@ -129,6 +132,9 @@ async function runTask(task: TaskItem) {
     ws.onerror = () => {
       startingKeys.value.delete(key)
       ws.close()
+      // 命令注入通道连不上：会话已建但任务命令从未发出，用户看到的只是
+      // 一个空终端——必须回告，否则「运行成功」的假象会掩盖失败
+      message.error(t('taskRunner.startFailed'))
     }
     // 记录运行历史（P-20261002-120 按次新增：重跑产生新行不复用旧记录，
     // 快照固化原任务定义；新→旧，至多 5 条）并持久化
@@ -137,7 +143,8 @@ async function runTask(task: TaskItem) {
     emit('update:show', false)
   } catch {
     startingKeys.value.delete(key)
-    // 静默
+    // 终端创建抛错属 axios 面：拦截器已统一 toast + 错误中心记账，此处不重复
+    // 提示（WS 装配/发送失败不经过拦截器，已在上方 onerror 显式回告）
   }
 }
 

@@ -45,6 +45,7 @@ import { useApprovalHotkeys } from '../../composables/useApprovalHotkeys'
 import { opsConfirmApi } from '../../api/domains/opsconfirm'
 import { formatDate } from '../../utils/git'
 import { maskApprovalSecrets } from '../../utils/sensitiveMask'
+import { safeStorage } from '../../utils/storage'
 import type { ComponentPublicInstance } from 'vue'
 import type { ApprovalRecord } from '../../api/domains/opsconfirm'
 import type { ClaudeSessionInfo } from '../../api/domains/claude'
@@ -81,7 +82,7 @@ const hasPending = computed(() => approvals.pendingCount > 0)
 // 完整可见，不丢数据
 const RECENT_WINDOW_MS = 48 * 60 * 60 * 1000
 const RECENT_DISMISS_KEY = 'approval-recent-dismissed-at'
-const recentDismissedAt = ref(Number(localStorage.getItem(RECENT_DISMISS_KEY) || 0))
+const recentDismissedAt = ref(Number(safeStorage.getItem(RECENT_DISMISS_KEY) || 0))
 const recentFresh = computed(() => {
   const now = Date.now()
   return approvals.recent.some((a) => {
@@ -91,7 +92,9 @@ const recentFresh = computed(() => {
 })
 function dismissRecent(): void {
   recentDismissedAt.value = Date.now()
-  localStorage.setItem(RECENT_DISMISS_KEY, String(recentDismissedAt.value))
+  // safeStorage：屏蔽 Cookie/隐私模式下裸 setItem 抛 SecurityError，关闭动作
+  // 会连带炸掉当前事件链（健壮性红线）；走封装则降级为会话内生效
+  safeStorage.setItem(RECENT_DISMISS_KEY, String(recentDismissedAt.value))
 }
 const stackVisible = computed(() =>
   isMonitorRoute.value === false && (hasPending.value || recentFresh.value))

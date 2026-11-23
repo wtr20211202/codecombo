@@ -10,7 +10,7 @@ import { computed, getCurrentScope, onScopeDispose, ref } from 'vue'
 import { AUTOSAVE_DELAY_MIN } from '../../stores/font'
 import { projectApi } from '../../api/client'
 import { AppError } from '../../api/error-types'
-import { DRAFT_SAVED_BEACON_KEY, listFileDrafts, readDraft, readUntitledDraft, removeDraft, removeDrafts, removeUntitledDraft, saveDraft, saveUntitledDraft } from '../../utils/draftDb'
+import { DRAFT_SAVED_BEACON_KEY, isDraftDbDisabled, listFileDrafts, readDraft, readUntitledDraft, removeDraft, removeDrafts, removeUntitledDraft, saveDraft, saveUntitledDraft } from '../../utils/draftDb'
 import type { DraftRecord, DraftSavedBeacon } from '../../utils/draftDb'
 import { isRemoteEditorPath } from '../../utils/remoteEditorPath'
 import type { OpenFilesCtx } from './context'
@@ -36,7 +36,21 @@ export function createPersist(ctx: OpenFilesCtx): void {
 
   // ── 未保存草稿（P-20261002-6）：脏文件防抖 2s 落 IndexedDB，误关/崩溃后
   // 重开文件时探测提示恢复。对标 VS Code hot exit——编辑器基本功。
-  // 环境不可用（隐私模式等）由 draftDb 静默降级，此处零感知
+  // 环境不可用（隐私模式等）由 draftDb 降级为空操作；降级事实只在本页首次
+  // 写入失败时回告一次（P-20261122-13，见 onDraftPersistResult）
+
+  /** 草稿库不可用提示是否已发（每份 openFiles 实例一次）：用户以为 hot-exit
+   *  兜底可用、关页即丢是最坏形态，必须说明；但逐次击键刷 toast 会淹没主流程 */
+  let draftDbWarned = false
+
+  /** writeDraftNow 的落库结果回告口（fire-and-forget 链的收口）。只在
+   *  「环境不可用」（draftDb 置 disabled）时提示——>2MB 超限拒收是既定语义
+   *  （DB 保留旧草稿供降级恢复），事务丢 error/abort 属瞬时故障，二者均不提示 */
+  function onDraftPersistResult(ok: boolean) {
+    if (ok || draftDbWarned || !isDraftDbDisabled()) return
+    draftDbWarned = true
+    ctx.message.warning(ctx.t('editor.draftStorageUnavailable'))
+  }
 
   /** 待决恢复提示队列（bootstrap 恢复多标签可连发多条；提示条消费队首） */
   const draftOffers = ctx.draftOffers = ref<DraftOffer[]>([])
@@ -115,14 +129,14 @@ export function createPersist(ctx: OpenFilesCtx): void {
     const savedAt = Date.now()
     markDraftSelfWrite(projectId, path, savedAt)
     if (isUntitledPath(path)) {
-      void saveUntitledDraft(projectId, path, { content: file.content, savedAt })
+      void saveUntitledDraft(projectId, path, { content: file.content, savedAt }).then(onDraftPersistResult)
       return
     }
     void saveDraft(projectId, path, {
       content: file.content,
       savedAt,
       baseHash: file.baseHash || '',
-    })
+    }).then(onDraftPersistResult)
   }
 
   /** 脏文件草稿防抖写入（updateContent 触发，按 projectId+path 去抖）。
@@ -379,7 +393,7 @@ export function createPersist(ctx: OpenFilesCtx): void {
       if (typeof payload.project !== 'string' || typeof payload.path !== 'string'
         || typeof payload.savedAt !== 'number' || !Number.isFinite(payload.savedAt)) return
       void onDraftSavedBeacon(payload.project, payload.path, payload.savedAt)
-    } catch { /* 载荷异常静默：信标是纯增益，草稿本体已落库 */ }
+    } catch { /* silent-by-design: 信标载荷异常——信标是纯增益（跨标签同步提示），草稿本体已落库 */ }
   }
 
   /** 卸载前抢跑挂起的防抖写入（IndexedDB 异步 best-effort：已发起的事务

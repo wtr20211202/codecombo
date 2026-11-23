@@ -124,6 +124,9 @@ type sessionPageData struct {
 	// 事实源——CSS 进 <style>，JS 在 head 先行 initTheme 防闪白）
 	ThemeCSS template.CSS
 	ThemeJS  template.JS
+	// DragJS 访客页族拖拽导航守卫注入件（P-20261122-20，dragguard.go 单一
+	// 事实源——document 级 dragover/drop 仅拦含 Files 载荷的缺省导航）
+	DragJS template.JS
 }
 
 // 模板与 castpage.go/termpage.go 同族（头/横幅/卡片/主题化样式对齐）。单文件
@@ -246,8 +249,13 @@ color:var(--text);opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
 </div>
 <script>
 const SC = {{.Boot}};
+// 访客页族拖拽导航守卫（P-20261122-20，dragguard.go 单一事实源）
+{{.DragJS}}
 const t = k => (SC.dict[k] || k);
 const $ = id => document.getElementById(id);
+// 拖拽导航守卫注册（P-20261122-20）：会话回放页无协作位恒注册——拖入本地
+// 文件的缺省动作是导航到 file://，整页被替换、回放视图丢失；提示自带文案
+scDragGuard();
 // 标签页标题 = 分享名（P-20261118-9 去品牌前缀；<title> 已是分享名，此处校准）
 document.title = SC.name || document.title;
 $('bannerText').textContent = t('maskBanner');
@@ -403,5 +411,6 @@ func renderSessionPage(w io.Writer, token, lang, title, wm string) error {
 		BoardJS:  template.JS(guestBoardJS),
 		ThemeCSS: template.CSS(GuestThemeCSS),
 		ThemeJS:  template.JS(guestThemeJS),
+		DragJS:   template.JS(guestDragGuardJS),
 	})
 }

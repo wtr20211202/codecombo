@@ -179,3 +179,117 @@ test.describe('服务日志 UI 链路（mock 夹具）', () => {
     }
   })
 })
+
+/**
+ * 诊断包导出 E2E（P-20261122-10 S2a）：设置·系统监控「服务日志」分区的
+ * 「导出诊断包」按钮 + GET /api/system/diagnostics/export。
+ *
+ *   1. API 形状（真实例）：probe=1 只回体量预览（200 JSON，files/totals/limits
+ *      齐备、凭据路径不入清单、缺席条目可见）；不触发打包 → 不吃 30s 冷却、
+ *      可安全重复跑。正式导出的 zip 内容/脱敏/预算语义由 Go 单测覆盖
+ *      （server/diagnostics + server/api/system/diagnostics_test.go）。
+ *   2. UI 链路（网络层 mock，确定性夹具）：点按钮 → 先带 probe=1 取体量 →
+ *      再触发同源直链下载（不经 blob）→ 体量提示就地可见。
+ */
+const PROBE_FIXTURE = {
+  generatedAt: '2026-10-24T09:00:00Z',
+  version: '0.0.1-test',
+  source: 'api',
+  mask: true,
+  logDays: 3,
+  files: [
+    { name: 'logs/codecombo-2026-10-24.log', status: 'present', originalBytes: 1048576, includedBytes: 1048576 },
+    { name: 'logs/update.log', status: 'absent', originalBytes: 0, includedBytes: 0, reason: 'expected file absent' },
+    { name: 'logs/dsh-web.log', status: 'present', originalBytes: 524288, includedBytes: 524288 },
+  ],
+  totals: { files: 3, packedFiles: 3, absent: 1, truncated: 0, omitted: 0, includedBytes: 1572864, zipUpperBoundBytes: 1572864 },
+  limits: { fullFileBytes: 8388608, headBytes: 2097152, tailBytes: 14680064, rawBudgetBytes: 100663296, zipCapBytes: 67108864 },
+  derivedFiles: ['README.txt', 'manifest.json', 'logs-summary.txt'],
+}
+
+test.describe('诊断包导出 API 形状（真实例）', () => {
+  test('probe=1 体量预览：files/totals/limits 齐备 + 凭据路径不在清单', async ({ request }) => {
+    const res = await request.get(`${API_BASE}/api/system/diagnostics/export?probe=1`)
+    expect(res.status()).toBe(200)
+    const data = ((await res.json()) as {
+      data?: {
+        files?: { name: string; status: string; includedBytes: number }[]
+        totals?: { files: number; packedFiles: number; includedBytes: number }
+        limits?: { rawBudgetBytes: number; zipCapBytes: number }
+        derivedFiles?: string[]
+      }
+    }).data
+    expect(data).toBeTruthy()
+    expect(data!.files!.length).toBeGreaterThan(0)
+    // 实例运行中当天主日志必在（packedFiles>0 即证明计划里真有东西要打）
+    expect(data!.totals!.packedFiles).toBeGreaterThan(0)
+    expect(data!.limits!.rawBudgetBytes).toBe(96 * 1024 * 1024)
+    expect(data!.limits!.zipCapBytes).toBe(64 * 1024 * 1024)
+    expect(data!.derivedFiles!.length).toBeGreaterThan(0)
+    // dsh-web.log 在 DataDir 根不在 logs/——显式列举才会出现在清单里
+    expect(data!.files!.some((f) => f.name === 'logs/dsh-web.log')).toBe(true)
+    // 更新链条目恒在清单（缺席则 status=absent，本身就是判别证据）
+    expect(data!.files!.some((f) => f.name.startsWith('logs/update'))).toBe(true)
+    // 凭据路径绝不出现
+    for (const f of data!.files!) {
+      expect(f.name).not.toContain('master-key')
+      expect(f.name).not.toContain('config.json')
+    }
+  })
+})
+
+test.describe('诊断包导出 UI 链路（mock 夹具）', () => {
+  test('点「导出诊断包」→ 先 probe 取体量再直链下载 + 体量提示可见', async ({ page }) => {
+    test.setTimeout(120_000)
+    const probeCalls: string[] = []
+    // 下载导航在 Chromium 里由浏览器网络栈发起，page.route 不保证拦得到
+    // （实测：直链请求直接打到真实例，suggestedFilename 带服务端时间戳）——
+    // 这里改在 DOM 层截获程序化锚点点击：断言「先 probe、再发起同源直链」的
+    // 契约，且**不重复打真包**（真包产出/流式/脱敏由 Go 单测 + 本文件真实例
+    // probe 用例覆盖，避免 e2e 每次跑都做一次几十 MB 的采集）
+    await page.addInitScript(() => {
+      const w = window as unknown as { __diagClicks?: { href: string; download: string }[] }
+      w.__diagClicks = []
+      const origClick = HTMLAnchorElement.prototype.click
+      HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+        if (this.href.includes('/api/system/diagnostics/export')) {
+          w.__diagClicks!.push({ href: this.href, download: this.download })
+          return // 拦下真实导航（测的是触发契约，不是再打一次包）
+        }
+        return origClick.call(this)
+      }
+    })
+    await page.route('**/api/system/logs/dates', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) }))
+    await page.route('**/api/system/logs*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(tailBody('2026-10-24', TAIL_LINES)) }))
+    await page.route('**/api/system/diagnostics/export*', (route) => {
+      const url = new URL(route.request().url())
+      probeCalls.push(url.search)
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: PROBE_FIXTURE }) })
+    })
+
+    const section = await openServerLogs(page)
+    await section.locator('[data-testid="svclog-diag"]').click()
+
+    // 先 probe（体量预览），再触发下载直链
+    await expect.poll(() => probeCalls.length).toBeGreaterThan(0)
+    expect(probeCalls[0]).toContain('probe=1')
+    // 锚点点击发生在 probe 响应回来之后（axios 解包 → triggerDirectDownload）：
+    // probe 请求被拦获的瞬间页面侧还没点，必须轮询等点击落账
+    await expect.poll(async () => page.evaluate(() =>
+      (window as unknown as { __diagClicks: { href: string; download: string }[] }).__diagClicks.length),
+    { timeout: 10_000 }).toBe(1)
+    const clicks = await page.evaluate(() =>
+      (window as unknown as { __diagClicks: { href: string; download: string }[] }).__diagClicks)
+    // 直链形态：同源导出端点 + days 参数，不带 probe（probe 只用于预览）
+    expect(clicks[0].href).toContain('/api/system/diagnostics/export')
+    expect(clicks[0].href).toContain('days=3')
+    expect(clicks[0].href).not.toContain('probe')
+    // 锚点 download 兜底名（服务端 Content-Disposition 是保存名权威，这里只
+    // 守兜底名不变，别让重构把它改成 undefined）
+    expect(clicks[0].download).toBe('codecombo-diagnostics.zip')
+    // 体量提示就地可见（文件数来自 probe 响应）
+    await expect(section.locator('[data-testid="svclog-diag-size"]')).toContainText('3 个文件')
+  })
+})

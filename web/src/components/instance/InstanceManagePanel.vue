@@ -69,8 +69,10 @@ onBeforeUnmount(() => {
 async function copyInstanceUrl(inst: Instance) {
   const url = inst.url || ''
   if (!url) return
-  await copyText(url)
-  message.success(t('instance.urlCopied'))
+  // 结果分支：此前无条件报「已复制」，降级路径失败时是假成功——用户拿去粘贴
+  // 才发现是空剪贴板
+  if (await copyText(url)) message.success(t('instance.urlCopied'))
+  else message.error(t('common.copyFailed'))
 }
 
 function statusText(inst: Instance): string {

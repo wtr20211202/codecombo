@@ -53,9 +53,13 @@ func TestUpdateSubprocessEnvSuperviseInjection(t *testing.T) {
 }
 
 // TestNewUpdateCmdContract 换包子进程命令契约：argv 列式不经 shell + env
-// 契约含监管形态（真实 spawn 由 LaunchUpdateSubprocess 负责，测试不启动）
+// 契约含监管形态 + spawn 落独立进程组（真实 spawn 由 LaunchUpdateSubprocess
+// 负责，测试不启动）。进程属性断言走平台分支 helper——
+// P-20261122-7 起换包子进程必须脱组（launchd 组杀逃生门），P-2 若改属性
+// 只需改 daemonProcAttr 一处，本断言自动跟随
 func TestNewUpdateCmdContract(t *testing.T) {
 	cmd := newUpdateCmd("/old/codecombo", "/new/codecombo", 9999, 4321, "/dd", "v2.0.0", "v1.9.0", superviseLaunchd, nil)
+	assertDaemonProcAttr(t, cmd.SysProcAttr)
 	want := []string{"_do_update", "/old/codecombo", "/new/codecombo", "9999", "4321"}
 	if len(cmd.Args) != 1+len(want) {
 		t.Fatalf("argv = %v, want self + %v", cmd.Args, want)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 
 	"codecombo/server/config"
 	"codecombo/server/kernel"
@@ -40,7 +41,7 @@ func (m *Module) Stop(_ context.Context, _ kernel.Kernel) error {
 func (m *Module) autoStart(k kernel.Kernel) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("remoteaccess: auto-start panic", "panic", r)
+			slog.Error("remoteaccess: auto-start panic", "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
 	st := store.Get()

@@ -640,7 +640,16 @@ commit/push/pull/reset/rollback/merge/rebase/stash/tag/worktree 等）与该项�
                                             "code":"readonly_external"}，连接保持
                                             （输出流照常）；广播/排队指令不经本闸
                                             （走各自审批，见下）。需要写入先经
-                                            input-lock 解锁（下条）。close
+                                            input-lock 解锁（下条）。**分享持权
+                                            闸拒绝帧分义**（P-20261122-17）：
+                                            同一 WS 写链在分享访客持权期间也会
+                                            拒 owner 输入，但回的是稳定码
+                                            {"type":"input_rejected",
+                                            "code":"input_held_by_share"}——恢复
+                                            路径是在分享中心收回输入权或结束
+                                            分享（input-lock 不解此闸）；撤销/
+                                            轮换/过期与自愈对账后自动恢复键入。
+                                            close
                                             语义分流：DELETE 缺省=解除接管（tmux
                                             会话与其中进程原样存活，可再接管），
                                             ?kill=1=显式终结（kill-session 不可逆，
@@ -1487,7 +1496,10 @@ token+IP 频控），留言随分享生命周期级联删除——新留言入�
 request（10min 时效——P-20261121-2 由 60s 延长）；键入与状态对账统一走
 /s/{token}/termws WS 上行桥（开放直入接入即键入；申请批准路径持权帧才注入，
 10min 无键入自动回收、收回/过期主动断开该访客连接）。旧 /s/{token}/direct/
-state 与 /direct/input 两端点已退役。访客申请到达即广播
+state 与 /direct/input 两端点已退役。持权期间 owner 终端 WS 写链被拒时回
+{"type":"input_rejected","code":"input_held_by_share"}（P-20261122-17——
+与接管只读 readonly_external 分义；撤销/轮换/过期后会话闸自动解除，1min
+对账兜底崩溃窗口与半开连接）。访客申请到达即广播
 sc-ops:share.direct-request（detail 仅元数据：token/分享名/昵称/访客摘要）
 + 通知中心入账（share.direct.notify.request 模板，行内「批准/拒绝」双动作）。
 素材到达经 ops-channel 广播 sc-ops:share.drop（detail 仅

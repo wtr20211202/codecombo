@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -138,6 +140,62 @@ func TestOfflineUpdateHint(t *testing.T) {
 			if !strings.Contains(hint, want) {
 				t.Fatalf("hint should contain %q, got: %s", want, hint)
 			}
+		}
+	})
+}
+
+// TestRemovePIDFileIfStopped P-20261122-2 CLI 停机侧条件删除口径：gracefulStop/
+// Kill 确认旧进程死亡到删除之间，在途页面重启拉起的新实例可能已重写 PID 文件
+// ——仅当内容仍等于刚停掉的 pid 才删；内容不符（文件已归新实例）保留；文件
+// 缺失静默达成。CC_DATA_DIR 钉临时目录隔离宿主实况（pidFilePath 无 env 时带
+// 旧默认目录兼容查找，绝不触碰）
+func TestRemovePIDFileIfStopped(t *testing.T) {
+	writePID := func(t *testing.T, dir string, pid int) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "codecombo.pid"), []byte(strconv.Itoa(pid)+"\n9999\n"), 0o644); err != nil {
+			t.Fatalf("write pid file: %v", err)
+		}
+	}
+
+	t.Run("stopped pid removed", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("CC_DATA_DIR", dir)
+		writePID(t, dir, 4321)
+		removePIDFileIfStopped(4321)
+		if _, err := os.Stat(filepath.Join(dir, "codecombo.pid")); !os.IsNotExist(err) {
+			t.Fatal("pid file matching the stopped pid must be removed")
+		}
+	})
+
+	t.Run("rewritten by restarting instance preserved", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("CC_DATA_DIR", dir)
+		// 停掉的旧 PID 是 4321，但文件已被页面重启的新实例重写为 2147483000
+		//（远超 pid_max 的不存在值，只比对不探测）——保留
+		writePID(t, dir, 2147483000)
+		removePIDFileIfStopped(4321)
+		if _, err := os.Stat(filepath.Join(dir, "codecombo.pid")); err != nil {
+			t.Fatal("pid file rewritten by a restarting instance must be preserved")
+		}
+	})
+
+	t.Run("missing file no-op", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("CC_DATA_DIR", dir)
+		removePIDFileIfStopped(4321) // 不得 panic
+	})
+
+	t.Run("garbage content kept", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("CC_DATA_DIR", dir)
+		if err := os.WriteFile(filepath.Join(dir, "codecombo.pid"), []byte("junk\n"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		// 解析不出 PID≠刚停掉的 pid：不删（保守——CLI 侧垃圾文件的 stale 清理
+		// 由 cmdStop/cmdStatus 的先验死路径兜底，本口径只认「内容==停掉的 pid」）
+		removePIDFileIfStopped(4321)
+		if _, err := os.Stat(filepath.Join(dir, "codecombo.pid")); err != nil {
+			t.Fatal("unparseable pid file must be kept by the stopped-pid口径")
 		}
 	})
 }

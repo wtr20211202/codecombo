@@ -16,12 +16,14 @@ import {
   OPS_SHARE_PASTE_REVIEW,
   OPS_SHARE_WRESIZE,
   OPS_SHARE_DIRECT_REQUEST,
+  OPS_SHARE_PASTE_UPLOAD,
   type RemoteOpenInEditorDetail,
   type ShareDropDetail,
   type ShareWritableTypingDetail,
   type SharePasteReviewDetail,
   type ShareWritableResizeDetail,
   type ShareDirectRequestDetail,
+  type SharePasteUploadDetail,
 } from '../utils/opsEvents'
 import { buildRemoteEditorPath } from '../utils/remoteEditorPath'
 import { activateRailPanel, railPanelCount } from '../panels/registry'
@@ -29,6 +31,7 @@ import { toggleablePanelIds } from '../panels/registry'
 import { openSettingsTab } from '../utils/openSettings'
 import { prefetchMonacoLanguageWorkers } from '../utils/monacoWorkerPrefetch'
 import { safeStorage } from '../utils/storage'
+import { shouldShowToast } from '../utils/toastDedupe'
 import { recordFileUsage, removeFileUsage } from '../utils/paletteUsage'
 import { setMonacoModelOpenPathProvider, clearMonacoModelOpenPathProvider } from '../views/editor/monacoModelOpenSet'
 
@@ -148,13 +151,31 @@ export function useLayoutShell() {
     if (!d?.terminalId) return
     bumpDirectInputShares()
   }
+  /** 可写分享粘贴上传落盘直通分发（P-20261122-1）：sc-ops:share.paste-upload →
+   *  toast 即时感知（访客把文件上传落盘到主机临时目录——「主机多了一个访客
+   *  提供的文件」的最小可见性面；文件内容与绝对路径不上广播面，路径将经访客
+   *  键入通道进入终端回显）。落盘有频控（10/min per (token,IP)）+审计+敏感名
+   *  命中另有通知中心条目，逐次 toast 不成噪 */
+  function onSharePasteUpload(ev: Event): void {
+    const d = (ev as CustomEvent<SharePasteUploadDetail>).detail
+    if (!d?.name) return
+    message.info(t('share.writable.pasteUploaded', {
+      name: d.shareName || d.token || '',
+      file: d.name,
+      nick: d.nick || t('share.msg.anon'),
+    }))
+  }
   /** 可写分享视口 resize 直通分发（P-20261120-8）：sc-ops:share.wresize →
    *  toast 即时感知（访客把主机终端改格到其视口宽度——「终端被无形改格」的
    *  最小可见性面，评审必改5：wtyping 徽标给出访客在场，本事件给出改成了
-   *  什么格。合并窗+conn 节流后频度低，逐次播报不成噪） */
+   *  什么格）。P-20261122-16：同 terminalId 5s 去重（复用 toastDedupe 短窗
+   *  去重件）——服务端 500ms 合并窗 +1s conn 节流挡不住多访客/多连接各发一条，
+   *  逐条播报会把主人屏幕刷成 toast 流（用户主诉「一直在调整面板」的可见噪音
+   *  面）；窗口内只播首条，终值在访客侧 wr-strip 与审计台账可查，不丢信息 */
   function onShareWResize(ev: Event): void {
     const d = (ev as CustomEvent<ShareWritableResizeDetail>).detail
     if (!d?.terminalId || !d.cols || !d.rows) return
+    if (!shouldShowToast(`share.wresize:${d.terminalId}`, 5000)) return
     message.info(t('share.writable.resized', {
       name: d.shareName || d.token || '',
       cols: d.cols,
@@ -840,6 +861,7 @@ export function useLayoutShell() {
     window.addEventListener(OPS_SHARE_PASTE_REVIEW, onSharePasteReview)
     window.addEventListener(OPS_SHARE_WRESIZE, onShareWResize)
     window.addEventListener(OPS_SHARE_DIRECT_REQUEST, onShareDirectRequest)
+    window.addEventListener(OPS_SHARE_PASTE_UPLOAD, onSharePasteUpload)
     // Monaco 语言 worker chunk 空闲预取（P-20261002-103）：仅调度，不占引导/交互时间片
     prefetchMonacoLanguageWorkers()
     startInstanceId = instanceStore.currentInstanceId
@@ -1020,6 +1042,7 @@ export function useLayoutShell() {
     window.removeEventListener(OPS_SHARE_PASTE_REVIEW, onSharePasteReview)
     window.removeEventListener(OPS_SHARE_WRESIZE, onShareWResize)
     window.removeEventListener(OPS_SHARE_DIRECT_REQUEST, onShareDirectRequest)
+    window.removeEventListener(OPS_SHARE_PASTE_UPLOAD, onSharePasteUpload)
   })
 
   // 项目切换时刷新变更状态（路径已失效的项目跳过：git status 必失败，

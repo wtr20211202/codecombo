@@ -131,6 +131,7 @@ domain_specs() {
            web/e2e/specs/overlay-flicker-defense.spec.ts ;;
     layout)
       echo web/e2e/specs/layout-reset.spec.ts web/e2e/specs/layout-lock.spec.ts web/e2e/specs/narrow-screen.spec.ts \
+           web/e2e/specs/narrow-header-layout.spec.ts \
            web/e2e/specs/panel-registry.spec.ts web/e2e/specs/title-info.spec.ts \
            web/e2e/specs/activity-bar-drag.spec.ts \
            web/e2e/specs/icon-hit-target.spec.ts \

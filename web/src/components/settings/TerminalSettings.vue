@@ -16,6 +16,7 @@ import {
 } from '../../composables/tmuxMouseTakeover'
 import { invalidatePastePrecheckCache } from '../../composables/useTerminalDangerGate'
 import { termInstances } from '../../composables/useTerminalInstances'
+import { safeStorage } from '../../utils/storage'
 import { terminalLru, TERMINAL_LRU_KEEP } from '../../composables/terminalLru'
 import SnippetManager from './SnippetManager.vue'
 import SettingModifiedMark from './SettingModifiedMark.vue'
@@ -332,7 +333,9 @@ async function save() {
 // resetCloseConfirm 重置「关闭终端二次确认」的「不再提示」状态
 // 与 TerminalView.vue 中的 CLOSE_NO_PROMPT_KEY 保持一致
 function resetCloseConfirm() {
-  localStorage.removeItem('sc.terminal.closeNoConfirm')
+  // safeStorage：裸 removeItem 在屏蔽 Cookie/隐私模式下抛 SecurityError，
+  // 「重置」按钮会静默失效（健壮性红线，写侧一律上通道）
+  safeStorage.removeItem('sc.terminal.closeNoConfirm')
 }
 
 // 鼠标接管提示「不再提示」重置（P-20261106-6）：清 safeStorage 记忆恢复显示，

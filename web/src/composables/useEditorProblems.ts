@@ -50,7 +50,7 @@ export function connectEditorProblems(api: MonacoProblemsApi): void {
     if (!disposable || typeof disposable.dispose !== 'function') return
     disposeMarkerListener = () => disposable.dispose()
     recalc(api)
-  } catch { disposeMarkerListener = null }
+  } catch { disposeMarkerListener = null /* silent-by-design: 监听注册失败（editor 已 dispose）时聚合能力退化为空，属纯拆除路径 */ }
 }
 
 /** 供测试用：断开监听并清零聚合（生产代码不调用——监听随应用生命周期存活，

@@ -138,6 +138,22 @@
             <button class="copy-btn" type="button" data-copy="p=$(mktemp) &amp;&amp; curl -fsSL --retry 3 https://ghproxy.net/https://raw.githubusercontent.com/wtr20211202/codecombo/main/scripts/install.sh -o &quot;$p&quot; &amp;&amp; sh &quot;$p&quot;; rm -f &quot;$p&quot;" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
           </div>
         </div>
+        <!-- macOS quarantine 注记（P-20261122-4）：源=README §Upgrading 应用内更新第三条注意点（改先改源）。
+             一键脚本经 curl 取材、不落隔离属性——浏览器下载产物才带；此注记管的是「手工换二进制」取材口径 -->
+        <div class="doc-note">
+          <p>
+            <span data-lang-en><b>Replacing the binary by hand on macOS?</b> Don't use
+            browser-downloaded release artifacts — they carry the
+            <code>com.apple.quarantine</code> attribute and background spawn may be silently
+            refused, so the in-app update's swap subprocess cannot start. Download with
+            <code>curl</code>, or clear the attribute with
+            <code>xattr -d com.apple.quarantine &lt;binary&gt;</code>.</span>
+            <span data-lang-zh><b>在 macOS 手工换二进制？</b>不要用浏览器下载的发布产物——文件带
+            <code>com.apple.quarantine</code> 隔离属性，后台 spawn 可能被静默拒绝，应用内更新的
+            换包子进程起不来。用 <code>curl</code> 下载，或用
+            <code>xattr -d com.apple.quarantine &lt;二进制&gt;</code> 清除属性。</span>
+          </p>
+        </div>
         <!-- npm 特例（P-20261113-4-S2）：源=faq #upgrading 判别表 npm 行 + README §Install with npm，措辞循 faq 口径（steps aside / 恒为最新版）不新造 -->
         <div class="doc-note">
           <p>
@@ -194,7 +210,7 @@
             <button class="copy-btn" type="button" data-copy="codecombo start" aria-label="Copy"><span class="copy-ico" aria-hidden="true">⧉</span><span class="copied-ico" aria-hidden="true">✓</span></button>
           </div>
           <div class="cmd-row">
-            <code class="cmd-text">http://localhost:9999</code><span class="qs-cmt" data-lang-en># first visit asks for the lock password</span><span class="qs-cmt" data-lang-zh># 首次访问会要求设置锁密码</span>
+            <code class="cmd-text">https://localhost:9999</code><span class="qs-cmt" data-lang-en># first visit asks for the lock password (self-signed cert — trust/continue)</span><span class="qs-cmt" data-lang-zh># 首次访问会要求设置锁密码（自签证书——信任/继续即可）</span>
           </div>
         </div>
         <p class="doc-p">

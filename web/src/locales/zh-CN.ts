@@ -2948,6 +2948,16 @@ export default {
       pasteDenied: '已拒绝——粘贴块未注入',
       // 视口反喂 resize（P-20261120-8）：sc-ops:share.wresize 直通分发的 toast
       resized: '访客已把「{name}」的终端调整为 {cols}×{rows}（视口同步）',
+      // 粘贴上传落盘（P-20261122-1）：sc-ops:share.paste-upload 直通分发的
+      // toast（notify.* 为服务端敏感名命中通知模板键，仅敏感名才发——逐文件
+      // note 过噪）
+      pasteUploaded: '访客向「{name}」上传了 {file}（{nick}）',
+      notify: {
+        pasteUpload: {
+          title: '访客粘贴上传了敏感名文件',
+          body: '「{name}」{nick} 上传了 {file}（{size}）到主机临时目录',
+        },
+      },
     },
     // 退役短链外泄观测（P-20261008-2）：轮换作废的旧链接仍被访问的告警与
     // 徽标——零误报的外泄确认信号；notify.* 为服务端外泄告警 titleKey/bodyKey
@@ -3441,6 +3451,9 @@ export default {
       blockedPaste: '终端处于只读观察，输入已锁定（右上角锁图标可恢复）',
       // 服务端只读闸（P-20261008-17）：接管会话 WS 写链被服务端拒绝 / 锁态同步失败
       rejectedServer: '输入被拒绝：会话处于服务端只读锁（接管会话默认只读），解锁后可输入',
+      // 分享持权拒绝（P-20261122-17）：访客正在通过分享键入，owner 键盘让位——
+      // 恢复路径在分享中心（收回输入权/结束分享），input-lock 解锁不解此闸
+      rejectedShare: '输入被拒绝：访客正在通过分享输入，请在分享中心收回输入权或结束分享',
       syncFailed: '输入锁状态同步服务端失败，已保留本地锁态',
     },
     backendNativeShort: '原生',
@@ -4413,6 +4426,9 @@ export default {
     source: '源码',
     preview: '预览',
     sourcePreview: '源码+预览',
+    // 草稿库不可用（P-20261122-13）：IndexedDB 在隐私模式/配额耗尽时不可用，
+    // 未保存草稿将无法自动保存——一次性回告，避免「以为有 hot-exit 兜底」
+    draftStorageUnavailable: '浏览器存储不可用，未保存的草稿无法自动保存——请在关闭页面前手动保存',
     // 光标位置徽标（P-20261004-141）：Ln/Col 为通用缩写惯例不加键（VS Code
     // 同款原文），仅 selected 文案与点击提示入键
     cursorPos: {
@@ -5782,6 +5798,8 @@ export default {
     added: '远程实例 {name} 已添加',
     selfRef: '实例地址不能指向当前服务自身（本机服务）',
     urlCopied: '实例地址已复制',
+    // 切换失败（P-20261122-13）：路由跳转/上下文处置抛错时不再静默停在旧界面
+    switchFailed: '切换实例失败，请重试',
     manage: '管理实例',
     testConnection: '测试连接',
     testing: '测试中…',
@@ -5933,6 +5951,10 @@ export default {
       at: '时间：{time}',
       lastOutcome: '上次更新',
       unknownHint: '服务长时间未恢复，更新结果未知——请检查服务状态，或稍后刷新页面',
+      // unknown「仍为旧版本」明示形态（P-20261122-5）：服务可达且运行旧版本时
+      // 取代通用文案，附手动升级出口（更新子进程秒死静默链的结局收口面）
+      unknownStillOld: '更新未完成——服务当前仍运行旧版本 v{version}，本次自动更新未生效',
+      manualUpgrade: '前往发布页手动下载新版本',
       refreshHint: '新版本已生效；本页面仍在运行旧版界面，刷新后加载新界面',
       refreshNow: '刷新页面',
       // 失败态一键重试（P-20261110-1-S2）：复用 apply 受理端点，拒因落回原因行
@@ -7126,6 +7148,9 @@ export default {
     filterPlaceholder: '过滤任务…',
     recentSection: '最近运行',
     noMatch: '没有匹配的任务',
+    // 启动失败（P-20261122-13）：服务端未回会话 id / 命令注入 WS 连不上——
+    // 此前静默，用户只看到空终端
+    startFailed: '任务启动失败：终端通道未就绪，请重试',
     source: {
       npm: 'npm scripts',
       make: 'Make targets',
@@ -7520,7 +7545,13 @@ export default {
       noMatch: '无匹配行',
       loading: '读取中…',
       loadFailed: '日志读取失败，请重试',
-      footnote: '仅展示最近写入的尾部窗口；完整文件在服务数据目录 logs/ 下按日滚动',
+      // 诊断包导出（P-20261122-10 S2a）：全模块日志+更新链+平台+运行态一次打走
+      diagExport: '导出诊断包',
+      diagTip: '打包全模块日志 + 更新链日志 + 平台信息 + 运行态（逐行脱敏，凭据不入包）；先预览体量再下载',
+      diagStarted: '诊断包下载已开始（日志原文 {size}，压缩后更小）',
+      diagFailed: '诊断包导出失败，点击重试',
+      diagSize: '预计 {size} · {files} 个文件',
+      footnote: '仅展示最近写入的尾部窗口；完整文件在服务数据目录 logs/ 下按日滚动（诊断包可一次取走全量）',
     },
     // 磁盘水位（P-20261002-12）：面板卡片 + 巡检通知模板（monitor.disk.* 前缀）
     disk: {
@@ -8272,6 +8303,7 @@ export default {
         writableInput: '访客键入批次（mode 分档）',
         writablePaste: '可写粘贴审批',
         writableResize: '访客视口改格',
+        pasteUpload: '访客粘贴上传落盘',
       },
       workspace: {
         export: '导出工作区备份',
@@ -8325,6 +8357,9 @@ export default {
         export: '导出审计 CSV',
         prune: '审计容量自动裁剪（系统）',
         archive: '审计自动归档（系统）',
+      },
+      diagnostics: {
+        export: '导出诊断包',
       },
       approval: {
         export: '导出裁决历史 CSV',

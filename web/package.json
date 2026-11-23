@@ -27,6 +27,7 @@
     "check:icon-titles": "node scripts/check-icon-button-titles.mjs",
     "check:icon-semantics": "node scripts/check-icon-semantics.mjs",
     "icon:report": "node scripts/icon-similarity-report.mjs",
+    "scan:silent-catch": "node scripts/scan-silent-catch.mjs",
     "check:e2e-conventions": "node scripts/check-e2e-conventions.mjs",
     "check:e2e-dualpath": "node scripts/check-e2e-dualpath.mjs",
     "check:keybindings": "node scripts/check-keybindings.mjs",

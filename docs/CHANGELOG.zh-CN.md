@@ -6,6 +6,137 @@
 
 ## [Unreleased]
 
+## [0.0.1-beta.10] - 2026-11-23
+
+### 新增
+
+- **一站式诊断包** —— 设置 → 系统监控 → 服务日志新增「导出诊断包」按钮
+  （对应 `GET /api/system/diagnostics/export`），把一台机器的排障证据打成
+  一个 zip：全模块按日日志（默认 3 天、上限 `logRetentionDays`）、更新链
+  （`update.log`/`update-subprocess.log`/`update-restart.log`）、`crash.log`、
+  `dsh-web.log`、含版本行的 PID 文件全文、`update-result.json`、
+  `logs-summary.txt`（每文件总行/级别计数/模块前缀/首末时间戳）、`errors.txt`
+  （WARN+ERROR 原文）、平台基线（OS/架构/CPU/内存/时区/磁盘；Windows 只用
+  `cmd /c ver` + `sc query`，其余平台 `uname`/`sw_vers`）与基础运行态
+  （服务形态/argv/白名单 `CC_*` env/ingress·egress 既有投影/环境体检/更新
+  状态）。**预期存在却缺席的文件在 `manifest.json` 记 `absent`**——更新链
+  日志缺席本身就是判别证据。凭据路径（`master-key`/`data/`/`config.json`/
+  `*.pem`/`*.key`/`id_*`/`*cookie*`/`*authorization*`）永不入包，日志逐行
+  遮蔽（`mask=0` 显式关），数据目录归一为 `$DATA_DIR`。超 8MiB 的文件保留
+  头 2MiB + 尾 14MiB 并写显式截断 seam（失败证据在尾部）；`?probe=1` 先看
+  体量再下载。导出单飞互斥 + 30s 冷却，每次导出入审计（`diagnostics.export`）。
+  服务起不来时用 `codecombo diagnostics --out x.zip` 跑同一收集器离线采集。
+
+- **诊断包：平台深度采样** —— 包里现在能回答「这个进程被谁托管、在听什么端口、
+  进程树长什么样」：macOS `launchctl print gui/<uid>/com.codecombo`（200 行/
+  32KiB 封顶；job 状态、运行次数与 last exit code 是 launchd 组杀类故障的第一手
+  证据）、Linux `systemctl show -p Restart,KillMode,Type,User`（`KillMode=process`
+  即判别式）+ best-effort 200 行 `journalctl` 尾巴 + `ss -ltnp`、Windows
+  `sc query` + `netstat -ano -p tcp`（Windows 不做进程树——扫描贵、值低，改给
+  `tasklist` 提示）、unix 上 `ps` 进程树过滤到本二进制 + 至多 3 行 tmux。机器内存
+  走 `/proc/meminfo`、`sysctl hw.memsize` 或 `wmic`（WMIC 缺失记 skipped 不算
+  错误）。每条命令只读、3s 上限、不提权，输出逐行遮蔽/路径归一；缺工具或无权限
+  如实记 `skipped`。macOS `log show` 绝不自动跑（慢 + `<private>` 遮挡）——命令与
+  `DiagnosticReports` 路径提示写在包内 README。新增 `state/storage.json`（数据目录
+  各顶层条目的大小/条目数，只统计绝不读内容）；`state/runtime.json` 增终端会话摘要
+  （总数/上限/按 kind·origin·backend 计数与 OSC 运行态，绝不含 id/名称/路径/输出），
+  离线 CLI 形态如实标 skipped。
+
+- **可写分享的访客粘贴上传** —— 持写权限的访客可以与主人端一样把图片/文件
+  粘贴进分享终端：图片按需压缩、文件上传、路径插入输入行。访客能键入时
+  粘贴文件归终端，无键入资格时仍进协作收件箱。观看侧同时新增链接识别、
+  终端内查找条、选区复制（Ctrl+Shift+C 或复制按钮，受限环境有降级路径）
+  与 WebGL 上下文丢失时的降级渲染；文本遮蔽开启时内联图片渲染保持关闭。
+
+- **失败证据落盘** —— 换包子进程的 stdout/stderr 写入
+  `logs/update-subprocess.log`，退出码/信号记录在父进程裁决行；致命崩溃
+  （任意 goroutine panic、fatal runtime error）写入 `logs/crash.log`；
+  `CC_LOG_LEVEL=debug|info|warn|error` 控制日志级别、无须设置页开关
+  （生效值在 `/api/selfcheck` 可见）。事件订阅者、定时任务与 webhook 的
+  panic 带堆栈落日志（按站点每分钟一条限频），不再凭空消失。
+
+- **访客交付面板常驻上传按钮** —— 拖拽与粘贴之外多一条显而易见的通路，
+  不会拖文件的访客也有入口；逐文件结果与重试一并可用。
+
+### 变更
+
+- **更新结局说清当前版本** —— 更新尝试结束时若服务可达但仍跑旧版本，
+  版本面板明确显示「更新未完成，当前仍为 vX」并给手动下载链接，不再只是
+  一个笼统的未知态。
+
+- **访问提示与默认端口文档化** —— 安装脚本输出、README、官网与文档统一为
+  `https://` 访问并标注自签证书（TLS 启动失败时给 `http` 回落提示）；新增
+  「默认端口」小节逐条说明四个端口与关闭方式：9999 主端口（默认开 TLS，
+  `--no-tls` 或 `CC_TLS=0` 关）、10000 回环辅助口（仅开 TLS 时存在）、
+  10001 分享子服务口、10002 明文伴随口（`httpPort: 0` 关闭）。
+
+- **macOS 手工换包指引** —— 升级文档把 quarantine 与 launchd 进程组两案
+  写清为三步判别，应用内更新卡住时按日志文件一步定位。
+
+### 修复
+
+- **访客粘贴不再「点了没反应」** —— 闸前的每种原因（无写权限、申请待批、
+  未持输入权、访问被撤销或过期）都会在粘贴面给出具体提示；尝试在过闸前
+  即记账，诊断不再看到空轨迹；可写访客的输入行在获准键入后自动聚焦。
+- **聚焦态分享终端恢复 Ctrl/Cmd+V** —— 持权的分享终端聚焦后按原生粘贴
+  处理：图片与文件进上传链、纯文本走正常粘贴路径，主机不再收到字面 `^V`；
+  只读分享页行为不变。
+- **分享终端滚动不再闪烁** —— 分享终端收为单一滚动面：阅读历史时新输出
+  不再把视图拽回底部，滚动条归页面所有而非 xterm 自绘。超尺寸（可滚动）
+  视图下滚轮滚动页面、不再转发给全屏应用的鼠标上报——它们自己的滚动键
+  仍然可用；贴合视图行为与此前完全一致。
+- **可写分享断线自动重连** —— 任意连接中断改为退避重连（1s → 2s → 5s →
+  10s）并先探测分享是否仍开放，原地恢复不刷新页面（回滚缓冲保留）；分享
+  关闭、过期、撤销与口令变更各自直达终态，不再无限重试；写者上限拒绝
+  给出可见提示。
+- **键盘控制权必定归还** —— 撤销、轮换、过期分享后输入闸一律释放；此前
+  闸可能泄漏，把主人锁在自己的终端之外。
+- **可写分享的 resize 回读环** —— 可写终端不再在主人与访客之间反复弹跳
+  视口变化（多出列、状态刷新、主人附着不收敛），栅格停在应得尺寸。
+- **五类分享页拖入文件不再触发浏览器导航** —— 只读、直播、终端、画布、
+  冻结页全部拦截文件拖放，浏览器不再跳转去打开被拖入的文件。
+- **协作收件箱不再误收** —— 粘贴仲裁改在 window 捕获相监听，无关粘贴
+  不再被投进收件箱。
+- **npm 装实例设置页重启不再把应用弄坏** —— npm wrapper 升级为循环监管
+  者：重启后的进程以专用退出码握手报到，wrapper 区分「请求重启」与
+  「真崩溃」，PID 文件只由写它的进程删除。
+- **静默失败补留痕** —— 后端 15 处吞错路径补日志，前端「真静默」分类
+  （网络、存储、剪贴板、尺寸观察器）甄别并修复；新增静态检查防止新的
+  静默丢弃进仓。
+- **窄窗口布局兜底** —— 首页顶栏在窄宽度下换行而非溢出，文件树头标题
+  不再从词中间折行。
+- **launchd 在线更新不再「从第二次起每次必回滚」** —— 换包后的旧实例终结
+  判据原先只看 PID 文件版本行是否非空，把「有版本行」当成「已在运行新二进制」。
+  凡能写该行的实例（含换包窗口里 KeepAlive 从旧二进制重拉的那个）启动即写
+  自己的版本号，于是从第二次在线更新起旧实例永不被终结，版本门控读到的恒是
+  旧版本，10 分钟兜底后必然回滚。判据现收成单一共享函数：只有版本行等于
+  目标版本才跳过（中心分发链没有具体目标版本，改用「是否等于换包前版本」
+  否决）。PID 文件里没有活实例也不再当作无事可做——最多等 10 秒让重拉的
+  实例写盘，仍无则如实失败（回滚从 10 分钟兜底提前到秒级）。`launchd
+  terminate` 日志同时改为如实陈述三种原因（无版本行 / 版本不符 / 无法比对），
+  不再声称一个未经验证的「已换装」。
+- **macOS launchd 在线更新不再无声失败** —— 换包子进程改以独立进程组启动，
+  launchd 在主进程退出时的进程组清理不再能把它在写日志之前杀掉（launchd
+  安装且版本 ≤ v0.0.1-beta.9 时更新永远完不成：应用静默停在旧版本，不报错、
+  无结果文件）。两处 plist 写入点（一键脚本与远程部署器）同时下发
+  `AbandonProcessGroup=true` 作第二层防护——该键对旧版二进制同样生效，重写
+  plist 即刻生效，远程部署的 macOS 实例由中心实例重新远程部署带回。与本版
+  的「换包后终结旧实例」配合，launchd 实例现在会真正落到新版本。
+
+### 升级提示
+
+- **macOS launchd 安装（一键脚本装）且版本 ≤ v0.0.1-beta.9：应用内更新
+  无法完成。** 重跑一次安装脚本即可——它会把 `AbandonProcessGroup=true`
+  写进 launchd plist，立即生效且与二进制版本无关。中心实例远程部署装的
+  实例必须改由 beta.10+ 的中心实例重新远程部署——**禁止**重跑安装脚本
+  （会丢 `PATH`/`WorkingDirectory`/`NoNewPrivileges` 且绑定缩回回环）。
+  曾用浏览器下载产物手工换过二进制的，清掉 quarantine 属性
+  （`xattr -d com.apple.quarantine <二进制>`）或用 `curl` 重新下载。
+- **Windows 服务、systemd 安装与前台/守护进程**无需任何手工步骤，按常规
+  应用内更新即到本版。自建 systemd unit 必须保留 `KillMode=process`
+  （systemd 默认的 `control-group` 会复现同类静默失败）。
+- **npm 装实例**用 `npm i -g codecombo@latest` 升级。
+
 ## [0.0.1-beta.9] - 2026-11-22
 
 ### 新增
@@ -346,7 +477,8 @@
 - 文档全面刷新：快速开始前置、完整工具清单（What's inside）、典型场景
   走查、开放贡献指南（欢迎 DCO 签名的 PR）。
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.9...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.10...HEAD
+[0.0.1-beta.10]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.10
 [0.0.1-beta.9]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.9
 [0.0.1-beta.8]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.8
 [0.0.1-beta.7]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.7

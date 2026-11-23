@@ -107,7 +107,8 @@ excluded() {
     scripts/perf/*) return 0;;
     # docs 内部过程文档（内部台账/审计快照/巡检记录——对公众零价值且含内部语境）
     docs/duplicate-triage-20261006.md|docs/e2e-trash-ui-24-0.md|\
-    docs/e2e-trash-ui-25-0.md|docs/giant-files-20261007.md|\
+    docs/e2e-trash-ui-25-0.md|docs/error-log-audit-20261122.md|\
+    docs/giant-files-20261007.md|\
     docs/license-audit-20261006.md|docs/license-audit-20261026.md|\
     docs/lint-baseline.md|docs/perf-report.md|docs/polish-roadmap.md|\
     docs/release-runbook.md|\
@@ -260,7 +261,7 @@ for must in main.go go.mod go.sum LICENSE NOTICE README.md CONTRIBUTING.md SECUR
             server/api/tools/dsh.go server/share/assets/xterm.js web/public/fonts/LICENSE-JetBrainsMono.txt \
             web/package.json web/package-lock.json scripts/e2e-seed.sh scripts/check-event-names.mjs \
             scripts/release-export.sh scripts/release-scan.sh scripts/release-publish.sh \
-            npm/cli/bin/codecombo.js scripts/npm-stage.mjs \
+            npm/cli/bin/codecombo.js npm/cli/test/codecombo.test.cjs scripts/npm-stage.mjs \
             scripts/install.sh scripts/install.ps1 \
             .github/workflows/ci.yml .github/workflows/release.yml .github/ISSUE_TEMPLATE/bug_report.md; do
   if [ ! -e "$DEST_ABS/$must" ]; then

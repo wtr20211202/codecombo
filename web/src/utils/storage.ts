@@ -10,6 +10,8 @@ function safeLocal(): Storage | null {
   try {
     return window.localStorage
   } catch {
+    // silent-by-design: 本函数就是静默降级的收口点（隐私模式属性访问即抛），
+    // 不可用由调用方落内存兜底，不需要也不应该再向用户回告
     return null
   }
 }
@@ -18,6 +20,7 @@ function safeSession(): Storage | null {
   try {
     return window.sessionStorage
   } catch {
+    // silent-by-design: 同 safeLocal（会话存储不可用时落 sessionMemory）
     return null
   }
 }

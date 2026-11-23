@@ -2,9 +2,9 @@
  * 统一双视图（原文件 ↔ 预览）的分流判定与偏好记忆（P-20261119-4 S3）。
  *
  * kind 数据源 = 服务端 file-preview 注册表（file-policy 响应增量 pv 字段，
- * 与分享访客面同一判定源——扩展格式两侧同时生效）。零依赖纯函数模块 +
- * localStorage 设备本地偏好（remotePathMemory.ts 同族口径：设备本地偏好
- * 不进车道 1）。
+ * 与分享访客面同一判定源——扩展格式两侧同时生效）。纯函数模块 + safeStorage
+ * 设备本地偏好（remotePathMemory.ts 同族口径：设备本地偏好不进车道 1；
+ * 存储通道走健壮性红线统一封装，屏蔽 Cookie/隐私模式下读写均不抛错）。
  *
  * 分流默认态（用户定向修订定案）：
  *  - 预览 Kind 命中的二进制类（docx/pdf/image/av/html/csv/sheet）→ 默认
@@ -13,6 +13,8 @@
  *    嗅探下恒为空——sniffed-binary 的 md/txt 不给预览态（回落信息卡现状）；
  *  - info/未注册 → 无预览态（信息卡+下载，真未知格式如实交代）。
  */
+
+import { safeStorage } from './storage'
 
 /** 视图态（tab 内「原文件 | 预览」双态） */
 export type FileViewMode = 'source' | 'preview'
@@ -48,21 +50,15 @@ function extOf(path: string): string {
 export function preferredViewMode(path: string): FileViewMode | null {
   const ext = extOf(path)
   if (!ext) return null // 无扩展名（Makefile 等）不落偏好——prefers nothing to a shared catch-all
-  try {
-    const v = localStorage.getItem(KEY_PREFIX + ext)
-    return v === 'source' || v === 'preview' ? v : null
-  } catch {
-    return null
-  }
+  const v = safeStorage.getItem(KEY_PREFIX + ext)
+  return v === 'source' || v === 'preview' ? v : null
 }
 
 /** 记住视图偏好（GitHub/VS Code 惯例：切换即写，下次打开同扩展名生效） */
 export function rememberViewMode(path: string, mode: FileViewMode): void {
   const ext = extOf(path)
   if (!ext) return
-  try {
-    localStorage.setItem(KEY_PREFIX + ext, mode)
-  } catch { /* 环境无 localStorage 静默跳过 */ }
+  safeStorage.setItem(KEY_PREFIX + ext, mode)
 }
 
 /** 打开链的默认视图态：偏好优先，缺省按 kind 分流（二进制可预览类默认

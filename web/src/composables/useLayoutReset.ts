@@ -5,6 +5,7 @@ import { LAYOUT_DEFAULTS, usePanelLayout } from './usePanelLayout'
 import { confirmDialog } from './useDialog'
 import { useI18n } from './useI18n'
 import { OPS_COLLAPSE_TREE } from '../utils/opsEvents'
+import { safeStorage } from '../utils/storage'
 
 /**
  * 一键重置当前项目布局（P-20261002-74）：uiState 持久化了面板开合/双栏宽度/
@@ -49,7 +50,8 @@ export function useLayoutReset() {
     layout.restoreFromMaximized()
     // 2. 树展开复位：先清 localStorage 展开键（树未挂载时也生效），再派发收起
     //    事件让挂载中的树就地处收起（collapseAll 的 deep watch 回写空表，与清键收敛）
-    try { localStorage.removeItem(`sc.fileTree.expanded.${pid}`) } catch { /* 存储不可用忽略 */ }
+    //    封装内已有 try/catch 与内存兜底，此处无需再包一层
+    safeStorage.removeItem(`sc.fileTree.expanded.${pid}`)
     window.dispatchEvent(new CustomEvent(OPS_COLLAPSE_TREE, { detail: { projectId: pid } }))
     // 3. 服务端写回默认（既有 uiState 写端点；浅合并只动 layout/fileTree 两个命名空间）
     await uiStateStore.resetLayoutState({

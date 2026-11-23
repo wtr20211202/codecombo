@@ -92,11 +92,15 @@ link or the npm channel (`npm i -g codecombo@next` — the npm registry has
 integrity mechanisms built in). The Windows one-liner has no mirror variant
 documented yet (planned follow-up).
 
-Then open **http://localhost:9999** and set your lock password on first start.
-Version selection is automatic: the latest stable release when one exists;
-until then the newest rc, falling back to the newest beta. Port, bind
+Then open **https://localhost:9999** and set your lock password on first
+start. TLS is on by default — a self-signed certificate is generated on first
+start, so your browser will ask you to trust/continue on the first visit; if
+certificate generation ever fails the service falls back to plain HTTP and
+logs it. Version selection is automatic: the latest stable release when one
+exists; until then the newest rc, falling back to the newest beta. Port, bind
 address, install directory and data directory are adjustable — see
-[Optional parameters](#optional-parameters).
+[Optional parameters](#optional-parameters); the ports the service opens by
+default and what each is for — see [Default ports](#default-ports).
 
 **Permissions & the service account.** To register the service you need
 elevation — administrator PowerShell on Windows, sudo on Linux (the script
@@ -194,6 +198,48 @@ Before adding a second instance:
 - **Never re-run the script on a remote-deployed instance** (see
   [Upgrading](#upgrading)).
 
+#### Default ports
+
+With defaults (main port `9999`) a running instance opens four ports. Each
+auxiliary port tracks the main port (`+1` / `+2` / `+3`) unless configured
+otherwise:
+
+| Port (default) | What it is for |
+|---|---|
+| `9999` — main port | The one port you actually need: UI, API and terminals over **HTTPS/WSS**. TLS is on by default with a self-signed certificate (generated into the data directory's `certs/` on first start, reused after) — your browser asks you to trust/continue on the first visit. Turn TLS off with `--no-tls` or `CC_TLS=0` |
+| `10000` — main+1 | Plaintext loopback helper, bound to `127.0.0.1` only: the local CLI (`status`/`stop`/`restart`) and agent callbacks keep plain-HTTP access despite the self-signed cert. Exists only while TLS is on. Move it with the `loopbackPort` config key |
+| `10001` — main+2 | File-sharing sub-service — the `/s/…` links you share open on this port (bound to the same address as the main port). Move it with the `sharePort` config key |
+| `10002` — main+3 | Plaintext companion on the main bind address (LAN-reachable): an out-of-the-box http face for deep-inspection networks where TLS is slow. Credentials travel unencrypted here — turn it off with `"httpPort": 0` in `config.json` |
+
+Certificate trust (installing `certs/cert.pem` into a client trust store),
+instance-to-instance TLS, and the companion-port trade-offs are covered in
+[deploy-linux.md §4.1](docs/deploy-linux.md) and [§8](docs/deploy-linux.md).
+
+**Changing the service shape to plain HTTP** (rarely needed — the installers
+register the service without TLS switches, so it runs with the TLS-on
+default): one edit per platform, then restart:
+
+```bash
+# systemd: drop an override with Environment=CC_TLS=0 under [Service]
+sudo systemctl edit codecombo        # add:  [Service]  /  Environment=CC_TLS=0
+sudo systemctl restart codecombo
+```
+
+```bash
+# launchd: add <string>--no-tls</string> to ProgramArguments in
+# ~/Library/LaunchAgents/com.codecombo.plist, then
+launchctl unload ~/Library/LaunchAgents/com.codecombo.plist
+launchctl load ~/Library/LaunchAgents/com.codecombo.plist
+```
+
+```powershell
+# Windows service: read the current command line, re-set it with --no-tls
+# appended (keep --data-dir and the rest as they are), then
+sc.exe qc Codecombo
+sc.exe config Codecombo binPath= "<current command line> --no-tls"
+sc.exe start Codecombo
+```
+
 ### Install with npm
 
 ```bash
@@ -201,7 +247,9 @@ npm i -g codecombo
 codecombo start
 ```
 
-Then open **http://localhost:9999** and set your lock password on first start.
+Then open **https://localhost:9999** and set your lock password on first
+start (TLS is on by default — self-signed certificate, accept the browser
+warning on first visit; see [Default ports](#default-ports)).
 Requires Node.js 18+ — the npm package is a thin wrapper; `npm` picks the
 native binary for your platform (Windows / Linux / macOS, amd64 & arm64) via
 optional dependencies. No postinstall scripts. Prebuilt binaries are also on
@@ -215,6 +263,13 @@ moves only with stable releases, and pre-release versions (rc / beta)
 publish to the `next` channel. Updates for npm installs are owned by npm: the
 in-app updater stays off for this install shape — just re-run the install
 command to move to the latest.
+
+Restarts triggered from the settings page are supervised in both npm shapes:
+a foreground `codecombo --serve` stays attached to your terminal (the wrapper
+re-spawns the binary), and a `codecombo start` daemon re-spawns itself
+detached — closing the terminal afterwards does not kill it (follow-up output
+lands in `~/.codecombo/logs/update-restart.log`). A restart crash loop
+(5 requests within 60s) trips the wrapper's breaker instead of spinning.
 
 ### Upgrading
 
@@ -235,14 +290,64 @@ absolute path in the unit):
 
 **1. In-app update (recommended shape)** — "Check Update" in the version
 panel (Settings → About) pulls the new binary from GitHub and swaps it with
-automatic rollback on failure. Two notes: versions older than v0.0.1-beta.3
-cannot see new releases in-app (a check-chain defect, fixed in
-v0.0.1-beta.3) — upgrade once via the script/manual paths below first;
+automatic rollback on failure. Three notes: versions older than
+v0.0.1-beta.3 cannot see new releases in-app (a check-chain defect, fixed
+in v0.0.1-beta.3) — upgrade once via the script/manual paths below first;
 during the beta phase the GitHub stable channel stays empty, so turn on
-**Follow pre-releases** in the version panel before checking.
+**Follow pre-releases** in the version panel before checking; and on macOS,
+a binary that was ever replaced by hand with a browser-downloaded release
+artifact carries the `com.apple.quarantine` attribute — background spawn
+may then be silently refused, the in-app update's swap subprocess never
+starts and the rollout dies without a visible error (the app just never
+comes back on the new version). For manual replacement on macOS, don't use
+browser-downloaded artifacts — download with `curl` or clear the attribute
+with `xattr -d com.apple.quarantine <binary>`; an instance already stuck
+there upgrades once via the paths below — re-running the install script is
+safe for script installs, while remote-deploy instances must get a fresh
+remote deploy from the central instance instead (**never** re-run the
+script — see the table above and the warning under 2). If the quarantine
+attribute was already cleared and the symptom is unchanged, this is not the
+cause — see the launchd process-group case next.
+
+**macOS launchd installs on v0.0.1-beta.9 or older: in-app update never
+completes.** launchd cleans up the job's whole process group when the main
+process exits (best-effort, with no timing guarantee), so the update's swap
+subprocess is killed before it can even open its log: the app silently
+reverts to the old version — no error, no result file, and
+`<data-dir>/logs/update.log` is never created. **From v0.0.1-beta.10 on,
+in-app update works** (the swap subprocess starts in its own process
+group). The plist side of the fix is independent of the binary version:
+re-running the install script writes `AbandonProcessGroup=true` into the
+plist and loads it, which takes effect immediately — a script-installed
+instance on ≤beta.9 upgrades in-app right after the re-run;
+remote-deployed instances get the same key from a fresh remote deploy
+(the central instance must run beta.10+); a hand-written plist can simply
+add the key itself; otherwise install beta.10+ by hand. To tell the three
+macOS silent-failure shapes apart:
+- the service log (`<data-dir>/logs/codecombo-<date>.log`) has
+  `start update process failed` → the subprocess cannot start
+  (quarantine/permissions);
+- no such line, `<data-dir>/logs/update.log` does not exist, and
+  `<data-dir>/tmp/update-*` holds a complete downloaded artifact →
+  launchd process-group kill (this case);
+- `update.log` contains `waiting for old process` → the liveness/wait
+  chain stalled.
+
+Self-built systemd units must keep `KillMode=process`: under the systemd
+default (`control-group`) the swap subprocess is cleaned up the same way
+when the main process exits — the same silent failure.
+
 Script-installed (systemd-managed) instances: if the service has not come
 back on its own after updating, `sudo systemctl restart codecombo` finishes
 the rollout.
+
+**Restart behavior** (in-app updates and the settings-page restart share the
+same chain): systemd / Windows-service / launchd instances are re-launched by
+their supervisor. A manually started instance restarts as a detached daemon —
+a foreground `codecombo --serve` returns to the prompt and follow-up output
+lands in `~/.codecombo/logs/update-restart.log` (npm installs keep their own
+supervision: the wrapper re-spawns a foreground `--serve` attached to your
+terminal).
 
 **2. Re-run the install script (script installs only)** — re-running is
 upgrade-safe: the script replaces the binary and the service registration
@@ -350,8 +455,9 @@ build.bat             # Windows
 # or: ./dist/codecombo        # equivalent to `start`
 ```
 
-Then open **http://localhost:9999**, set your lock password on first start,
-and add a project (a local Git repo, or clone one). Prebuilt binaries for
+Then open **https://localhost:9999**, set your lock password on first start
+(TLS is on by default — self-signed certificate, accept the browser warning
+on first visit), and add a project (a local Git repo, or clone one). Prebuilt binaries for
 Windows / Linux / macOS (amd64 & arm64) are published on the
 [Releases](../../releases) page.
 
@@ -374,7 +480,10 @@ from your phone or another machine on the LAN, bind all interfaces:
 codecombo start --host 0.0.0.0        # or: -H 0.0.0.0 (flag beats config.json server.host)
 ```
 
-Then open `http://<machine-ip>:9999` from the other device. The lock password
+Then open `https://<machine-ip>:9999` from the other device (TLS is on by
+default — accept the self-signed certificate warning on first visit; a
+plaintext companion port exists for deep-inspection networks that slow TLS
+down, see [Default ports](#default-ports)). The lock password
 (first-start setup) is the gate — bind to `0.0.0.0` only on networks you trust.
 
 ## First steps
@@ -384,9 +493,10 @@ loop from a fresh instance to real work — every step below is an existing
 capability, covered in depth in [What's inside](#whats-inside) and
 [Highlights](#highlights).
 
-**1. Open the workbench, set the lock.** Open **http://localhost:9999** and
-set your lock password on first start — it is the gate for every visit, with
-idle auto-lock on top.
+**1. Open the workbench, set the lock.** Open **https://localhost:9999** and
+set your lock password on first start (TLS is on by default — self-signed
+certificate, accept the browser warning on first visit) — it is the gate for
+every visit, with idle auto-lock on top.
 
 **2. Add a project — or hand even that to an agent.** Add a local Git repo
 (or clone one) from the home screen. Or skip the step entirely — the
@@ -512,6 +622,26 @@ Details → [official docs](https://wtr20211202.github.io/codecombo/guide/featur
 Share a file, a folder, a text snippet, or a live terminal with visitors via
 one-click links — TTL, password, view-once and frozen-snapshot are all one
 toggle away; visitors need no account.
+
+Live terminal shares are read-only by default and masked; the owner can
+optionally open **guest input** (open mode, or request-and-approve). In that
+writable mode the page carries a persistent **Upload files/images** button —
+it works in every browser and on mobile: images are compressed, the same type
+and size limits apply, and the saved path is typed into the terminal. With the
+terminal focused, **Ctrl+V** now reaches the browser's native paste: files are
+uploaded as above, and plain text is pasted through the terminal input channel
+(the same command-approval and audit path as typing). The trade-off is that
+Ctrl+V is no longer forwarded to the host as a literal `^V`, so terminal
+programs that bind it (for example Vim's visual block) no longer receive it.
+Pasting files with Ctrl+V still depends on the browser: Firefox does not expose
+files copied from the file manager via `clipboardData.files`, pasting files is
+not available in iOS Safari, desktop Safari greys it out, and Android Chrome
+depends on clipboard permissions — when the clipboard really holds an image
+the page also tries an explicit clipboard read as a fallback. On mobile or
+any other browser you can additionally use the collaboration-material entry
+(camera / choose files) when the owner has enabled collaboration; dragging
+files onto a writable page uploads nothing — the page blocks the default
+navigation and points you to the upload button or Ctrl+V.
 
 ![Share dialog](docs/img/share-dialog.png)
 

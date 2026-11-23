@@ -64,7 +64,8 @@ export function useWebSocket() {
       const msg = JSON.parse(event.data)
       dispatchMessage(msg)
     } catch {
-      // 忽略无效消息
+      // silent-by-design: 服务端非 JSON 帧是协议噪声，忽略；断连另有
+      // useWsDisconnectBar 顶部指示条与 1009/1011 通知中心入账
     }
   }
 

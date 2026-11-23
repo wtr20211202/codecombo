@@ -145,7 +145,7 @@ func (m *Manager) Source() UpdateSource {
 
 // NpmManaged 本二进制是否 npm 分发安装（P-20261113-4-S1）。检查/状态响应的
 // npmManaged 旗标经本方法透出：与 applyUpdate 的 ErrNpmManaged 拒绝闸同一对象
-//（binaryPath）同一判据（IsNpmManaged），保证「响应旗标说 npm」与「点了更新必
+// （binaryPath）同一判据（IsNpmManaged），保证「响应旗标说 npm」与「点了更新必
 // 被 409」是同一事实，不另立判定防两处漂移
 func (m *Manager) NpmManaged() bool {
 	return IsNpmManaged(m.binaryPath)
@@ -438,7 +438,18 @@ func (m *Manager) applyUpdate(ctx context.Context, info *ReleaseInfo, currentVer
 
 	pid := os.Getpid()
 	if err := launchUpdateSubprocessFn(m.binaryPath, newBinary, port, pid, m.dataDir, info.Version, currentVersion); err != nil {
-		m.fail("start update process failed: " + err.Error())
+		// errMsg 两形态（P-20261122-5）：spawn err 沿现状前缀；秒死直陈握手结论
+		// （ErrSubprocessDied 包装文本自带 outcome + darwin 条件化自救指引）——
+		// 面板「上次更新」与失败通知读到的两类原因可区分，零新增 notify i18n 键
+		// （failed 通知 Body=errMsg 原文，notifyUpdateFailed 既有包装）。
+		// durable 判死留痕（P-20261122-9 必改1：主日志 slog.Error + update-subprocess.log
+		// 裁决行）在 LaunchUpdateSubprocess 单一裁决点完成——本函数与中心链
+		// 共用该入口，两处不重复落盘
+		if errors.Is(err, ErrSubprocessDied) {
+			m.fail(err.Error())
+		} else {
+			m.fail("start update process failed: " + err.Error())
+		}
 		return err
 	}
 
@@ -914,11 +925,36 @@ func updateSubprocessEnv(dataDir, version, prevVersion string, form superviseFor
 // newUpdateCmd 组装换包子进程命令（不启动）。拆出便于单测断言 argv 与 env
 // 契约注入——测试绝不真实 spawn 换包进程（launchUpdateSubprocessFn 注释
 // 同款护栏）
+//
+// P-20261122-7：无条件设 cmd.SysProcAttr = daemonProcAttr()，让换包子进程落
+// **独立进程组**。macOS launchd 的清理口径是「job 主进程死亡时 best-effort
+// 清理 same process group ID 的全部剩余进程」（launchd.plist(5)
+// AbandonProcessGroup 条目）——主进程交接后约 500ms 退出，同组子进程会被
+// 连带清理，活不到 initLogger 写 update.log（用户实测三次在线升级静默失败
+// 的代码层根因；对称实锚=install.sh systemd unit 的 KillMode=process 是
+// Linux 侧刻意保护子进程的同一产品意图）。Setpgid 是 launchd 文档化的
+// 逃生门；不用 Setsid：多出的「脱离会话」本病灶不需要，且 daemonProcAttr
+// 还被 restartBare 用来拉起服务本体（变成会话首进程属语义变更、收益为零）。
+// 无条件（不只 launchd 分支）：bare/前台形态下终端 Ctrl+C 只发给前景进程
+// 组，换包子进程不再被连带打断；systemd 侧由 unit 的 KillMode=process
+// 兜底；Windows 服务形态子进程本就活得过父进程自退（P-20261112-1-S2
+// 实锚），该属性在此只提供终端信号隔离，无行为回归面。
+// 纵深防御：两处 plist 写入点（scripts/install.sh / server/deploy/codecombo.go）
+// 同时下发 AbandonProcessGroup=true——plist 层修复与二进制无关，≤beta.9
+// 的二进制重跑装脚本即受益（exec.Cmd 无 Sys 字段，进程属性唯一入口即
+// SysProcAttr）
 func newUpdateCmd(currentBinary, newBinary string, port, pid int, dataDir, version, prevVersion string, form superviseForm, origArgs []string) *exec.Cmd {
 	cmd := exec.Command(newBinary, "_do_update", currentBinary, newBinary, fmt.Sprintf("%d", port), fmt.Sprintf("%d", pid))
 	cmd.Env = updateSubprocessEnv(dataDir, version, prevVersion, form, origArgs)
+	cmd.SysProcAttr = daemonProcAttr()
 	return cmd
 }
+
+// newUpdateCmdFn 换包子进程命令组装取值口（默认 newUpdateCmd，P-20261122-5）：
+// 单测替换以让 LaunchUpdateSubprocess 的真实握手链（尺寸标记 → Start → 活性窗）
+// 跑在一个无害子进程上（测试二进制 -test.list 即刻退出形态），不真实执行
+// _do_update 任何换包动作（launchUpdateSubprocessFn 注释同款护栏）
+var newUpdateCmdFn = newUpdateCmd
 
 // LaunchUpdateSubprocess 启动 _do_update 子进程执行二进制替换。
 // env 正名 CODECOMBO_UPDATE_* + 旧名 SIMPLE_CODING_UPDATE_* 双写一个版本期：
@@ -927,7 +963,50 @@ func newUpdateCmd(currentBinary, newBinary string, port, pid int, dataDir, versi
 // P-20261112-1-S1 增发可选监管形态提示 CODECOMBO_UPDATE_SUPERVISE（缺省回落
 // bare=旧对端行为不劣化，语义见 do_update.go 契约块）。
 // P-20261112-1-S2 增发可选 argv 列式契约（origArgsFn=本进程 os.Args[1:]）：
-// bare/前台形态换包后按原参数原样重启，见 updateSubprocessEnv
+// bare/前台形态换包后按原参数原样重启，见 updateSubprocessEnv。
+// P-20261122-7：spawn 成功即落一条带子进程 PID 的锚行（主日志，签名不变）——
+// P-5 活性握手与 `ps`/`log show` 对账可立刻定位换包子进程。
+// P-20261122-9：子进程 stdio 不再丢弃——stdout/stderr 同接
+// DataDir/logs/update-subprocess.log（Start 成功之后、initLogger 之前的
+// runtime/迁移/panic 字节；与 update.log 严格分离，理由见 subprocesslog.go 头注），
+// 握手失败的裁决行（PID/outcome/原因）同文件追加 + 主日志 slog.Error。
+// P-20261122-5 增活性握手：Start() 成功不再等于子进程活着（实测 quarantine
+// 秒死静默链）——spawn 前记 update.log 尺寸、有界窗内等 `update started` 首行，
+// 无证据即返回 ErrSubprocessDied，调用方保持安全态（自更新链不置 restarting
+// 不退出；中心链不触发重启钩子），详见 handshake.go。返 nil=活性已证
 func LaunchUpdateSubprocess(currentBinary, newBinary string, port, pid int, dataDir, version, prevVersion string) error {
-	return newUpdateCmd(currentBinary, newBinary, port, pid, dataDir, version, prevVersion, currentSuperviseFormFn(), origArgsFn()).Start()
+	mark, err := updateLogSize(dataDir)
+	if err != nil {
+		return err
+	}
+	cmd := newUpdateCmdFn(currentBinary, newBinary, port, pid, dataDir, version, prevVersion, currentSuperviseFormFn(), origArgsFn())
+	// 诊断面打开失败不阻断换包（stdio 丢弃 = 修复前行为），但要响声——否则
+	// 下一次「没日志」无从归因
+	subLog, logErr := openSubprocessLog(dataDir)
+	if logErr != nil {
+		slog.Warn("update: open subprocess log failed — subprocess stdio will be discarded",
+			"path", updateSubprocessLogPath(dataDir), "err", logErr)
+	} else {
+		// Stdout 与 Stderr 同接同一 *os.File：panic trace 走 stderr、早期 fmt/日志
+		// 走 stdout，两者都要（exec 把 *os.File 的句柄直接交给子进程，无拷贝 goroutine）
+		cmd.Stdout = subLog
+		cmd.Stderr = subLog
+		// 子进程持有自己的句柄副本，父进程关闭不影响其继续写；「alive but silent」
+		// 放弃路径下存活子进程会继续写自己的句柄
+		defer subLog.Close()
+	}
+	if err := cmd.Start(); err != nil {
+		// spawn 失败的同步留痕（exec 详情随 err 返回调用方，主日志补一行：
+		// 失败通知/HTTP 响应之外的 durable 面）
+		slog.Error("update: start swap subprocess failed",
+			"binary", newBinary, "log", updateSubprocessLogPath(dataDir), "err", err)
+		return err
+	}
+	slog.Info("update: swap subprocess started",
+		"pid", cmd.Process.Pid, "binary", newBinary, "log", updateSubprocessLogPath(dataDir))
+	outcome, herr := awaitSubprocessLiveness(cmd, dataDir, mark, prevVersion, version)
+	if herr != nil {
+		recordSubprocessFailure(dataDir, subLog, cmd.Process.Pid, outcome, herr)
+	}
+	return herr
 }

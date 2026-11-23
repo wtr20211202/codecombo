@@ -27,6 +27,8 @@ export function useDesktopNotify() {
       const result = await Notification.requestPermission()
       return result === 'granted'
     } catch {
+      // silent-by-design: 权限请求被浏览器拒绝属预期形态，返回 false 由设置页
+      // 权限行（NotificationSettings.desktopPermission）呈现并引导
       return false
     }
   }
@@ -83,9 +85,11 @@ export function useDesktopNotify() {
         }
       }
       // 5 秒后自动关闭（部分浏览器需要）
-      setTimeout(() => { try { n.close() } catch { /* 已被用户手动关闭 */ } }, 5000)
+      setTimeout(() => { try { n.close() } catch { /* silent-by-design: 通知已被用户手动关闭（纯拆除类） */ } }, 5000)
     } catch {
-      // 静默：部分浏览器在 SW 上下文外可能报错
+      // silent-by-design: 桌面弹窗是通知中心入账（调用方 store.add/addLocal）之外
+      // 的纯增益提醒；部分浏览器在 SW 上下文外构造 Notification 会报错，此时
+      // 站内中心仍有账，不构成用户可见的信息丢失
     }
   }
 

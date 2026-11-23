@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -135,9 +136,16 @@ func webhookBody(n Notification) string {
 	return truncateRunes(mask.MaskText(n.Body), webhookFieldMax)
 }
 
-// deliver 外发并记录结果（goroutine 内执行；panic 不外泄）
+// deliver 外发并记录结果（goroutine 内执行；panic 不外泄——但必须留痕：
+// P-20261122-9 必改2，此前 `_ = recover()` 让外发链 bug 永久无痕，用户只见
+// 「推送没到」）
 func (f *Forwarder) deliver(w WebhookPrefs, title, body string) {
-	defer func() { _ = recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("webhook forward panicked",
+				"mode", w.Mode, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
 	if err := SendWebhook(w, title, body); err != nil {
 		// 失败静默丢弃，仅留日志（不回写通知中心——避免推送失败本身再生成
 		// 通知的循环；URL 配错由用户在设置页「测试推送」发现）

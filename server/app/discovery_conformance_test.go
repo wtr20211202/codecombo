@@ -69,6 +69,14 @@ var routeWhitelist = map[string]string{
 	"/assets/addon-unicode11.js":          "分享访客页 vendored 资产（xterm unicode11 宽度表）——同上",
 	"/assets/JetBrainsMono-Regular.woff2": "分享访客页 vendored 资产（终端字体，OFL）——同上",
 	"/assets/JetBrainsMono-Bold.woff2":    "分享访客页 vendored 资产（终端字体粗体，OFL）——同上",
+	// P-20261122-1 观看侧四件（web-links/search/webgl/image）：终端直播访客页
+	// 通用/条件挂载的浏览器渲染资源（授权模式无关裁定 D / ImageAddon 仅在
+	// SC.unfiltered 时挂载的遮蔽闸）——同为访客渲染资源非 agent 能力端点
+	// （xterm 系豁免口径同上；frozen/cast 定格页明确不挂，防蔓延裁定 D）
+	"/assets/addon-web-links.js": "分享访客页 vendored 资产（xterm addon-web-links 链接可点）——同上",
+	"/assets/addon-search.js":    "分享访客页 vendored 资产（xterm addon-search 搜索条）——同上",
+	"/assets/addon-webgl.js":     "分享访客页 vendored 资产（xterm addon-webgl 渲染）——同上",
+	"/assets/addon-image.js":     "分享访客页 vendored 资产（xterm addon-image 图片协议，SC.unfiltered 条件挂载）——同上",
 }
 
 // manifestWhitelist 清单侧例外：推导覆盖不了的显式 extras 条目（均在码有注释背书）

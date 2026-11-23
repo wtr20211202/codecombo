@@ -26,6 +26,11 @@ const BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:9999'
 const PROJECT_NAME = 'simple-coding'
 const WRITABLE_PASS = 'wr-e2e-pass-1'
 
+// 访客页主脚本顶层 `const term` 是全局词法绑定而非 window 属性（globalThis.term
+// 恒 undefined）；page.evaluate 的函数在页内全局作用域编译，直接引用该标识符
+// 即取到真实终端实例。declare 仅服务 TS 类型面（e2e 不进 vue-tsc/eslint 扫描）
+declare const term: { options?: { theme?: { cursor?: string } } }
+
 interface AuditEvent {
   action: string
   detail?: string
@@ -488,5 +493,237 @@ test.describe('share-writable', () => {
     })).ok()).toBeTruthy()
     await expect(box).toHaveAttribute('data-cols', '100', { timeout: 10_000 })
     await expect(box).toHaveAttribute('data-rows', '30')
+  })
+
+  // 粘贴上传落盘链（P-20261122-1 必改2）：访客页 paste 事件接管（capture 抢先）
+  // → 压缩/直传 → POST /s/{token}/paste-upload 落系统临时目录 sc-paste-* →
+  // 路径经 term.paste（bracketed paste）→ onData → WS Binary 帧注入 PTY →
+  // owner scrollback 可见。旁证四面：wr-actions 动作排（必改4 复制钮/必改6
+  // 搜索开关）在场、持权态光标色（必改7 摘除后的回归断言——setStdin(on)
+  // 点亮 '#3d7bfd'）、审计 share.pasteUpload 元数据口径、pu-tip 落盘回执
+  test('访客粘贴上传落盘链：文件粘贴 → sc-paste-* 落盘 → 路径入 PTY → 审计 + 光标色回归', async ({ request, page }) => {
+    test.setTimeout(120_000)
+    const headers = await unlockHeaders(request)
+    const shareBase = await getShareBase(request, headers)
+    const { token, sessionId } = await createTerminalShare(request, headers, 'paste')
+    createdSessions.push(sessionId)
+    expect((await request.post(`${BASE}/api/share/${token}/writable`, {
+      headers, data: { on: true, confirm: true, passphrase: WRITABLE_PASS },
+    })).ok()).toBeTruthy()
+
+    await page.goto(`${shareBase}/s/${token}`)
+    await page.locator('input[name="passphrase"]').fill(WRITABLE_PASS)
+    await page.locator('.field button').click()
+    await page.waitForURL(`${shareBase}/s/${token}`)
+    await expect(page.getByTestId('wr-strip')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('wr-text')).toContainText(/可写模式|Writable mode/)
+
+    // 持权态光标色回归（必改7：能力已在库 b15ea9f6，本 spec 是唯一防线——
+    // canType=true 时 setStdin 点亮 '#3d7bfd'，teardown 回 'transparent' 的
+    // 语义由代码与单测对账，此处锚定可写态现值）
+    const cursorColor = await page.evaluate(() => term.options?.theme?.cursor || '')
+    expect(cursorColor).toBe('#3d7bfd')
+
+    // 动作排在场（复制钮/搜索开关——必改4/6 访客页 UI 面）
+    await expect(page.getByTestId('wr-actions')).toBeVisible()
+    await expect(page.getByTestId('wr-copy')).toBeVisible()
+    await expect(page.getByTestId('wr-search-toggle')).toBeVisible()
+
+    // 文件粘贴（合成 ClipboardEvent 直达捕获相仲裁监听——文件载荷，非文本）
+    await page.locator('.xterm-screen').click()
+    await page.evaluate(() => {
+      const dt = new DataTransfer()
+      dt.items.add(new File([new TextEncoder().encode('e2e paste upload body')], 'e2e-paste.txt', { type: 'text/plain' }))
+      const ta = document.querySelector('.xterm-helper-textarea')
+      ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    })
+    // 路径入 PTY：owner scrollback 出现 sc-paste-*.txt（Windows 回告正斜杠路径）
+    const sbDeadline = Date.now() + 15_000
+    let sbText = ''
+    while (Date.now().valueOf() < sbDeadline) {
+      const res = await request.get(`${BASE}/api/terminals/${sessionId}/scrollback`, { headers })
+      if (res.ok()) {
+        sbText = await res.text()
+        if (sbText.includes('sc-paste-') && sbText.includes('.txt')) break
+      }
+      await new Promise(r => setTimeout(r, 300))
+    }
+    expect(sbText, 'pasted path should reach the PTY via the WS bridge').toContain('sc-paste-')
+    expect(sbText).toContain('.txt')
+
+    // 审计（元数据口径：净化名/大小/visitor 摘要/IP/会话——文件内容不入账）
+    const audits = await waitAudit(request, headers, 'share.pasteUpload', token)
+    expect(audits.length).toBeGreaterThanOrEqual(1)
+    expect(JSON.stringify(audits)).toContain('e2e-paste.txt')
+
+    // 落盘回执 tip（pu-tip 2.4s 自灭——上传完成即现）
+    await expect(page.getByTestId('pu-tip')).toContainText(/已落盘|Saved/, { timeout: 10_000 })
+  })
+
+  // 端点门禁三态（必改1 mode-aware 分档）：只读形态/双开关全关 404 存在性
+  // 不可探测 → hold 无持权 403 → open 准入 200。页内 fetch 全真上下文
+  // （同源 + 口令 cookie 已由 gate 解锁携带）
+  test('粘贴上传端点门禁：只读形态 404 → hold 无持权 403 → open 准入', async ({ request, page }) => {
+    test.setTimeout(120_000)
+    const headers = await unlockHeaders(request)
+    const shareBase = await getShareBase(request, headers)
+    // 只读形态：双开关全关（writable off；申请通道关=guest-input off）
+    const ro = await createTerminalShare(request, headers, 'ro404')
+    createdSessions.push(ro.sessionId)
+    expect((await request.post(`${BASE}/api/share/${ro.token}/guest-input`, {
+      headers, data: { on: false },
+    })).ok()).toBeTruthy()
+    await page.goto(`${shareBase}/s/${ro.token}`)
+    const roStatus = await page.evaluate(async (tok) => {
+      const fd = new FormData()
+      fd.append('file', new File(['x'], 'a.txt', { type: 'text/plain' }))
+      const res = await fetch(`/s/${tok}/paste-upload`, { method: 'POST', body: fd })
+      return res.status
+    }, ro.token)
+    expect(roStatus).toBe(404)
+
+    // hold 模式（申请通道缺省在场、未开直入）：无持权 403 direct_denied
+    const hold = await createTerminalShare(request, headers, 'hold403')
+    createdSessions.push(hold.sessionId)
+    await page.goto(`${shareBase}/s/${hold.token}`)
+    const holdStatus = await page.evaluate(async (tok) => {
+      const fd = new FormData()
+      fd.append('file', new File(['x'], 'a.txt', { type: 'text/plain' }))
+      fd.append('visitorId', 'v-e2e-nohold')
+      const res = await fetch(`/s/${tok}/paste-upload`, { method: 'POST', body: fd })
+      return res.status
+    }, hold.token)
+    expect(holdStatus).toBe(403)
+
+    // open 模式：准入 200 + data.path 落盘形态
+    const open = await createTerminalShare(request, headers, 'open200')
+    createdSessions.push(open.sessionId)
+    expect((await request.post(`${BASE}/api/share/${open.token}/writable`, {
+      headers, data: { on: true, confirm: true, passphrase: WRITABLE_PASS },
+    })).ok()).toBeTruthy()
+    await page.goto(`${shareBase}/s/${open.token}`)
+    await page.locator('input[name="passphrase"]').fill(WRITABLE_PASS)
+    await page.locator('.field button').click()
+    await page.waitForURL(`${shareBase}/s/${open.token}`)
+    const openBody = await page.evaluate(async (tok) => {
+      const fd = new FormData()
+      fd.append('file', new File(['direct upload'], 'open.txt', { type: 'text/plain' }))
+      fd.append('visitorId', 'v-e2e-open')
+      const res = await fetch(`/s/${tok}/paste-upload`, { method: 'POST', body: fd })
+      return { status: res.status, body: await res.json() }
+    }, open.token)
+    expect(openBody.status).toBe(200)
+    expect(String(openBody.body?.data?.path || '')).toContain('sc-paste-')
+  })
+
+  // 频控（ratePair (token,IP) 10/min）：第 11 次 429 + Retry-After——上传与
+  // 键入帧率闸独立的护栏面（drops.go dropMaxPerIP 同参数取态）
+  test('粘贴上传频控：(token,IP) 每分钟 10 次，第 11 次 429', async ({ request, page }) => {
+    test.setTimeout(120_000)
+    const headers = await unlockHeaders(request)
+    const shareBase = await getShareBase(request, headers)
+    const { token } = await createTerminalShare(request, headers, 'rate429')
+    expect((await request.post(`${BASE}/api/share/${token}/writable`, {
+      headers, data: { on: true, confirm: true, passphrase: WRITABLE_PASS },
+    })).ok()).toBeTruthy()
+    await page.goto(`${shareBase}/s/${token}`)
+    await page.locator('input[name="passphrase"]').fill(WRITABLE_PASS)
+    await page.locator('.field button').click()
+    await page.waitForURL(`${shareBase}/s/${token}`)
+    const statuses = await page.evaluate(async (tok) => {
+      const out: number[] = []
+      for (let i = 0; i < 11; i++) {
+        const fd = new FormData()
+        fd.append('file', new File(['x'], 'r.txt', { type: 'text/plain' }))
+        fd.append('visitorId', 'v-e2e-rate')
+        out.push((await fetch(`/s/${tok}/paste-upload`, { method: 'POST', body: fd })).status)
+      }
+      return out
+    }, token)
+    expect(statuses.filter(s => s === 200).length).toBe(10)
+    expect(statuses[10]).toBe(429)
+  })
+
+  // 压缩链降级（必改2/必改9）：image/* 载荷解码失败（损坏 PNG）时压缩链整体
+  // 降级原图——上传照常成功落 .png、路径照常入 PTY，粘贴链不因压缩异常中断
+  // （createImageBitmap 抛错 → catch 返回原 File 的回归面；真实大图重编码的
+  // 阈值矩阵由主人端 pasteImageCompress 单测钉住，本页是近逐行同构移植）
+  test('图片粘贴压缩降级：损坏 PNG 解码失败仍落盘 .png 并入 PTY', async ({ request, page }) => {
+    test.setTimeout(120_000)
+    const headers = await unlockHeaders(request)
+    const shareBase = await getShareBase(request, headers)
+    const { token, sessionId } = await createTerminalShare(request, headers, 'imgfallback')
+    createdSessions.push(sessionId)
+    expect((await request.post(`${BASE}/api/share/${token}/writable`, {
+      headers, data: { on: true, confirm: true, passphrase: WRITABLE_PASS },
+    })).ok()).toBeTruthy()
+    await page.goto(`${shareBase}/s/${token}`)
+    await page.locator('input[name="passphrase"]').fill(WRITABLE_PASS)
+    await page.locator('.field button').click()
+    await page.waitForURL(`${shareBase}/s/${token}`)
+    await expect(page.getByTestId('wr-text')).toContainText(/可写模式|Writable mode/, { timeout: 10_000 })
+
+    await page.locator('.xterm-screen').click()
+    await page.evaluate(() => {
+      const dt = new DataTransfer()
+      // 类型是 image/png 但字节不是合法 PNG：解码必然失败 → 降级原图上传
+      dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], 'broken.png', { type: 'image/png' }))
+      const ta = document.querySelector('.xterm-helper-textarea')
+      ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    })
+    const sbDeadline = Date.now() + 15_000
+    let sbText = ''
+    while (Date.now().valueOf() < sbDeadline) {
+      const res = await request.get(`${BASE}/api/terminals/${sessionId}/scrollback`, { headers })
+      if (res.ok()) {
+        sbText = await res.text()
+        if (sbText.includes('sc-paste-') && sbText.includes('.png')) break
+      }
+      await new Promise(r => setTimeout(r, 300))
+    }
+    expect(sbText, 'fallback upload must still land as .png and reach the PTY').toContain('sc-paste-')
+    expect(sbText).toContain('.png')
+  })
+
+  // 拖拽导航守卫（P-20261122-14 必改1，P-20261122-20 上提为五页族共享件）：
+  // 拖拽上传经用户定向裁撤，但浏览器缺省动作是导航到本地文件——整页替换、
+  // 终端视图丢失。collab 关（创建缺省）时守卫仅对 Files 载荷 preventDefault
+  // （不读字节、不上传），drop 后守卫提示面 drag-tip 给既有词表文案改走
+  // Ctrl+V/上传按钮（P-20261122-20 起监听在 dragguard.go，writablepage 旧监听
+  // 已删——故断言 drag-tip 而非粘贴链专属的 pu-tip，同一次投放无双提示）。
+  // 断言=缺省动作被拦（defaultPrevented）+ URL 不变 + tip 可见。
+  test('拖拽导航守卫：collab 关时拖入文件 → 缺省导航被拦、URL 不变、提示改走 Ctrl+V', async ({ request, page }) => {
+    test.setTimeout(120_000)
+    const headers = await unlockHeaders(request)
+    const shareBase = await getShareBase(request, headers)
+    const { token } = await createTerminalShare(request, headers, 'dragguard')
+    expect((await request.post(`${BASE}/api/share/${token}/writable`, {
+      headers, data: { on: true, confirm: true, passphrase: WRITABLE_PASS },
+    })).ok()).toBeTruthy()
+    await page.goto(`${shareBase}/s/${token}`)
+    await page.locator('input[name="passphrase"]').fill(WRITABLE_PASS)
+    await page.locator('.field button').click()
+    await page.waitForURL(`${shareBase}/s/${token}`)
+    await expect(page.getByTestId('wr-strip')).toBeVisible({ timeout: 10_000 })
+    const urlBefore = page.url()
+
+    // 合成拖放（DataTransfer 带 File）：dragover/drop 都应被守卫 preventDefault
+    const guarded = await page.evaluate(() => {
+      const dt = new DataTransfer()
+      dt.items.add(new File(['e2e drag guard body'], 'e2e-drag.txt', { type: 'text/plain' }))
+      const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true })
+      document.body.dispatchEvent(over)
+      const drop = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })
+      document.body.dispatchEvent(drop)
+      return { overPrevented: over.defaultPrevented, dropPrevented: drop.defaultPrevented }
+    })
+    expect(guarded.overPrevented, 'dragover default action must be cancelled').toBe(true)
+    expect(guarded.dropPrevented, 'drop default action must be cancelled').toBe(true)
+    await expect(page.getByTestId('drag-tip')).toContainText(
+      /拖拽不发送文件|Dragging does not send files/, { timeout: 5_000 },
+    )
+    // 无双提示：粘贴/上传链专属的 pu-tip 不得被拖放同时点亮（旧监听残留症状）
+    await expect(page.getByTestId('pu-tip')).toBeHidden()
+    expect(page.url()).toBe(urlBefore)
   })
 })

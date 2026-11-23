@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -53,10 +54,25 @@ func getTokenSalt() []byte {
 		if _, err := rand.Read(tokenSalt); err != nil {
 			panic("crypto/rand unavailable for token salt: " + err.Error())
 		}
-		_ = os.MkdirAll(filepath.Dir(saltPath), 0700)
-		_ = os.WriteFile(saltPath, tokenSalt, 0600)
+		// 盐未落盘：本进程内令牌校验照常，但重启后盐重新生成 → 全部既有
+		// unlock/API 令牌失效。曾完全静默，用户只感知「重启后全要重新登录」
+		// 而无从归因（P-20261122-12 静默失败审计），故两处失败都留痕
+		persistTokenSalt(saltPath, tokenSalt)
 	})
 	return tokenSalt
+}
+
+// persistTokenSalt 盐值落盘（失败留痕，不影响本进程内校验）。
+// 独立成函数便于单测直接构造失败路径（包级 sync.Once 使 getTokenSalt
+// 无法在同一测试二进制内重放失败态）。
+func persistTokenSalt(saltPath string, salt []byte) {
+	if err := os.MkdirAll(filepath.Dir(saltPath), 0700); err != nil {
+		slog.Warn("token salt dir create failed", "dir", filepath.Dir(saltPath), "err", err)
+	}
+	if err := os.WriteFile(saltPath, salt, 0600); err != nil {
+		slog.Warn("token salt persist failed — all issued tokens become invalid after restart",
+			"path", saltPath, "err", err)
+	}
 }
 
 func sha256Hex(s string) string {

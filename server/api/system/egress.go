@@ -119,27 +119,24 @@ func egressShareEntries(shares []store.Share, now time.Time) []gin.H {
 	return active
 }
 
-// EgressOverview GET /api/system/egress-overview —— 数据出域面总览（纯只读聚合）。
-// 管理面鉴权：挂在全局 api 组（LockMiddleware + TokenAuthMiddleware）之下
-func EgressOverview(c *gin.Context) {
+// EgressProjection 数据出域面只读投影（EgressOverview 与诊断包共用，同 ingress
+// 投影的单一事实源纪律：诊断包不另造读路径）
+func EgressProjection() (gin.H, error) {
 	shares, err := store.Get().Share.List()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "internal", "msg": err.Error()})
-		return
+		return nil, err
 	}
 	hosts, err := store.Get().RemoteHost.List()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "internal", "msg": err.Error()})
-		return
+		return nil, err
 	}
 	_, auditTotal, err := store.Get().Audit.List(1, 0)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"err": "internal", "msg": err.Error()})
-		return
+		return nil, err
 	}
 
 	activeShares := egressShareEntries(shares, time.Now())
-	c.JSON(http.StatusOK, gin.H{
+	return gin.H{
 		"webhook":    egressWebhook(store.Get().Notification.GetPrefs().Webhook),
 		"shares":     gin.H{"count": len(activeShares), "items": activeShares},
 		"agentToken": store.Get().AgentToken.Meta(),
@@ -147,5 +144,16 @@ func EgressOverview(c *gin.Context) {
 			"count": len(hosts), // 只出数量：主机清单走远程分区列表接口（响应剥敏感字段）
 		},
 		"audit": gin.H{"total": auditTotal},
-	})
+	}, nil
+}
+
+// EgressOverview GET /api/system/egress-overview —— 数据出域面总览（纯只读聚合）。
+// 管理面鉴权：挂在全局 api 组（LockMiddleware + TokenAuthMiddleware）之下
+func EgressOverview(c *gin.Context) {
+	projection, err := EgressProjection()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"err": "internal", "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, projection)
 }

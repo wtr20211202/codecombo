@@ -9,6 +9,195 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.10] - 2026-11-23
+
+### Added
+
+- **One-shot diagnostics bundle** — a new "Export diagnostics" button in
+  Settings → Monitor → Service logs (backed by `GET /api/system/diagnostics/export`)
+  packs everything needed to triage one machine into a single zip: all-module
+  daily logs (3 days by default, capped by `logRetentionDays`), the update
+  chain (`update.log`, `update-subprocess.log`, `update-restart.log`),
+  `crash.log`, `dsh-web.log`, the PID file with its version line,
+  `update-result.json`, a `logs-summary.txt` (line/level/module counts and
+  first/last timestamps per file), an `errors.txt` with every WARN/ERROR line,
+  the platform baseline (OS/arch/CPU/memory/timezone/disk; `cmd /c ver` and
+  `sc query` on Windows, `uname`/`sw_vers` elsewhere) and basic runtime state
+  (supervise form, argv, whitelisted `CC_*` env, ingress/egress projections,
+  self-check report, update status). Files that are expected but missing appear
+  as `absent` in `manifest.json` — a missing `update.log` is itself evidence.
+  Credential paths (`master-key`, `data/`, `config.json`, `*.pem`, `*.key`,
+  `id_*`, `*cookie*`, `*authorization*`) are never packed, log lines are masked
+  by default (`mask=0` opts out) and the data directory appears as `$DATA_DIR`.
+  Files over 8 MiB keep a 2 MiB head plus a 14 MiB tail with an explicit
+  truncation seam (failure evidence lives at the end); `?probe=1` previews the
+  size before downloading. Exports are single-flight with a 30 s cooldown and
+  audited as `diagnostics.export`. When the service does not start at all,
+  `codecombo diagnostics --out x.zip` runs the same collector offline.
+
+- **Diagnostics bundle: platform deep sampling** — the bundle now answers "what
+  is supervising this process, what is it listening on, what is running" on all
+  three platforms: macOS `launchctl print gui/<uid>/com.codecombo` (capped at
+  200 lines / 32 KiB; job state, run count and last exit code are the first-hand
+  evidence for the launchd group-kill failure class), Linux `systemctl show
+  -p Restart,KillMode,Type,User` (`KillMode=process` is the discriminator) plus
+  a best-effort 200-line `journalctl` tail and `ss -ltnp`, Windows `sc query`
+  plus `netstat -ano -p tcp` (no process tree on Windows — scan cost versus
+  value; `tasklist` hint instead), and a `ps` process tree on unix filtered to
+  this binary plus up to three tmux lines. Machine memory comes from
+  `/proc/meminfo`, `sysctl hw.memsize` or `wmic` (absent WMIC is skipped, not an
+  error). Each command is read-only, capped at 3 s, runs unprivileged, and its
+  output is masked/path-normalized line by line; a missing tool or permission
+  denial is recorded as `skipped`. macOS `log show` is never run automatically
+  (slow, redacts `<private>`) — the command and the `DiagnosticReports` path
+  hint are documented in the bundle README. New `state/storage.json` reports
+  data-directory size/entry counts per top-level entry (statistics only, file
+  content is never read) and `state/runtime.json` gains a terminal-session
+  summary (counts/status by kind/origin/backend; never ids, names, paths or
+  output). The offline CLI marks the session summary as skipped.
+
+- **Guest paste-to-upload in writable shares** — a guest holding write access
+  can paste images and files into the shared terminal the same way the owner
+  can: images are compressed when needed, the file is uploaded, and its path
+  is inserted into the input line. While the guest can type, pasted files go
+  to the terminal; without typing rights they still land in the
+  collaboration inbox. Viewers also gain link detection, an in-terminal find
+  bar, selection copy (Ctrl+Shift+C or the copy button, with a fallback for
+  restricted contexts) and a WebGL fallback on context loss; inline image
+  rendering stays disabled while text masking is on.
+
+- **Failure evidence on disk** — the update swap subprocess now writes its
+  own stdout/stderr to `logs/update-subprocess.log` and its exit
+  code/signal is recorded on the parent's verdict line; fatal crashes
+  (a panic in any goroutine, fatal runtime errors) land in `logs/crash.log`;
+  and `CC_LOG_LEVEL=debug|info|warn|error` controls log verbosity without a
+  settings toggle (the effective value is visible in `/api/selfcheck`).
+  Panics in event subscribers, scheduled jobs and webhooks are logged with
+  their stack, rate-limited to one per minute per site, instead of vanishing.
+
+- **A visible upload button in the guest delivery panel** — in addition to
+  drag-and-drop and paste, so a guest who cannot drop a file still has an
+  obvious path; per-file results and retry come with it.
+
+### Changed
+
+- **Update outcome says which version you are on** — when an update attempt
+  ends with the service reachable but still on the old version, the version
+  panel now states it explicitly ("update not completed, still on vX") with
+  a link to download manually, instead of a generic unknown state.
+
+- **Access hints and default ports documented** — install script output,
+  README, site and docs now show `https://` access with a self-signed
+  certificate note (and an `http` fallback hint when TLS startup fails), and
+  a new "default ports" section explains each port and how to turn it off:
+  9999 main (TLS on by default; `--no-tls` or `CC_TLS=0`), 10000 the
+  loopback helper (exists only with TLS), 10001 the share sub-service, 10002
+  the plaintext companion port (`httpPort: 0` to disable).
+
+- **macOS manual-replacement guidance** — the upgrade docs spell out the
+  quarantine and launchd process-group cases with a three-way triage, so an
+  in-app update that appears stuck can be identified from the log files in
+  one step.
+
+### Fixed
+
+- **launchd installs no longer roll back on every release after the first
+  one** — the stale-instance check that runs after the swap used to accept
+  *any* PID-file version line as proof that the running instance was already
+  the new binary. Every instance that can write the version line — including
+  the one KeepAlive relaunches from the old binary mid-swap — writes it with
+  its own version, so from the second in-app update onward the pre-swap
+  instance was never terminated, the version gate never saw the target
+  version, and the update rolled back after the ten-minute guard. The check
+  is now a single shared predicate: the running instance is skipped only when
+  its version line equals the target (center-deployed updates have no
+  concrete target and compare against the pre-update version instead). A PID
+  file without a live instance is no longer "nothing to do" either: the
+  updater waits up to 10 s for the relaunched instance to write its PID file
+  and fails honestly — rolling back within seconds instead of after the
+  ten-minute guard — when none appears. The `launchd terminate` log line now
+  states the real reason (no version line / version mismatch / unverifiable)
+  instead of claiming a swap that was never verified.
+- **macOS launchd in-app updates no longer die silently** — the swap
+  subprocess now starts in its own process group, so launchd's cleanup when
+  the main process exits can no longer kill it before it even writes its
+  log (on launchd installs up to v0.0.1-beta.9 the update never completed:
+  the app silently stayed on the old version, with no error and no result
+  file). Both plist writers (install script and remote deployer) now emit
+  `AbandonProcessGroup=true` as a second layer — it applies to older
+  binaries as soon as the plist is rewritten, and remote-deployed macOS
+  instances pick it up from a fresh remote deploy. Together with the
+  stale-instance termination in this release, a launchd install now
+  actually lands on the new version.
+- **Guest paste no longer "does nothing"** — every pre-gate cause (no write
+  access, application pending, input control not held, access revoked or
+  expired) shows a specific hint at the paste surface, and attempts are
+  recorded before the gate so the diagnostics trail is no longer empty; a
+  writable guest's input line also focuses itself as soon as typing is
+  allowed.
+- **Ctrl/Cmd+V works in a focused shared terminal** — a focused writable
+  share terminal passes paste through natively: images and files go to the
+  upload chain, plain text goes through the normal paste path, and the host
+  no longer receives a literal `^V`. Read-only share pages keep their
+  previous behavior.
+- **No more scroll flicker in shared terminals** — the shared terminal now
+  has a single scroll surface: reading history no longer gets yanked back
+  to the bottom when new output arrives, and the scrollbar belongs to the
+  page instead of xterm's own. In the oversized (scrollable) view the wheel
+  scrolls the page rather than being forwarded to full-screen apps' mouse
+  reporting — their own scroll keys still work; the fitted view behaves
+  exactly as before.
+- **Writable shares reconnect instead of giving up** — a dropped connection
+  now backs off (1s → 2s → 5s → 10s), probes whether sharing is still on,
+  and resumes in place without a reload (scrollback preserved). Turning
+  sharing off, expiry, revocation and password changes route to their final
+  states instead of retrying forever, and a writer-limit denial shows a
+  visible message.
+- **Keyboard control is always handed back** — revoking, rotating or
+  expiring a share now always releases the input gates; previously a gate
+  could leak and keep the owner locked out of their own terminal.
+- **Resize feedback loop in write-enabled shares** — the write-enabled
+  terminal no longer bounces viewport changes between owner and viewer
+  (extra columns, state refreshes, an owner attach that never settles); the
+  grid settles at the intended size.
+- **Dropping a file on any share page is safe** — read-only, live,
+  terminal, canvas and frozen pages all intercept file drops, so the
+  browser no longer navigates away to the dropped file.
+- **The collaboration inbox only receives intended files** — paste
+  arbitration now listens at the window capture phase, so unrelated pastes
+  are no longer delivered to the inbox.
+- **npm installs: a settings-page restart no longer breaks the app** — the
+  npm wrapper is now a loop supervisor: the restarted process reports
+  readiness through a dedicated exit handshake, the wrapper tells "restart
+  requested" apart from a genuine crash, and the PID file is only removed
+  by the process that wrote it.
+- **Silent failures surfaced** — fifteen backend paths that discarded
+  errors without a trace now log them, and the frontend's silent-failure
+  classes (network, storage, clipboard, resize observers) were classified
+  and fixed; a static check keeps new silent discards out.
+- **Narrow-window layout** — the home top bar wraps instead of overflowing
+  at narrow widths, and file-tree header titles no longer break mid-word.
+
+### Upgrade notes
+
+- **macOS launchd installs (one-line script) on v0.0.1-beta.9 or older
+  cannot complete in-app updates.** Re-run the install script once: it
+  rewrites the launchd plist with `AbandonProcessGroup=true`, which takes
+  effect immediately and does not depend on the binary version. Instances
+  installed by a central instance's remote deploy must instead get a fresh
+  remote deploy from a central instance on beta.10 or later — **never**
+  re-run the install script on those (it drops `PATH`/`WorkingDirectory`/
+  `NoNewPrivileges` and reverts the bind address to loopback). If the
+  binary was ever replaced by hand with a browser-downloaded artifact,
+  clear the quarantine attribute (`xattr -d com.apple.quarantine <binary>`)
+  or download it with `curl`.
+- **Windows services, systemd installs and bare/foreground processes** need
+  no manual step: this release arrives through the normal in-app update.
+  Self-built systemd units must keep `KillMode=process` — the systemd
+  default (`control-group`) kills the swap subprocess the same way launchd
+  did, with the same silent result.
+- **npm installs** upgrade with `npm i -g codecombo@latest`.
+
 ## [0.0.1-beta.9] - 2026-11-22
 
 ### Added
@@ -499,7 +688,8 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.9...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.10...HEAD
+[0.0.1-beta.10]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.10
 [0.0.1-beta.9]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.9
 [0.0.1-beta.8]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.8
 [0.0.1-beta.7]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.7

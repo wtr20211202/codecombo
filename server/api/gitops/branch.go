@@ -527,8 +527,14 @@ func ResolveConflictWithContent(c *gin.Context) {
 	}
 
 	// 标记为已解决（仅写回成功路径触达：409 拒绝时不得 git add，防把他人
-	// 窗口期改动以「已解决」状态暂存）
-	_ = git.ResolveConflict(p.Path, req.File, "manual")
+	// 窗口期改动以「已解决」状态暂存）。失败必须经错误面透出（P-20261122-12）：
+	// 内容已写回但 git add 失败=冲突列表仍挂着该文件，静默 200 会让用户以为
+	// 已解决；走 respondGitError 时 shared.Error 对非空 err 落 slog.Error，
+	// 日志与响应一次收口
+	if err := git.ResolveConflict(p.Path, req.File, "manual"); err != nil {
+		respondGitError(c, "Mark conflict resolved failed", err)
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "conflict resolved"})
 }

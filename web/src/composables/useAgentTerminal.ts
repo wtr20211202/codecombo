@@ -312,8 +312,10 @@ export function resetAgentTerminalStateForTest() {
   expandedMode.value = 'docked'
   pendingOpenState = null
   activateIntent.value = ''
-  try { localStorage.removeItem(EXPANDED_KEY) } catch { /* ignore */ }
-  try { localStorage.removeItem(OPEN_STATE_KEY) } catch { /* ignore */ }
+  // 写侧一律走 safeStorage（屏蔽 Cookie/隐私模式下裸 removeItem 抛错；封装
+  // 同时清内存兜底，测试复位语义不变）
+  safeStorage.removeItem(EXPANDED_KEY)
+  safeStorage.removeItem(OPEN_STATE_KEY)
   projectDockedMem.clear()
   // 项目切换 watch 重绑当前 active pinia（vitest setup 每用例换 pinia 实例，
   // 安装期闭包的 store 会被孤立；应用运行期本行不执行，watch 终身有效）

@@ -102,7 +102,7 @@ function onDrop(ev: DragEvent) {
       if (payload.hostId && payload.hostId !== props.host?.id && payload.names?.length) {
         emit('dropRemote', { fromHostId: payload.hostId, fromCwd: payload.cwd || '/', names: payload.names, toCwd: cwd.value })
       }
-    } catch { /* 非本应用数据，忽略 */ }
+    } catch { /* silent-by-design: 拖拽载荷非本应用格式（外部拖入文本等），忽略是正确行为 */ }
     return
   }
   const files = Array.from(dt.files || [])

@@ -83,6 +83,8 @@ export async function readImageFromClipboard(): Promise<ClipboardImageResult> {
   try {
     items = await navigator.clipboard.read()
   } catch {
+    // silent-by-design: 本函数契约即把「剪贴板读受限」建模为返回形态，由调用方
+    // （useFileTreePaste）按 kind 分支提示，回告责任不在本层
     return { kind: 'denied' }
   }
   for (const item of items) {

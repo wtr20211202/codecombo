@@ -88,7 +88,8 @@ export async function writeClipboard(text: string): Promise<boolean> {
       useClipboardHistoryStore().record(text)
       return true
     } catch {
-      // 权限拒绝或浏览器不支持，回退到 execCommand
+      // silent-by-design: 权限拒绝/非安全上下文是预期形态，回退 execCommand，
+      // 最终成败经 writeClipboard 返回值回告调用方（失败提示 copyFailed）
     }
   }
   try {
@@ -319,7 +320,8 @@ export function useTerminalClipboard(params: UseTerminalClipboardParams) {
       }
       return false
     } catch (err) {
-      // read() 权限拒绝/不可用：返回 false 让调用方回退 readText
+      // silent-by-design: read() 权限拒绝/不可用是预期形态，返回 false 让调用方
+      // 回退 readText（图片粘贴降级为文本粘贴，用户仍得到结果）
       debug('clipboard.read failed, fallback to readText', err)
       return false
     }

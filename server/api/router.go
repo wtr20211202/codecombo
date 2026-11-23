@@ -275,6 +275,13 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 		api.GET("/system/logs", system.ServiceLogs)
 		api.GET("/system/logs/dates", system.ServiceLogDates)
 
+		// 诊断包导出（P-20261122-10 S2a）：全模块按日日志 + 更新链日志 +
+		// dsh-web.log + crash.log + 平台基线 + 基础运行态打成一个流式 zip
+		//（逐行脱敏、凭据路径硬拒、单飞 + 30s 冷却、每次导出入审计）；
+		// probe=1 只回体量预览。鉴权由组中间件承担（与 servicelogs 同级管理面），
+		// 采集器同时被 CLI `codecombo diagnostics` 复用
+		api.GET("/system/diagnostics/export", system.DiagnosticsExport)
+
 		// 本机环境体检（P-20261003-317）：聚合既有环境信号为一张只读体检单
 		//（git/git-lfs/tmux/agent 运行时/端口注册表/buildInfo/数据盘水位，
 		// 各条目 {item,status,detail,hint}），新人配置检查与 issue 附环境一键化；

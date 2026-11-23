@@ -311,6 +311,11 @@ type UpdateStatusResponse struct {
 	// update.Manager.NpmManaged）：面板只消费 check 响应，status 面为 agent 经
 	// 状态端点感知安装形态留口（智能体可操作性一等公民）。omitempty 可选字段
 	NpmManaged bool `json:"npmManaged,omitempty"`
+	// BuildVersion 响应服务当前运行的二进制版本（api/system buildVersion，恒在）：
+	// unknown 结局判定「服务可达但版本<目标」= 更新未完成仍为旧版本（P-20261122-5
+	// 用户 mac 实测案——重启后旧版本被监管者重拉，unknown 结局此前无「仍为旧版本」
+	// 指引）。omitempty 可选字段：旧二进制不携带即前端回落通用 unknownHint 文案
+	BuildVersion string `json:"buildVersion,omitempty"`
 }
 
 // LockConfig 锁定机制配置，持久化到 docstore 集合 "lock" 的 "config" 文档

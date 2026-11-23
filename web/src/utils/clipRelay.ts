@@ -61,7 +61,8 @@ export async function readLocalClipboardText(history: ReadonlyArray<{ text: stri
       if (text) return text
     }
   } catch {
-    /* 权限拒绝 / 文档失焦：走应用内历史兜底 */
+    /* silent-by-design: 权限拒绝/文档失焦时走应用内剪贴板历史兜底，发送侧
+       仍能取到最近一条文本（回退成功即无信息丢失） */
   }
   return history.length > 0 ? (history[0]?.text || null) : null
 }

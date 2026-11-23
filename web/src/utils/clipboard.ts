@@ -15,7 +15,8 @@ export async function readClipboardText(): Promise<string | null> {
       return (await navigator.clipboard.readText()) ?? null
     }
   } catch {
-    // 权限拒绝 / 文档失焦等
+    // silent-by-design: 本函数契约即「失败返回 null 由调用方降级」，权限拒绝/
+    // 文档失焦是预期形态，回告责任在调用方（如 ${CLIPBOARD} 保留原样）
   }
   return null
 }
@@ -32,7 +33,8 @@ export async function copyText(text: string): Promise<boolean> {
       return true
     }
   } catch {
-    // 权限拒绝 / 文档失焦等，走降级
+    // silent-by-design: 权限拒绝/文档失焦是预期形态，本函数降级到 execCommand，
+    // 最终结果经返回值回告调用方（失败分支提示 common.copyFailed）
   }
   // 降级：execCommand（同步，需在用户手势调用栈内）。
   // 用 Range 选区而不是 textarea focus+select——focus 会被 Naive UI 模态框的
@@ -61,6 +63,7 @@ export async function copyText(text: string): Promise<boolean> {
     span.remove()
     return ok
   } catch {
+    // silent-by-design: 降级路径自身抛错时以返回值 false 回告，调用方统一提示
     return false
   }
 }

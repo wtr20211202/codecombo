@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -483,9 +485,15 @@ func DeleteRemoteTerminal(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "remote terminal closed"})
 }
 
-// killRemoteTmux 远端清理 tmux 会话（best-effort：主机不可达/无 tmux 时静默失败）
+// killRemoteTmux 远端清理 tmux 会话（best-effort：主机不可达/无 tmux 时静默失败；
+// panic 属 bug，围堵 + 留痕——P-20261122-9 必改2 静默 recover 审计）
 func killRemoteTmux(hostID, tmuxName string) {
-	defer func() { _ = recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("remote: kill tmux session panicked", "hostId", hostID, "tmux", tmuxName,
+				"panic", r, "stack", string(debug.Stack()))
+		}
+	}()
 	rh, err := store.Get().RemoteHost.Get(hostID)
 	if err != nil {
 		return
@@ -570,7 +578,13 @@ func RedrawRemoteTerminal(c *gin.Context) {
 // （与本地 tmuxBackend.RedrawClient 同语义）。best-effort：主机不可达/凭据失效/无
 // tmux 时返回错误，由调用方决定如何呈现（当前前端静默）
 func redrawRemoteTmux(hostID, tmuxName string) error {
-	defer func() { _ = recover() }()
+	// panic 围堵保持既有降级（返回 nil=前端静默），但必须留痕（必改2）
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("remote: redraw tmux clients panicked", "hostId", hostID, "tmux", tmuxName,
+				"panic", r, "stack", string(debug.Stack()))
+		}
+	}()
 	rh, err := store.Get().RemoteHost.Get(hostID)
 	if err != nil {
 		return err

@@ -872,14 +872,34 @@ useHomeGlobalListeners({
   align-items: center;
   gap: 16px;
   flex-shrink: 0;
+  /* 窄宽度兜底（P-20261122-15）：品牌区与动作区放不下时换行，不设视口断点
+     ——换行由真实内容宽/locale 自适应触发（实测固定 ≤760 断点在 768 下
+     品牌与动作区重叠、850 下副标题多出一行） */
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 .home-header-left {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 1;
+  /* flex-basis 必须 auto（原 flex:1 = 1 1 0%）：0% 基线下 left 会被动作区
+     压成 0 宽（390 实测），品牌整体溢出到动作区下方并重叠；auto 让品牌
+     按内容宽参与换行决策、换行后独占整行 */
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+/* 动作区（原无规则）：窄屏随 header 折到第二行并在行内二次换行；宽屏
+   margin-left:auto 保持右贴边。gap 用 --space-1 而非 0——按钮热区相邻需
+   可辨识间距（13 项桌面宽 460→508，仍远小于 900 视口可用宽） */
+.home-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
 }
 
 /* logo 即版本弹窗入口（P-20261107-1）：pointer 提示可点；不再 flex:1 撑满——

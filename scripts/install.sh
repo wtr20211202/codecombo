@@ -411,7 +411,7 @@ PKLA
       ${SUDO} systemctl enable --now codecombo.service
       say "服务已启动：systemctl status codecombo"
     fi
-    say "访问 http://localhost:${PORT}（首启设置锁密码）"
+    say "访问 https://localhost:${PORT}（首启设置锁密码；TLS 缺省启用，自签证书首启自动生成——浏览器首次访问需信任/继续；证书生成失败自动回落 http，服务日志可见）"
     exit 0
   fi
   say "无免密 sudo——跳过系统服务，给出手动启动命令（不注册系统服务，后台守护运行；或重跑前先 sudo -v）"
@@ -433,6 +433,10 @@ if [ "$OS" = darwin ]; then
   PLIST="$HOME/Library/LaunchAgents/com.codecombo.plist"
   say "注册 launchd 用户代理 com.codecombo（免 sudo）"
   mkdir -p "$HOME/Library/LaunchAgents"
+  # P-20261122-7：AbandonProcessGroup=true——launchd 默认在 job 主进程死亡时
+  # 清理同进程组的剩余进程（launchd.plist(5)），应用内更新的换包子进程会被
+  # 连带杀掉、活不到写日志（mac 在线升级静默失败的根因）。本键让 launchd 放手；
+  # 属 launchd 层行为、与二进制版本无关——重跑本脚本即对旧版实例生效
   cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -449,13 +453,14 @@ if [ "$OS" = darwin ]; then
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>$PLIST_DATA_ENV
+  <key>AbandonProcessGroup</key><true/>
 </dict>
 </plist>
 PLIST
   launchctl unload "$PLIST" 2>/dev/null || true
   launchctl load "$PLIST"
   say "服务已启动：launchctl list | grep codecombo"
-  say "访问 http://localhost:${PORT}（首启设置锁密码）"
+  say "访问 https://localhost:${PORT}（首启设置锁密码；TLS 缺省启用，自签证书首启自动生成——浏览器首次访问需信任/继续；证书生成失败自动回落 http，服务日志可见）"
   exit 0
 fi
 
@@ -469,7 +474,7 @@ if [ -n "${CODECOMBO_PORT:-}" ]; then START_ARGS="$START_ARGS --port $PORT"; fi
 if [ -n "${CODECOMBO_HOST:-}" ]; then START_ARGS="$START_ARGS --host $BIND_HOST"; fi
 if [ -n "${CODECOMBO_DATA_DIR:-}" ]; then START_ARGS="$START_ARGS --data-dir \"$DATA_DIR\""; fi
 say "手动启动：$BIN start${START_ARGS}（不注册系统服务，后台守护运行；排障看实时报错加 --serve 换前台形态）"
-say "访问 http://localhost:${PORT}（首启设置锁密码）"
+say "访问 https://localhost:${PORT}（首启设置锁密码；TLS 缺省启用，自签证书首启自动生成——浏览器首次访问需信任/继续；证书生成失败自动回落 http，服务日志可见）"
 say "更新方式：应用内「检查更新」（GitHub 源，失败自动回滚）"
 # 落盘完整性哨兵（须始终为本文件最后一行）：入口「哨兵自检」回读文件尾判定
 # 脚本是否完整——后续维护在本行之后不得再追加内容；纯 ASCII 大写下划线注释

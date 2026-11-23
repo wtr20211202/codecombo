@@ -2,6 +2,8 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -11,6 +13,23 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// 写盘失败留痕纪律（P-20261122-12 静默失败审计 P0）：通知仓储的写方法都无
+// error 返回口（Add/MarkRead/Dismiss…是既有签名，改签名波及全部消费方），
+// 失败时用户可感知的形态是「重启后已读又变未读 / 已删的通知又回来」——
+// 没有日志就完全无法诊断。slog.Warn 是唯一可收集面（诊断包/日志页可反查）。
+// ErrNotFound 不算失败：条目已被并发删除属幂等终态（批量清除会带已不存在的
+// ID，见前端 dismiss-batch 语义），落日志只会制造噪声。
+func warnNotifyPersist(op, id string, err error) {
+	if err == nil || errors.Is(err, ErrNotFound) {
+		return
+	}
+	if id == "" {
+		slog.Warn("notification persist failed", "op", op, "err", err)
+		return
+	}
+	slog.Warn("notification persist failed", "op", op, "id", id, "err", err)
+}
 
 // NotificationStore 通知存储——基于 DocumentStore
 type NotificationStore interface {
@@ -124,8 +143,12 @@ func (r *notificationRepo) Add(n notification.Notification) {
 	if n.Time.IsZero() {
 		n.Time = time.Now()
 	}
-	data, _ := json.Marshal(n)
-	_ = r.doc.Create("notifications", n.ID, data)
+	if data, err := json.Marshal(n); err != nil {
+		slog.Warn("notification marshal failed", "id", n.ID, "category", n.Category, "err", err)
+	} else {
+		// 落库失败=通知丢失（用户点开通知中心看不到刚发生的事），Add 无返回口
+		warnNotifyPersist("create", n.ID, r.doc.Create("notifications", n.ID, data))
+	}
 	// 通知为有界资源：每次 Add 后裁剪到上限（前端通知中心同为 200 条封顶）。
 	// trimOldest 此前从未被调用——长运行实例的通知文件无界累积，且 List 为
 	// 全目录读取，条目越多 GET /api/notifications 越慢
@@ -184,32 +207,45 @@ func (r *notificationRepo) MarkAllRead() {
 		patches[key] = map[string]any{"read": true}
 	}
 	if len(patches) > 0 {
-		_ = r.doc.PatchBatch("notifications", patches)
+		warnNotifyPersist("mark-all-read", "", r.doc.PatchBatch("notifications", patches))
 		r.invalidateCache()
 	}
 }
 
 func (r *notificationRepo) MarkRead(id string) {
-	_ = r.doc.Patch("notifications", id, map[string]any{"read": true})
+	warnNotifyPersist("mark-read", id, r.doc.Patch("notifications", id, map[string]any{"read": true}))
 	r.invalidateCache()
 }
 
 func (r *notificationRepo) Dismiss(id string) {
-	_ = r.doc.Delete("notifications", id)
+	warnNotifyPersist("dismiss", id, r.doc.Delete("notifications", id))
 	r.invalidateCache()
 }
 
 // DismissMany 批量移除：通知中心同类聚合后一键清除整组（重复通知可上百条，
 // 逐条 dismiss 会打上百个请求）。一次失效缓存即可
 func (r *notificationRepo) DismissMany(ids []string) {
+	// 逐条失败聚合成一条 Warn（上层一次可能带数百 ID，逐条告警会刷屏）：
+	// 失败条目在下次列表读取时仍会在场，是用户可感知的「删不掉」
+	failures := make([]string, 0, 1)
+	var firstErr error
 	for _, id := range ids {
-		_ = r.doc.Delete("notifications", id)
+		if err := r.doc.Delete("notifications", id); err != nil && !errors.Is(err, ErrNotFound) {
+			failures = append(failures, id)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if len(failures) > 0 {
+		slog.Warn("notification batch dismiss partially failed",
+			"failed", len(failures), "total", len(ids), "firstID", failures[0], "err", firstErr)
 	}
 	r.invalidateCache()
 }
 
 func (r *notificationRepo) Clear() {
-	_ = r.doc.Clear("notifications")
+	warnNotifyPersist("clear", "", r.doc.Clear("notifications"))
 	r.invalidateCache()
 }
 

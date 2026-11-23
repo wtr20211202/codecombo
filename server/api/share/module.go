@@ -129,6 +129,13 @@ const shareCleanupInterval = 10 * time.Minute
 // 不重试（见 hits.go / viewaudit.go 的各自取舍注记）
 const shareFlushInterval = 3 * time.Second
 
+// shareGateReconcileInterval 会话输入闸自愈对账周期（P-20261122-17）：三
+// 生命周期路径（撤销/轮换/过期）已有即时收口，ticker 兜的是崩溃窗口、
+// 记录先死与半开连接滞留的残账——1min 足以把 owner 键盘的最大误锁期压到
+// 分钟级，又不产生可感知的周期开销（无残留时只扫几张内存表）。ListShares
+// 入口同口调用（内部 5s 节流）让「有人看管理面」时更快自愈
+const shareGateReconcileInterval = time.Minute
+
 // Start 启动分享子服务监听。端口占用等失败不阻断主服务启动——
 // 状态端点会暴露"未就绪"，前端提示用户检查配置。
 // 另注册过期清理（snippet 固定 24h + 文件分享 opt-in TTL 同管线，P-71/
@@ -244,6 +251,11 @@ func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 	svc = svc.WithWritableResizeEvents(func(ev share.WritableResizeEvent) {
 		opschannel.BroadcastEvent(opschannel.EventShareWritableResize, ev)
 	})
+	// 访客粘贴上传落盘（P-20261122-1）：回调体只做 opschannel 非阻塞投递
+	//（审计/敏感名 note 的攒批在 server/share 侧既有缓冲）
+	svc = svc.WithPasteUploadEvents(func(ev share.PasteUploadEvent) {
+		opschannel.BroadcastEvent(opschannel.EventSharePasteUpload, ev)
+	})
 	// 管理面协作端点（handlers_collab.go）经包级引用触达持权状态机
 	//（liveWire 同款装配契约：Stop 必须摘除，防停机后旧服务被管理端点命中）
 	setShareSvc(svc)
@@ -289,6 +301,12 @@ func (m *Module) Start(_ context.Context, k kernel.Kernel) error {
 		// 一次 tick 会 nil 函数调用 panic——闭包里的函数值永远有效
 		sch.AddTicker("share-flush", shareFlushInterval, func(context.Context) {
 			flushFn()
+		})
+		// 会话输入闸自愈对账（P-20261122-17）：来源反向索引 + 记录存活/
+		// 开放连接在场核对，残账就地释放（撤销/轮换/过期主路径已即时收口，
+		// 本 ticker 兜崩溃窗口与半开连接；DirectState 不重复触达）
+		sch.AddTicker("share-gate-reconcile", shareGateReconcileInterval, func(context.Context) {
+			svc.ReconcileGates()
 		})
 	}
 
@@ -572,19 +590,35 @@ func (writableAdapter) SetWritableGate(sessionID string, held bool) {
 	}
 }
 
-// WritableResizeAllowed 视口 resize 的会话准入（share.WritableResizer 面，
-// P-20261120-8）：TmuxExternal 外部接管会话禁用（评审必改4——真机 tmux 客户端
-// 的 window-size 交互未定义，访客改格会与用户本机 tmux 客户端互相踩踏）；
-// 会话不在同禁（fire 路径 Resize 报错收场）
-func (writableAdapter) WritableResizeAllowed(sessionID string) bool {
+// WritableResizeDenyReason 视口 resize 的会话准入（share.WritableResizer 面，
+// P-20261120-8 定案 + P-20261122-16 ④ 升级为可观测原因）：空 = 允许。
+//   - external_session：TmuxExternal 外部接管会话禁用（评审必改4——真机 tmux
+//     客户端的 window-size 交互未定义，访客改格会与用户本机 tmux 客户端互相
+//     踩踏）；
+//   - owner_active：主人本机有交互 WS 客户端附着（AttachedClients>0，share 的
+//     /termws 与 SSE 不计数）——owner 的 xterm 只在首连时按视口 resize 一次，
+//     从不消费访客反喂的 PTY 尺寸变化，附着期间改格 = 主人视图按旧 cols 渲染
+//     整屏错位（「在系统里打开同一会话即恢复正常」正是打开时首连 resize 把
+//     PTY 改回）。附着期间画布以主机为准，主人在场优先于访客视口；
+//   - session_missing：会话不在（落点 Resize 也会报错，原因面在准入口如实区分）
+//
+// 本判定在 fire 路径**应用前复核**（合并窗 500ms 内 owner 可能刚附着），
+// 不能只在收帧时查一次
+func (writableAdapter) WritableResizeDenyReason(sessionID string) string {
 	if sessionID == "" {
-		return false
+		return "session_missing"
 	}
 	sess := terminal.DefaultManager.GetSession(sessionID)
 	if sess == nil {
-		return false
+		return "session_missing"
 	}
-	return sess.Origin != terminal.OriginExternal
+	if sess.Origin == terminal.OriginExternal {
+		return "external_session"
+	}
+	if sess.AttachedClients() > 0 {
+		return "owner_active"
+	}
+	return ""
 }
 
 // WritableResize 把访客视口尺寸应用到锚定会话 PTY（share.WritableResizer 面）：

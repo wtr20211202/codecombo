@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	shared "codecombo/server/api/shared"
+	"codecombo/server/pastetmp"
 
 	"github.com/gin-gonic/gin"
 )
@@ -152,11 +152,11 @@ func validatePasteFile(header *multipart.FileHeader) (string, error) {
 }
 
 // writePasteTempFile 落盘共用尾段：sc-paste-<unixms>.<ext> 命名 + 流式拷贝 +
-// Windows 正斜杠路径回告（shell 兼容，既有惯例）
+// Windows 正斜杠路径回告（shell 兼容，既有惯例）。命名与 O_EXCL 独占创建在
+// pastetmp 微包（P-20261122-1 访客粘贴上传链共用同一事实源——同前缀即共享
+// paste-cleaner 生命周期，同 O_EXCL 防同毫秒碰撞/共享 /tmp symlink 劫持）
 func writePasteTempFile(c *gin.Context, file multipart.File, header *multipart.FileHeader, ext string, errMsg string) {
-	tmpDir := os.TempDir()
-	name := fmt.Sprintf("sc-paste-%d%s", time.Now().UnixNano()/int64(time.Millisecond), ext)
-	dst, fullPath, err := createUniquePasteFile(tmpDir, name)
+	dst, fullPath, err := pastetmp.Create(os.TempDir(), pastetmp.Name(ext))
 	if err != nil {
 		shared.Error(c, http.StatusInternalServerError, errMsg, err)
 		return
@@ -181,29 +181,6 @@ func writePasteTempFile(c *gin.Context, file multipart.File, header *multipart.F
 			"size": header.Size,
 		},
 	})
-}
-
-// createUniquePasteFile 在 dir 下以 name 创建独占新文件：O_EXCL 两重保障——
-// ① 同毫秒多次上传的命名碰撞不互相覆盖（批量粘贴逐个请求的现实形态，也是
-// 既有 image 链的潜在 bug）；② 不跟随符号链接（多用户 Linux 的共享 /tmp 上，
-// 预埋 sc-paste-* symlink 可劫持写入路径——远端形态 remotePasteName 随机后缀
-// 同因）。0600：粘贴载荷可能含敏感内容，收敛到本用户可读（原 os.Create 为
-// 0666&umask）。碰撞时按 sc-paste-<ms>-1.<ext> 步进（cleaner 前缀匹配不受影响）
-func createUniquePasteFile(dir, name string) (*os.File, string, error) {
-	full := filepath.Join(dir, name)
-	base := strings.TrimSuffix(name, filepath.Ext(name))
-	ext := filepath.Ext(name)
-	for i := 0; i < 100; i++ {
-		f, err := os.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if err == nil {
-			return f, full, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
-			return nil, "", err
-		}
-		full = filepath.Join(dir, fmt.Sprintf("%s-%d%s", base, i+1, ext))
-	}
-	return nil, "", fmt.Errorf("cannot create unique paste file in %s", dir)
 }
 
 // ============== 临时文件清理 ==============

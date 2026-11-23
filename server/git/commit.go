@@ -3,6 +3,7 @@ package git
 import (
 	"codecombo/server/model"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -278,7 +279,13 @@ func ExtractChanges(repoPath string, commit string, files []string, message stri
 
 	// 7. 恢复之前暂存的工作区变更
 	if hasStash {
-		_, _ = execGit(repoPath, "stash", "pop")
+		// pop 失败＝用户提交前的工作区改动仍留在 stash 里、工作区看起来「干净」
+		// ——提交本身已成功不能返回 error（调用方会当失败重试产出重复提交），
+		// 但静默丢弃等于用户改动凭空消失（P-20261122-12 审计 P1）：必须留痕
+		if _, err := execGit(repoPath, "stash", "pop"); err != nil {
+			slog.Warn("stash pop after commit failed — pre-commit worktree changes remain in stash",
+				"repo", repoPath, "err", err)
+		}
 	}
 
 	return nil

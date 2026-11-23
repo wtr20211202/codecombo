@@ -54,6 +54,8 @@ type pageData struct {
 // 留本文件，CSS 段在 page_css.go、JS 三段在 page_js_core/shell/nav.go；
 // P-20261120-1 起主题注入件（theme.go GuestThemeCSS/guestThemeJS——访客页族
 // 六页单一事实源）按同形拼接装配进 CSS 段之后与 core/shell 之间；
+// P-20261122-20 起拖拽导航守卫（dragguard.go guestDragGuardJS——五页族单一
+// 事实源）在 core 之后、shell 之前装配，调用点在 nav 段首（scDragGuard()）；
 // 段间以常量拼接装配
 const pageTmplSrc = `<!doctype html>
 <html lang="{{.Lang}}">
@@ -81,7 +83,7 @@ const pageTmplSrc = `<!doctype html>
 {{if .StatusBanner}}<div class="status-banner" id="status-banner" title="{{.StatusTitle}}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>{{.StatusBanner}}</span></div>{{end}}
 <div class="spin"></div></div>
 <script>
-` + pageTmplJsCoreSrc + guestThemeJS + pageTmplJsShellSrc + pageTmplJsNavSrc + `</body>
+` + pageTmplJsCoreSrc + guestThemeJS + guestDragGuardJS + pageTmplJsShellSrc + pageTmplJsNavSrc + `</body>
 </html>`
 
 var pageTmpl = template.Must(template.New("share").Parse(pageTmplSrc))

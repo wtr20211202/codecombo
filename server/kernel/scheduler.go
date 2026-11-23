@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -73,7 +74,7 @@ func (s *Scheduler) AddTicker(name string, interval time.Duration, fn func(ctx c
 		defer s.wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				s.logger.Error("scheduler: job panicked", "job", name, "panic", r)
+				s.logger.Error("scheduler: job panicked", "job", name, "panic", r, "stack", string(debug.Stack()))
 			}
 		}()
 		ticker := time.NewTicker(interval)
@@ -87,7 +88,7 @@ func (s *Scheduler) AddTicker(name string, interval time.Duration, fn func(ctx c
 				func() {
 					defer func() {
 						if r := recover(); r != nil {
-							s.logger.Error("scheduler: job panicked", "job", name, "panic", r)
+							s.logger.Error("scheduler: job panicked", "job", name, "panic", r, "stack", string(debug.Stack()))
 						}
 					}()
 					fn(s.ctx)

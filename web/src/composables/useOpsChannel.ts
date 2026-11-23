@@ -88,7 +88,7 @@ function connect(): void {
         case 'panel': dispatch(OPS_PANEL, ev.payload); break
         default: dispatch(`sc-ops:${ev.type}`, ev.payload)
       }
-    } catch { /* 非 JSON 消息忽略 */ }
+    } catch { /* silent-by-design: 非 JSON 消息是通道协议噪声，忽略即正确行为（连接态另有 connected 指示） */ }
   }
   ws.onclose = (ev) => {
     connected.value = false

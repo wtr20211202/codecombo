@@ -135,8 +135,8 @@ type Service struct {
 	// directLimit 申请端点频控（参数与上传频控独立）
 	directLimit *ratePair
 	// gates 会话输入闸合并账本（P-20261121-1 必改3）：开放直入「连接在场」
-	// 与申请批准「持权在场」两来源统一记账，闸值经 writableSink 单点落
-	// （gateLedger 见 direct.go；两路直写同一 atomic 的组合开关竞态已收口）
+	// 与申请批准「持权在场」两来源统一记账，闸值经 writableSink 单点落（见
+	// direct.go：组合开关竞态已收口；来源反向索引/对账节流锚 P-20261122-17）
 	gates *gateLedger
 	// directOnRelease 持权回收回调（惰性超时/级联/关通道缘由；nil 安全）——
 	// 装配层据此补非 owner 缘由的审计（会话侧输入闸的解除已收口进 Service
@@ -169,6 +169,12 @@ type Service struct {
 	// writableResizeEvents 视口 resize 应用后的广播回调（owner 侧「终端被改格」
 	// 最小可见性面；装配层接 opschannel 同上）
 	writableResizeEvents func(WritableResizeEvent)
+	// pasteLimit 访客粘贴上传频控（P-20261122-1，ratePair 参数化复用：
+	// (token,IP) + token 全局双维固定窗口，参数见 pasteupload.go）
+	pasteLimit *ratePair
+	// pasteUploadEvents 粘贴上传到达的广播回调（nil = 不广播；装配层接
+	// opschannel——dropEvents 同款回调注入先例）
+	pasteUploadEvents func(PasteUploadEvent)
 }
 
 // shareCtxKey 守卫层已解析记录的上下文键（gateGuard 查过一次，handler 内
@@ -199,8 +205,9 @@ func NewService(shares ShareLookup, roots ProjectRoots, logger *slog.Logger) *Se
 	return &Service{shares: shares, roots: roots, logger: logger, hits: NewHitCounter(),
 		views: &ViewAuditBuffer{}, gate: newGateSessions(), view: newViewSessions(),
 		msgLimit: newMsgRateLimiter(), notes: &GuestNoteBuffer{}, retired: &RetiredHitTracker{},
-		dropLimit: newRatePair(dropMaxPerIP, dropMaxPerToken, dropWindow),
-		direct:    newDirectHub(), directLimit: newRatePair(directMaxPerIP, directMaxPerToken, directWindow),
+		dropLimit:  newRatePair(dropMaxPerIP, dropMaxPerToken, dropWindow),
+		pasteLimit: newRatePair(pasteMaxPerIP, pasteMaxPerToken, pasteWindow),
+		direct:     newDirectHub(), directLimit: newRatePair(directMaxPerIP, directMaxPerToken, directWindow),
 		gates:    newGateLedger(),
 		writable: newWritableHub()}
 }
@@ -287,24 +294,30 @@ func (s *Service) WithWritableResizeEvents(fn func(WritableResizeEvent)) *Servic
 	return s
 }
 
+// WithPasteUploadEvents 注入粘贴上传到达广播回调（链式；装配层接
+// opschannel——owner 侧 sc-ops:share.paste-upload toast 直通分发的数据源）
+func (s *Service) WithPasteUploadEvents(fn func(PasteUploadEvent)) *Service {
+	s.pasteUploadEvents = fn
+	return s
+}
+
 // FlushHits 把攒下的访问计数批量落盘（apply = store.Share.RecordHits）。
 // 装配层（shareapi Module）经内核调度器定时调用 + Stop 兜底各一次
 func (s *Service) FlushHits(apply func(token string, n int64, at time.Time) error) int {
 	return s.hits.Flush(apply, s.logger)
 }
 
-// Handler 组装路由（Go 1.22 方法+通配符模式）。
-// /dl/{name...} 为自描述下载链接：URL 以原文件名结尾，下载工具可直接
-// 取名；{name...} 整段即分享根内相对路径。
+// Handler 组装路由（Go 1.22 方法+通配符模式）。/dl/{name...} 为自描述下载
+// 链接：URL 以原文件名结尾，{name...} 整段即分享根内相对路径。
 // 只注册 GET + 有限几条 POST：/s/{token}/gate（口令验证，P-20261006-25）、
 // /s/{token}/messages（访客留言，P-20261006-13）、/s/{token}/view（一次性
 // 显式确认，P-20261020-3）、/s/{token}/drop 与 /s/{token}/direct/*（协作
-// 通道，P-20261024-1——开关缺省关，关闭时恒 404 与「端点不存在」不可区分，
-// 存在性不可探测）。除留言/素材/直通输入外这是访客面唯一的写入端点
-// （限长/频控/转义/级联防线见 guestboard.go 与 drops.go；终端直播的
-// 「严格只读」仍由「无内容写入」+ 路由面 405 第一层保证：POST/PUT 到
-// /s/* 其他路径都是 405）；全部内容子资源与协作端点经 gateGuard 统一
-// 把口令门。
+// 通道，P-20261024-1）、/s/{token}/paste-upload（访客粘贴上传落盘，
+// P-20261122-1——可写门禁在 handler，见 pasteupload.go）。除上述外访客面
+// 无写入端点（限长/频控/转义/级联防线见 guestboard.go 与 drops.go；终端
+// 直播「严格只读」仍由「无内容写入」+ 路由面 405 第一层保证：POST/PUT 到
+// /s/* 其他路径都是 405）；全部内容子资源与协作端点经 gateGuard 统一把口令门
+// （协作端点开关缺省关，关闭恒 404 与「端点不存在」不可区分）。
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /s/{token}", s.handlePage)
@@ -355,6 +368,9 @@ func (s *Service) Handler() http.Handler {
 	// 通道任一在场即接入，全关恒 404 与「端点不存在」不可区分；升级握手同
 	// 过 gateGuard 口令门 + Origin 同源校验，防线全录 writable.go 头注）
 	mux.Handle("GET /s/{token}/termws", s.gateGuard(http.HandlerFunc(s.handleTermWS)))
+	// 访客粘贴上传落盘（P-20261122-1）：mode-aware 门禁在 handler（open 即
+	// 准入 / hold 须持权 / 全关恒 404，pasteupload.go 包注释防线全录）
+	mux.Handle("POST /s/{token}/paste-upload", s.gateGuard(http.HandlerFunc(s.handlePasteUpload)))
 	mux.Handle("GET /s/{token}/writable/state", s.gateGuard(http.HandlerFunc(s.handleWritableState)))
 	mux.HandleFunc("GET /assets/{name}", s.handleAsset)
 	// 全捕获：分享口上任何未匹配路径（/s/、/s/、乱敲的路径）一律渲染
@@ -862,11 +878,9 @@ func sharePageURL(r *http.Request, token string) string {
 }
 
 // handleNotFoundAny 分享口上所有未匹配路径的品牌 404（/s/、/、乱敲路径等）。
-// /s/* 上的写方法例外为 405：分享口注册 GET + 有限几条 POST（/s/{token}/gate
-// 口令验证 P-20261006-25、/s/{token}/messages 访客留言 P-20261006-13、
-// /s/{token}/view 一次性显式确认 P-20261020-3、/s/{token}/drop 素材上行与
-// /s/{token}/direct/* 直通输入档 P-20261024-1——协作端点开关缺省关且关闭时
-// 恒 404，存在性不可探测），已注册路径到不了这里；
+// /s/* 上的写方法例外为 405：分享口注册的有限几条 POST（gate/messages/view/
+// drop/direct/paste-upload，见 Handler 注——协作端点开关缺省关且关闭时恒 404，
+// 存在性不可探测）已注册路径到不了这里；
 // 除上述写入端点外访客面无「内容写入」端点——终端直播「严格只读」的第一层
 // 保证，404 会让客户端误以为端点不存在而非方法不对，405 + Allow: GET 才是对
 // 该契约的诚实表达
@@ -1641,73 +1655,6 @@ func (s *Service) handleAsset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
-}
-
-// ── 小工具 ──
-
-// NormalizeRelPath 分享路径归一（对外语义的唯一权威实现，管理面与
-// 访客面共用）：反斜杠 → 斜杠、丢弃空段与 "."、内部 ".." 逐级上跳；
-// 试图越过根的路径（顶层多余的 ../）返回错误——分享根是能力边界，
-// 归一只做安全的等价变换，绝不钳制改写指向。
-// 病态路径防御：总长/段数超限直接拒绝（访客路径会逐段 Lstat，超长
-// 输入不应换取系统调用放大）
-func NormalizeRelPath(p string) (string, error) {
-	if len(p) > 1024 {
-		return "", errPathEscape
-	}
-	parts := strings.Split(strings.ReplaceAll(p, "\\", "/"), "/")
-	if len(parts) > 64 {
-		return "", errPathEscape
-	}
-	var stack []string
-	for _, seg := range parts {
-		switch {
-		case seg == "", seg == ".":
-		case seg == "..":
-			if len(stack) == 0 {
-				return "", errPathEscape
-			}
-			stack = stack[:len(stack)-1]
-		default:
-			stack = append(stack, seg)
-		}
-	}
-	return strings.Join(stack, "/"), nil
-}
-
-// TargetInfo 管理面创建分享前的目标探测结果
-type TargetInfo struct {
-	Name  string
-	IsDir bool
-	Size  int64
-}
-
-// StatTarget 校验 rootDir 下 rel 真实存在并返回展示信息。
-// 与访问路径同一套归一与逃逸防护（os.Root），rootDir 本身必须是
-// 已校验的项目根；分享目标路径上的符号链接一律拒绝——保证分享根
-// 从创建那一刻起就是真实目录/文件，不存在被链接偷换的起点
-func StatTarget(rootDir, rel string) (TargetInfo, error) {
-	rel, err := NormalizeRelPath(rel)
-	if err != nil {
-		return TargetInfo{}, err
-	}
-	root, err := os.OpenRoot(rootDir)
-	if err != nil {
-		return TargetInfo{}, err
-	}
-	defer root.Close()
-	if herr := rejectSymlinkPath(root, rel); herr != nil {
-		return TargetInfo{}, fs.ErrNotExist
-	}
-	fsRel := rel
-	if fsRel == "" {
-		fsRel = "."
-	}
-	info, err := root.Stat(fsRel)
-	if err != nil {
-		return TargetInfo{}, err
-	}
-	return TargetInfo{Name: info.Name(), IsDir: info.IsDir(), Size: info.Size()}, nil
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
