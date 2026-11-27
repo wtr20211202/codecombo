@@ -31,8 +31,15 @@ import (
 const MaxGuestsPerToken = 5
 
 // maxTailBytes 尾流缓冲上限（字节）：快照只是「接上直播前的最近画面」，够
-// 铺满数屏即可（服务端 CaptureScrollback 播种同样裁到此限）；有界是内存红线
-const maxTailBytes = 128 << 10
+// 铺满数屏即可（服务端 CaptureScrollback 播种同样裁到此限）；有界是内存红线。
+// P-20261124-3 S2：128KB→512KB——用户复报「分享终端可查看的历史非常少」，接入前
+// 历史只有 128KB（约 2~3 屏），512KB 覆盖 120×60 栅格约 10~15 屏（视输出密度），
+// 配合访客侧 xterm scrollback（SC_TERM_SCROLLBACK=20000）与历史模式兜底。内存账：
+// 每馈线 ≤512KB（馈线数=活跃直播分享数）；订阅时逐访客拷一份快照（Subscribe 内
+// append 复制），单 token 并发上限 MaxGuestsPerToken=5 → 瞬时 ≤3MB/token
+//（馈线 0.5MB + 5 份快照 2.5MB），订阅断开即释放；不上探 1MB 是为「多分享并行 +
+// 弱机」留余量
+const maxTailBytes = 512 << 10
 
 // seedScrollbackLines 订阅播种时回看的 scrollback 行数（与跨会话输出检索
 // 同一档位）：遮蔽器按序处理播种+实时流，行数只影响首屏铺多少历史

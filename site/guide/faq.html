@@ -241,10 +241,13 @@
             <p>
               <span data-lang-en>A few items are deliberately <b>browser-local</b> (localStorage): the
               resizable inner sidebar widths of the terminal-session / remote / notes managers, floating
-              terminal geometry, dismissed one-time hints, form drafts. Those do <b>not</b> follow you to
-              another browser or device — each browser keeps its own copy.</span>
+              terminal geometry, dismissed one-time hints, form drafts, the “Visual effects: reduced”
+              tier (it describes this machine’s remote-control/GPU situation, not your account). Those
+              do <b>not</b> follow you to another browser or device — each browser keeps its own
+              copy.</span>
               <span data-lang-zh>少数项刻意存<b>浏览器本地</b>（localStorage）：终端会话管理 / 远程管理 /
-              笔记管理页的内嵌侧栏宽、终端悬浮窗几何、一次性提示已阅、表单草稿。这些<b>不</b>跨浏览器、
+              笔记管理页的内嵌侧栏宽、终端悬浮窗几何、一次性提示已阅、表单草稿、视觉特效「减弱」档
+              （它描述的是本机的远控/GPU 形态，不是账号偏好）。这些<b>不</b>跨浏览器、
               不跨设备跟随——每个浏览器各存一份。</span>
             </p>
           </div>
@@ -546,7 +549,55 @@
             </p>
           </div>
         </details>
+        <details class="faq-item">
+          <summary><span data-lang-en>Settings / share dialogs / lock screen flicker over remote control</span><span data-lang-zh>远程控制时设置、分享弹窗或锁屏一直闪烁</span></summary>
+          <div class="faq-body">
+            <p>
+              <span data-lang-en>The overlays are full-screen frosted-glass layers whose blur is
+              re-sampled every frame; over a remote-control stream (UU, Remote Desktop, TeamViewer,
+              screen sharing) that re-composition can surface as whole-panel flicker, while the same
+              machine is fine when used locally. Two mitigations ship by default: modal masks and
+              glass panels no longer blur (no visible difference — the panels already had opaque
+              backgrounds), and the lock screen keeps its frosted privacy backdrop unless you opt
+              into the reduced tier. Turn on <b>Settings → Appearance → Visual effects: Reduced</b>
+              (or open <code>/?__lowfx=1</code> once) to drop the remaining blur, make overlays
+              opaque and stop decorative animations — loading spinners keep running. It is a
+              per-device preference and does not roam with your account.</span>
+              <span data-lang-zh>这些弹层是全屏磨砂玻璃层，模糊每帧重采样；经远程控制（UU、
+              远程桌面、TeamViewer、屏幕共享）串流时，这种整体重新合成会表现为整块闪烁，而同一台
+              机器本地操作正常。默认已降级两处：弹窗遮罩与玻璃面板不再模糊（观感无差——面板本就
+              带不透明底色），锁屏默认仍保留防窥磨砂背景。把 <b>设置 → 外观 → 视觉特效</b> 切到
+              「减弱」（或打开一次 <code>/?__lowfx=1</code>）即去掉剩余模糊、遮罩改实底并停用装
+              饰性动画——加载 spinner 等必要反馈保留。该偏好按设备本地生效，不随账号漫游。</span>
+            </p>
+            <p>
+              <span data-lang-en>If flicker persists with the reduced tier on, it is on the
+              capture/compositing side (remote-control encoder or software rendering), not in the
+              page: try turning off hardware acceleration in the remote-control app or in the
+              browser, and record the details below when reporting.</span>
+              <span data-lang-zh>若减弱档下仍闪，则在捕获/合成侧（远程控制编码器或软件渲染），
+              不在页面本身：可试关闭远程控制软件或浏览器的硬件加速，并按下述模板记录后反馈。</span>
+            </p>
+            <p>
+              <span data-lang-en>Diagnostic template (about two minutes): remote-control app and
+              version + capture/encode profile; Chrome version; <code>chrome://gpu</code> summary and
+              the WebGL renderer (<code>SwiftShader</code> means software compositing); remote
+              resolution; per surface (settings / share dialog / lock screen) whether flicker is
+              gone, reduced or unchanged; a screenshot or short recording. Add
+              <code>?__debug-flicker=1</code> to the URL and copy the <code>[flicker]</code> console
+              lines (they now include the sampled backdrop-filter / background and an env line with
+              the low-effects state, WebGL renderer and frame-interval p50/p95).</span>
+              <span data-lang-zh>诊断模板（约两分钟）：远程控制软件名与版本 + 捕获/编码档位；Chrome
+              版本；<code>chrome://gpu</code> 摘要与 WebGL renderer（出现 <code>SwiftShader</code>
+              即软件合成）；远端分辨率；三个面（设置 / 分享弹窗 / 锁屏）各自「消失 / 减轻 / 不变」
+              的结论；截图或录屏。URL 加 <code>?__debug-flicker=1</code> 并复制 <code>[flicker]</code>
+              控制台行（现含采样的 backdrop-filter / 底色，以及低特效状态、WebGL 渲染器、帧间隔
+              p50/p95 的 env 行）。</span>
+            </p>
+          </div>
+        </details>
       </section>
+
 
       <!-- ============ 常见报错（源=docs/deploy-linux.md §7（203/EXEC 三态 :540）§6c（Text file busy/资产拿错）§10（分享 404）§6b（agent not found），改先改源） ============ -->
       <section class="doc-section" id="errors">
@@ -678,6 +729,13 @@
               剪贴板读取作兜底。移动端或其余浏览器另可在分享者已开启协作时使用协作素材入口
               （拍照 / 选择文件）；可写页上的拖拽不会上传任何文件——页面会拦截缺省导航并
               提示改用上传按钮或 Ctrl+V。</span>
+              <span data-lang-en>Upload limits differ by context: local terminal
+              <b>100 MB</b> (images 20 MB), share visitors and remote terminals
+              <b>20 MB</b> (images 10 MB) — over-limit errors state the readable
+              "exceeds X MB (current Y MB)" instead of raw byte counts.</span>
+              <span data-lang-zh>上传限额分端：本机终端 <b>100 MB</b>（图片 20 MB）、
+              分享访客与远程终端 <b>20 MB</b>（图片 10 MB）——超限错误直接给出可读的
+              「超过 X MB（当前 Y MB）」，不再只报字节数。</span>
             </p>
           </div>
         </details>

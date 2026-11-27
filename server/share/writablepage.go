@@ -894,6 +894,7 @@ const writableJS = `
     } catch (e) { /* silent-by-design: 非浏览器宿主/冻结 window 时放弃暴露 */ }
   }
 
+
   // PASTE_FILE_MAX_COUNT 单批上限（主人端 pasteFiles.ts 同值——两端同参数，
   // 评审裁定 A；超限警告截断同主人端语义）
   const PASTE_FILE_MAX_COUNT = 5;
@@ -1017,6 +1018,13 @@ const writableJS = `
     puDiagAdd('upload', { kind: kind, bytes: file.size, status: res.status });
     if (res.status === 429) throw new Error(t('clLimited'));
     if (res.status === 403) throw new Error(t('wrRevoked'));
+    // 400 too_large = 服务端体封顶/单文件上限命中（P-20261123-5）：给可读上限文案
+    //（puTooLarge 写死 share 口径 20/10——本页是访客端，owner 100MB 不适用）
+    if (res.status === 400) {
+      let errBody = {};
+      try { errBody = await res.json(); } catch (e) {}
+      if (errBody && errBody.error === 'too_large') throw new Error(t('puTooLarge'));
+    }
     if (!res.ok) throw new Error(t('puFailed'));
     let d = {};
     try { d = await res.json(); } catch (e) { throw new Error(t('puFailed')); }
@@ -1047,6 +1055,16 @@ const writableJS = `
         uploadStrip(t('puUploading').replace('{i}', String(i)).replace('{n}', String(files.length)));
         try {
           const payload = kind === 'image' ? await compressPasteImage(file) : file;
+        // 压缩后预检（P-20261123-6 S2 方案⑥）：__scPasteLimits 注入值现读；
+        // 缺失（旧服务/null）→ 不预检（服务端 400/413 可读文案兜底，不回退默认放行）
+        const pl = (typeof window.__scPasteLimits === 'object' && window.__scPasteLimits) || null;
+        if (pl) {
+          const maxMB = kind === 'image' ? pl.imageMB : pl.fileMB;
+          if (maxMB > 0 && payload.size > maxMB * 1024 * 1024) {
+            flashTip(t('puPrecheckTooLarge').replace('{name}', file.name || '').replace('{max}', String(maxMB)));
+            continue;
+          }
+        }
           const path = await uploadPasteOne(payload, kind);
           if (path) paths.push(quotePastePath(path));
           else flashTip(t('puFailOne').replace('{name}', file.name || ''));

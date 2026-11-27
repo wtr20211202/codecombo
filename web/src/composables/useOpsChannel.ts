@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue'
 import { applyLockRejection, getUnlockToken, LOCK_REJECTED_CLOSE_CODE, useLockStore } from '../stores/lock'
 import { opsBrowserIdQuery } from '../utils/opsBrowserId'
+import { recordWsLifecycle } from '../utils/wsLifecycle'
 import { OPS_AGENT_GROUPS_CHANGED, OPS_NAVIGATE, OPS_NOTIFY, OPS_PANEL, OPS_PROJECTS_CHANGED, OPS_SETTINGS_CHANGED, OPS_TASK_PROGRESS } from '../utils/opsEvents'
 
 /**
@@ -23,6 +24,7 @@ let started = false
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempts = 0
+let wsOpenedAt = 0
 
 // 指数退避封顶：与 useWebSocketBase 同策略——常驻通道无限重试但封顶 30s，
 // 服务端宕机期间不再固定 5s 风暴；onopen 归零 attempts，恢复后快速重试
@@ -68,9 +70,10 @@ function connect(): void {
   const url = `${proto}//${location.host}/ws/ops-channel?${opsBrowserIdQuery()}`
   // 内存令牌缺省（刷新后会话在 HttpOnly cookie）时握手不带子协议，
   // 由浏览器自动携带的同源 cookie 兜底（P-20261019-2）
+  wsOpenedAt = 0
   ws = token ? new WebSocket(url, [token]) : new WebSocket(url)
 
-  ws.onopen = () => { connected.value = true; reconnectAttempts = 0 }
+  ws.onopen = () => { connected.value = true; wsOpenedAt = Date.now(); reconnectAttempts = 0 }
   ws.onmessage = (msg) => {
     try {
       const ev = JSON.parse(String(msg.data)) as { type?: string; payload?: Record<string, unknown> }
@@ -91,6 +94,9 @@ function connect(): void {
     } catch { /* silent-by-design: 非 JSON 消息是通道协议噪声，忽略即正确行为（连接态另有 connected 指示） */ }
   }
   ws.onclose = (ev) => {
+    // WS 生命周期入环（P-20261124-2 S1a④）：ops 通道是常驻单例，4001 锁定
+    // 拒绝与网络断线（1006）分别可辨
+    recordWsLifecycle(ws?.url ?? '', ev.code, ev.reason, ev.wasClean, wsOpenedAt, reconnectAttempts, false)
     connected.value = false
     // 释放死连接引用：handleRecovery 的 ws 守卫据此放行，
     // 否则断线后 ws 仍指向 CLOSED socket，online/visible 恢复触发永远失效
@@ -118,13 +124,18 @@ export function initOpsChannel(): void {
   const lockStore = useLockStore()
   watch(() => lockStore.isLocked, (locked) => {
     if (locked) {
-      // 锁定：token 已撤销，主动断开并停止重连
+      // 锁定：token 已撤销，主动断开并停止重连（诊断按 intentional 记 normal，
+      // 与 4001 服务端拒绝区分——前者是本地隐私动作，后者是凭证失效）
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
       }
-      ws?.close()
-      ws = null
+      if (ws) {
+        recordWsLifecycle(ws.url, 1005, '', true, wsOpenedAt, reconnectAttempts, true)
+        ws.onclose = null // 主动关闭只记一条（onclose 不再重复上报）
+        ws.close()
+        ws = null
+      }
     } else {
       // 解锁：立即补连
       if (reconnectTimer !== null) {

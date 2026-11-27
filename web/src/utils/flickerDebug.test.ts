@@ -3,8 +3,12 @@ import {
   FLICKER_LOG_CAP,
   FLICKER_LOG_PREFIX,
   FLICKER_WATCH_SELECTORS,
+  formatFlickerEnv,
   formatFlickerEvent,
   parseTransitionPhase,
+  readWebGLRenderer,
+  sampleFlickerStyle,
+  sampleRafFrameIntervals,
   setFlickerDebug,
   startFlickerDebug,
   type FlickerEvent,
@@ -55,6 +59,53 @@ describe('formatFlickerEvent 行格式', () => {
   it('前缀+相对时间+种类+目标+阶段+类名（e2e 按此 grep）', () => {
     const line = formatFlickerEvent({ t: 10, dt: 1234, kind: 'phase', target: '.lock-overlay', phase: 'leave-active', classes: 'lock-overlay lock-fade-leave-active' })
     expect(line).toBe(`${FLICKER_LOG_PREFIX} +1234ms phase .lock-overlay phase=leave-active classes="lock-overlay lock-fade-leave-active"`)
+  })
+
+  it('show 携样式采样时追加 backdrop/bg 尾段（P-20261125-2）；无采样保持旧格式', () => {
+    const withStyle = formatFlickerEvent({
+      t: 1, dt: 5, kind: 'show', target: '.n-modal-mask', phase: 'idle', classes: 'n-modal-mask',
+      style: { backdropFilter: 'none', backgroundColor: 'rgba(0, 0, 0, 0.55)' },
+    })
+    expect(withStyle).toBe(
+      `${FLICKER_LOG_PREFIX} +5ms show .n-modal-mask phase=idle classes="n-modal-mask" backdrop=none bg=rgba(0, 0, 0, 0.55)`,
+    )
+    const plain = formatFlickerEvent({ t: 1, dt: 6, kind: 'hide', target: '.n-modal-mask', phase: 'idle', classes: 'n-modal-mask' })
+    expect(plain.endsWith('classes="n-modal-mask"')).toBe(true)
+  })
+})
+
+describe('环境快照（P-20261125-2 S3）', () => {
+  it('jsdom 无 WebGL/getContext → 渲染器降级 unknown；样式按计算值给出（默认 none），不抛错', () => {
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    // jsdom 可返回 backdrop-filter 计算值（无规则即 none），真实浏览器同口径；
+    // 空串（属性缺失）才降级 'unknown'——两种形态都不得抛错
+    const style = sampleFlickerStyle(el)
+    expect(style?.backdropFilter === 'none' || style?.backdropFilter === 'unknown').toBe(true)
+    expect(style?.backgroundColor).toBeTruthy()
+    expect(sampleFlickerStyle(null)).toBeUndefined()
+    expect(readWebGLRenderer()).toBe('unknown')
+    el.remove()
+  })
+
+  it('rAF 不可用 → 帧间隔回落 0（0=不可测）', async () => {
+    const win = { requestAnimationFrame: undefined } as unknown as Window & typeof globalThis
+    await expect(sampleRafFrameIntervals(win)).resolves.toEqual({ p50: 0, p95: 0 })
+  })
+
+  it('rAF 可用 → 按注入时间戳算出 p50/p95（最近秩，单帧抖动可测）', async () => {
+    const stamps = [0, 10, 20, 100]
+    let i = 0
+    const win = {
+      requestAnimationFrame: (cb: (ts: number) => void) => { cb(stamps[i++] ?? 100); return i },
+    } as unknown as Window & typeof globalThis
+    // 4 帧 → 间隔 [10,10,80]；p50 最近秩取 idx1=10，p95 取末位=80
+    await expect(sampleRafFrameIntervals(win, 4)).resolves.toEqual({ p50: 10, p95: 80 })
+  })
+
+  it('env 行格式稳定（低特效状态/渲染器/帧间隔三段）', () => {
+    expect(formatFlickerEnv({ lowFx: '1', webglRenderer: 'SwiftShader', rafP50: 16.7, rafP95: 33.3 }))
+      .toBe(`${FLICKER_LOG_PREFIX} env low-fx=1 webgl=SwiftShader raf-p50=16.7ms raf-p95=33.3ms`)
   })
 })
 

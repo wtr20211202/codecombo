@@ -38,6 +38,12 @@ func (f *fakeControl) SetFallback(enable *bool) (bool, string, time.Time) {
 	return f.enabled, f.source, f.since
 }
 
+// WatcherStats Control 扩展方法（P-20261124-1 S1⑥b）：本套件不测监听统计，
+// 返回固定 skipped 形状即可（watch 包 Stats 由自身单测覆盖）
+func (f *fakeControl) WatcherStats() any {
+	return map[string]any{"status": "skipped", "reason": "fake control"}
+}
+
 func setup(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

@@ -65,6 +65,13 @@ type platformCommand struct {
 	MaxBytes int
 	// Filter 输出过滤（进程树：ps 全表按本二进制 + tmux 收窄）
 	Filter commandFilter
+	// Timeout 单命令超时（0 = platformCommandTimeout）；deep 模式可放宽
+	// （journal 8s）——只在 deep 采集时使用，默认包耗时零回归
+	Timeout time.Duration
+	// DeepTimeout deep 模式下的超时覆盖（0 = 用 Timeout）
+	DeepTimeout time.Duration
+	// DeepOnly 仅 deep 模式派发（dmesg 这类大输出可选探针）
+	DeepOnly bool
 }
 
 // platformCommands 平台命令表（纯函数：单测按 GOOS 注入三分支断言）。
@@ -122,15 +129,28 @@ func platformCommands(env platformEnv) []platformCommand {
 			},
 			{
 				ID: "systemd-unit", GOOS: "linux", Optional: true,
-				Args:     []string{"systemctl", "show", "-p", "Restart,KillMode,Type,User", env.unit()},
-				MaxLines: 20, MaxBytes: 4 << 10,
+				// P-20261124-1 S3①：扩展监管属性（重启次数/退出码/启动时刻/内存/
+				// 任务数/IO/NOFILE 限制）——卡顿复盘里「被 OOM/重启」的直接判据
+				Args: []string{"systemctl", "show", "-p",
+					"Restart,KillMode,Type,User,NRestarts,ExecMainStatus,ActiveEnterTimestamp,MemoryCurrent,TasksCurrent,IOReadBytes,IOWriteBytes,LimitNOFILE",
+					env.unit()},
+				MaxLines: 30, MaxBytes: 6 << 10,
 				Note: "unit supervisor properties — #26 discriminator: KillMode=process is what protects the update subprocess",
 			},
 			{
 				ID: "systemd-journal", GOOS: "linux", Optional: true,
 				Args:     []string{"journalctl", "-u", env.unit(), "-n", "200", "--no-pager"},
 				MaxLines: 200, MaxBytes: 64 << 10,
-				Note: "system journal tail for the unit (best-effort; permission denied -> skipped)",
+				// 只保留这一个 journal 探针：deep 模式放宽到 8s，默认仍 3s
+				Timeout: 3 * time.Second, DeepTimeout: 8 * time.Second,
+				Note: "system journal tail for the unit (best-effort; permission denied -> skipped; deep mode allows 8s)",
+			},
+			{
+				ID: "dmesg-tail", GOOS: "linux", Optional: true, DeepOnly: true,
+				Args:     []string{"dmesg", "-T"},
+				MaxLines: 100, MaxBytes: 16 << 10, Filter: filterTail,
+				Timeout: 2 * time.Second,
+				Note:    "kernel ring buffer tail (deep only; permission denied -> skipped) — OOM/NFS/IO errors live here",
 			},
 			{
 				ID: "listeners", GOOS: "linux", Optional: true,
@@ -254,7 +274,11 @@ type PlatformInfo struct {
 }
 
 // collectPlatform 采集平台基线与深度采样（ctx 由收集器统一 20s 预算钳制）
-func collectPlatform(ctx context.Context, goos, dataDir string, red *Redactor, now time.Time) PlatformInfo {
+func collectPlatform(ctx context.Context, goos, dataDir string, red *Redactor, now time.Time, deadline time.Time, report *CollectionReport) PlatformInfo {
+	deep := false
+	if report != nil {
+		deep = report.deep
+	}
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	info := PlatformInfo{
@@ -273,17 +297,36 @@ func collectPlatform(ctx context.Context, goos, dataDir string, red *Redactor, n
 		TimeLocal: time.Local.String(),
 		DataDir:   red.Path(dataDir),
 	}
-	if du, err := sysinfo.Usage(dataDir); err == nil {
+	// statfs 在挂死的网络盘上不可取消：放进带 deadline 的 goroutine（S3⑦）
+	diskStart := time.Now()
+	type diskOut struct {
+		du  sysinfo.DiskUsage
+		err error
+	}
+	dout, diskTimedOut := runDeadline(deadline, func() diskOut {
+		du, err := sysinfo.Usage(dataDir)
+		return diskOut{du: du, err: err}
+	})
+	diskStatus := ProbeOK
+	diskNote := ""
+	if diskTimedOut {
+		diskStatus = ProbeTimeout
+		diskNote = "statfs did not return before the collection deadline (hung mount?)"
+		info.Notes = append(info.Notes, "disk usage skipped: "+diskNote)
+	} else if dout.err != nil {
+		diskNote = "disk usage unavailable: " + red.Line(dout.err.Error())
+		info.Notes = append(info.Notes, diskNote)
+	} else {
 		info.Disk = &DiskSample{
 			Path:        red.Path(dataDir),
-			TotalMB:     du.Total / 1024 / 1024,
-			UsedMB:      du.Used() / 1024 / 1024,
-			FreeMB:      du.Free / 1024 / 1024,
-			UsedPercent: du.UsedPercent(),
+			TotalMB:     dout.du.Total / 1024 / 1024,
+			UsedMB:      dout.du.Used() / 1024 / 1024,
+			FreeMB:      dout.du.Free / 1024 / 1024,
+			UsedPercent: dout.du.UsedPercent(),
 		}
-	} else {
-		info.Notes = append(info.Notes, "disk usage unavailable: "+red.Line(err.Error()))
 	}
+	report.Add(ProbeResult{ID: "statfs:dataDir", Kind: "file", Status: string(diskStatus),
+		DurationMS: time.Since(diskStart).Milliseconds(), Note: diskNote})
 	// Linux 发行版基线走文件读（非命令）：/etc/os-release 是标准位置，
 	// 容器/精简镜像缺失时如实缺席
 	if goos == "linux" {
@@ -297,8 +340,20 @@ func collectPlatform(ctx context.Context, goos, dataDir string, red *Redactor, n
 		if cmd.GOOS != goos {
 			continue // 表项与宿主平台不符：不派发（纯数据表也可跨平台复用）
 		}
-		sample := runPlatformCommand(ctx, cmd, env.ExeBase, red)
+		if cmd.DeepOnly && !deep {
+			report.Add(ProbeResult{ID: "command:" + cmd.ID, Kind: "command", Status: string(ProbeSkipped), Deep: true, Note: "deep-only probe (?deep=1)"})
+			continue
+		}
+		cmdStart := time.Now()
+		sample := runPlatformCommand(ctx, cmd, env.ExeBase, red, deep)
 		info.Commands = append(info.Commands, sample)
+		status := ProbeOK
+		if sample.Status != "ok" {
+			status = ProbeSkipped
+		}
+		report.Add(ProbeResult{ID: "command:" + cmd.ID, Kind: "command", Status: string(status),
+			DurationMS: time.Since(cmdStart).Milliseconds(), Bytes: int64(len(sample.Output)),
+			Note: sample.Note, Deep: cmd.DeepOnly || cmd.DeepTimeout > 0})
 		if sample.Status != "ok" && sample.Note != "" {
 			info.Notes = append(info.Notes, cmd.ID+": "+sample.Note)
 		}
@@ -336,15 +391,26 @@ func processTreeFrom(goos string, samples []CommandSample) *ProcessTreeSample {
 // runPlatformCommand 执行单条平台命令（3s 钳制，失败=skipped 不标红）。
 // 输出处理顺序固定：解码 → 过滤 → 上限 → 逐行脱敏/路径归一——先裁剪再
 // 脱敏会让 note 里的「截断」与包内字节对得上，且脱敏只处理真正入包的行。
-func runPlatformCommand(ctx context.Context, cmd platformCommand, exeBase string, red *Redactor) CommandSample {
+func runPlatformCommand(ctx context.Context, cmd platformCommand, exeBase string, red *Redactor, deep bool) CommandSample {
 	sample := CommandSample{
 		ID:      cmd.ID,
 		Command: red.Line(strings.Join(cmd.Args, " ")),
 	}
-	cctx, cancel := context.WithTimeout(ctx, platformCommandTimeout)
+	timeout := platformCommandTimeout
+	if cmd.Timeout > 0 {
+		timeout = cmd.Timeout
+	}
+	if deep && cmd.DeepTimeout > 0 {
+		timeout = cmd.DeepTimeout
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// #nosec G204 —— 命令表是编译期常量（platformCommands），无用户输入拼接
-	out, err := exec.CommandContext(cctx, cmd.Args[0], cmd.Args[1:]...).Output()
+	ec := exec.CommandContext(cctx, cmd.Args[0], cmd.Args[1:]...)
+	// WaitDelay（P-20261124-1 风险清单）：D 状态子进程可能杀不掉，管道不关
+	// 会让 Output() 永久阻塞——WaitDelay 到点即放弃读端
+	ec.WaitDelay = 500 * time.Millisecond
+	out, err := ec.Output()
 	text, note := decodeCommandOutput(out)
 	switch cmd.Filter {
 	case filterProcessTree:
@@ -353,6 +419,10 @@ func runPlatformCommand(ctx context.Context, cmd platformCommand, exeBase string
 		note = joinNote(note, filterNote)
 	case filterListenerRows:
 		filtered, filterNote := filterListenerRowOutput(text)
+		text = filtered
+		note = joinNote(note, filterNote)
+	case filterTail:
+		filtered, filterNote := filterTailOutput(text, cmd.MaxLines)
 		text = filtered
 		note = joinNote(note, filterNote)
 	}
@@ -365,7 +435,7 @@ func runPlatformCommand(ctx context.Context, cmd platformCommand, exeBase string
 	if err != nil {
 		sample.Status = "skipped"
 		if cctx.Err() == context.DeadlineExceeded {
-			note = joinNote(note, fmt.Sprintf("timed out after %s", platformCommandTimeout))
+			note = joinNote(note, fmt.Sprintf("timed out after %s", timeout))
 		} else {
 			note = joinNote(note, commandErrorText(err, red))
 		}

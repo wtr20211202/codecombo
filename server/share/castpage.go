@@ -363,6 +363,9 @@ function openTerm(){
   // 取代 P-9 的 scWheelRoute 放行）；scTermDiag 在 ?term=diag 时开诊断环形缓冲
   scWheelCapture($('termBox'), term);
   scTermDiag(term, $('termBox'));
+  // alt-screen 进入/退出重排（P-20261123-4 ③）：回放里的全屏 TUI 切缓冲不触发
+  // 容器观测，挂 onBufferChange 后 relayout + force（alt 底部锚，状态行可见）
+  scOnBufferChange(term, $('termBox'), relayout);
   termOpened = true;
 }
 // 录制栅格 + 舞台尺寸驱动的重排（舞台/章节区/窗口任何变化都按栅格重新定字号）

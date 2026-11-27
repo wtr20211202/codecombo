@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // 平台命令表纯数据化 + GOOS 注入三分支（P-20261122-10 必改C 纪律；
@@ -70,8 +71,24 @@ func TestPlatformCommandsPerGOOS(t *testing.T) {
 			t.Fatalf("linux uname = %q, want `uname -a` (S2b)", got)
 		}
 		// #26 判别式：KillMode 必须来自实际托管单元
-		if got := strings.Join(byID["systemd-unit"].Args, " "); got != "systemctl show -p Restart,KillMode,Type,User codecombo.service" {
-			t.Fatalf("systemd-unit args = %q", got)
+		unitArgs := strings.Join(byID["systemd-unit"].Args, " ")
+		if !strings.HasPrefix(unitArgs, "systemctl show -p Restart,KillMode,Type,User,") ||
+			!strings.HasSuffix(unitArgs, " codecombo.service") {
+			t.Fatalf("systemd-unit args = %q", unitArgs)
+		}
+		// P-20261124-1 S3①：监管/资源属性扩展（重启次数/退出码/内存/任务数/IO/NOFILE）
+		for _, prop := range []string{"NRestarts", "ExecMainStatus", "ActiveEnterTimestamp", "MemoryCurrent", "TasksCurrent", "IOReadBytes", "IOWriteBytes", "LimitNOFILE"} {
+			if !strings.Contains(unitArgs, prop) {
+				t.Fatalf("systemd-unit args missing %s: %q", prop, unitArgs)
+			}
+		}
+		// journal 唯一探针：deep 模式放宽到 8s（不加第二个 journal 探针）
+		if byID["systemd-journal"].DeepTimeout != 8*time.Second {
+			t.Fatalf("systemd-journal deep timeout = %v, want 8s", byID["systemd-journal"].DeepTimeout)
+		}
+		// dmesg 只作 deep-only 可选探针
+		if cmd, ok := byID["dmesg-tail"]; !ok || !cmd.DeepOnly {
+			t.Fatal("dmesg-tail must exist and be deep-only")
 		}
 		if got := strings.Join(byID["systemd-journal"].Args, " "); got != "journalctl -u codecombo.service -n 200 --no-pager" {
 			t.Fatalf("systemd-journal args = %q", got)

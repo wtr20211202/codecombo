@@ -155,6 +155,10 @@ var termDictZh = map[string]string{
 	"puUploadBtn":   "上传文件/图片",
 	"puNoFile":      "剪贴板里没有可发送的文件，请点「上传文件/图片」按钮",
 	"puNeedHold":    "先申请输入权限，获批后再上传",
+	// 超限可读错误（P-20261123-5）：服务端 400 too_large 时前端按 file/image 分型
+	// 给出 MB 上限（share 端 20/10 由页面常量带入）
+	"puTooLarge":    "文件超过 20 MB 上限（图片 10 MB）",
+	"puPrecheckTooLarge": "「{name}」超过 {max} MB 上限，已跳过",
 	// 闸前粘贴可见化（P-20261123-1 ②）：带文件粘贴落在页内输入框（搜索框/
 	// 留言昵称/协作素材框）且有键入资格——文件只能走终端粘贴链，提示先聚焦
 	// 终端；不 preventDefault（输入框语义与去向都不变）
@@ -172,6 +176,16 @@ var termDictZh = map[string]string{
 	"seNext":     "下一个匹配",
 	"seClose":    "关闭搜索",
 	"seNoResult": "无匹配",
+	// 完整显示开关（P-20261123-4 ④）：宽度优先放大会让宽矮视口只露部分行，
+	// 一键切「缩小字号看全 40 行」；按钮文字 = 点击后的目标动作
+	"fitShow":    "完整显示",
+	"fitZoom":    "放大",
+	"fitShowTip": "缩小字号让全部行可见（完整显示，适合宽而矮的窗口）",
+	"fitZoomTip": "恢复宽度优先放大（只看部分行，纵向可滚动）",
+	// 历史模式浮层（P-20261124-3 S2）：overset 到顶继续上滚交还 xterm scrollback
+	// 后的唯一常驻出口（滚回底也可退出，但按钮对触摸/误入更可发现）
+	"histBack":    "回到实时",
+	"histBackTip": "退出历史滚动，回到直播最新输出",
 }
 
 var termDictEn = map[string]string{
@@ -267,6 +281,10 @@ var termDictEn = map[string]string{
 	"puUploadBtn":   "Upload files/images",
 	"puNoFile":      "No file in the clipboard — use the “Upload files/images” button",
 	"puNeedHold":    "Request input access first — uploads unlock after approval",
+	// Paste over-limit readable error (P-20261123-5): server 400 too_large mapped
+	// by file/image kind; share caps 20/10 MB from page constants
+	"puTooLarge":    "File exceeds the 20 MB limit (images 10 MB)",
+	"puPrecheckTooLarge": "\"{name}\" exceeds the {max} MB limit — skipped",
 	// 闸前粘贴可见化（P-20261123-1 ②，注释见中文表同键条目）
 	"puFocusTerm": "Click the terminal area first, then paste files",
 	// 选区复制（P-20261122-1 必改4，注释见中文表同键条目）
@@ -280,6 +298,14 @@ var termDictEn = map[string]string{
 	"seNext":     "Next match",
 	"seClose":    "Close search",
 	"seNoResult": "No matches",
+	// 完整显示开关（P-20261123-4 ④，注释见中文表同键条目）
+	"fitShow":    "Fit window",
+	"fitZoom":    "Zoom in",
+	"fitShowTip": "Shrink the font so every row is visible (fits wide, short windows)",
+	"fitZoomTip": "Back to width-first zoom (some rows scroll vertically)",
+	// 历史模式浮层（P-20261124-3 S2，注释见中文表同键条目）
+	"histBack":    "Back to live",
+	"histBackTip": "Leave history scrolling and return to the latest live output",
 }
 
 func termDictFor(lang string) map[string]string {
@@ -311,6 +337,10 @@ type termPageData struct {
 	// 单一事实源——WS 上行输入位，开关在场才挂载）
 	WritableCSS template.CSS
 	WritableJS  template.JS
+	// PasteLimitsJS 粘贴上传限额注入（P-20261123-6 S2）：window.__scPasteLimits
+	// 纯数字对象（template.JS），先于 WritableJS 执行——writablepage 预检按它
+	// 现读；nil-safe helper 渲染期现读 settings 生效值（no-store 保证 reload 新鲜）
+	PasteLimitsJS template.JS
 	// EntryCSS/EntryJS 合并入口条（P-20261119-3，entrybar.go 单一事实源——
 	// 协作/留言两条入口条并单条双入口的条壳；仅终端直播页注入）
 	EntryCSS template.CSS
@@ -382,6 +412,38 @@ box-shadow:var(--shadow);overflow:hidden}
    flex 两端单行——roTip 左、版权右；.footer 锚点语义保留（挂载脚本插入位） */
 .foot-note{flex-shrink:0;display:flex;justify-content:space-between;gap:12px;
 padding:6px 6px 0;color:var(--muted);font-size:11.5px;opacity:.85}
+/* 完整显示开关（P-20261123-4 ④）：页头右侧胶囊按钮——只读直播页没有可写
+   action bar，页头是唯一对所有直播访客可见的入口；词表驱动（fitShow/fitZoom） */
+.fit-toggle{flex:0 0 auto;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.4);
+color:#fff;border-radius:999px;padding:3px 11px;font-size:12px;font-weight:600;cursor:pointer;
+font-family:inherit;white-space:nowrap}
+.fit-toggle:hover{background:rgba(255,255,255,.26)}
+/* 历史模式浮层（P-20261124-3 S2）：overset 到顶继续上滚已把滚动面交还 xterm
+   scrollback，右下角浮层是滚轮之外唯一退出入口（触摸/误入可点）；.card 已
+   position:relative，按钮覆于终端区右下、不进列流。hidden 属性显式隐藏
+   （button 缺省 display 不受 UA [hidden] 之外样式干扰，仍写死保险） */
+.hist-back{position:absolute;right:14px;bottom:14px;z-index:6;
+background:rgba(20,26,40,.92);border:1px solid rgba(255,255,255,.32);color:#fff;
+border-radius:999px;padding:5px 13px;font-size:12px;font-weight:600;cursor:pointer;
+font-family:inherit;white-space:nowrap;box-shadow:0 3px 12px rgba(0,0,0,.35)}
+.hist-back:hover{background:rgba(30,38,56,.96)}
+.hist-back[hidden]{display:none}
+/* 矮视口 chrome 压缩（P-20261123-4 ⑤）：宽而矮（UU 远程常见 2000×500）下把
+   header/banner/action bar/footer 的 padding 与间距收紧，高度让给终端。安全警示
+   （.banner）只收边距、不改字号也不截断，保持完整可见。作用域限直播页——本样式
+   块只属于 termpage，frozen/cast 不注入，两页观感零变化 */
+@media (max-height:640px){
+#app.wrap{padding-top:6px;padding-bottom:4px}
+#app .header{padding:5px 12px;gap:8px;border-radius:10px}
+#app .header .icon{width:26px;height:26px;border-radius:8px}
+#app .header h1{font-size:14px}
+#app .banner{margin-top:5px;padding:4px 10px;font-size:12px}
+#app .card{margin-top:5px;border-radius:10px}
+#app .term-box{padding:5px 8px}
+#app .foot-note{padding:3px 4px 0;font-size:10.5px}
+#app .wr-actions{padding:3px 8px 0;row-gap:4px;gap:4px}
+#app .wr-actions .cl-btn{padding:3px 9px;font-size:12px}
+}
 .state{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
 color:var(--muted);text-align:center;padding:30px}
 .state .big{width:64px;height:64px;border-radius:18px;background:var(--chip);margin-bottom:14px;
@@ -417,6 +479,7 @@ color:#8b94a9;opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
       <div class="sub" id="sub"></div>
     </div>
     <div class="badge" id="badge" data-state="connecting"><span class="dot"></span><span id="badgeText"></span></div>
+    <span id="fitSlot"></span>
     <span id="themeSlot"></span>
   </div>
   <div class="banner{{if .Unfiltered}} unfiltered{{end}}" id="maskBanner" data-testid="share-mask-banner">
@@ -425,6 +488,10 @@ color:#8b94a9;opacity:.04;white-space:nowrap;transform:rotate(-24deg)}
   </div>
   <div class="card">
     <div class="term-box" id="termBox"></div>
+    <!-- 历史模式浮层（P-20261124-3 S2）：overset 到顶继续上滚后出现；文案/点击
+         由页脚本接线（termLayoutJS 的 scHistoryExit 单一口径）。cast/frozen 无
+         本元素 → 两页不启用历史模式（零变化） -->
+    <button type="button" class="hist-back" id="histBack" data-testid="term-hist-back" hidden></button>
     <div class="state" id="stateBox" style="display:none"></div>
   </div>
   <!-- foot-note 并入 footer 单行（P-20261118-9 布局紧凑化）：roTip 左 / 版权右；
@@ -551,17 +618,100 @@ let wrHostResize = null;
 // 层）经既有 layout 重排点同步 kick 驱动重算目标——复用 scObserve 的观测链，
 // 可写页不再另挂第二个 ResizeObserver
 let wrLayoutHook = null;
+// 完整显示开关（P-20261123-4 ④；P-20261124-3 S2 增 auto 缺省档）：显式
+// ?fit=window|width 优先（可直接分享/书签），其次 localStorage 记忆（sc.term.fit），
+// 都没有 = auto——装不下整格且 fit 字号可达 SC_TERM_FIT_MIN 时 scFitGrid 自动按
+// 完整显示走（全行可见，xterm scrollback 天然可达，S2 ①）；不可行时与 width 等价
+//（宽度优先 + overset，历史模式兜底见 termLayoutJS）。window 模式：0.25 步进下调
+// 字号求「全部行可见且 fs≥12」，列容器跟随实际字号（放开 --col-floor 的 82vw 流式
+// 下限）；装不下则回退宽度字号 + 底部锚（scEnsureNow 的 fit 底部锚分支），不降到
+// 不可读字号。页头开关是反向出口（按钮文字 = 点击后的动作）：生效态显示「放大」
+//（点击=显式 width 并记忆），宽度态显示「完整显示」（点击=显式 window）
+const FIT_KEY = 'sc.term.fit';
+function fitModeFromEnv(){
+  let m = '';
+  try { m = new URLSearchParams(location.search || '').get('fit') || ''; } catch (e) {}
+  if (m === 'window' || m === 'width') return m;
+  try { m = localStorage.getItem(FIT_KEY) || ''; } catch (e) {}
+  return m === 'window' || m === 'width' ? m : 'auto';
+}
+let fitMode = fitModeFromEnv();
+// fit 实际生效判定（P-20261124-3）：window 恒按完整显示意图（装不下走底部锚回退）；
+// auto 只在 scFitGrid 确实缩字号装下（fsFit>0）时算生效——只有生效态才让容器跟随
+// 字号/放开流式下限（fits 态与宽度回退逐字节保持旧观感）
+function fitEngaged(){
+  const b = $('termBox');
+  if (fitMode === 'window') return true;
+  if (fitMode !== 'auto' || !b) return false;
+  return scScrollState(b).fsFit > 0;
+}
+function syncFitUi(){
+  const btn = $('fitToggle');
+  if (btn) {
+    const engaged = fitEngaged();
+    const key = engaged ? 'fitZoom' : 'fitShow';
+    btn.textContent = t(key);
+    btn.title = t(key + 'Tip');
+    btn.setAttribute('aria-label', btn.title);
+    btn.setAttribute('aria-pressed', engaged ? 'true' : 'false');
+  }
+  const root = document.documentElement.style;
+  if (fitEngaged()) root.setProperty('--col-floor', '0px');
+  else root.removeProperty('--col-floor');
+}
+function applyFitMode(m, persist){
+  fitMode = m === 'window' || m === 'width' ? m : 'auto';
+  const box0 = $('termBox');
+  if (!box0) return;
+  if (fitMode === 'auto') box0.dataset.fitMode = 'auto';
+  else if (fitMode === 'window') box0.dataset.fitMode = 'window';
+  else delete box0.dataset.fitMode;
+  syncFitUi();
+  if (persist) { try { localStorage.setItem(FIT_KEY, fitMode); } catch (e) {} }
+  layout();
+}
+// 页头入口（只读直播页无 action bar，页头是唯一对所有访客可见的位置）；
+// 点击在 完整显示 ↔ 放大 间切换并记忆，URL 不重写（分享链接不带个人偏好）
+(function mountFitToggle(){
+  const slot = $('fitSlot');
+  if (!slot) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'fit-toggle';
+  btn.id = 'fitToggle';
+  btn.setAttribute('data-testid', 'term-fit-toggle');
+  btn.onclick = function(){ applyFitMode(fitEngaged() ? 'width' : 'window', true); };
+  slot.appendChild(btn);
+})();
+// 历史模式浮层（P-20261124-3 S2）：词表文案 + 点击退出（滚动面交还实时，
+// 退出动作清抑制窗并 force 定位——见 termLayoutJS scHistoryExit）。元素缺席于
+// cast/frozen，本段零命中
+(function mountHistBack(){
+  const btn = $('histBack');
+  if (!btn) return;
+  btn.textContent = t('histBack');
+  btn.title = t('histBackTip');
+  btn.setAttribute('aria-label', btn.title);
+  btn.onclick = function(){ scHistoryExit($('termBox'), term, true); };
+})();
 function layout(){
   if (!term.element) return;
   if (hostCols > 0 && hostRows > 0) {
-    scTermNeed(hostCols, term.options.fontSize);
+    // 先定字号（fit 可能下调）再按实际字号写列容器所需宽（P-20261123-4 ④：
+    // 顺序反过来会拿旧字号写 need，fit 收窄后再多一轮收敛）；fitEngaged 读
+    // scFitGrid 刚写入的 fsFit（auto 是否实际生效）
     scFitGrid(term, $('termBox'), hostCols, hostRows);
+    scTermNeed(hostCols, term.options.fontSize, fitEngaged());
+    syncFitUi();
   } else {
     scClearGrid(term);
     doFit();
   }
   if (wrLayoutHook) wrLayoutHook();
 }
+// 应用完整显示偏好（此时实例已构造；term.element 未 open 时 layout 空转，
+// open 后的首次 layout 会按当前 fitMode 收敛）
+applyFitMode(fitMode, false);
 const relayout = scObserve($('termBox'), layout);
 function setHost(cols, rows){
   if (!(cols > 0 && rows > 0)) return;
@@ -569,8 +719,9 @@ function setHost(cols, rows){
   hostRows = Math.max(2, Math.min(rows, 300));
   // 内容自适应列宽（P-20261106-9）：列容器按主机列数放宽/收窄（宽度仍受视口
   // 约束，不强制铺满；字号按当前生效值回算、钳 ≥ 产品字号，P-20261119-2）；
-  // 栅格立即换尺寸（随后到达的字节按主机栅格落屏）
-  scTermNeed(hostCols, term.options.fontSize);
+  // 栅格立即换尺寸（随后到达的字节按主机栅格落屏）。fit 生效态放开 ≥14 钳
+  // （P-20261124-3：auto 缺省档下 fs 可能 <14，钳回 14 会多一轮 need→aw 回读）
+  scTermNeed(hostCols, term.options.fontSize, fitEngaged());
   if (term.cols !== hostCols || term.rows !== hostRows) term.resize(hostCols, hostRows);
   // 滚动位不在此处写（P-20261123-2）：栅格重排的默认位由 scFitGrid 的几何真变
   // 检测驱动 scEnsureCursorVisible(force)——同一几何的 1s 对账帧不拽回用户上滚
@@ -584,6 +735,9 @@ scFontsReady(() => {
   term.open($('termBox'));
   scWheelCapture($('termBox'), term);
   scTermDiag(term, $('termBox'));
+  // alt-screen 进入/退出重排（P-20261123-4 ③）：全屏 TUI 切缓冲不触发容器观测，
+  // 不挂此钩子会沿旧字号/旧锚定基准；relayout + force 一次（alt 底部锚）
+  scOnBufferChange(term, $('termBox'), relayout);
   layout();
 }, () => { scRemeasure(term); relayout(); });
 
@@ -595,6 +749,9 @@ function setBadge(state, text){
 }
 function showState(title, desc){
   $('termBox').style.display = 'none';
+  // 历史模式浮层随结束态收起（终端区已由状态卡替换；残留浮层无退出对象）
+  const hb = $('histBack');
+  if (hb) hb.hidden = true;
   // 可写位观看侧 UI（P-20261122-1：动作排/搜索条，writablepage 挂载）随直播
   // 结束收起——终端区已被结束态卡片替换，复制/搜索无对象；元素缺席即空转
   document.querySelectorAll('.wr-actions,.wr-search,.pu-tip').forEach(function(el){ el.style.display = 'none'; });
@@ -704,6 +861,7 @@ es.onopen = () => {
 // 单一事实源——hello 前不开输入，出域警示随页首横幅右段常驻，粘贴危险块
 // 服务端预检）
 {{.CollabJS}}
+{{.PasteLimitsJS}}
 {{.WritableJS}}
 {{.BoardJS}}
 </script>
@@ -742,8 +900,9 @@ func renderTermPage(w io.Writer, token, lang, title, wm string, collab, guestInp
 		LayoutCSS:   template.CSS(termLayoutCSS),
 		LayoutJS:    template.JS(termLayoutJS),
 		Unfiltered:  unfiltered,
-		WritableCSS: template.CSS(writableCSS),
-		WritableJS:  template.JS(writableJS),
+		WritableCSS:   template.CSS(writableCSS),
+		WritableJS:    template.JS(writableJS),
+		PasteLimitsJS: pasteLimitsJS(),
 		EntryCSS:    template.CSS(entryBarCSS),
 		EntryJS:     template.JS(entryBarJS),
 		ThemeCSS:    template.CSS(GuestThemeCSS),

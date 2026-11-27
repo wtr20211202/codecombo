@@ -65,6 +65,7 @@
     "httpPort",
     "logRetentionDays",
     "loopbackPort",
+    "pasteLimits",
     "port",
     "previewCompatMode",
     "remoteAccess",

@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted } from 'vue'
 import { NButton, NIcon, useMessage } from 'naive-ui'
 import { TerminalOutline } from '@vicons/ionicons5'
 import TerminalPane from '../terminal/TerminalPane.vue'
+import { PASTE_OWNER_FILE_MAX_BYTES, PASTE_OWNER_IMAGE_MAX_BYTES } from '../../utils/pasteFiles'
 import TerminalPaneContextMenu from '../terminal/TerminalPaneContextMenu.vue'
 import AgentActivityPanel from './AgentActivityPanel.vue'
 import { useI18n } from '../../composables/useI18n'
@@ -207,6 +208,9 @@ defineExpose({ fitSystemPane, fitFor, fitAllSystem, insertTextFor })
         :session-id="ps.id"
         :ws-url-factory="getTerminalWsUrl"
         :upload-paste="uploadPaste"
+        :paste-max-file-bytes="PASTE_OWNER_FILE_MAX_BYTES"
+        :paste-max-image-bytes="PASTE_OWNER_IMAGE_MAX_BYTES"
+        :paste-limit-kind="'owner'"
         :scrollback-lines="currentScrollbackLines"
         :osc-hook="onPaneOsc"
         :resize-call="(id: string, rows: number, cols: number) => terminalApi.resize(id, rows, cols)"
@@ -229,6 +233,9 @@ defineExpose({ fitSystemPane, fitFor, fitAllSystem, insertTextFor })
           :session-id="s.id"
           :ws-url-factory="getTerminalWsUrl"
           :upload-paste="uploadPaste"
+          :paste-max-file-bytes="PASTE_OWNER_FILE_MAX_BYTES"
+          :paste-max-image-bytes="PASTE_OWNER_IMAGE_MAX_BYTES"
+          :paste-limit-kind="'owner'"
           :scrollback-lines="currentScrollbackLines"
           :osc-hook="onPaneOsc"
           :resize-call="(id: string, rows: number, cols: number) => terminalApi.resize(id, rows, cols)"

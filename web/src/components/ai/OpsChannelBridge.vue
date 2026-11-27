@@ -8,6 +8,7 @@ import { useSessionContextStore } from '../../stores/sessionContext'
 import { useAssistantTaskStore } from '../../stores/assistantTask'
 import { useAgentQueueStore } from '../../stores/agentQueue'
 import { useTerminalSessionsStore } from '../../stores/terminal-sessions'
+import { invalidatePasteLimits } from '../../composables/pasteLimits'
 import { useApprovalsStore } from '../../stores/approvals'
 import type { ApprovalRecord } from '../../api/domains/opsconfirm'
 import { useAsksStore } from '../../stores/asks'
@@ -92,6 +93,8 @@ function onNotify(e: Event) {
 }
 
 function onSettingsChanged() {
+  // 粘贴上传限额失效（P-20261123-6 S2）：缓存置空，终端粘贴链下次预检前重拉
+  invalidatePasteLimits()
   void terminalThemeStore.load()
   // 界面密度跟随（P-20261003-322）：uidensity 落服务端 settings，本页与他端
   // （设置页/agent settings API）改档均经本广播到达，行高 token 多端一致

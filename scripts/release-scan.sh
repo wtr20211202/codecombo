@@ -87,7 +87,9 @@ fi
     'sca_''migrationtesttoken01' \
     'sca_''e2escmT0k3nXy7Qw' \
     'sca_''e2eFrozen0Secret1' \
-    'sca_''test0000000000000000000000000000000000000000000000000000test'
+    'sca_''test0000000000000000000000000000000000000000000000000000test' \
+    'sc_''abcdefghijklmnopqrstuvwx' \
+    'sc_''leaketoken123456'
 } > "$SCAN_CANARY/fake-tokens.txt"
 
 total_hits=0

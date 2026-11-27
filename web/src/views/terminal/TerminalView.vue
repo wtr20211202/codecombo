@@ -54,6 +54,7 @@ import { useTerminalThemeStore } from '../../stores/terminal-theme'
 import { rememberActiveTab, recallActiveTab } from '../../utils/terminalActiveTab'
 import { safeStorage } from '../../utils/storage'
 import TerminalPane from '../../components/terminal/TerminalPane.vue'
+import { PASTE_OWNER_FILE_MAX_BYTES, PASTE_OWNER_IMAGE_MAX_BYTES } from '../../utils/pasteFiles'
 import TerminalTabbar from '../../components/terminal/TerminalTabbar.vue'
 import TerminalEmptyState from '../../components/terminal/TerminalEmptyState.vue'
 import TerminalPanesArea from '../../components/terminal/TerminalPanesArea.vue'
@@ -663,6 +664,9 @@ function onTogglePaneMaximize(tabId: string, paneId: string) {
 const paneHandlers = {
   getTerminalWsUrl,
   uploadPaste,
+  pasteMaxFileBytes: PASTE_OWNER_FILE_MAX_BYTES,
+  pasteMaxImageBytes: PASTE_OWNER_IMAGE_MAX_BYTES,
+  pasteLimitKind: 'owner',
   onOscEvent: onOscEventSync,
   resizeTerminal,
   redrawTerminal,

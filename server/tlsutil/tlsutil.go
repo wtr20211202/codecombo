@@ -66,13 +66,13 @@ func EnsureCert(dir string) (certPath, keyPath string, err error) {
 		// P-20261025-1 起新签发证书 CN=codecombo。存量证书不受影响（EnsureCert
 		// 见 cert.pem+key.pem 即复用，CN 只是自签证书的展示性身份；peercert 的
 		// TOFU 钉扎按指纹不按 CN——已有配对在证书自然轮换前零重配对面）
-		Subject:      pkix.Name{CommonName: "codecombo"},
-		NotBefore:    time.Now().Add(-24 * time.Hour), // 容忍客户端时钟略慢
-		NotAfter:     time.Now().Add(certValidity),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     dnsNames(),
-		IPAddresses:  ipSANs(),
+		Subject:     pkix.Name{CommonName: "codecombo"},
+		NotBefore:   time.Now().Add(-24 * time.Hour), // 容忍客户端时钟略慢
+		NotAfter:    time.Now().Add(certValidity),
+		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:    dnsNames(),
+		IPAddresses: ipSANs(),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
@@ -138,4 +138,74 @@ func ipSANs() []net.IP {
 		}
 	}
 	return ips
+}
+
+// HSTSHeaderValue Strict-Transport-Security 单一源（P-20261124-1 S3②）：
+// app.go 的下发中间件与诊断包 tls.json 引用同一常量——两处手写 max-age
+// 必然漂移，而 HSTS 写错会静默把一个 IP 字面量主机锁在 https 上。
+// 注意：HSTS 规范对 IP 字面量主机不生效（RFC 6797 §2.3），自签场景另见
+// 诊断包 README 的删除 cert.pem+key.pem 重签指引。
+const HSTSHeaderValue = "max-age=31536000"
+
+// LeafSummary 证书公钥元数据（P-20261124-1 S3②）：只读 certPath 的第一个
+// CERTIFICATE PEM 块，**绝不读私钥**（key 路径不在签名里，物理上不可能被读）。
+// 供诊断包 state/tls.json 使用：排障要回答「客户端为什么拒绝握手」——
+// 指纹/有效期/SAN/自签是最直接的三个判据。
+type LeafInfo struct {
+	Subject       string   `json:"subject"`
+	Issuer        string   `json:"issuer"`
+	SerialNumber  string   `json:"serialNumber"`
+	NotBefore     string   `json:"notBefore"`
+	NotAfter      string   `json:"notAfter"`
+	DaysRemaining int      `json:"daysRemaining"`
+	DNSNames      []string `json:"dnsNames"`
+	IPAddresses   []string `json:"ipAddresses"`
+	Fingerprint   string   `json:"sha256Fingerprint"`
+	IsSelfSigned  bool     `json:"selfSigned"`
+	KeyType       string   `json:"keyType"`
+}
+
+// LeafSummary 解析证书元数据（certPath 为空/不可读返回错误，调用方写 skipped）
+func LeafSummary(certPath string) (*LeafInfo, error) {
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, err
+	}
+	var der []byte
+	for {
+		block, rest := pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			der = block.Bytes
+			break
+		}
+		data = rest
+	}
+	if der == nil {
+		return nil, errors.New("no CERTIFICATE PEM block in cert file")
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+	sum := sha256.Sum256(der)
+	s := &LeafInfo{
+		Subject:       cert.Subject.String(),
+		Issuer:        cert.Issuer.String(),
+		SerialNumber:  cert.SerialNumber.String(),
+		NotBefore:     cert.NotBefore.Format(time.RFC3339),
+		NotAfter:      cert.NotAfter.Format(time.RFC3339),
+		DaysRemaining: int(time.Until(cert.NotAfter).Hours() / 24),
+		DNSNames:      append([]string{}, cert.DNSNames...),
+		Fingerprint:   formatFingerprint(sum),
+		KeyType:       cert.PublicKeyAlgorithm.String(),
+	}
+	for _, ip := range cert.IPAddresses {
+		s.IPAddresses = append(s.IPAddresses, ip.String())
+	}
+	// 自签判定：issuer==subject 且自签名验证通过（仅判「是否自签」，不做信任链）
+	s.IsSelfSigned = cert.Subject.String() == cert.Issuer.String() && cert.CheckSignatureFrom(cert) == nil
+	return s, nil
 }

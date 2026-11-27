@@ -126,7 +126,7 @@ func TestTermPagesWireContentAdaptiveWidth(t *testing.T) {
 	if !strings.Contains(pages["live"], "setHost(m.cols, m.rows)") {
 		t.Fatal("live page must size the column from hello cols")
 	}
-	if !strings.Contains(pages["live"], "scTermNeed(hostCols, term.options.fontSize)") {
+	if !strings.Contains(pages["live"], "scTermNeed(hostCols, term.options.fontSize, fitEngaged())") {
 		t.Fatal("live page must pass the effective font size to scTermNeed")
 	}
 	if !strings.Contains(pages["frozen"], "scTermNeed(scTextCols(text))") {
@@ -219,18 +219,25 @@ func TestTermPagesEnlargeFontAndScrollFollow(t *testing.T) {
 		"Math.min(wR, SC_TERM_MAX_FONT / SC_TERM_FONT_SIZE)", // 放大段：宽度比×cap
 		"SC_TERM_FONT_SIZE * Math.min(1, wR)",                // 收缩段：宽度优先（必改0）
 		"if (wR >= 1) {",                                     // 放大段门槛只看宽度（hR 门槛已撤）
-		"fs = Math.max(SC_TERM_FONT_SIZE, fs || 0)",          // 半边参数化钳 ≥ 产品字号
+		"fs = allowSmall ? (fs || 0) : Math.max(SC_TERM_FONT_SIZE, fs || 0)", // 半边参数化钳 ≥ 产品字号（fit 模式放开）
 		// 滚轮归一与修饰键语义（P-20261123-2 ①②）
 		"if (e.deltaMode === 1) return raw * cellH;",                   // line → 字高归一
 		"if (e.deltaMode === 2) return raw * pageH;",                   // page → 视口高归一
 		"if (e.ctrlKey || e.metaKey) { e.stopPropagation(); return; }", // 缩放放行缺省、只拦内层
 		"if (e.shiftKey) return;",                                      // shift+wheel 无横向面：忽略
-		"scSetFollow(box, next >= maxTop - 1);",                        // wheel 上滚清 follow / 滚到底恢复
+		// 写入稳定化（P-20261124-3 S1）：唯一 rAF 写口 + wheel 触底 ≥2px 容差
+		"function scQueueWrite(box)", "function scFlushScroll(box)", "function scQueueScroll(box, top)",
+		"scQueueWrite(box); // 唯一写口", "scQueueScroll(box, next)",
+		"scSetFollow(box, next >= maxTop - SC_TERM_BOTTOM_EPS);",
+		"const SC_TERM_BOTTOM_EPS = 2;", "const SC_TERM_USER_MS = 150;",
+		"const SC_TERM_OVER_HYST = 2;", "const SC_TERM_FS_EPS = 0.25;",
+		"function scFollowConfirm(box)",   // 原生滚动触底连续两帧确认
+		"Date.now() - st.userTs < SC_TERM_USER_MS", // 用户手势后抑制程序写
 		// follow 语义（P-20261123-2 ③）
 		"if (!st.follow) return;",              // follow=false 绝不写 scrollTop
 		"if (box.dataset.gridGeom !== geom) {", // 几何真变才 force（同几何不拽回）
 		"return h > 0 ? cy * h : -1;",          // rowY=0 有效、未知 = -1
-		"if (rowY < 0) return;",                // 未知锚点不写
+		"if (!anchorBottom && rowY < 0) return;", // 未知锚点不写（底部锚模式无需光标行）
 		// 诊断面（P-20261123-2 ④）
 		"function scTermDiag(term, box)", "window.__scTermDiag", "ydisp", "hasSb",
 		"snapshot: function(){ return scDiagFields(term, box); }", "wheel-inner",
@@ -287,6 +294,108 @@ func TestTermPagesEnlargeFontAndScrollFollow(t *testing.T) {
 		strings.Contains(pages["frozen"], "scWheelCapture($('termBox')") ||
 		strings.Contains(pages["frozen"], "scEnsureCursorVisible($('termBox')") {
 		t.Fatal("frozen page must stay on the container-fit path (no grid/overset call sites)")
+	}
+}
+
+// 宽矮视口完整适配 + alt-screen 锚定 + 矮视口 chrome 压缩（P-20261123-4）静态对账：
+//   - ①follow 几何抑制窗（geomTs 400ms）+ 非 own scroll 双向 truth table 在共享件
+//   - ②单次收敛视口源（documentElement.clientWidth）替代 box.clientWidth 反馈
+//   - ③alt-screen 判定 + onBufferChange 重排 + 底部锚（alt/fit 两分支）
+//   - ④fit=window 完整适配（SC_TERM_FIT_MIN 可读下限、scTermNeed allowSmall、
+//     页头开关 ?fit=/localStorage、--col-floor 放开）
+//   - ⑤矮视口 chrome 压缩只注入直播页（frozen/cast 不命中）
+//   - ⑥诊断面新增字段齐备
+func TestTermPagesFitWindowAndAltScreen(t *testing.T) {
+	js := termLayoutJS
+	for _, want := range []string{
+		"const SC_TERM_FIT_MIN = 12;",                    // fit 可读下限
+		"function scFitMode(box)",                        // fit 模式读取
+		"return m === 'window' || m === 'auto' ? m : 'width';", // auto 缺省档（P-20261124-3 S2 ①）
+		"function scIsAlt(term)",                         // alt-screen 判定
+		"function scOnBufferChange(term, box, relayout)", // 缓冲切换重排
+		"term.buffer.onBufferChange(function(){",         // 挂接 xterm 事件
+		"const anchorBottom = scIsAlt(term) || scFitMode(box) === 'window'", // 锚定基准分叉
+		"Date.now() - st.geomTs < 400",                   // 几何抑制窗（follow 误清修复）
+		"fsWidth: st.fsWidth || 0", "fsFit: st.fsFit || 0", // 诊断字号基线
+		"altScreen: false", "fitMode: scFitMode(box)", "geomTs: st.geomTs || 0",
+		"userGesture: st.userTs || 0", "visibleRows: st.visibleRows || 0",
+		"out.altScreen = b.type === 'alternate';",
+		"st.fsWidth = fsFit > 0 ? fsWidth : fs;", "st.fsFit = fsFit;",
+		// 历史模式兜底 + diag 扩展（P-20261124-3 S2）
+		"function scHistoryEnter(box, term)", "function scHistoryWheel(box, term, dy)",
+		"function scHistoryExit(box, term, reposition)",
+		// 无浮层页面（cast/frozen）不得进入历史滚轮路径：enter 返回 false 时
+		// 调用方落回普通外层滚动（零变化），wheel 自身再防一层
+		"if (dy < 0 && box.scrollTop <= 1 && scHistoryEnter(box, term)) {",
+		"if (!scHistButton() || !scCanHistory(term)) return false;",
+		"if (!st.hist) return;",
+		"return b.type === 'normal' && b.baseY > 0;", // 只对 normal scrollback 生效
+		"term.scrollLines(lines)",                    // 交还 xterm scrollback
+		"if (b.viewportY >= b.baseY) scHistoryExit(box, term, true);", // 回底退出
+		"out.baseY = b.baseY;", "historyMode: !!st.hist",
+		"writes: []", "function scDiagWrite(box, from, to, programmatic)",
+		// 观测阈值过滤（P-20261124-3 S1）
+		"Math.abs(r.width - lw) < SC_TERM_RO_EPS",
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("term layout js missing fit/alt-screen piece %q", want)
+		}
+	}
+	// 稳定视口源（单次收敛）+ fit 模式列容器跟随
+	for _, want := range []string{
+		"const vw = document.documentElement.clientWidth;",
+		"scTermNeed(hostCols, term.options.fontSize, fitEngaged())",
+		"return scScrollState(b).fsFit > 0;",
+	} {
+		if !strings.Contains(js+renderAllTermPages(t, false)["live"], want) {
+			t.Fatalf("missing single-convergence/fit width piece %q", want)
+		}
+	}
+	live := renderAllTermPages(t, false)["live"]
+	for _, want := range []string{
+		"'term-fit-toggle'",                        // 页头完整显示开关
+		"term-hist-back",                           // 历史模式「回到实时」浮层（P-20261124-3 S2）
+		"function fitModeFromEnv()",                // ?fit= 优先 + localStorage 记忆
+		"return m === 'window' || m === 'width' ? m : 'auto';", // 缺省 auto（P-20261124-3 S2 ①）
+		"localStorage.getItem(FIT_KEY)",            // 记忆读取
+		"applyFitMode(fitEngaged() ? 'width' : 'window', true)",
+		"root.setProperty('--col-floor', '0px')",   // fit 容器跟随收窄
+		"scOnBufferChange(term, $('termBox'), relayout)",
+		"@media (max-height:640px){",               // 矮视口压缩
+		"#app .banner{margin-top:5px;padding:4px 10px;font-size:12px}", // 安全警示完整可见（只收边距）
+	} {
+		if !strings.Contains(live, want) {
+			t.Fatalf("live page missing fit/alt-screen wire %q", want)
+		}
+	}
+	// cast 也挂缓冲切换重排（回放进入 alt-screen）；frozen 维持容器 fit 路径不受影响
+	for _, name := range []string{"cast"} {
+		if !strings.Contains(renderAllTermPages(t, false)[name], "scOnBufferChange(term, $('termBox'), relayout)") {
+			t.Fatalf("%s page must wire alt-screen buffer change", name)
+		}
+	}
+	frozen := renderAllTermPages(t, false)["frozen"]
+	for _, gone := range []string{"term-fit-toggle", "@media (max-height:640px){", "scOnBufferChange(term, $('termBox'), relayout)"} {
+		if strings.Contains(frozen, gone) {
+			t.Fatalf("frozen page must not inherit live-only fit/chrome piece %q", gone)
+		}
+	}
+	// 词条 zh/en 成对（按钮两态 + 提示；历史模式浮层 P-20261124-3 S2）
+	for i, d := range [2]map[string]string{termDictZh, termDictEn} {
+		for _, k := range []string{"fitShow", "fitZoom", "fitShowTip", "fitZoomTip", "histBack", "histBackTip"} {
+			if strings.TrimSpace(d[k]) == "" {
+				t.Fatalf("term dict #%d missing %s", i, k)
+			}
+		}
+	}
+	// 历史浮层只注入直播页（cast/frozen 无 #histBack，历史模式不启用零变化）
+	for name, page := range renderAllTermPages(t, false) {
+		if name == "live" {
+			continue
+		}
+		if strings.Contains(page, "term-hist-back") {
+			t.Fatalf("%s page must not carry the history-mode overlay", name)
+		}
 	}
 }
 
@@ -575,7 +684,7 @@ func TestTerminalGuestPageUnfilteredFromRecord(t *testing.T) {
 // 提示/无持权提示三键；P-20261123-1 增输入框聚焦提示 puFocusTerm）
 func TestWritableCapabilityDictParity(t *testing.T) {
 	keys := []string{
-		"puUploading", "puDone", "puTooMany", "puUnsupported", "puFailOne", "puFailed",
+		"puUploading", "puDone", "puTooMany", "puUnsupported", "puFailOne", "puFailed", "puTooLarge", "puPrecheckTooLarge",
 		"puUploadBtn", "puNoFile", "puNeedHold", "puFocusTerm",
 		"cpCopy", "cpCopied", "cpCopyFailed",
 		"seToggle", "seSearch", "sePrev", "seNext", "seClose", "seNoResult",

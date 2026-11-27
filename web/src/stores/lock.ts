@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { lockApi, type LockState } from '@/api/lock'
 import { safeStorage } from '@/utils/storage'
 import { buildClearLockCookie } from '@/utils/lockCookie'
+import { clearDiagSnapshot } from '@/utils/browserDiagnostics'
 
 // localStorage key：P-20261019-2 起不再是令牌载体（令牌改服务端下发的
 // HttpOnly cookie，localStorage 可读副本停写）。保留常量用于两处遗留清扫：
@@ -56,6 +57,9 @@ export const LOCK_REJECTED_CLOSE_CODE = 4001
 export function applyLockRejection(): void {
   setUnlockToken(null)
   sweepLegacyTokenCopies()
+  // 浏览器诊断快照是 XSS 可读面（P-20261124-2 S1b b）：锁定/登出即清，
+  // 内存环保留在本标签页会话内（解锁后仍可导出本次会话的证据）
+  clearDiagSnapshot()
   try {
     const lockStore = useLockStore()
     lockStore.isLocked = true
@@ -186,6 +190,7 @@ export const useLockStore = defineStore('lock', () => {
     unlockToken.value = null
     setUnlockToken(null)
     sweepLegacyTokenCopies()
+    clearDiagSnapshot()
     isLocked.value = true
     stopIdleTimer()
   }

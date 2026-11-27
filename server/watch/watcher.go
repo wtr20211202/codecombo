@@ -116,6 +116,10 @@ type RepoWatcher struct {
 	// 敏感文件工作台外写入观测（P-20261005-15）状态域：节流/自环标记表 +
 	// 测试注入口，判定链见 external.go
 	external externalGuard
+
+	// 运行统计（P-20261124-1 S1⑥b）：事件/溢出/错误类别原子计数，诊断包
+	// 经 watchapi.Control.WatcherStats() 读取（见 stats.go）
+	stats watcherStats
 }
 
 func NewRepoWatcher(bc BroadcastFunc) (*RepoWatcher, error) {
@@ -135,7 +139,10 @@ func NewRepoWatcher(bc BroadcastFunc) (*RepoWatcher, error) {
 }
 
 func (rw *RepoWatcher) Start() {
+	rw.stats.started.Store(true)
+	rw.stats.stopped.Store(false)
 	go func() {
+		defer rw.stats.stopped.Store(true)
 		// 使用带过期清理的防抖映射，避免无限增长
 		type debounceEntry struct {
 			lastFire time.Time
@@ -156,6 +163,7 @@ func (rw *RepoWatcher) Start() {
 				if !ok {
 					return
 				}
+				rw.noteEvent()
 				if isDotGitPath(event.Name) {
 					continue
 				}
@@ -205,6 +213,7 @@ func (rw *RepoWatcher) Start() {
 				if !ok {
 					return
 				}
+				rw.noteError(err)
 				slog.Error("watcher error", "err", err)
 			}
 		}
@@ -381,6 +390,7 @@ func (rw *RepoWatcher) RemoveWatch(path string) error {
 
 func (rw *RepoWatcher) Stop() {
 	rw.stopOnce.Do(func() {
+		rw.stats.stopped.Store(true)
 		close(rw.done)
 		rw.watcher.Close()
 	})

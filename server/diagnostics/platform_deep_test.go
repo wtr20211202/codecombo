@@ -177,8 +177,17 @@ func TestCollectStorage(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "logs", "a.log"), "hello")
 	writeFile(t, filepath.Join(dir, "config.json"), "SECRET-CONFIG")
 
-	st := collectStorage(dir, &DiskSample{TotalMB: 100}, NewRedactor(dir, true),
-		time.Date(2026, 11, 22, 12, 0, 0, 0, time.Local))
+	st, large := collectStorage(dir, &DiskSample{TotalMB: 100}, NewRedactor(dir, true),
+		time.Date(2026, 11, 22, 12, 0, 0, 0, time.Local), time.Time{})
+	// 大文件面复用同一次 walk：data/ 只计数不列名（凭据库红线）
+	if large.DataFiles != 2 {
+		t.Fatalf("data/ file count = %d, want 2 (names must never be listed)", large.DataFiles)
+	}
+	for _, f := range large.Top {
+		if strings.Contains(f.Path, "master-key") || strings.Contains(f.Path, "data/") {
+			t.Fatalf("data/ file name leaked into large-files: %s", f.Path)
+		}
+	}
 	byName := map[string]StorageDirSample{}
 	for _, d := range st.Dirs {
 		byName[d.Name] = d

@@ -88,7 +88,10 @@ build_target() {
     if [ "$os" = "windows" ]; then ext=".exe"; fi
     local output="dist/codecombo-${os}-${arch}${ext}"
     echo "    Building $os/$arch..."
-    CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "$LDFLAGS" -o "$output" .
+    # -trimpath（P-20261126-3 评审 A3）：pprof 档案内嵌的函数名/文件路径不再含
+    # 构建机绝对路径——诊断包 deep 档的 profiles/* 可外发，文本面 Redactor 之外的
+    # 二进制面一次解决
+    CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "$output" .
     sign_artifact "$output"
 }
 
@@ -118,8 +121,9 @@ elif [ -n "$TARGET" ]; then
     build_target "$os" "$arch"
 else
     echo "==> Building current platform..."
-    # 与 build_target 一致：禁用 cgo，避免本机构建动态链接 libc（交叉编译分支均为纯静态）
-    CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o dist/codecombo .
+    # 与 build_target 一致：禁用 cgo，避免本机构建动态链接 libc（交叉编译分支均为纯静态）；
+    # -trimpath 同款理由（诊断包 pprof 档案不内嵌构建机路径）
+    CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o dist/codecombo .
     sign_artifact dist/codecombo
 fi
 

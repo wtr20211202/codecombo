@@ -1,9 +1,13 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useErrorLogStore } from '@/stores/errorLog'
+import { buildBrowserDiagnosticsPayload, clearBrowserDiagnostics } from '@/utils/browserDiagnostics'
 
 describe('errorLog store', () => {
-  beforeEach(() => setActivePinia(createPinia()))
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    clearBrowserDiagnostics()
+  })
 
   it('starts empty', () => {
     const s = useErrorLogStore()
@@ -76,5 +80,40 @@ describe('errorLog store', () => {
     expect(s.logs).toHaveLength(200)
     expect(s.logs[0].url).toBe('/x204')
     expect(s.logs[199].url).toBe('/x5')
+  })
+
+  // 浏览器诊断投影（P-20261124-2 S1a②）：错误中心条目同步进诊断环，字段白名单
+  // + URL 模板化；rawMessage/query 参数不出现
+  it('add() 投影进浏览器诊断环（白名单/模板化；clear 同步清环）', () => {
+    const s = useErrorLogStore()
+    s.add({
+      category: 'network',
+      method: 'GET',
+      url: '/api/share/SENTINEL_TOKEN_1/messages?path=/home/alice/secret',
+      status: 0,
+      rawMessage: 'RAW_SENTINEL /home/alice/secret',
+      userMessage: '网络连接异常，请检查服务是否启动',
+      requestId: 'sc-rid-x',
+      errorClass: 'timeout',
+      durationMs: 1234,
+      silent: true,
+      timedOut: false,
+      clientTimeoutMs: 0,
+    })
+    const [entry] = buildBrowserDiagnosticsPayload().entries
+    expect(entry.kind).toBe('request')
+    expect(entry.path).toBe('/api/share/:token/messages')
+    expect(entry.message).toBe('网络连接异常，请检查服务是否启动')
+    expect(entry.requestId).toBe('sc-rid-x')
+    expect(entry.durationMs).toBe(1234)
+    expect(entry.clientTimeoutMs).toBe(0)
+    expect(entry.silent).toBe(true)
+    const json = JSON.stringify(entry)
+    expect(json).not.toContain('SENTINEL_TOKEN_1')
+    expect(json).not.toContain('RAW_SENTINEL')
+    expect(json).not.toContain('alice')
+
+    s.clear()
+    expect(buildBrowserDiagnosticsPayload().entries).toHaveLength(0)
   })
 })

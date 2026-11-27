@@ -13,6 +13,7 @@ import { useFontStore, FONT_SETTINGS_KEY } from '../stores/font'
 import { useUiZoomStore, UI_ZOOM_STORAGE_KEY } from '../stores/ui-zoom'
 import { useGraphLanesStore, GRAPH_LANE_STORAGE_KEY } from '../stores/graph-lanes'
 import { useFileNestingStore, FILE_NESTING_STORAGE_KEY } from '../stores/file-nesting'
+import { useLowFxStore, LOW_FX_STORAGE_KEY } from '../stores/low-fx'
 import { useTerminalThemeStore, TERMINAL_THEME_FOLLOW_KEY } from '../stores/terminal-theme'
 import { LOCALE_STORAGE_KEY } from '../stores/locale-constants'
 
@@ -24,6 +25,7 @@ function buildHandlers(): Record<string, () => void> {
   const uiZoomStore = useUiZoomStore()
   const graphLanesStore = useGraphLanesStore()
   const fileNestingStore = useFileNestingStore()
+  const lowFxStore = useLowFxStore()
   const terminalThemeStore = useTerminalThemeStore()
   return {
     [THEME_SETTINGS_KEY]: () => themeStore.syncFromStorage(),
@@ -32,6 +34,9 @@ function buildHandlers(): Record<string, () => void> {
     [UI_ZOOM_STORAGE_KEY]: () => uiZoomStore.load(),
     [GRAPH_LANE_STORAGE_KEY]: () => graphLanesStore.load(),
     [FILE_NESTING_STORAGE_KEY]: () => fileNestingStore.load(),
+    // 低特效档（P-20261125-2 S2）：A 标签切减弱，B 标签同设备跟随（load 内重写
+    // 根属性，无需刷新）
+    [LOW_FX_STORAGE_KEY]: () => lowFxStore.load(),
     [TERMINAL_THEME_FOLLOW_KEY]: () => terminalThemeStore.syncFollowFromStorage(),
   }
 }

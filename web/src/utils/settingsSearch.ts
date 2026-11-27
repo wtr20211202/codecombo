@@ -103,6 +103,9 @@ export const SETTINGS_CONTROL_ANCHORS: Partial<Record<SettingsTabKey, SettingsCo
     { match: '文件树 嵌套 同名族 file nesting', controlId: 'settings-file-nesting' },
     { match: '泳道 拓扑图 graph lane 拓扑 提交图', controlId: 'settings-graph-lanes' },
     { match: 'diff 色板 色弱 色盲 colorblind 可访问性 accessibility 蓝橙', controlId: 'settings-diff-palette' },
+    // 视觉特效档（P-20261125-2 S2）：远控/屏幕共享/低配机的「减弱」入口。词条刻意
+    // 避开「闪烁」——settingsSearch.test.ts 钉 hits('闪烁')===['terminal']（终端光标）
+    { match: '视觉特效 减弱 低特效 low fx visual effects', controlId: 'settings-low-fx' },
     { match: '终端字体 字体 连字 等宽字体名 mono monospace terminal font ligatures', controlId: 'settings-terminal-font-family' },
   ],
   terminal: [
@@ -112,6 +115,8 @@ export const SETTINGS_CONTROL_ANCHORS: Partial<Record<SettingsTabKey, SettingsCo
     { match: '默认 shell default shell', controlId: 'settings-terminal-default-shell' },
     { match: '选中即复制 复制 copy on select', controlId: 'settings-terminal-copy-on-select' },
     { match: '高危命令粘贴预检 危险命令 paste precheck dangerous', controlId: 'settings-terminal-paste-precheck' },
+    // P-20261125-1：粘贴上传三端限额行（六框结构收口时顺路补锚点）
+    { match: '粘贴上传 上传限额 粘贴限额 paste upload limits', controlId: 'settings-paste-limits' },
     { match: '背压 丢帧 自愈 backpressure dropped diagnostics', controlId: 'settings-terminal-backpressure' },
   ],
   git: [
@@ -196,6 +201,8 @@ const PINYIN_INITIALS: Record<string, string> = {
   替: 't', 还: 'h', 原: 'y',
   // P-20261005-191 高危命令粘贴预检锚点词新增用字（高危/粘贴/预检/危险）
   高: 'g', 危: 'w', 粘: 'n', 贴: 't', 预: 'y', 检: 'j', 险: 'x',
+  // P-20261125-1 粘贴上传限额锚点词新增用字（限额）
+  限: 'x', 额: 'e',
   // P-20261005-4 设置导出/导入锚点词新增用字（设置迁移）
   迁: 'q', 移: 'y', 设: 's',
   // P-20261005-1 锚点扩容新增用字（字体大小/滚动缓冲/选中/等待音效/时段/静默/
@@ -218,6 +225,8 @@ const PINYIN_INITIALS: Record<string, string> = {
   闪: 's', 烁: 's', 竖: 's', 条: 't', 线: 'x', 形: 'x',
   // P-20261006-5 diff 色板锚点词新增用字（色弱/色盲/可访问性/蓝橙）
   弱: 'r', 盲: 'm', 可: 'k', 访: 'f', 问: 'w', 性: 'x', 蓝: 'l', 橙: 'c',
+  // P-20261125-2 视觉特效档锚点词新增用字（视觉特效/减弱/低特效——低/效/弱已在上表）
+  视: 's', 觉: 'j', 特: 't', 减: 'j',
   // P-20261019-11 远程接入分区锚点词新增用字（反向隧道/内网穿透/中继/公网/手机）
   反: 'f', 向: 'x', 隧: 's', 网: 'w', 穿: 'c', 透: 't', 继: 'j', 公: 'g', 手: 's',
   // P-20261008-15 服务日志关键词新增用字（服/排障）

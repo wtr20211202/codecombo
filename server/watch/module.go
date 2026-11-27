@@ -138,6 +138,20 @@ func (m *Module) SetFallback(enable *bool) (bool, string, time.Time) {
 	return m.rw.SetFallback(enable)
 }
 
+// WatcherStats 监听运行统计（P-20261124-1 S1⑥b）：实现 server/api/watchapi
+// 的 Control 扩展方法（签名用 any，watch 不反向 import api 层）。未 Init/未
+// Start/已 Stop 由 Stats 内部写 skipped，api 层不需要区分实例状态。
+func (m *Module) WatcherStats() any {
+	if m == nil || m.rw == nil {
+		return WatcherStats{
+			Status: "skipped",
+			Reason: "watch module not initialized",
+			Note:   "counts/classes only — no watched paths and no raw error text are recorded",
+		}
+	}
+	return m.rw.Stats()
+}
+
 // decodePayload 宽松解码 map/struct 形态的事件载荷
 func decodePayload(payload any, dst any) bool {
 	switch v := payload.(type) {

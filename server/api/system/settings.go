@@ -8,6 +8,7 @@ import (
 	"codecombo/server/git"
 	"codecombo/server/mask"
 	"codecombo/server/middleware"
+	"codecombo/server/pastetmp"
 	"codecombo/server/proxy"
 	"codecombo/server/store"
 	"codecombo/server/terminal"
@@ -67,6 +68,40 @@ func SetEffectiveLogLevel(level string) {
 }
 
 // EffectiveLogLevel 读取生效日志级别（未注入返回空串）
+// pasteLimitsEffectiveJSON 三端粘贴上传限额当前生效值 + spec（默认值与范围），
+// GET /api/settings 的 pasteLimits/pasteLimitsSpec 载荷。spec 供设置页数字框
+// min/max 与「恢复默认」语义（发 0），前端不再抄一份范围。store 为 nil（早期/
+// 测试路径）时回落 P-5 默认值——不得 panic
+func pasteLimitsEffectiveJSON(c *gin.Context) (gin.H, gin.H) {
+	var owner, share, remote pastetmp.Limit
+	if store.Get() != nil && store.Get().Settings != nil && store.Get().Settings.Get() != nil {
+		owner, share, remote = store.Get().Settings.Get().Server.EffectivePasteLimits()
+	} else {
+		owner, share, remote = pastetmp.Owner, pastetmp.Share, pastetmp.Remote
+	}
+	mb := func(v int64) int { return int(v) }
+	bodyMB := func(l pastetmp.Limit, overhead int64) int { return int(l.FileMB + overhead) }
+	_ = bodyMB
+	effective := gin.H{
+		"owner":  gin.H{"fileMB": mb(owner.FileMB), "imageMB": mb(owner.ImageMB), "bodyMB": bodyMB(owner, 4)},
+		"share":  gin.H{"fileMB": mb(share.FileMB), "imageMB": mb(share.ImageMB), "bodyMB": bodyMB(share, 2)},
+		"remote": gin.H{"fileMB": mb(remote.FileMB), "imageMB": mb(remote.ImageMB), "bodyMB": bodyMB(remote, 2)},
+	}
+	spec := gin.H{
+		"defaults": gin.H{
+			"owner":  gin.H{"fileMB": int(pastetmp.DefaultOwnerFileMB), "imageMB": int(pastetmp.DefaultOwnerImageMB)},
+			"share":  gin.H{"fileMB": int(pastetmp.DefaultShareFileMB), "imageMB": int(pastetmp.DefaultShareImageMB)},
+			"remote": gin.H{"fileMB": int(pastetmp.DefaultRemoteFileMB), "imageMB": int(pastetmp.DefaultRemoteImageMB)},
+		},
+		"ranges": gin.H{
+			"owner":  gin.H{"fileMin": config.PasteOwnerFileMinMB, "fileMax": config.PasteOwnerFileMaxMB, "imageMin": config.PasteOwnerImageMinMB, "imageMax": config.PasteOwnerImageMaxMB},
+			"share":  gin.H{"fileMin": config.PasteShareFileMinMB, "fileMax": config.PasteShareFileMaxMB, "imageMin": config.PasteShareImageMinMB, "imageMax": config.PasteShareImageMaxMB},
+			"remote": gin.H{"fileMin": config.PasteRemoteFileMinMB, "fileMax": config.PasteRemoteFileMaxMB, "imageMin": config.PasteRemoteImageMinMB, "imageMax": config.PasteRemoteImageMaxMB},
+		},
+	}
+	return effective, spec
+}
+
 func EffectiveLogLevel() string {
 	logLevelMu.RLock()
 	defer logLevelMu.RUnlock()
@@ -158,9 +193,14 @@ func GetSettings(c *gin.Context) {
 			"dshAllowStandalone": cfg.Server.DshAllowStandaloneOrDefault(),
 			"dshNpmCommand":      cfg.Server.DshNpmCommand,
 			"dshRollbackVersion": cfg.Server.DshRollbackVersion,
-			"updateURL":          cfg.Server.UpdateURL,
-			"updateChecks":       cfg.Server.UpdateChecks,
-			"updateChannel":      cfg.Server.UpdateChannel,
+			// 粘贴上传三端限额（P-20261123-6）：pasteLimits=生效值（已补默认/
+			// 钳制/image≤file 纠偏），pasteLimitsSpec=默认值+范围（设置页边界
+			// 与「恢复默认」语义源，前端不抄范围）
+			"pasteLimits":     func() gin.H { eff, _ := pasteLimitsEffectiveJSON(c); return eff }(),
+			"pasteLimitsSpec": func() gin.H { _, sp := pasteLimitsEffectiveJSON(c); return sp }(),
+			"updateURL":       cfg.Server.UpdateURL,
+			"updateChecks":    cfg.Server.UpdateChecks,
+			"updateChannel":   cfg.Server.UpdateChannel,
 			// 更新链出站代理（P-20261109-12）：空 = 回环境变量感知（HTTPS_PROXY）
 			"updateProxy": cfg.Server.UpdateProxy,
 			// 系统代理自动探测开关（P-20261110-1 S6）：默认 false（存量零变化）；
@@ -400,6 +440,13 @@ func UpdateSettings(c *gin.Context) {
 		// activeId）只由 POST /api/remoteaccess/tunnel 维护，此处保留现值——
 		// 设置页编辑档案不会意外停掉/切换正在运行的隧道
 		RemoteAccess *config.RemoteAccessConfig `json:"remoteAccess"`
+		// PasteLimits 粘贴上传三端限额（P-20261123-6）——**叶子级增量语义，仅
+		// 本字段**（既有嵌套对象 remoteAccess/userPrefs 等仍是全量替换）：
+		//   省略端/叶子 = 不动；显式 0 = 恢复默认（落盘 0，GET 回默认——不是把
+		//   当前默认数字钉死）；非零 = 范围校验（owner 1~512/1~64，share/remote
+		//   1~20/1~10 只允许下调）。先对合并后的整块校验再一次性赋值（防校验
+		//   失败内存改一半），Save 失败回滚本三字段
+		PasteLimits *config.PasteLimitsPut `json:"pasteLimits"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		shared.Error(c, http.StatusBadRequest, "Settings operation failed", err)
@@ -407,6 +454,9 @@ func UpdateSettings(c *gin.Context) {
 	}
 
 	cfg := store.Get().Settings.Get()
+	// pasteLimits 旧值快照（P-20261123-6）：Save 失败时回滚本三字段（其余 settings
+	// 字段沿用既有形态——settings 共享指针 + Save 失败内存态不落盘的既有语义）
+	pasteLimitsSnapshot := cfg.Server.PasteLimits
 	if req.AutoFetch != nil {
 		cfg.Server.AutoFetch = *req.AutoFetch
 	}
@@ -901,6 +951,44 @@ func UpdateSettings(c *gin.Context) {
 		}
 		cfg.Server.TrustedProxies = v
 	}
+	// 粘贴上传三端限额（P-20261123-6）：叶子级增量 + 先校验后赋值 + Save 失败
+	// 回滚本三字段。快照旧值 → 逐端逐叶合并（省略=不动、显式 0=恢复默认落 0、
+	// 非零=范围校验 400 可读文案）→ image≤file 读时纠偏（EffectivePasteLimits）
+	// 无需写期校验。非法时内存不动直接 400
+	if req.PasteLimits != nil {
+		mergePair := func(dst *config.PasteLimitPair, src *config.PasteLimitPairPut, name string, fileMin, fileMax, imageMin, imageMax int) error {
+			if src == nil {
+				return nil
+			}
+			if src.FileMB != nil {
+				v := *src.FileMB
+				if v != 0 && (v < fileMin || v > fileMax) {
+					return fmt.Errorf("pasteLimits.%s.fileMB out of range (%d-%d or 0 to reset)", name, fileMin, fileMax)
+				}
+				dst.FileMB = v
+			}
+			if src.ImageMB != nil {
+				v := *src.ImageMB
+				if v != 0 && (v < imageMin || v > imageMax) {
+					return fmt.Errorf("pasteLimits.%s.imageMB out of range (%d-%d or 0 to reset)", name, imageMin, imageMax)
+				}
+				dst.ImageMB = v
+			}
+			return nil
+		}
+		if err := mergePair(&cfg.Server.PasteLimits.Owner, req.PasteLimits.Owner, "owner", config.PasteOwnerFileMinMB, config.PasteOwnerFileMaxMB, config.PasteOwnerImageMinMB, config.PasteOwnerImageMaxMB); err != nil {
+			shared.Error(c, http.StatusBadRequest, "Settings operation failed", err)
+			return
+		}
+		if err := mergePair(&cfg.Server.PasteLimits.Share, req.PasteLimits.Share, "share", config.PasteShareFileMinMB, config.PasteShareFileMaxMB, config.PasteShareImageMinMB, config.PasteShareImageMaxMB); err != nil {
+			shared.Error(c, http.StatusBadRequest, "Settings operation failed", err)
+			return
+		}
+		if err := mergePair(&cfg.Server.PasteLimits.Remote, req.PasteLimits.Remote, "remote", config.PasteRemoteFileMinMB, config.PasteRemoteFileMaxMB, config.PasteRemoteImageMinMB, config.PasteRemoteImageMaxMB); err != nil {
+			shared.Error(c, http.StatusBadRequest, "Settings operation failed", err)
+			return
+		}
+	}
 	// TLS：启用后需重启进程生效（监听器在启动期装配）。
 	// 指针直接透传（nil=未配置不动，保持原值/默认开）。
 	// cert/key 成对校验：只填其一必然导致启动期加载失败，保存期即拒绝
@@ -985,6 +1073,7 @@ func UpdateSettings(c *gin.Context) {
 	}
 
 	if err := store.Get().Settings.Save(); err != nil {
+		cfg.Server.PasteLimits = pasteLimitsSnapshot // 仅 pasteLimits 新增回滚语义（P-20261123-6）
 		shared.Error(c, http.StatusInternalServerError, "Settings operation failed", err)
 		return
 	}

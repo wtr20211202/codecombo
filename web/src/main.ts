@@ -7,6 +7,9 @@ import './styles/md-preview.css'
 // 编辑器选区拖拽到 agent 侧栏（P-20261003-162）：拖影挂 body 无组件 scope，
 // 落点高亮是跨组件全局类，样式集中在此
 import './styles/selection-drag.css'
+// 低特效档（P-20261125-2 S2）：html[data-low-fx="1"] 下的去模糊/补实底/关装饰
+// 动画/平滑滚动收口；规则按选择器逐条枚举，见文件头注
+import './styles/low-fx.css'
 // 打包品牌字体（SIL OFL 1.1，可自由分发）：拉丁字形本地渲染保证跨机器一致，
 // 中文回落系统字体栈（微软雅黑/苹方）。按需字重控制体积
 import '@fontsource/geist-sans/400.css'
@@ -29,6 +32,8 @@ import i18n from './i18n'
 import { applyThemeEarly } from './themes/early-init'
 import { useErrorLogStore } from './stores/errorLog'
 import { installClipboardHistoryCapture } from './stores/clipboardHistory'
+import { installBrowserDiagnostics } from './utils/browserDiagnostics'
+import { installFetchDiagnostics } from './utils/fetchDiagnostics'
 
 // 在 mount 前同步应用主题 CSS 变量，避免首屏 var(--bg-primary) 缺失导致背景透明
 applyThemeEarly()
@@ -43,6 +48,12 @@ app.use(router)
 // 多剪贴板历史（P-20261002-149）：全局 copy 事件捕获启动即装（幂等）——
 // 原生 Ctrl/Cmd+C 不经任何组件，必须 document 级监听才能入史
 installClipboardHistoryCapture()
+
+// 浏览器侧诊断环（P-20261124-2）：脚本/Promise 未捕获异常 + 资源加载失败 +
+// pagehide 快照 flush（只写本地 sessionStorage，不发网络）；fetch 透明包装只
+// 补同源直连点。两装均幂等，须早于首个业务请求。
+installBrowserDiagnostics()
+installFetchDiagnostics()
 
 // 渲染兜底①（P-20261002-26）：全局 errorHandler 入账错误中心（错误面板可见）。
 // App.vue 的 onErrorCaptured 未达熔断阈值时放行到这里（渲染层错误 + 不经组件

@@ -380,8 +380,8 @@ export const settingsApi = {
     // 运行态 enabled/activeId 由 remoteAccessApi.control 维护，服务端保存时
     // 保留现值（设置页编辑档案不会停掉/切换运行中的隧道）
     remoteAccess?: { profiles: RemoteAccessProfileInput[]; activeId?: string; enabled?: boolean }
-  // config 可选：后台同步（userPrefs 漫游上云）以 silent: true 调用，失败不弹
-  // 错误 toast（离线常态噪音）；设置页用户主动保存不传，维持既有失败提示
+    pasteLimits?: import('./pasteLimitsTypes').PasteLimitsPut // 粘贴上传三端限额（P-20261126-1 S2b）：叶子级增量，0=恢复默认哨兵；内联 import() 避开与 pasteLimitsTypes 的静态类型环（该文件反向 import 本文件 SettingsData，no-cycle 计入 type import）
+  // config 可选：后台同步以 silent: true 调用（失败不弹错误 toast，离线常态噪音）；设置页用户主动保存不传，维持既有失败提示
   }, config?: AxiosRequestConfig) => api.put('/settings', data, config),
 }
 

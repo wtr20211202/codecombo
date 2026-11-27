@@ -718,6 +718,20 @@ export default {
     terminalRemoteTmux: '远程终端 tmux 持久化',
     terminalRemoteTmuxEnable: '在远程主机的 tmux 会话中启动远程终端（远端需已安装 tmux，缺失时自动回退原生 shell）',
     terminalRemoteTmuxHint: '开启后 SSH 通道断开时远端进程与输出仍在，重开终端标签即重连续工作；仅对远程管理新开的终端生效',
+    // 粘贴上传三端限额（P-20261123-6 S2；P-20261125-1 标签/单位拆分：单位独立
+    // span 不进 naive suffix——suffix 会把数字输入区压成 0 宽）
+    pasteLimits: {
+      title: '粘贴上传上限',
+      owner: '本机终端',
+      share: '分享访客',
+      remote: '远程终端',
+      fileLabel: '文件',
+      imageLabel: '图片',
+      mbUnit: 'MB',
+      inputAria: '{row} {field}（{unit}）',
+      restoreDefault: '恢复默认',
+      hint: '本机终端最高 512MB（大文件上传占临时目录约 2 倍峰值磁盘、慢链路耗时更长）；分享与远程仅可在默认值内收紧。点「恢复默认」回到默认值，保存后即时生效。',
+    },
     tmuxStatus: 'tmux 状态',
     tmuxInstalled: '已安装',
     tmuxNotInstalled: '未安装',
@@ -3470,6 +3484,11 @@ export default {
       unsupported: '不支持的文件类型：{name}（可用文件树粘贴/拖入上传）',
       tooMany: '单次最多粘贴 {n} 个文件，已忽略其余',
       folderHint: '暂不支持文件夹粘贴，请将文件夹拖入文件树或项目内使用',
+      // 超限可读错误（P-20261123-5）：服务端内层 MB 文案 → 中文；owner 100/20、
+      // share/remote 20/10 由 max 参数带入，不再各写死数值
+      tooLarge: '文件超过 {max} MB（当前 {size} MB）',
+      tooLargeImage: '图片超过 {max} MB（当前 {size} MB）',
+      precheckTooLarge: '「{name}」超过 {max} MB 上限，已跳过',
     },
     // WebGL 上下文丢失自动降级（浏览器活跃 WebGL 上下文 ~16 个上限，超限驱逐最老者）
     webglContextLost: 'GPU 渲染上下文丢失，该终端已自动切换至 CPU 渲染（功能不受影响）',
@@ -7443,6 +7462,12 @@ export default {
       previewRemove: '− 删除行',
       hint: '色弱友好档用蓝/橙替代红绿（红绿色弱用户约 8%，红绿难辨时改靠色相轴可辨的两色），文本差异视图与编辑器 diff 同时生效',
     },
+    lowFx: {
+      label: '视觉特效',
+      standard: '标准',
+      reduced: '减弱',
+      hint: '减弱档关闭毛玻璃模糊与装饰性动画（加载 spinner 等必要反馈保留），遮罩改为实底——远程控制（UU/向日葵/TeamViewer）、屏幕共享与低配机上建议开启，可减少弹层闪烁与丢帧；设备本地生效，不随账号漫游',
+    },
     dashboardLanding: {
       label: '进入项目时默认显示',
       editor: '编辑器',
@@ -7499,7 +7524,7 @@ export default {
     keywords: {
       general: '通用 自动拉取 拉取间隔 智能体 默认 审批 守护 运行时 安装 自定义 会话 备份 workspace agent provider guard approval runtime fetch interval',
       appearance: '外观 主题 暗色 亮色 语言 字体 界面 编辑器 连字 换行 空白字符 小地图 固定滚动 置顶 缩放 密度 紧凑 保存时格式化 格式化 自动保存 仪表盘 默认 落点 泳道 拓扑 提交图 文件树 嵌套 同名族 theme dark light language font editor ligatures whitespace minimap word wrap sticky scroll zoom density compact format save dashboard landing graph lane nesting fileNesting',
-      terminal: '终端 回滚 行数 字体 光标 后端 shell bash tmux powershell wsl 复制 选中 历史记录 提示音 dsh scrollback font cursor backend copy select history',
+      terminal: '终端 回滚 行数 字体 光标 后端 shell bash tmux powershell wsl 复制 选中 历史记录 提示音 dsh 粘贴上传 上传 限额 scrollback font cursor backend copy select history paste upload limits',
       agentcron: '定时任务 定时 计划 周期 每日 每周 触发 智能体 自动 试跑 依赖链 前序 父任务 完成触发 接力 续命 relayFrom agent cron schedule daily weekly trigger automation dependency chain predecessor variables placeholder date time weekday 变量 占位符 relay',
       sentinel: '输出哨兵 哨兵 监控 订阅 正则 匹配 OOM 死锁 告警 通知 sentinel watch monitor pattern regex alert',
       git: 'Git 用户名 邮箱 提交 拉取 推送 远程 凭据 换行 gitignore gitattributes user name email commit pull push credential autocrlf',
@@ -7547,10 +7572,23 @@ export default {
       loadFailed: '日志读取失败，请重试',
       // 诊断包导出（P-20261122-10 S2a）：全模块日志+更新链+平台+运行态一次打走
       diagExport: '导出诊断包',
-      diagTip: '打包全模块日志 + 更新链日志 + 平台信息 + 运行态（逐行脱敏，凭据不入包）；先预览体量再下载',
+      diagTip: '打包全模块日志 + 更新链日志 + 平台信息 + 运行态（逐行脱敏，凭据不入包）；自动附带最新浏览器快照，一次拿全两面证据',
       diagStarted: '诊断包下载已开始（日志原文 {size}，压缩后更小）',
       diagFailed: '诊断包导出失败，点击重试',
       diagSize: '预计 {size} · {files} 个文件',
+      diagDeep: '深度诊断（约 30s）',
+      diagDeepTip: '追加宿主/证书/网络时序取证与 TLS 全窗扫描；采集更久，包体略大',
+      diagStartedNoProbe: '诊断包下载已开始（体量预览失败，大小未知）',
+      diagPreviewFailed: '体量预览失败（下载已开始）',
+      diagClientReportFailed: '浏览器快照上传失败，本次诊断包不含浏览器报告（服务端证据照常下载）',
+      // 浏览器诊断（P-20261124-2 S1a⑤；P-20261126-2 P-2b 附带上传）：本地 JSON
+      // 直接下载不经服务器，下载保底成功后异步附带进服务端会话窗；导出诊断包
+      // 时前端会自动附带最新快照（P-20261127-1），不依赖先点本按钮
+      browserDiagExport: '导出浏览器诊断',
+      browserDiagTip: '本次会话的失败请求 / 未捕获异常 / WS 关闭码 / 资源加载失败（捕获时已脱敏，不含请求体、响应体与令牌）；本地生成 JSON 直接下载不经服务器，下载成功后自动上传同一份快照进服务端会话窗（导出诊断包时自动附带最新快照；远程实例除外）',
+      browserDiagDone: '浏览器诊断已下载（{n} 条记录）',
+      browserDiagFailed: '浏览器诊断生成失败，请重试',
+      browserDiagNotAttached: '浏览器诊断已保存到本地；附带进服务端诊断包失败',
       footnote: '仅展示最近写入的尾部窗口；完整文件在服务数据目录 logs/ 下按日滚动（诊断包可一次取走全量）',
     },
     // 磁盘水位（P-20261002-12）：面板卡片 + 巡检通知模板（monitor.disk.* 前缀）
@@ -8360,6 +8398,7 @@ export default {
       },
       diagnostics: {
         export: '导出诊断包',
+        client_report: '上传浏览器侧诊断报告（系统，纯内存 5 分钟窗）',
       },
       approval: {
         export: '导出裁决历史 CSV',

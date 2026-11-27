@@ -87,10 +87,15 @@ const singleHtmlTarget = computed(() => {
 </script>
 
 <template>
+  <!-- 宽度档位对齐 CLAUDE.md 弹窗 token 纪律（P-20261125-2 页面视觉验收补记）：
+       此前未设宽度 → naive card 默认撑满视口（实测 1920 下输入框近 1900px、
+       标题贴屏幕边缘），与同族 ShareTermOptionsDialog 的 --modal-w-sm 写法不一致。
+       md(560) 与新建会话/批量重命名等表单弹窗同档 -->
   <NModal
     v-model:show="show"
     preset="card"
     class="share-create-modal"
+    :style="{ width: 'var(--modal-w-md)', maxWidth: '94vw' }"
     :title="t('share.create.title')"
     :mask-closable="false"
     @after-leave="cancelCreate"

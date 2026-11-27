@@ -164,20 +164,43 @@ border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
 //     上滑）绝不写 scrollTop——上滚阅读不被新输出拽回；滚回底部（wheel 到底或
 //     原生滚动触底）恢复 follow。光标行跑到可视窗上方（清屏/整屏重绘，光标跳回
 //     格顶）不向上追随：那等于每次 TUI 重绘都把视口拽到格顶，正是被治理的「跳
-//     光标锚」。rAF 合并 + clamp [0, maxTop]
+//     光标锚」。alt-screen（全屏 TUI）与 fit=window 回退态改底部锚 maxTop（P-20261123-4
+//     ③：状态/输入行在格底，尾部截头使访客 buffer 停在 normal 时由 fit 强制
+//     底部锚，不单押 altScreen 探测）。写入路径统一进 scFlushScroll 的单一 rAF
+//     写口（P-20261124-3 S1：一帧最多一次 scrollTop——旧实现 ensure 与 wheel 各自
+//     一条 rAF，同帧先后写两次，视口抖动/闪烁的主要成因），clamp [0, maxTop]
 //   - scFollowReset(box)：follow 回 true（重连 term.reset()/cast seek 重置屏幕后
 //     调用），下一次 scEnsureCursorVisible（hello/setHost/drain）重新定位
 //   - scCursorRowY(term)：光标行顶 y（px，px 级锚点供给 scEnsureCursorVisible）——
 //     buffer.active.cursorY 是栅格内行号（0..rows-1，0 = 有效顶位），单元高与
 //     scFitGrid 同源 scCellAt 按当前字号量测；实例未开放/异常回落 -1（未知哨兵，
 //     与合法 0 区分）
-//   - scTermDiag(term, box)：现场诊断（P-20261123-2 ④）——?term=diag 时暴露
-//     window.__scTermDiag（≤50 条环形：wheel dy/归一值/是否接住、outer
-//     scrollTop/scrollHeight/clientHeight、follow、overset、inner ydisp/hasScrollback、
-//     layout cols/rows/fs；绝不含终端内容）+ snapshot() 即时快照。滚动类主诉可据此
-//     定性（inner 消费/拽回/重排），e2e 读 inner ydisp 证明单面（fits 态 wheel 落到
-//     xterm 内部面时记 wheel-inner 条目）。未开启时 scDiagPush 只过一条布尔判断，
-//     热路径零成本
+//   - scTermDiag(term, box)：现场诊断（P-20261123-2 ④；P-20261123-4 ⑥ 扩展；
+//     P-20261124-3 增历史模式/写入审计）——?term=diag 时暴露 window.__scTermDiag
+//     （≤50 条环形：wheel dy/归一值/是否接住、outer scrollTop/scrollHeight/clientHeight、
+//     follow、overset、inner ydisp/baseY/hasScrollback/historyMode、layout cols/rows/fs、
+//     altScreen、fsWidth/fsFit、fitMode、geomTs、userGesture、visibleRows；绝不含
+//     终端内容）+ snapshot() 即时快照 + writes（≤40 条滚动位写入审计：flush 序号/
+//     from/to——证明「一帧最多一次写」与非回拽）。未开启时 scDiagPush/scDiagWrite
+//     只过一条布尔判断，热路径零成本
+//   - scFitMode(box)：'window' = 完整显示（fit，P-20261123-4 ④ 显式 opt-in）/
+//     'auto' = 缺省档（P-20261124-3 S2：装不下整格且 fit 字号可达 SC_TERM_FIT_MIN
+//     时自动按 window 走，否则回退宽度优先——页头开关可切显式 window/width）/
+//     'width' = 宽度优先；读 data-fit-mode，页面脚本控制（cast/frozen 不设 = width）
+//   - scIsAlt(term)：当前是否 alternate buffer（全屏 TUI）——锚定基准分叉用
+//   - scOnBufferChange(term, box, relayout)：进入/退出 alt-screen 时重排 + force
+//     重新锚定（xterm 不自动重排；旧内核无该事件时静默跳过）
+//   - scHistoryEnter/scHistoryWheel/scHistoryExit(box, term)：overset 历史模式兜底
+//     （P-20261124-3 S2）。S1 的显式取舍「overset 态 xterm scrollback 不可达」在
+//     宽矮视口 fit 不可行（fs<SC_TERM_FIT_MIN）时仍是能力缺口：外层已到顶
+//     （scrollTop==0）还继续上滚 → 把滚动面临时交还 xterm scrollback（term.scrollLines
+//     驱动 buffer.ydisp），外层不回写、follow 置 false；页内浮层按钮「回到实时」
+//     （#histBack，页面提供）是主出口。scHistoryEnter 返回是否进入——页面无浮层
+//     （cast/frozen）时返回 false，调用方落回普通外层滚动，零行为变化；滚回
+//     inner 底（viewportY≥baseY）、重连（scFollowReset）、外层原生滚动（触摸/拖条）
+//     也是退出路径，退出时 scrollToBottom + force 定位。只有 normal buffer 有
+//     scrollback（alt-screen 的 baseY 恒 0，天然不进），且复用既有两个监听
+//     （wheel/scroll）不新增事件注册——fits 态与 cast/frozen 零变化
 //   - scClearGrid(term)：撤销栅格模式内联尺寸（回落容器 fit 时用）
 //   - scObserve(el, fn)：容器尺寸观测（ResizeObserver，回落 window resize；rAF
 //     合并同帧多次变化），返回可手动触发的 kick
@@ -194,6 +217,23 @@ const SC_TERM_MIN_FONT = 9;
 const SC_TERM_MAX_FONT = 42;
 const SC_TERM_SCROLLBACK = 20000;
 const SC_TERM_SB = 14;
+// fit=window 完整适配的可读下限（P-20261123-4 ④）：宽矮视口下 40 行要全见往往
+// 需要 14 以下的字号；再低即纯损失（9px 不可读），装不下就回退宽度字号 + 底部锚
+const SC_TERM_FIT_MIN = 12;
+// 滚动/写入稳定化阈值（P-20261124-3 S1，全部 guest-only 呈现选择）：
+//   - 触底容差：滚动条/触控板停在底部附近时 ±1px 抖动不反复翻 follow（真丢跟随时
+//     用户会离底 >2px）；原 1px 在亚像素滚动设备上抖动频发
+//   - 用户手势抑制窗：wheel/原生滚动后 150ms 内不落程序写——服务端 8ms 合帧下
+//     ensure 与用户手势交错是「视口被拽一下」的成因；150ms 覆盖触控板惯性尾巴
+//   - overset 滞回：整格高与容器高在 ±2px 内不切换滚动面归属（出没滚动条+内容
+//     跳变=闪），代价是最多 2px 行被裁
+//   - 字号应用阈值：候选字号与现值差 ≤0.25px 不写 xterm 字号（每次写都整屏重排），
+//     同时用现值重算 cell 保持元素尺寸与实际字号一致
+const SC_TERM_BOTTOM_EPS = 2;
+const SC_TERM_USER_MS = 150;
+const SC_TERM_OVER_HYST = 2;
+const SC_TERM_FS_EPS = 0.25;
+const SC_TERM_RO_EPS = 1;
 function scTermOptions(extra){
   return Object.assign({
     disableStdin: true,
@@ -250,10 +290,11 @@ function scCellAt(fs){
   const dpr = window.devicePixelRatio || 1;
   return { w: r.width / 32, h: Math.ceil(r.height * dpr) / dpr };
 }
-function scTermNeed(cols, fs){
+function scTermNeed(cols, fs, allowSmall){
   if (!(cols > 0)) return 0;
-  // 半边参数化钳 ≥ 产品字号（P-20261119-2，只放宽不收窄——理由见头注 scTermNeed 条目）
-  fs = Math.max(SC_TERM_FONT_SIZE, fs || 0);
+  // 半边参数化钳 ≥ 产品字号（P-20261119-2，只放宽不收窄——理由见头注 scTermNeed 条目）。
+  // fit=window 模式（P-20261123-4 ④）允许 <14：容器跟随实际字号变窄，避免两侧大留白
+  fs = allowSmall ? (fs || 0) : Math.max(SC_TERM_FONT_SIZE, fs || 0);
   const cw = scCellAt(fs).w;
   if (!(cw > 0)) return 0;
   const n = Math.max(80, Math.min(cols, 500));
@@ -264,19 +305,38 @@ function scTermNeed(cols, fs){
   if (root.getPropertyValue('--term-need') !== v) root.setProperty('--term-need', v);
   return need;
 }
+// fit 模式（P-20261123-4 ④；P-20261124-3 S2 增 auto）：'window' = 完整显示（缩小
+// 字号让全部行可见），'auto' = 缺省档（overset 且 fit 可行才实际缩字号，不可行
+// 与 width 等价），'width' = 缺省宽度优先放大。落在 data-fit-mode 上，三页脚本
+// 零改动即可读；未设/异形值一律 width（cast/frozen 不设 → 行为零变化）
+function scFitMode(box){
+  const m = box && box.dataset ? box.dataset.fitMode : '';
+  return m === 'window' || m === 'auto' ? m : 'width';
+}
+// alt-screen 判定（P-20261123-4 ③）：全屏 TUI（vim/less/htop）切到 alternate buffer，
+// 状态/输入行固定在格底——访客滚动锚改底部；normal 保持光标行锚。try 兜底旧内核
+function scIsAlt(term){
+  try { return term.buffer.active.type === 'alternate'; } catch (e) { return false; }
+}
 function scFitGrid(term, box, cols, rows){
   const el = term.element;
   if (!el || !box || !(cols > 0 && rows > 0)) return false;
   const cs = getComputedStyle(box);
-  // 可用宽 = 内容盒宽（不含滚动条占位）− 内边距 − xterm 自绘 slider 让位。
-  // 加回滚动条占位（offsetWidth − clientWidth − 边框 = 垂直滚动条宽）的理由
-  // （P-20261123-2）：.term-box 常驻 scrollbar-gutter:stable（见 CSS），clientWidth
-  // 恒不含滚动条。若直接拿 clientWidth 算字号，滚动条出没/样式宽度变化会改字号
-  // 收敛点——实测 1920 视口 fs 从 25 掉到 21、列容器缩回流式下限（两侧大留白
-  // 回潮）；加回后 aw 与「无滚动条占位」时逐字节等价，字号反馈闭环不动
-  const bw = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
-  const gut = Math.max(0, box.offsetWidth - box.clientWidth - bw);
-  const aw = box.clientWidth + gut - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - SC_TERM_SB;
+  // 可用宽（P-20261123-4 ② 单次收敛）：稳定视口源 documentElement.clientWidth
+  // 减 wrap 内边距与固定 chrome 36（= term-box 左右内边距 20 + 卡片边框 2 + 滚动条
+  // 让位 14，与 scTermNeed/vpTarget 同源口径）——替代 box.clientWidth（其宽受
+  // --term-need 反推控制，读回来再算字号构成「反推→读回→再反推」收敛环，首载
+  // 多次收敛 22.5→22.75→26.25 派发多次原生 scroll 正是 follow 误清的触发面）。
+  // 高度仍读 box（视口高稳定，不参与环）。wrap 定宽口径下与旧「加回 gutter 占位」
+  // 稳态逐字节等价（1836+10−20−14 = 1920−72−36），只是不再依赖中间态
+  const vw = document.documentElement.clientWidth;
+  const wrapPad = (function(){
+    const wrap = box.closest('.wrap') || box.parentElement;
+    if (!wrap) return 0;
+    const wcs = getComputedStyle(wrap);
+    return (parseFloat(wcs.paddingLeft) || 0) + (parseFloat(wcs.paddingRight) || 0);
+  })();
+  const aw = Math.max(SC_TERM_MIN_FONT * 8, vw - wrapPad - 36);
   const ah = box.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
   if (!(aw > 0 && ah > 0)) return false;
   const base = scCellAt(SC_TERM_FONT_SIZE);
@@ -310,8 +370,49 @@ function scFitGrid(term, box, cols, rows){
       cell = scCellAt(fs);
     }
   }
-  if (term.options.fontSize !== fs) term.options.fontSize = fs;
-  if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
+  // fit 完整适配（P-20261123-4 ④ opt-in；P-20261124-3 S2 起 'auto' 缺省档同样走
+  // 此分支）：宽度 fs 以内 0.25 步进向下找「rows*cellH ≤ ah 且 fs≥SC_TERM_FIT_MIN」
+  // 的最大字号——装得下即无 overset、全行可见（xterm scrollback 天然可达）；装不下
+  // （fs<12 仍溢出）回退宽度 fs+底部锚，不降到 9px 纯损失。宽度方向仍须装得下
+  // （cell 随字号非线性，逐 0.25 校验同主链）。先做一次廉价不可行判定：cellH 随
+  // 字号单调不减，12px 格高都超过容器高即无解，省去整条 0.25 量测链（auto 缺省档
+  // 下每个观测都会走这里，量测=强制重排，热路径量级考量）
+  const fsWidth = fs;
+  const st = scScrollState(box);
+  const fitMode = scFitMode(box);
+  let fsFit = 0;
+  if (fitMode !== 'width' && rows * cell.h > ah) {
+    if (rows * scCellAt(SC_TERM_FIT_MIN).h <= ah) {
+      let ffs = fs;
+      while (ffs > SC_TERM_FIT_MIN && (rows * scCellAt(ffs).h > ah || cols * scCellAt(ffs).w > aw)) {
+        ffs = Math.max(SC_TERM_FIT_MIN, ffs - 0.25);
+      }
+      if (ffs >= SC_TERM_FIT_MIN && rows * scCellAt(ffs).h <= ah && cols * scCellAt(ffs).w <= aw) {
+        fs = ffs;
+        cell = scCellAt(fs);
+        fsFit = fs;
+      }
+    }
+    // 装不下：保持宽度 fs（外层 overset + 底部锚兜底——不降 9px 纯损失）
+  }
+  // 字号应用阈值（P-20261124-3 S1）：候选与现值差 ≤0.25px 不写 xterm 字号——
+  // 写字号 = 整屏重排（ResizeObserver 每轮观测都写即整屏闪）；跳过时用现值重算
+  // cell，元素尺寸与真实字号保持一致
+  const curFs = term.options.fontSize;
+  if (Math.abs(curFs - fs) > SC_TERM_FS_EPS + 1e-6) {
+    term.options.fontSize = fs;
+    st.geomTs = Date.now();
+  } else if (curFs !== fs) {
+    fs = curFs;
+    cell = scCellAt(fs);
+    if (fsFit) fsFit = fs;
+  }
+  // 诊断面（P-20261123-4 ⑥）：宽度基线字号（无 fit 时为实际生效值）/ fit 实际
+  // 字号 / 可见行数供 e2e 断言
+  st.fsWidth = fsFit > 0 ? fsWidth : fs;
+  st.fsFit = fsFit;
+  st.visibleRows = cell.h > 0 ? Math.floor(ah / cell.h) : 0;
+  if (term.cols !== cols || term.rows !== rows) { term.resize(cols, rows); st.geomTs = Date.now(); }
   el.style.width = (Math.ceil(cols * cell.w) + SC_TERM_SB) + 'px';
   el.style.height = Math.max(Math.ceil(rows * cell.h), ah) + 'px';
   el.style.margin = '0 auto';
@@ -320,17 +421,28 @@ function scFitGrid(term, box, cols, rows){
   // 字号/容器高之一变化 = 首载、主机改格、字号收敛）才 force 定位光标行（唯一
   // 有意义的默认位）；同几何的重复观测不写 scrollTop——ResizeObserver 空转或横幅
   // 折叠时用户的阅读位置不被拽回。装得下即撤并复位滚动位与 follow（清态面：残留
-  // overset 会让捕获相吞滚轮而容器无溢出，xterm scrollback 导航失灵）
-  if (rows * cell.h > ah) {
+  // overset 会让捕获相吞滚轮而容器此时无溢出，xterm scrollback 导航失灵）。
+  // 滞回（P-20261124-3 S1）：临界 ±SC_TERM_OVER_HYST px 内不切换滚动面归属——
+  // 旧实现在 rows*cellH 与 ah 差 1px 时因字号取整/滚动条让位反复 toggle，滚动条
+  // 出没与内容跳变即用户可见的闪；fit 生效时全行必然装下，直接按非 overset 处理
+  //（fit 搜索的装下容差恰在临界带内，不能被滞回留住旧态）
+  const overflow = rows * cell.h - ah;
+  const wantOverset = fsFit > 0 ? false
+    : (scOverset(box) ? overflow > -SC_TERM_OVER_HYST : overflow > SC_TERM_OVER_HYST);
+  if (wantOverset) {
     box.dataset.overset = '1';
     const geom = cols + 'x' + rows + '@' + fs + '/' + Math.round(ah);
     if (box.dataset.gridGeom !== geom) {
       box.dataset.gridGeom = geom;
+      // 几何真变进抑制窗（P-20261123-4 ①）：字号/容器收敛触发的原生 scroll 在
+      // 400ms 内不推断 follow（首载 follow=true 不被清——beta.10 回归修复点）
+      st.geomTs = Date.now();
       scEnsureCursorVisible(box, term, true);
     }
   } else {
     delete box.dataset.overset;
     delete box.dataset.gridGeom;
+    if (st.hist) scHistoryExit(box, st.term, false);
     scSetFollow(box, true);
     box.scrollTop = 0;
   }
@@ -355,11 +467,29 @@ function scScrollState(box){
       follow: true,   // 跟随最新输出（首载 true；用户上滚清、滚回底恢复）
       writeAt: -1,    // 最近一次程序写落位（与原生滚动区分）
       writeTs: 0,
+      geomTs: 0,      // 最近一次几何/字号/容器变化时刻（P-20261123-4 ①）：抑制窗
+                      // 内不做 follow 推断——字号收敛造成的浏览器原生 scroll 调整
+                      // 不再被误判成用户滚动（beta.10「follow 首载丢失」回归根因）
       acc: 0,         // 触控板小数累积（整像素才动）
-      pending: 0,     // rAF 合并的待应用位移
-      raf: 0,
+      pending: 0,     // 待应用的用户 wheel 位移（进唯一写口）
+      target: null,   // 待应用的程序定位（进唯一写口；null=无）
+      writeRaf: 0,    // 唯一写口 rAF（P-20261124-3 S1：一帧最多一次 scrollTop）
+      flushId: 0,     // 写口序号（诊断审计：同一 flush 内不得二次写）
+      frameTs: 0,     // 当前写口的 rAF 时间戳（同帧写入审计）
       force: false,   // 待应用的强制定位（首载/重连/几何真变）
-      ensureRaf: 0
+      ensureRaf: 0,
+      ensureInfo: null, // 待应用程序定位的来源信息（write 审计/ensure 诊断）
+      followCand: null, // 原生滚动的触底候选（连续两帧确认后才落 follow）
+      followSeq: 0,
+      hist: false,    // 历史模式（overset 到顶继续上滚 → 交还 xterm scrollback）
+      histAcc: 0,     // 历史模式的逐行小数累积
+      term: null,     // scWheelCapture 装入（历史模式/退出定位用）
+      // 诊断面（P-20261123-4 ⑥）：fsWidth=宽度优先基线字号、fsFit=fit 实际字号
+      //（0=fit 未生效）、visibleRows=当前字号下可见行数、userTs=最近用户手势时刻
+      fsWidth: 0,
+      fsFit: 0,
+      visibleRows: 0,
+      userTs: 0
     };
   }
   return box.__scScroll;
@@ -368,14 +498,74 @@ function scSetFollow(box, on){
   const st = scScrollState(box);
   st.follow = !!on;
   box.dataset.follow = on ? '1' : '0';
-  if (!on) { st.acc = 0; st.pending = 0; }
+  if (!on) { st.acc = 0; st.pending = 0; st.target = null; st.ensureInfo = null; }
 }
-function scWriteScroll(box, top){
+// 唯一写口（P-20261124-3 S1）：wheel 位移与 ensure 程序定位都只登记到同一 rAF，
+// 帧内合并为一次 scrollTop 写——旧实现 ensure/wheel 各自一条 rAF，同帧先后各写
+// 一次（外加各自引发的 scroll 事件），是「滚动时闪」的写入面成因
+function scQueueWrite(box){
   const st = scScrollState(box);
-  box.scrollTop = top;
+  if (st.writeRaf) return;
+  st.writeRaf = requestAnimationFrame(function(ts){ st.writeRaf = 0; st.frameTs = ts || 0; scFlushScroll(box); });
+}
+function scQueueScroll(box, top){
+  const st = scScrollState(box);
+  st.target = top;
+  scQueueWrite(box);
+}
+function scFlushScroll(box){
+  const st = scScrollState(box);
+  if (!scOverset(box)) { st.pending = 0; st.target = null; st.ensureInfo = null; return; }
+  // follow=false（用户阅读态）：程序目标一律丢弃（ensure 上游也已拒绝），只落用户 wheel
+  if (!st.follow) { st.target = null; st.ensureInfo = null; }
+  const maxTop = scMaxTop(box);
+  const from = box.scrollTop;
+  let next = from;
+  let wheeled = false;
+  let programmatic = false; // 本帧实际应用了 ensure 目标（写审计/诊断口径）
+  if (st.pending) {
+    next = Math.max(0, Math.min(maxTop, from + st.pending));
+    st.pending = 0;
+    wheeled = true;
+  }
+  // 用户手势后 SC_TERM_USER_MS 内不落程序写（抑制窗）：目标保留，输出继续推时
+  // 下一帧/下一次 ensure 再试——与 wheel 交错造成的「拽一下」由此消除
+  if (st.target != null && Date.now() - (st.userTs || 0) >= SC_TERM_USER_MS) {
+    const t = Math.max(0, Math.min(maxTop, st.target));
+    st.target = null;
+    if (Math.abs(t - next) >= 0.5) { next = t; programmatic = true; }
+    else st.ensureInfo = null; // 目标已被当前位置覆盖：不产生 ensure 事件
+  }
+  // wheel 触底判定用 ≥2px 容差（亚像素滚动条/触控板在底部 ±1px 抖动不翻 follow）
+  if (wheeled) scSetFollow(box, next >= maxTop - SC_TERM_BOTTOM_EPS);
+  if (Math.abs(next - from) < 0.5) { if (programmatic) st.ensureInfo = null; return; }
+  st.flushId++;
+  box.scrollTop = next;
   // 记锚：紧跟的 scroll 事件（用户/程序写都会派发）据此区分来源
   st.writeAt = box.scrollTop;
   st.writeTs = Date.now();
+  st.geomTs = st.writeTs; // 程序写同样进入几何抑制窗（P-20261123-4 ①）
+  scDiagWrite(box, from, box.scrollTop, programmatic);
+  // ensure 诊断只在程序目标真的落写时记（wheel-only 写不冒充 ensure 事件）
+  if (programmatic && st.ensureInfo) {
+    scDiagNote('ensure', st.term, box, Object.assign(
+      { from: Math.round(from), to: Math.round(box.scrollTop) }, st.ensureInfo));
+    st.ensureInfo = null;
+  }
+}
+// 原生滚动触底推断的连续两帧确认（P-20261124-3 S1）：单帧抖动不翻 follow，
+// 两帧后位置结论一致才落（true→false / false→true 双向）
+function scFollowConfirm(box){
+  const st = scScrollState(box);
+  st.followCand = box.scrollTop >= scMaxTop(box) - SC_TERM_BOTTOM_EPS;
+  const seq = ++st.followSeq;
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      if (seq !== st.followSeq) return; // 期间有新滚动/几何事件：本轮作废
+      const cand = box.scrollTop >= scMaxTop(box) - SC_TERM_BOTTOM_EPS;
+      if (cand === st.followCand) scSetFollow(box, cand);
+    });
+  });
 }
 function scMaxTop(box){ return Math.max(0, box.scrollHeight - box.clientHeight); }
 function scOverset(box){ return !!(box && box.dataset && box.dataset.overset === '1'); }
@@ -395,14 +585,18 @@ function scNormWheel(e, cellH, pageH){
 function scWheelCapture(box, term){
   if (!box || box.__scWheelOn) return;
   box.__scWheelOn = true;
+  scScrollState(box).term = term;
   scSetFollow(box, true);
   // 捕获相接管（passive:false）：xterm 的 wheel 监听挂在 .xterm-scrollable-element
   // 上，捕获相先于它；不 stopPropagation 的话内层光滑滚动件照常消费（旧
   // attachCustomWheelEventHandler 的「放行」只在 _handleWheel 入口短路，事件
   // 仍被外层消费——P-20261123-2 立案实测 wheel 后 outer scrollTop 恒不变）
   box.addEventListener('wheel', function(e){
-    // 仅 overset 且确有溢出：fits 态外层是死容器，xterm 内部面即单面（行为原样）
+    const st = scScrollState(box);
+    // 仅 overset 且确有溢出：fits 态外层是死容器，xterm 内部面即单面（行为原样）；
+    // 历史模式中若几何变化使超集面消失，先退出历史模式（滚轮交还内层）
     if (!scOverset(box) || !(box.scrollHeight > box.clientHeight + 1)) {
+      if (st.hist) scHistoryExit(box, term, false);
       // 诊断：fits 态 wheel 落到 xterm 内部面（inner 消费的实证面，含 inner ydisp）
       scDiagNote('wheel-inner', term, box, { dy: e.deltaY || 0, mode: e.deltaMode, handled: false });
       return;
@@ -416,7 +610,21 @@ function scWheelCapture(box, term){
     if (!dy) return;
     e.preventDefault();
     e.stopPropagation();
-    const st = scScrollState(box);
+    st.userTs = Date.now(); // 用户手势时刻（P-20261123-4 ⑥ 诊断）
+    // 历史模式（P-20261124-3 S2）：外层已交还滚动面，滚轮直接驱动 xterm scrollback
+    if (st.hist) {
+      scHistoryWheel(box, term, dy);
+      scDiagNote('wheel', term, box, { dy: dy, norm: Math.round(dy), mode: e.deltaMode, handled: true, hist: 1 });
+      return;
+    }
+    // 进入历史模式：overset 已到顶（scrollTop≤1）仍继续上滚，且 normal buffer 确有
+    // scrollback + 页面提供退出浮层。alt-screen/fits 态天然不进（见 scCanHistory）；
+    // scHistoryEnter 返回 false（cast/frozen 无浮层）时落回下方普通外层滚动路径
+    if (dy < 0 && box.scrollTop <= 1 && scHistoryEnter(box, term)) {
+      scHistoryWheel(box, term, dy);
+      scDiagNote('wheel', term, box, { dy: dy, norm: Math.round(dy), mode: e.deltaMode, handled: true, hist: 1 });
+      return;
+    }
     st.acc += dy;
     const whole = st.acc > 0 ? Math.floor(st.acc) : Math.ceil(st.acc);
     if (!whole) {
@@ -426,7 +634,7 @@ function scWheelCapture(box, term){
     }
     st.acc -= whole;
     st.pending += whole;
-    if (!st.raf) st.raf = requestAnimationFrame(function(){ st.raf = 0; scFlushWheel(box); });
+    scQueueWrite(box); // 唯一写口（P-20261124-3 S1：与 ensure 同帧只落一次）
     scDiagNote('wheel', term, box, { dy: dy, norm: whole, mode: e.deltaMode, handled: true });
   }, { passive: false, capture: true });
   // 原生滚动（触摸/拖滚动条/键盘）：与程序写区分——写后 500ms 内同位视为自家
@@ -434,24 +642,92 @@ function scWheelCapture(box, term){
   box.addEventListener('scroll', function(){
     const st = scScrollState(box);
     const own = Math.abs(box.scrollTop - st.writeAt) <= 1 && Date.now() - st.writeTs < 500;
+    // 几何抑制窗（P-20261123-4 ①）：scFitGrid 字号/容器收敛后的 400ms 内浏览器
+    // 会派发原生 scroll（几何变化调整 scrollTop）——此窗内**不做 follow 推断**
+    //（只记诊断），否则宽度优先放大（22.5→22.75→26.25）的偏移被判成用户滚动
+    // → follow=false → scEnsureNow 恒 return → 视图停中间、底部被截（beta.10
+    // 回归根因）。窗内 own 锚照常维护（500ms 内同位仍是程序写回写）
+    if (Date.now() - st.geomTs < 400) {
+      scDiagNote('scroll-geomts', term, box, { own: own });
+      return;
+    }
     if (!own) {
-      scSetFollow(box, box.scrollTop >= scMaxTop(box) - 1);
+      // 双向 truth table（P-20261123-4 ①）+ 连续两帧确认（P-20261124-3 S1）：
+      // 窗外非 own scroll 一律按触底判定（离开底部即 false、回底即 true），但
+      // 单帧抖动不落，两帧后位置一致才写 follow
+      st.userTs = Date.now(); // 用户手势时刻（P-20261123-4 ⑥ 诊断）
+      if (st.hist) scHistoryExit(box, term, false);
+      scFollowConfirm(box);
       st.acc = 0;
     }
     scDiagNote('scroll', term, box, { own: own });
   }, { passive: true });
 }
-function scFlushWheel(box){
+// ── 历史模式兜底（P-20261124-3 S2）──────────────────────────────────────
+// 进入条件：overset 外层已到顶（scrollTop≤1）仍继续上滚 + normal buffer 确有
+// scrollback（baseY>0）+ 页面提供退出浮层（#histBack；cast/frozen 无此元素 →
+// 零启用零变化）。alt-screen 的 baseY 恒 0（xterm 不保留历史），天然不进。
+// 退出路径：滚回 inner 底（viewportY≥baseY）/ 浮层按钮 / 外层原生滚动 / 重连
+//（scFollowReset）/ 几何回落到 fits（scFitGrid 清态）——统一 scrollToBottom +
+// 需要时 scFollowReset 语义的 force 定位，绝不留在历史态
+function scHistButton(){ return document.getElementById('histBack'); }
+function scCanHistory(term){
+  try {
+    const b = term.buffer.active;
+    return b.type === 'normal' && b.baseY > 0;
+  } catch (e) { return false; }
+}
+function scHistoryEnter(box, term){
   const st = scScrollState(box);
-  const d = st.pending;
-  st.pending = 0;
-  if (!d || !scOverset(box)) return;
-  const maxTop = scMaxTop(box);
-  const from = box.scrollTop;
-  const next = Math.max(0, Math.min(maxTop, from + d));
-  if (Math.abs(next - from) >= 0.5) scWriteScroll(box, next);
-  // wheel 上滚即 follow=false（当前位置离开底），滚到底恢复 follow
-  scSetFollow(box, next >= maxTop - 1);
+  if (st.hist) return true;
+  // 页面必须提供退出浮层（#histBack；cast/frozen 无此元素 → 不进历史模式）。
+  // 返回是否进入：调用方据此决定是否消费本轮 wheel——旧写法在无浮层页仍调用
+  // scHistoryWheel，cast 回放页会在 overset 到顶后静默滚 inner xterm（无处退出，
+  // 违反「frozen/cast 零变化」）
+  if (!scHistButton() || !scCanHistory(term)) return false;
+  st.hist = true;
+  st.histAcc = 0;
+  st.term = term;
+  scSetFollow(box, false);
+  box.dataset.history = '1';
+  const btn = scHistButton();
+  if (btn) btn.hidden = false;
+  scDiagNote('history-in', term, box, { hist: 1 });
+  return true;
+}
+function scHistoryWheel(box, term, dy){
+  const st = scScrollState(box);
+  if (!st.hist) return; // 防御：只有进入历史模式后 wheel 才驱动 inner scrollback
+  const cellH = scTermCellH(term);
+  st.histAcc += dy / (cellH > 0 ? cellH : SC_TERM_FONT_SIZE);
+  const lines = st.histAcc > 0 ? Math.floor(st.histAcc) : Math.ceil(st.histAcc);
+  if (!lines) return;
+  st.histAcc -= lines;
+  try { term.scrollLines(lines); } catch (e) { scHistoryExit(box, term, true); return; }
+  // 回底：inner viewportY 追平 baseY → 交还实时（退出时 force 定位）
+  try {
+    const b = term.buffer.active;
+    if (b.viewportY >= b.baseY) scHistoryExit(box, term, true);
+  } catch (e) { scHistoryExit(box, term, true); }
+}
+function scHistoryExit(box, term, reposition){
+  if (!box) return;
+  const st = scScrollState(box);
+  if (!st.hist) return;
+  const t = term || st.term;
+  st.hist = false;
+  st.histAcc = 0;
+  delete box.dataset.history;
+  const btn = scHistButton();
+  if (btn) btn.hidden = true;
+  try { if (t) t.scrollToBottom(); } catch (e) { /* 实例已销毁 */ }
+  if (reposition && t) {
+    // 退出是显式动作（按钮/回底）：清用户手势时刻，让 force 定位当帧落地
+    st.userTs = 0;
+    scSetFollow(box, true);
+    scEnsureCursorVisible(box, t, true);
+  }
+  scDiagNote('history-out', t, box, { hist: 0 });
 }
 function scEnsureCursorVisible(box, term, force){
   if (!box || !term) return;
@@ -472,14 +748,25 @@ function scEnsureNow(box, term){
   // follow=false：绝不写 scrollTop（含 force 场景）——用户上滚阅读的位置优先，
   // 重排/新输出都不许把视口拽走；follow 由滚回底部或重连/seek 的 scFollowReset 恢复
   if (!st.follow) return;
+  // 用户手势后 SC_TERM_USER_MS 内抑制程序写（P-20261124-3 S1）：服务端 8ms 合帧下
+  // ensure 与 wheel 交错会把视口拽一下（闪烁主因）；此窗内 force 一并让位——用户
+  // 正在交互时首载/几何定位不该抢回视口，后续输出/ensure 在窗外自然重算
+  if ((st.userTs || 0) && Date.now() - st.userTs < SC_TERM_USER_MS) return;
+  // 锚定基准（P-20261123-4 ③）：alt-screen（全屏 TUI——状态/输入行固定在格底，
+  // tail 截头导致访客 buffer 停在 normal 时由 fit=window/可见开关强制底部锚）与
+  // fit=window 回退态（装不下只能外层滚）一律底部锚 maxTop；normal 保持光标行锚
+  const anchorBottom = scIsAlt(term) || scFitMode(box) === 'window';
   const rowY = scCursorRowY(term);   // -1 = 未知
-  if (rowY < 0) return;
+  if (!anchorBottom && rowY < 0) return;
   const cellH = scTermCellH(term);
   const maxTop = scMaxTop(box);
   const top = box.scrollTop;
   const h = box.clientHeight;
   let next = top;
-  if (force) {
+  if (anchorBottom) {
+    // 底部锚：首载/几何真变与跟随都贴格底（底部状态行/输入行可见）
+    next = maxTop;
+  } else if (force) {
     // 首载/重连 hello/几何真变：光标行顶 = 默认位（rowY=0 是有效顶位，不再当未知
     // 落 maxTop——旧实现把新鲜提示符页拽到格底即「934→88」跳位的一半成因）
     next = rowY;
@@ -493,12 +780,31 @@ function scEnsureNow(box, term){
   }
   next = Math.max(0, Math.min(maxTop, next));
   if (Math.abs(next - top) < 0.5) return;
-  scWriteScroll(box, next);
-  scDiagNote('ensure', term, box, { force: force, rowY: Math.round(rowY), from: Math.round(top), to: Math.round(box.scrollTop) });
+  // 进唯一写口（P-20261124-3 S1）：与 wheel 同帧合并，最多一次 scrollTop 写；
+  // ensure 诊断在落写时由 scFlushScroll 记账（from/to 为实际落位）
+  st.ensureInfo = { force: force, rowY: Math.round(rowY) };
+  scQueueScroll(box, next);
 }
 function scFollowReset(box){
   if (!box) return;
+  const st = scScrollState(box);
+  // 重连/seek 重置屏后历史模式无意义（buffer 已换/回底）：先退出再复位 follow
+  if (st.hist) scHistoryExit(box, st.term, false);
   scSetFollow(box, true);
+}
+// 缓冲区切换重排（P-20261123-4 ③）：进入/退出 alt-screen 只换 xterm 缓冲，不自动
+// 触发容器观测——不重排就沿旧字号/旧 overset 态，且新旧缓冲的锚定基准不同（alt
+// 底部 / normal 光标）。此钩子 relayout + force 一次；旧内核无 onBufferChange 时
+// 静默跳过（几何观测仍兜底）
+function scOnBufferChange(term, box, relayout){
+  try {
+    if (!term.buffer || typeof term.buffer.onBufferChange !== 'function') return;
+    term.buffer.onBufferChange(function(){
+      if (relayout) relayout();
+      scEnsureCursorVisible(box, term, true);
+      scDiagNote('buffer', term, box, {});
+    });
+  } catch (e) { /* 旧内核/已销毁实例：忽略 */ }
 }
 function scCursorRowY(term){
   // 光标行顶 y（px）：最新输出行锚点（buffer.active.cursorY = 栅格内行号 0..rows-1，
@@ -512,22 +818,34 @@ function scCursorRowY(term){
     return h > 0 ? cy * h : -1;
   } catch (e) { return -1; }
 }
-// 现场诊断（P-20261123-2 ④）：?term=diag 暴露 window.__scTermDiag（≤50 条环形，
-// 绝不含终端内容）。字段：wheel 的 dy/归一值/是否接住、outer scrollTop/
-// scrollHeight/clientHeight、follow、overset、inner ydisp(viewportY)/hasScrollback
-// (baseY>0)、layout cols/rows/fs——滚动类主诉据此定性（inner 消费/拽回/重排），
-// e2e 读 inner ydisp 证明单面。未开启时 scDiagPush 只过一条布尔判断
+// 现场诊断（P-20261123-2 ④；P-20261124-3 增 inner baseY/历史模式与写入审计）：
+// ?term=diag 暴露 window.__scTermDiag（≤50 条环形，绝不含终端内容）。字段：wheel
+// 的 dy/归一值/是否接住、outer scrollTop/scrollHeight/clientHeight、follow、
+// overset、inner ydisp(viewportY)/baseY/hasScrollback、historyMode、layout
+// cols/rows/fs——滚动类主诉据此定性（inner 消费/拽回/重排）。writes 是滚动位写入
+// 审计（≤40 条：flush 序号/from/to），证明「一帧最多一次写」与非回拽。未开启时
+// scDiagPush/scDiagWrite 只过一条布尔判断
 let scDiagOn = false;
 function scDiagFields(term, box, extra){
+  const st = scScrollState(box);
   const out = {
     top: Math.round(box.scrollTop), sh: box.scrollHeight, ch: box.clientHeight,
     follow: box.dataset.follow === '1', overset: scOverset(box),
-    ydisp: -1, hasSb: false, cols: 0, rows: 0, fs: 0
+    ydisp: -1, baseY: 0, hasSb: false, historyMode: !!st.hist, cols: 0, rows: 0, fs: 0,
+    // 布局/锚定诊断（P-20261123-4 ⑥）：altScreen=当前是否 alternate buffer、
+    // fsWidth=宽度优先基线字号、fsFit=fit 实际字号（0=未生效）、fitMode=模式、
+    // geomTs=最近几何变化时刻、userGesture=最近用户手势时刻（0=无）、
+    // visibleRows=当前字号下终端区可见行数
+    altScreen: false, fsWidth: st.fsWidth || 0, fsFit: st.fsFit || 0,
+    fitMode: scFitMode(box), geomTs: st.geomTs || 0, userGesture: st.userTs || 0,
+    visibleRows: st.visibleRows || 0
   };
   try {
     const b = term.buffer.active;
     out.ydisp = b.viewportY;
+    out.baseY = b.baseY;
     out.hasSb = b.baseY > 0;
+    out.altScreen = b.type === 'alternate';
     out.cols = term.cols;
     out.rows = term.rows;
     out.fs = term.options.fontSize;
@@ -544,6 +862,17 @@ function scDiagPush(kind, fields){
   d.entries.push(e);
   if (d.entries.length > 50) d.entries.splice(0, d.entries.length - 50);
 }
+// 写入审计（P-20261124-3 S1）：每次真实 scrollTop 写记一条（与 entries 分离，
+// 不挤占 wheel/scroll/ensure 序列；≤40 条，绝不含终端内容）
+function scDiagWrite(box, from, to, programmatic){
+  if (!scDiagOn) return;
+  const d = window.__scTermDiag;
+  if (!d || !d.writes) return;
+  const st = scScrollState(box);
+  d.writes.push({ t: Date.now(), frame: st.frameTs || 0, flush: st.flushId,
+    from: Math.round(from), to: Math.round(to), prog: !!programmatic });
+  if (d.writes.length > 40) d.writes.splice(0, d.writes.length - 40);
+}
 // 采集包装：关闭时零字段采集（scDiagFields 含 buffer/几何读，不做事先构造）
 function scDiagNote(kind, term, box, extra){
   if (!scDiagOn) return;
@@ -555,8 +884,9 @@ function scTermDiag(term, box){
   if (!on || !box) return null;
   window.__scTermDiag = {
     entries: [],
-    clear: function(){ this.entries.length = 0; },
-    // 即时快照（e2e 读 inner ydisp 的变化用；仅在 diag 开启时存在）
+    writes: [],
+    clear: function(){ this.entries.length = 0; this.writes.length = 0; },
+    // 即时快照（e2e 读 inner ydisp/baseY/historyMode 的变化用；仅在 diag 开启时存在）
     snapshot: function(){ return scDiagFields(term, box); }
   };
   scDiagOn = true;
@@ -573,6 +903,11 @@ function scClearGrid(term){
   // 溢出时把首屏误留在旧位置
   const box = el.parentElement;
   if (box && box.dataset) {
+    if (box.__scScroll && box.__scScroll.hist) scHistoryExit(box, box.__scScroll.term, false);
+    // fit 生效态标记随栅格一起撤（P-20261124-3）：回落容器 fit 时不再按 fit 字号
+    // 放开 --col-floor/列宽——页面脚本的 fitEngaged() 读 fsFit，残留会让容器-fit
+    // 页停留在放流式下限的观感
+    if (box.__scScroll) box.__scScroll.fsFit = 0;
     delete box.dataset.overset;
     delete box.dataset.gridGeom;
     scSetFollow(box, true);
@@ -586,7 +921,21 @@ function scObserve(el, fn){
     raf = requestAnimationFrame(() => { raf = 0; fn(); });
   };
   try {
-    if (window.ResizeObserver && el) { new ResizeObserver(kick).observe(el); return kick; }
+    if (window.ResizeObserver && el) {
+      // contentRect 阈值过滤（P-20261124-3 S1）：亚像素抖动/滚动条让位等 <1px 的
+      // 观测不触发重排（重排=字号重算+整屏重排的潜在源）；首帧必放行，手动 kick
+      // （setHost/hello 的重排点）不受此过滤
+      let lw = -1, lh = -1, first = true;
+      new ResizeObserver(function(entries){
+        const r = entries && entries[0] && entries[0].contentRect;
+        if (r) {
+          if (!first && Math.abs(r.width - lw) < SC_TERM_RO_EPS && Math.abs(r.height - lh) < SC_TERM_RO_EPS) return;
+          lw = r.width; lh = r.height; first = false;
+        }
+        kick();
+      }).observe(el);
+      return kick;
+    }
   } catch (e) { /* 回落 window resize */ }
   window.addEventListener('resize', kick);
   return kick;

@@ -42,6 +42,13 @@ func requestIsHTTPS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
+// RequestIsHTTPS requestIsHTTPS 的导出形态（P-20261126-2）：同属性族 cookie
+// helper（sc_diag_session）在 middleware 包外签发时复用同一 Secure 判定——
+// 判定逻辑单一事实源，不另写第二份 X-Forwarded-Proto 解析
+func RequestIsHTTPS(r *http.Request) bool {
+	return requestIsHTTPS(r)
+}
+
 // SetLockTokenCookie 在响应上以 HttpOnly 下发解锁 token cookie（P-20261019-2）：
 // 同主机任意端口的页面 JS（dsh 控制台/端口预览等独立端口 UI）读不到
 // document.cookie 里的令牌——cookie 按主机隔离不按端口隔离，此前前端

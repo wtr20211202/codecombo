@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { DEFAULT_PASSWORD, fixedLocale, gotoAndUnlock, projectCardByName } from '../../tests/helpers'
 import { API_BASE } from '../../tests/api-base'
 
@@ -181,15 +182,17 @@ test.describe('服务日志 UI 链路（mock 夹具）', () => {
 })
 
 /**
- * 诊断包导出 E2E（P-20261122-10 S2a）：设置·系统监控「服务日志」分区的
- * 「导出诊断包」按钮 + GET /api/system/diagnostics/export。
+ * 诊断包导出 E2E（P-20261122-10 S2a / P-20261127-1 修订）：设置·系统监控
+ * 「服务日志」分区的「导出诊断包」按钮 + GET /api/system/diagnostics/export。
  *
  *   1. API 形状（真实例）：probe=1 只回体量预览（200 JSON，files/totals/limits
  *      齐备、凭据路径不入清单、缺席条目可见）；不触发打包 → 不吃 30s 冷却、
  *      可安全重复跑。正式导出的 zip 内容/脱敏/预算语义由 Go 单测覆盖
  *      （server/diagnostics + server/api/system/diagnostics_test.go）。
  *   2. UI 链路（网络层 mock，确定性夹具）：点按钮 → 先带 probe=1 取体量 →
- *      再触发同源直链下载（不经 blob）→ 体量提示就地可见。
+ *      恒先自动 POST 一份最新浏览器快照（P-20261127-1：点一次 B 拿全两面
+ *      证据；不再读「点过 A 没有」的前端 5min 窗口）→ 再触发同源直链下载
+ *      （不经 blob）→ 体量提示就地可见。
  */
 const PROBE_FIXTURE = {
   generatedAt: '2026-10-24T09:00:00Z',
@@ -239,12 +242,13 @@ test.describe('诊断包导出 API 形状（真实例）', () => {
 })
 
 test.describe('诊断包导出 UI 链路（mock 夹具）', () => {
-  test('点「导出诊断包」→ 先 probe 取体量再直链下载 + 体量提示可见', async ({ page }) => {
+  test('点「导出诊断包」→ 先 probe 取体量 + 恒先自动 POST 浏览器快照 → 直链携带 clientReport=1 + 体量提示可见', async ({ page }) => {
     test.setTimeout(120_000)
     const probeCalls: string[] = []
+    const postBodies: Array<Record<string, unknown>> = []
     // 下载导航在 Chromium 里由浏览器网络栈发起，page.route 不保证拦得到
     // （实测：直链请求直接打到真实例，suggestedFilename 带服务端时间戳）——
-    // 这里改在 DOM 层截获程序化锚点点击：断言「先 probe、再发起同源直链」的
+    // 这里改在 DOM 层截获程序化锚点点击：断言「先 probe/POST、再发起同源直链」的
     // 契约，且**不重复打真包**（真包产出/流式/脱敏由 Go 单测 + 本文件真实例
     // probe 用例覆盖，避免 e2e 每次跑都做一次几十 MB 的采集）
     await page.addInitScript(() => {
@@ -268,28 +272,209 @@ test.describe('诊断包导出 UI 链路（mock 夹具）', () => {
       probeCalls.push(url.search)
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: PROBE_FIXTURE }) })
     })
+    // 浏览器快照上传（P-20261127-1）：点 B 恒先自动 POST，成功才带 clientReport=1
+    await page.route('**/api/system/diagnostics/client-report', (route) => {
+      postBodies.push(route.request().postDataJSON() as Record<string, unknown>)
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
+    })
 
     const section = await openServerLogs(page)
     await section.locator('[data-testid="svclog-diag"]').click()
 
-    // 先 probe（体量预览），再触发下载直链
+    // 先 probe（体量预览），再自动 POST 浏览器快照，最后触发下载直链
     await expect.poll(() => probeCalls.length).toBeGreaterThan(0)
     expect(probeCalls[0]).toContain('probe=1')
-    // 锚点点击发生在 probe 响应回来之后（axios 解包 → triggerDirectDownload）：
-    // probe 请求被拦获的瞬间页面侧还没点，必须轮询等点击落账
+    // 锚点点击发生在 probe+POST 都回来之后（axios 解包 → triggerDirectDownload）：
+    // 请求被拦获的瞬间页面侧还没点，必须轮询等点击落账
     await expect.poll(async () => page.evaluate(() =>
       (window as unknown as { __diagClicks: { href: string; download: string }[] }).__diagClicks.length),
     { timeout: 10_000 }).toBe(1)
     const clicks = await page.evaluate(() =>
       (window as unknown as { __diagClicks: { href: string; download: string }[] }).__diagClicks)
-    // 直链形态：同源导出端点 + days 参数，不带 probe（probe 只用于预览）
+    // 直链形态：同源导出端点 + days 参数，不带 probe（probe 只用于预览）；
+    // P-20261127-1：点 B 恒先自动 POST 浏览器快照（handler await POST 成功后才
+    // 触发直链），直链携带 clientReport=1——服务端按会话窗把快照作
+    // state/browser.json 派生条目入包（zip 面语义由 Go 单测守，此处不真实下载）
     expect(clicks[0].href).toContain('/api/system/diagnostics/export')
     expect(clicks[0].href).toContain('days=3')
     expect(clicks[0].href).not.toContain('probe')
+    expect(clicks[0].href).toContain('clientReport=1')
+    // 先 POST 后直链的时序由 handler 结构保证（await POST → click），POST 已落账
+    expect(postBodies.length).toBe(1)
+    // POST 体是 server 作用域裁剪版（与按钮 A 同一上传通道/形状）
+    expect(postBodies[0]).not.toHaveProperty('resource')
     // 锚点 download 兜底名（服务端 Content-Disposition 是保存名权威，这里只
     // 守兜底名不变，别让重构把它改成 undefined）
     expect(clicks[0].download).toBe('codecombo-diagnostics.zip')
     // 体量提示就地可见（文件数来自 probe 响应）
     await expect(section.locator('[data-testid="svclog-diag-size"]')).toContainText('3 个文件')
+
+    // 深度诊断复选框（P-20261124-1）：勾选后 probe 与直链都带 deep——
+    // 前端只做参数透传，30s 预算/深探针语义由 Go 单测覆盖。
+    // 形态差异是既有传输层决定的：probe 走 axios 的 params（布尔序列化成
+    // deep=true），直链走 URLSearchParams（按 API 契约 deep=1）；服务端
+    // diagDeepEnabled 两种都认，所以断言按语义匹配而不是钉字面量。
+    const deepBox = section.locator('[data-testid="svclog-diag-deep"]')
+    await expect(deepBox).toBeVisible()
+    await deepBox.click()
+    await section.locator('[data-testid="svclog-diag"]').click()
+    await expect.poll(() => probeCalls.length, { timeout: 10_000 }).toBe(2)
+    expect(probeCalls[1]).toMatch(/[?&]deep=(1|true)(&|$)/)
+    // 第二次点击恒再发一份新快照（环实时变、最新最有价值；服务端 ≤4 份滚动兜底）
+    await expect.poll(() => postBodies.length, { timeout: 10_000 }).toBe(2)
+    await expect.poll(async () => page.evaluate(() =>
+      (window as unknown as { __diagClicks: { href: string; download: string }[] }).__diagClicks.length),
+    { timeout: 10_000 }).toBe(2)
+    const deepClicks = await page.evaluate(() =>
+      (window as unknown as { __diagClicks: { href: string; download: string }[] }).__diagClicks)
+    expect(deepClicks[1].href).toContain('deep=1')
+    expect(deepClicks[1].href).toContain('clientReport=1')
+  })
+})
+
+/**
+ * 浏览器诊断导出 E2E（P-20261124-2 S1a⑤ + P-20261126-2 P-2b / P-20261127-1 修订）：
+ * 同一分区的「导出浏览器诊断」按钮（按钮 A）= 本地 Blob 下载保底（不经服务器，
+ * 服务器卡死时仍可用）+ 下载成功后异步附带 POST /api/system/diagnostics/client-report
+ * （server 作用域裁剪版：entries ≤50 / 无 resource / 无 UA / 无 protocol）。
+ * 「导出诊断包」（按钮 B）不再读「点过 A 没有」的前端 5min 窗口——点 B 恒先
+ * 自动 POST 一份新快照，成功才带 clientReport=1；失败/超时直链退化纯服务端包
+ * 不阻断。脱敏/白名单/环上限由 vitest 覆盖（web/src/utils/browserDiagnostics.test.ts），
+ * 此处守集成契约：下载文件名形态、JSON 顶层 schema、POST 体形状、携带参数。
+ */
+test.describe('浏览器诊断导出 UI（真实例页面 + 本地 Blob 下载 + 附带上传）', () => {
+  test('点「导出浏览器诊断」→ 本地 JSON 下载 + 异步 POST；点「导出诊断包」恒再发新快照 → 直链携带 clientReport=1', async ({ page }) => {
+    test.setTimeout(120_000)
+    const postBodies: Array<Record<string, unknown>> = []
+    await page.route('**/api/system/diagnostics/client-report', (route) => {
+      postBodies.push(route.request().postDataJSON() as Record<string, unknown>)
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
+    })
+    await page.route('**/api/system/logs/dates', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) }))
+    await page.route('**/api/system/logs*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(tailBody('2026-10-24', TAIL_LINES)) }))
+    await page.route('**/api/system/diagnostics/export*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: PROBE_FIXTURE }) }))
+    // 直链在 DOM 层截获（不真实下载几十 MB 的包，与上方导出测试同一契约锚）
+    await page.addInitScript(() => {
+      const w = window as unknown as { __diagClicks?: { href: string; download: string }[] }
+      w.__diagClicks = []
+      const origClick = HTMLAnchorElement.prototype.click
+      HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+        if (this.href.includes('/api/system/diagnostics/export')) {
+          w.__diagClicks!.push({ href: this.href, download: this.download })
+          return
+        }
+        return origClick.call(this)
+      }
+    })
+
+    const section = await openServerLogs(page)
+    const btn = section.locator('[data-testid="svclog-browser-diag"]')
+    await expect(btn).toBeVisible()
+    await expect(btn).toContainText('导出浏览器诊断')
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      btn.click(),
+    ])
+    // 文件名只用 [0-9A-Za-z.-]（跨平台安全，不带冒号）
+    expect(download.suggestedFilename()).toMatch(/^browser-diagnostics-[0-9A-Za-z.-]+\.json$/)
+    const raw = readFileSync(await download.path(), 'utf8')
+    const payload = JSON.parse(raw) as {
+      schemaVersion?: number
+      page?: { protocol?: string; timezone?: string; tzOffsetMinutes?: number; visibility?: string; userAgent?: string }
+      entries?: unknown[]
+      ws?: unknown[]
+      resource?: unknown[]
+      truncated?: boolean
+    }
+    expect(payload.schemaVersion).toBe(1)
+    expect(['http:', 'https:']).toContain(payload.page?.protocol)
+    expect(typeof payload.page?.timezone).toBe('string')
+    expect(typeof payload.page?.tzOffsetMinutes).toBe('number')
+    expect(payload.page?.userAgent?.length ?? 0).toBeLessThanOrEqual(256)
+    expect(Array.isArray(payload.entries)).toBe(true)
+    expect(Array.isArray(payload.ws)).toBe(true)
+    expect(Array.isArray(payload.resource)).toBe(true)
+    expect(typeof payload.truncated).toBe('boolean')
+    // 无 console[]（不包装 console）、无请求/响应体与请求头字段
+    expect(payload).not.toHaveProperty('console')
+    expect(raw).not.toMatch(/"(body|headers|rawMessage|retry|authorization|token)"\s*:/i)
+
+    // 本地下载保底成功后异步附带 POST（3s 超时 silent；失败不阻断）——
+    // body 是 server 作用域裁剪版：resource/UA/protocol 不出浏览器（A1 前端半场）
+    await expect.poll(() => postBodies.length).toBe(1)
+    const posted = postBodies[0]!
+    expect(posted.schemaVersion).toBe(1)
+    expect(Array.isArray(posted.entries)).toBe(true)
+    expect((posted.entries as unknown[]).length).toBeLessThanOrEqual(50)
+    expect(Array.isArray(posted.ws)).toBe(true)
+    expect(posted).not.toHaveProperty('resource')
+    expect(posted).not.toHaveProperty('truncated')
+    const postedPage = posted.page as Record<string, unknown> | undefined
+    expect(postedPage).toBeTruthy()
+    expect(postedPage).not.toHaveProperty('userAgent')
+    expect(postedPage).not.toHaveProperty('protocol')
+    expect(postedPage).not.toHaveProperty('serverObservedHost') // 只由服务端回填
+
+    // P-20261127-1：点「导出诊断包」恒先自动 POST 一份**新**快照（不读「点过
+    // A 没有」的前端窗口），成功才带 clientReport=1——postBodies 涨到 2
+    await section.locator('[data-testid="svclog-diag"]').click()
+    await expect.poll(() => postBodies.length, { timeout: 10_000 }).toBe(2)
+    const freshPosted = postBodies[1]!
+    expect(freshPosted).not.toHaveProperty('resource') // 与 A 同一 server 作用域通道
+    await expect.poll(async () => page.evaluate(() =>
+      (window as unknown as { __diagClicks: { href: string }[] }).__diagClicks.length),
+    { timeout: 10_000 }).toBe(1)
+    const clicks = await page.evaluate(() =>
+      (window as unknown as { __diagClicks: { href: string }[] }).__diagClicks)
+    expect(clicks[0]!.href).toContain('clientReport=1')
+  })
+
+  test('POST 失败（route abort）→ A toast「本地已保存」；B 快照上传失败 toast + 直链不带 clientReport、下载不阻断', async ({ page }) => {
+    test.setTimeout(120_000)
+    await page.route('**/api/system/diagnostics/client-report', (route) => route.abort())
+    await page.route('**/api/system/logs/dates', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) }))
+    await page.route('**/api/system/logs*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(tailBody('2026-10-24', TAIL_LINES)) }))
+    await page.route('**/api/system/diagnostics/export*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: PROBE_FIXTURE }) }))
+    await page.addInitScript(() => {
+      const w = window as unknown as { __diagClicks?: { href: string }[] }
+      w.__diagClicks = []
+      const origClick = HTMLAnchorElement.prototype.click
+      HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+        if (this.href.includes('/api/system/diagnostics/export')) {
+          w.__diagClicks!.push({ href: this.href, download: this.download })
+          return
+        }
+        return origClick.call(this)
+      }
+    })
+
+    const section = await openServerLogs(page)
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      section.locator('[data-testid="svclog-browser-diag"]').click(),
+    ])
+    // 本地下载保底不受上传失败影响
+    expect(download.suggestedFilename()).toMatch(/^browser-diagnostics-[0-9A-Za-z.-]+\.json$/)
+    // A 的附带上传失败只 toast「本地已保存」，不阻断
+    await expect(page.locator('.n-message').filter({ hasText: '附带进服务端诊断包失败' })).toBeVisible({ timeout: 10_000 })
+
+    // P-20261127-1：点 B 恒先自发新快照——同样 abort → 轻提示「不含浏览器报告」，
+    // 直链退化纯服务端包（不带 clientReport=1）照常触发，下载不阻断
+    await section.locator('[data-testid="svclog-diag"]').click()
+    await expect(page.locator('.n-message').filter({ hasText: '不含浏览器报告' })).toBeVisible({ timeout: 10_000 })
+    await expect.poll(async () => page.evaluate(() =>
+      (window as unknown as { __diagClicks: { href: string }[] }).__diagClicks.length),
+    { timeout: 10_000 }).toBe(1)
+    const clicks = await page.evaluate(() =>
+      (window as unknown as { __diagClicks: { href: string }[] }).__diagClicks)
+    expect(clicks[0]!.href).toContain('days=3')
+    expect(clicks[0]!.href).not.toContain('clientReport')
   })
 })

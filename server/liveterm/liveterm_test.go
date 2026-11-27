@@ -365,7 +365,7 @@ func TestTailBounded(t *testing.T) {
 
 	h.Wire("tok1", "s-1", false)
 	big := bytes.Repeat([]byte("y"), 32<<10)
-	for i := 0; i < 8; i++ { // 256KB > 128KB 上限
+	for i := 0; i < 24; i++ { // 768KB > 512KB 上限（P-20261124-3 自 128KB 提升）
 		sess.emit(big)
 	}
 	sub, err := h.Subscribe("tok1", "s-1", false)

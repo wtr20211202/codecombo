@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"codecombo/server/pastetmp"
 )
 
 type ProjectConfig struct {
@@ -122,6 +124,89 @@ type CustomAgent struct {
 }
 
 // FindCustomAgent 按 Name 查找自定义智能体（未配置返回 nil）
+
+// PasteLimitPair 单端粘贴上传限额（MB，语义 = MiB 1024×1024 字节）。零值字段 =
+// 该项回落默认；显式 0 落盘 = 用户「恢复默认」意图（生效层读时补默认，不钉死数字）
+type PasteLimitPair struct {
+	FileMB  int `json:"fileMB,omitempty"`
+	ImageMB int `json:"imageMB,omitempty"`
+}
+
+// PasteLimitsConfig 三端粘贴上传限额（P-20261123-6）。share/remote 上限设计为
+// 只允许下调（默认即 P-5 的 20/10）：上调需要分享同源入口读 deadline+按 token
+// 字节配额、remote 流式上传/超时预算等基础设施，另案
+type PasteLimitsConfig struct {
+	Owner  PasteLimitPair `json:"owner,omitempty"`
+	Share  PasteLimitPair `json:"share,omitempty"`
+	Remote PasteLimitPair `json:"remote,omitempty"`
+}
+
+// 粘贴限额范围常量（settings API 校验与 spec 下发的单一事实源；UI 数字框
+// min/max 同源，前端不再抄一份）
+const (
+	PasteOwnerFileMinMB   = 1
+	PasteOwnerFileMaxMB   = 512 // 硬顶：multipart spool+二次落盘约 2× 峰值磁盘
+	PasteOwnerImageMinMB  = 1
+	PasteOwnerImageMaxMB  = 64 // image 经前端压缩链后 64MB 足够
+	PasteShareFileMinMB   = 1
+	PasteShareFileMaxMB   = 20 // 默认值=上限：share 面只允许下调
+	PasteShareImageMinMB  = 1
+	PasteShareImageMaxMB  = 10
+	PasteRemoteFileMinMB  = 1
+	PasteRemoteFileMaxMB  = 20
+	PasteRemoteImageMinMB = 1
+	PasteRemoteImageMaxMB = 10
+)
+
+// pastePairEffective 单端生效值：0/负 = 默认；超上限钳到上限；image>file 取
+// min（手改 settings 文档写脏也不至于把上传链锁死/放大）
+func pastePairEffective(pair PasteLimitPair, defFile, defImage, minFile, maxFile, minImage, maxImage int) pastetmp.Limit {
+	toMB := func(v int, def, lo, hi int) int64 {
+		switch {
+		case v <= 0:
+			return int64(def)
+		case v < lo:
+			return int64(lo)
+		case v > hi:
+			return int64(hi)
+		}
+		return int64(v)
+	}
+	file := toMB(pair.FileMB, defFile, minFile, maxFile)
+	image := toMB(pair.ImageMB, defImage, minImage, maxImage)
+	if image > file {
+		image = file
+	}
+	return pastetmp.Limit{FileMB: file, ImageMB: image}
+}
+
+// PasteLimitPairPut PUT 载荷的单端叶子三态（nil=不动；0=恢复默认落盘 0；
+// 非零=范围内值）。与 PasteLimitPair（生效/落盘形态）分离——同一 JSON 形状
+// 两种语义，不共用类型防误用
+type PasteLimitPairPut struct {
+	FileMB  *int `json:"fileMB,omitempty"`
+	ImageMB *int `json:"imageMB,omitempty"`
+}
+
+// PasteLimitsPut PUT 载荷的 pasteLimits（端对象 nil=该端不动）
+type PasteLimitsPut struct {
+	Owner  *PasteLimitPairPut `json:"owner,omitempty"`
+	Share  *PasteLimitPairPut `json:"share,omitempty"`
+	Remote *PasteLimitPairPut `json:"remote,omitempty"`
+}
+
+// EffectivePasteLimits 当前生效的三端粘贴上传限额（每次上传请求现读——设置页/
+// PUT /api/settings 保存即按请求热生效，无需重启）。store 为 nil 的测试/早期
+// 路径由调用方走 nil-safe helper（PasteLimitsEffectiveOrDefault），本方法不含
+// 全局态。返回 pastetmp.Limit 三元组（config→pastetmp 单向依赖，pastetmp 保持
+// 纯标准库叶子无环）
+func (s *ServerConfig) EffectivePasteLimits() (owner, share, remote pastetmp.Limit) {
+	owner = pastePairEffective(s.PasteLimits.Owner, 100, 20, PasteOwnerFileMinMB, PasteOwnerFileMaxMB, PasteOwnerImageMinMB, PasteOwnerImageMaxMB)
+	share = pastePairEffective(s.PasteLimits.Share, 20, 10, PasteShareFileMinMB, PasteShareFileMaxMB, PasteShareImageMinMB, PasteShareImageMaxMB)
+	remote = pastePairEffective(s.PasteLimits.Remote, 20, 10, PasteRemoteFileMinMB, PasteRemoteFileMaxMB, PasteRemoteImageMinMB, PasteRemoteImageMaxMB)
+	return owner, share, remote
+}
+
 func (s *ServerConfig) FindCustomAgent(name string) *CustomAgent {
 	for i := range s.CustomAgents {
 		if s.CustomAgents[i].Name == name {
@@ -196,6 +281,15 @@ type ServerConfig struct {
 	// 非项目投递（deliver）目标必须落在该前缀内——白名单边界即路径穿越防线。
 	// 写路径校验见 system.UpdateSettings（仅接受绝对目录路径）
 	SyncDestRoot string `json:"syncDestRoot,omitempty"`
+	// PasteLimits 粘贴上传三端限额配置（P-20261123-6）：零值/缺字段 = 该端默认
+	// （owner 100/20、share 20/10、remote 20/10，与 P-20261123-5 定稿一致）。生效值
+	// 经 EffectivePasteLimits 读时补默认/钳制/纠偏（0/负=回落默认、超上限钳到上限、
+	// image>file 取 min），落盘的是用户原意（0=恢复默认的显式三态），不落钳后值。
+	// owner 1~512/1~64 可上调（multipart spool+二次落盘约 2× 峰值磁盘，UI 明示）；
+	// share/remote 1~20/1~10 只允许下调（分享同源入口读 deadline+字节配额、remote
+	// 流式/超时预算未建，上调另案）。omitzero：结构体零值不落 JSON——存量配置文件
+	// 与旧前端零漂移；机器本地调优，不随多实例 sync 迁移
+	PasteLimits PasteLimitsConfig `json:"pasteLimits,omitzero"`
 	// TrustedProxies 可信反向代理清单（P-20261020-1）：仅当直连对端命中该
 	// 列表（IP 或 CIDR）时才采信 X-Forwarded-For / X-Forwarded-Proto /
 	// X-Forwarded-Host / X-Real-IP，用于 c.ClientIP() 的限流/审计口径与

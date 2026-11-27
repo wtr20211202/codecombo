@@ -55,6 +55,15 @@ func renderRuntime(opts Options, red *Redactor) string {
 			"reason": "offline CLI collection has no terminal manager; start the service and export via GET /api/system/diagnostics/export",
 		}
 	}
+	// 文件监听统计（P-20261124-1 S1⑥b）：计数/类别，无路径/无 error 原文
+	if opts.Runtime != nil && opts.Runtime.Watcher != nil {
+		doc["watcher"] = opts.Runtime.Watcher
+	} else {
+		doc["watcher"] = map[string]any{
+			"status": "skipped",
+			"reason": "watch module stats not injected (offline CLI collection or module not assembled)",
+		}
+	}
 	if len(notes) > 0 {
 		doc["notes"] = notes
 	}
@@ -67,7 +76,10 @@ func renderRuntime(opts Options, red *Redactor) string {
 
 // runtimeEnv CC_* env 白名单（必改B/D：只白名单，值过 mask + 路径归一）。
 // 不在白名单的 env 一律不收集——env 是最容易混进凭据的面（*_TOKEN/*_KEY）。
-var envWhitelist = []string{"CC_DATA_DIR", "CC_TLS", "CC_LOG_LEVEL", "CC_PORT", "HOME", "PATH"}
+// CC_DIAG_PROFILE_RATE（P-20261126-3 S3/A5）：block/mutex 采样开关——包内可见
+// 「pprof 档案为什么是空的」（=0 全关；缺省低速率常开，goruntime.json 采样率
+// 登记与这里对读）。
+var envWhitelist = []string{"CC_DATA_DIR", "CC_TLS", "CC_LOG_LEVEL", "CC_PORT", "CC_DIAG_PROFILE_RATE", "HOME", "PATH"}
 
 func runtimeEnv(red *Redactor) map[string]string {
 	out := map[string]string{}

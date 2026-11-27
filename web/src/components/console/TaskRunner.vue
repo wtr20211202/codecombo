@@ -21,6 +21,7 @@ import { useProjectStore } from '../../stores/project'
 import { useUIStateStore, type TaskRunEntry } from '../../stores/uiState'
 import { tasksApi, terminalApi, getTerminalWsUrl, type TaskItem } from '../../api/client'
 import { OPS_ACTIVATE_TERMINAL } from '../../utils/opsEvents'
+import { recordWsLifecycle } from '../../utils/wsLifecycle'
 import { useI18n } from '../../composables/useI18n'
 import { hasBlockingOverlay } from '../../utils/overlayGuard'
 
@@ -119,8 +120,13 @@ async function runTask(task: TaskItem) {
     // 注入命令：分开发送 cd 与任务命令——Windows PowerShell 5.1 不支持 &&
     // 分隔符（实测 ParserError: InvalidEndOfLine），会话内 cd 持久生效，
     // 拆分发送在 bash/PowerShell 行为一致
-    const ws = new WebSocket(getTerminalWsUrl(termId))
+    const wsUrl = getTerminalWsUrl(termId)
+    const ws = new WebSocket(wsUrl)
+    // 短命注入通道（P-20261124-2 S1a④）：只记 onerror（连不上/注入失败）；
+    // 800ms 正常关闭是设计内拆线，不进诊断环，避免每次运行刷一条噪声
+    let openedAt = 0
     ws.onopen = () => {
+      openedAt = Date.now()
       if (task.cwd) {
         ws.send(`cd "${task.cwd}"\r`)
         setTimeout(() => ws.send(task.command + '\r'), 300)
@@ -130,6 +136,7 @@ async function runTask(task: TaskItem) {
       setTimeout(() => ws.close(), 800)
     }
     ws.onerror = () => {
+      recordWsLifecycle(wsUrl, 0, '', false, openedAt, 0, false)
       startingKeys.value.delete(key)
       ws.close()
       // 命令注入通道连不上：会话已建但任务命令从未发出，用户看到的只是

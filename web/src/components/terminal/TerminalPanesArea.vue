@@ -37,6 +37,9 @@ const props = defineProps<{
   handlers: {
     getTerminalWsUrl: (sessionId: string) => string
     uploadPaste: (file: File, kind: 'image' | 'file') => Promise<string | null>
+    /** 粘贴上传预检上限（P-20261123-5，字节）：项目终端=owner 口径 100/20 */
+    pasteMaxFileBytes?: number
+    pasteMaxImageBytes?: number
     onOscEvent: (ev: OscEvent, sessionId: string) => void
     resizeTerminal: (id: string, rows: number, cols: number, silent?: boolean) => void
     /** 显示失步权威重绘（tmux refresh-client，native 服务端 no-op） */
@@ -240,6 +243,8 @@ onBeforeUnmount(() => {
         :session-id="tab.id"
         :ws-url-factory="h.getTerminalWsUrl"
         :upload-paste="h.uploadPaste"
+        :paste-max-file-bytes="h.pasteMaxFileBytes"
+        :paste-max-image-bytes="h.pasteMaxImageBytes"
         :osc-hook="h.onOscEvent"
         :resize-call="h.resizeTerminal"
         :redraw-call="h.redrawTerminal"
@@ -287,6 +292,8 @@ onBeforeUnmount(() => {
           :session-id="tab.panes![1]!"
           :ws-url-factory="h.getTerminalWsUrl"
           :upload-paste="h.uploadPaste"
+          :paste-max-file-bytes="h.pasteMaxFileBytes"
+          :paste-max-image-bytes="h.pasteMaxImageBytes"
           :osc-hook="h.onOscEvent"
           :resize-call="h.resizeTerminal"
           :redraw-call="h.redrawTerminal"

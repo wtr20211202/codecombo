@@ -6,6 +6,9 @@ import { messageMock, resetNaiveRuntimeMocks } from '@/__tests__/mocks/naiveRunt
 // 单测只需可注入返回值；writeClipboard 的降级链走真实实现（jsdom 桩 clipboard
 // API 的 secure-context 主路径），入史 store 需要 active pinia（beforeEach 建） ──
 const { commandRecordMock } = vi.hoisted(() => ({ commandRecordMock: vi.fn() }))
+const { pasteLimitsStateMock } = vi.hoisted(() => ({
+  pasteLimitsStateMock: { current: null as Record<string, unknown> | null },
+}))
 
 vi.mock('naive-ui', async (importOriginal) =>
   (await import('@/__tests__/mocks/naiveRuntime')).mockNaiveUi(await importOriginal()))
@@ -14,6 +17,16 @@ vi.mock('vue-i18n', async (importOriginal) =>
 vi.mock('./useTerminalSession', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./useTerminalSession')>()
   return { ...actual, getLastCommandOutputRecord: commandRecordMock }
+})
+// 粘贴限额单例 mock（P-20261123-6 S2）：owner 100/20 生效值固定——预检在限内
+// 不拦截（超大文件预检另测）；load 的网络面在 jsdom 下不可用，mock 掉
+vi.mock('./pasteLimits', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./pasteLimits')>()
+  return {
+    ...actual,
+    getPasteLimits: () => pasteLimitsStateMock.current as never,
+    loadPasteLimits: async () => {},
+  }
 })
 
 import { useTerminalClipboard } from './useTerminalClipboard'
@@ -96,7 +109,7 @@ function makeFilePasteHarness(uploadImpl?: (file: File, kind: 'image' | 'file') 
   const focus = vi.fn()
   const inst = { term: { paste, focus, getSelection: () => '', clearSelection: vi.fn() } } as unknown as TermInstance
   const uploadPaste = vi.fn(uploadImpl ?? (async () => '/tmp/sc-paste-1.txt'))
-  const api = useTerminalClipboard({ termInstances: new Map([['t1', inst]]), uploadPaste })
+  const api = useTerminalClipboard({ termInstances: new Map([['t1', inst]]), uploadPaste, limitKind: 'owner' })
   const textarea = document.createElement('textarea')
   document.body.appendChild(textarea)
   textarea.focus()
@@ -195,6 +208,27 @@ describe('useTerminalClipboard.attachNativePaste（文件粘贴编排）', () =>
     expect(h.uploadPaste).toHaveBeenCalledTimes(1)
     expect(h.paste).toHaveBeenCalledTimes(1)
     h.detach()
+  })
+
+  // 超限预检（P-20261123-6 S2）：单例生效值 1MB file 上限下 2MB 文件被拦——
+  // uploadPaste 零调用 + precheckTooLarge toast；不阻断同批其余文件
+  it('超限预检：file 超上限跳过上传并 toast，不阻断其余', async () => {
+    pasteLimitsStateMock.current = {
+      owner: { fileMB: 1, imageMB: 1, bodyMB: 5 },
+      share: { fileMB: 20, imageMB: 10, bodyMB: 22 },
+      remote: { fileMB: 20, imageMB: 10, bodyMB: 22 },
+    }
+    const h = makeFilePasteHarness(async () => '/tmp/ok.txt')
+    dispatchPaste({
+      files: [new File(['x'.repeat(2 * 1024 * 1024)], 'big.zip', { type: 'application/zip' }), new File(['a'], 'a.txt', { type: 'text/plain' })],
+      types: ['Files'],
+    })
+    await flush()
+    expect(h.uploadPaste).toHaveBeenCalledTimes(1) // 只有 a.txt 过预检
+    expect(h.uploadPaste).toHaveBeenCalledWith(expect.any(File), 'file')
+    expect(messageMock.warning).toHaveBeenCalledWith(expect.stringContaining('terminal.pasteFile.precheckTooLarge'))
+    expect(h.paste).toHaveBeenCalledWith('/tmp/ok.txt')
+    pasteLimitsStateMock.current = null
   })
 
   it('目录形态项（Files 声明零文件）：引导 toast 不上传', async () => {

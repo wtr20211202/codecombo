@@ -5,8 +5,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
+
+	"codecombo/server/diagnostics"
 )
 
 // 可观测性装配（P-20261122-9 必改B/必改C）：两件"失败必有痕"的底座能力，
@@ -91,4 +94,34 @@ func installCrashOutput(dataDir string) (string, error) {
 		return path, err
 	}
 	return path, nil
+}
+
+// envDiagProfileRate block/mutex 采样开关（P-20261126-3 S3）：env-only，与
+// CC_LOG_LEVEL 同款姿态（诊断场景有 env 足够）。值=「0」全关；缺省/其它值走
+// 低速率默认档——这两个采样率全仓此前未启用，不装则 deep 档案恒空。
+// 状态经 envWhitelist 进包（CC_DIAG_PROFILE_RATE）+ goruntime.json 采样率登记。
+const envDiagProfileRate = "CC_DIAG_PROFILE_RATE"
+
+// diagProfileBlockRate 低速率默认档：平均每 10μs 阻塞时长采样一个阻塞事件
+// （runtime 低开销档；注意语义不是「1/10000 事件」）。设 1 会全量记录阻塞
+// 事件，热路径开销不可控，不做配置口。
+const diagProfileBlockRate = 10000
+
+// diagProfileMutexFraction mutex 竞争事件采样比例 1/100（同为 runtime 低开销档）
+const diagProfileMutexFraction = 100
+
+// installDiagProfileRates 启动期装配 block/mutex 采样率并登记进 diagnostics
+// （state/goruntime.json 的采样率登记 + runtime.json env 白名单共同回答
+// 「block/mutex 档案为什么是空的」）。失败不可能（纯 runtime 调用），无错误面。
+func installDiagProfileRates() {
+	if strings.TrimSpace(os.Getenv(envDiagProfileRate)) == "0" {
+		runtime.SetBlockProfileRate(0)
+		runtime.SetMutexProfileFraction(0)
+		diagnostics.SetProfileSamplingRates(0, 0)
+		slog.Info("diagnostics block/mutex profiling disabled by env", "env", envDiagProfileRate+"=0")
+		return
+	}
+	runtime.SetBlockProfileRate(diagProfileBlockRate)
+	runtime.SetMutexProfileFraction(diagProfileMutexFraction)
+	diagnostics.SetProfileSamplingRates(diagProfileBlockRate, diagProfileMutexFraction)
 }

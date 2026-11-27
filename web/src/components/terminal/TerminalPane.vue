@@ -61,6 +61,15 @@ const props = withDefaults(
      * kind=image 截图压缩链 / kind=file 白名单文件链（P-20261024-2）
      */
     uploadPaste?: (file: File, kind: 'image' | 'file') => Promise<string | null>
+    /** 粘贴上传预检上限（P-20261123-5，字节）：项目终端 100/20（owner 口径）、
+     *  远程终端 20/10（remote 口径），由宿主组件按上下文传入；0/undefined = 不
+     *  预检（服务端仍是最终权威）。判定阈值单一事实源 = web/src/utils/pasteFiles.ts
+     *  PASTE_*_MAX_BYTES（与 server/pastetmp Limits 三端对账） */
+    pasteMaxFileBytes?: number
+    pasteMaxImageBytes?: number
+    /** 预检限额端别（P-20261123-6 S2）：owner=项目终端 / remote=远程终端——
+     *  未传 pasteMax* 覆盖时按此端别从全局生效值单例现读 */
+    pasteLimitKind?: 'owner' | 'remote' | 'share' 
     /** OSC 133 事件外抛（C=命令开始 / D=命令结束带退出码时长；E 通道预留） */
     oscHook?: (event: OscEvent, sessionId: string) => void
     /**
@@ -153,6 +162,11 @@ const clipApi = useTerminalClipboard({
   // 粘贴上传策略注入（项目终端由 TerminalView 传项目版实现）
   uploadPaste: (file, kind) =>
     props.uploadPaste ? props.uploadPaste(file, kind) : Promise.resolve(null),
+  // 预检上限透传（P-20261123-5）：宿主按终端形态传 owner/remote 口径——
+  // P-6 S2 起改为可选覆盖（未传时走全局生效值单例按 limitKind 现读）
+  maxFileBytes: props.pasteMaxFileBytes,
+  maxImageBytes: props.pasteMaxImageBytes,
+  limitKind: props.pasteLimitKind,
 })
 
 // ============== 窗格只读观察锁（P-20261003-91） ==============

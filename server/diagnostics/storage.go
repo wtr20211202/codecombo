@@ -34,21 +34,31 @@ type StorageStats struct {
 	DataDir     string             `json:"dataDir"`
 	Total       StorageDirSample   `json:"total"`
 	Dirs        []StorageDirSample `json:"dirs"`
-	Capped      bool               `json:"capped,omitempty"` // walk 触顶=数值是下界
-	Disk        *DiskSample        `json:"disk,omitempty"`
-	Notes       []string           `json:"notes,omitempty"`
+	// Capped bool walk 触顶=数值是下界
+	Capped bool `json:"capped,omitempty"`
+	// TimedOut walk 因采集 deadline 提前停止（stat 可能挂死，残余风险见 README）
+	TimedOut bool        `json:"timedOut,omitempty"`
+	Disk     *DiskSample `json:"disk,omitempty"`
+	Notes    []string    `json:"notes,omitempty"`
 }
 
 // collectStorage 递归统计数据目录并按顶层条目分解（一次 walk 同时算总量
-// 与各顶层子树的量）。
-func collectStorage(dataDir string, disk *DiskSample, red *Redactor, now time.Time) StorageStats {
+// 与各顶层子树的量，顺带收集 Top20 大文件——P-20261124-1 S2⑤ 要求复用同一
+// 次 WalkDir，绝不新增第三次 walk）。
+//
+// deadline 非零时每 4096 条检查一次，超时停止并标 timedOut（walk 的 stat 在
+// 挂死的网络盘上不可取消，只能放弃——残余风险写 README/runbook）。
+func collectStorage(dataDir string, disk *DiskSample, red *Redactor, now time.Time, deadline time.Time) (StorageStats, LargeFilesReport) {
 	st := StorageStats{
 		GeneratedAt: now.Format(time.RFC3339),
 		DataDir:     red.Path(dataDir),
 		Disk:        disk,
 		Total:       StorageDirSample{Name: "."},
 	}
+	var files LargeFilesReport
+	files.GeneratedAt = st.GeneratedAt
 	dirs := map[string]*StorageDirSample{}
+	var sinceCheck int
 	_ = filepath.WalkDir(dataDir, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // 单条不可读不中断（权限差异是常态，不是故障）
@@ -60,10 +70,20 @@ func collectStorage(dataDir string, disk *DiskSample, red *Redactor, now time.Ti
 			st.Capped = true
 			return filepath.SkipAll
 		}
+		sinceCheck++
+		if !deadline.IsZero() && sinceCheck >= 4096 {
+			sinceCheck = 0
+			if time.Now().After(deadline) {
+				st.TimedOut = true
+				return filepath.SkipAll
+			}
+		}
 		st.Total.Entries++
 		var size int64
+		regular := false
 		if info, ierr := d.Info(); ierr == nil && info.Mode().IsRegular() {
 			size = info.Size()
+			regular = true
 			st.Total.Bytes += size
 		}
 		rel, rerr := filepath.Rel(dataDir, p)
@@ -74,6 +94,15 @@ func collectStorage(dataDir string, disk *DiskSample, red *Redactor, now time.Ti
 		seg := slash
 		if i := strings.IndexByte(slash, '/'); i >= 0 {
 			seg = slash[:i]
+		}
+		if regular {
+			if strings.EqualFold(seg, "data") {
+				// data/ 是凭据库：只计数，不列文件名（P-20261124-1 红线）
+				files.DataFiles++
+				files.DataBytes += size
+			} else {
+				files.add(p, rel, size, red)
+			}
 		}
 		ds := dirs[seg]
 		if ds == nil {
@@ -97,6 +126,10 @@ func collectStorage(dataDir string, disk *DiskSample, red *Redactor, now time.Ti
 		st.Notes = append(st.Notes,
 			"walk capped at "+itoa(inventoryWalkCap)+" entries — figures are a lower bound")
 	}
+	if st.TimedOut {
+		st.Notes = append(st.Notes,
+			"walk stopped at the collection deadline — figures are a lower bound (stat on a hung mount cannot be cancelled)")
+	}
 	for _, ds := range dirs {
 		st.Dirs = append(st.Dirs, *ds)
 	}
@@ -115,7 +148,7 @@ func collectStorage(dataDir string, disk *DiskSample, red *Redactor, now time.Ti
 			break
 		}
 	}
-	return st
+	return st, files
 }
 
 // renderStorageJSON state/storage.json 渲染（格式化失败不可能：纯值结构；

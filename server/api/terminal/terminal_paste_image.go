@@ -14,20 +14,26 @@ import (
 
 	shared "codecombo/server/api/shared"
 	"codecombo/server/pastetmp"
+	"codecombo/server/store"
 
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	// pasteImageBodyMaxBytes 粘贴上传请求体上限（multipart 开销余量随最大形态走）
-	// 单字段上限另行校验：image 形态 10MB / file 形态 20MB（P-20261024-2）
-	pasteImageBodyMaxBytes = int64(22) << 20
-
-	// pasteImageMaxBytes image 形态（截图 blob）单文件上限：截图通常 < 2MB，留余量
-	pasteImageMaxBytes = 10 << 20
-	// pasteFileMaxBytes file 形态（P-20261024-2 通用文件粘贴）单文件上限
-	pasteFileMaxBytes = 20 << 20
-)
+// 粘贴上传限额单一事实源 = server/pastetmp（P-20261123-5）：owner 端 file 100MB /
+// image 20MB / body 104MB（用户主诉 20MB 过紧；104 = 100 + 4MB multipart 余量）。
+// share/remote 两端各自引用 pastetmp.Share / pastetmp.Remote，三端不再各写字面量。
+// pasteOwnerLimits 当前生效的 owner 端限额（P-20261123-6）：每次上传请求现读
+// settings 生效值——设置页/PUT /api/settings 保存即按请求热生效，无需重启。
+// store 为 nil（测试/早期路径）回落 P-5 默认 100/20；BodyMax 按 file 生效值 +4MB
+// 推导（pastetmp.BodyMaxForMB 统一算式）。owner file 1~512MB 可上调（multipart
+// spool+二次落盘约 2× 峰值磁盘，UI 明示），image 1~64MB
+func pasteOwnerLimits() (pastetmp.Limit, int64) {
+	lim := pastetmp.Owner
+	if st := store.Get(); st != nil && st.Settings != nil && st.Settings.Get() != nil {
+		lim, _, _ = st.Settings.Get().Server.EffectivePasteLimits()
+	}
+	return lim, pastetmp.BodyMaxForMB(lim.FileMB, 4)
+}
 
 // pasteFileAllowedExts file 形态扩展名白名单（P-20261024-2：常见文档/文本/代码/
 // 压缩/office 族 + 图片）。按扩展名而非 Content-Type 判定——paste 事件 File 的
@@ -71,8 +77,24 @@ var pasteFileAllowedExts = map[string]bool{
 func UploadPasteImage(c *gin.Context) {
 	// body 上限在 multipart 解析前套上：FormFile 会先把整个 multipart 体
 	// 读入内存/临时文件，无上限时超大请求体在 header.Size 检查前已付出代价。
-	// 22MB = file 形态本体 20MB 上限 + multipart 编码开销余量
-	shared.LimitBody(c, pasteImageBodyMaxBytes)
+	// 104MB = file 形态本体 100MB 上限 + multipart 编码开销余量（P-20261123-5）
+	lim, bodyMax := pasteOwnerLimits()
+	shared.LimitBody(c, bodyMax)
+	// Content-Length 早拒（P-20261123-5 方案①）：声明超限时按 file 上限口径回
+	// 413——用户拿到「文件上限 N MB」这个可行动信息；同时省超限请求的整体 spool
+	//（快路径；chunked 的 ContentLength=-1 走 MaxBytesReader 兜底）
+	if cl := c.Request.ContentLength; cl > bodyMax {
+		shared.Error(c, http.StatusRequestEntityTooLarge, "Upload paste file failed",
+			fmt.Errorf("file too large: %s (max %s)", pastetmp.MBText(cl), pastetmp.MBText(lim.FileMB*1024*1024)))
+		return
+	}
+	// 读超时延长（P-20261123-5 方案①）：全局 ReadTimeout 30s 对 100MB 慢链路不够，
+	// 本路由延长到 5 分钟；不动全局（其他端点维持既有 DoS 面）。gin 1.12
+	// responseWriter 有 Unwrap，ResponseController 可达底层连接；设置失败（如
+	// httptest.ResponseRecorder 无底层连接）不阻断主流程，保护降级为全局超时
+	if rc := http.NewResponseController(c.Writer); rc != nil {
+		_ = rc.SetReadDeadline(time.Now().Add(5 * time.Minute))
+	}
 
 	// 优先 file 形态（P-20261024-2）；缺省回落既有 image 形态（旧前端兼容）。
 	// 用 ErrMissingFile 判别「字段不存在」而非错误即回落——file 字段在但解析失败
@@ -81,7 +103,7 @@ func UploadPasteImage(c *gin.Context) {
 	if err != nil {
 		if shared.BodyTooLarge(err) {
 			shared.Error(c, http.StatusRequestEntityTooLarge, "Upload paste file failed",
-				fmt.Errorf("request body too large (max %d bytes)", pasteImageBodyMaxBytes))
+				fmt.Errorf("request body too large (max %s)", pastetmp.MBText(bodyMax)))
 			return
 		}
 		if !errors.Is(err, http.ErrMissingFile) {
@@ -92,22 +114,22 @@ func UploadPasteImage(c *gin.Context) {
 		if err != nil {
 			if shared.BodyTooLarge(err) {
 				shared.Error(c, http.StatusRequestEntityTooLarge, "Upload paste image failed",
-					fmt.Errorf("request body too large (max %d bytes)", pasteImageBodyMaxBytes))
+					fmt.Errorf("request body too large (max %s)", pastetmp.MBText(bodyMax)))
 				return
 			}
 			shared.Error(c, http.StatusBadRequest, "Upload paste image failed", err)
 			return
 		}
-		uploadPasteImage(c, file, header)
+		uploadPasteImage(c, file, header, lim)
 		return
 	}
-	uploadPasteFile(c, file, header)
+	uploadPasteFile(c, file, header, lim)
 }
 
 // uploadPasteFile file 形态：扩展名白名单 + 20MB 上限，落位/命名/清理与 image
 // 形态共用 sc-paste-* 生命周期
-func uploadPasteFile(c *gin.Context, file multipart.File, header *multipart.FileHeader) {
-	ext, err := validatePasteFile(header)
+func uploadPasteFile(c *gin.Context, file multipart.File, header *multipart.FileHeader, lim pastetmp.Limit) {
+	ext, err := validatePasteFile(header, lim)
 	if err != nil {
 		shared.Error(c, http.StatusBadRequest, "Upload paste file failed", err)
 		return
@@ -116,10 +138,10 @@ func uploadPasteFile(c *gin.Context, file multipart.File, header *multipart.File
 }
 
 // uploadPasteImage image 形态（既有语义）：Content-Type 四类精确白名单 + 10MB 上限
-func uploadPasteImage(c *gin.Context, file multipart.File, header *multipart.FileHeader) {
-	if header.Size > pasteImageMaxBytes {
+func uploadPasteImage(c *gin.Context, file multipart.File, header *multipart.FileHeader, lim pastetmp.Limit) {
+	if header.Size > lim.ImageMB*1024*1024 {
 		shared.Error(c, http.StatusBadRequest, "Upload paste image failed",
-			fmt.Errorf("image too large: %d bytes (max %d)", header.Size, pasteImageMaxBytes))
+			fmt.Errorf("image too large: %s (max %s)", pastetmp.MBText(header.Size), pastetmp.MBText(lim.ImageMB*1024*1024)))
 		return
 	}
 	ext := ".png"
@@ -140,9 +162,9 @@ func uploadPasteImage(c *gin.Context, file multipart.File, header *multipart.Fil
 // 扩展名取自原始文件名（File.name 只有 basename，无目录成分；lowercase 归一），
 // 白名单外的扩展名（含无扩展名文件——Makefile 等在 v1 白名单外，引导走文件树
 // 上传链）一律拒绝
-func validatePasteFile(header *multipart.FileHeader) (string, error) {
-	if header.Size > pasteFileMaxBytes {
-		return "", fmt.Errorf("file too large: %d bytes (max %d)", header.Size, pasteFileMaxBytes)
+func validatePasteFile(header *multipart.FileHeader, lim pastetmp.Limit) (string, error) {
+	if header.Size > lim.FileMB*1024*1024 {
+		return "", fmt.Errorf("file too large: %s (max %s)", pastetmp.MBText(header.Size), pastetmp.MBText(lim.FileMB*1024*1024))
 	}
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if !pasteFileAllowedExts[ext] {

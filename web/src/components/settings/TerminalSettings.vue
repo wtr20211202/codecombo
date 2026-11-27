@@ -24,6 +24,8 @@ import {
   settingsApi, terminalApi,
   type TerminalBackend, type SettingsData, type TmuxInfo, type ShellCandidate,
 } from '../../api/client'
+import type { PasteLimitPairPut, PasteLimitsPut } from '../../api/domains/pasteLimitsTypes'
+import { invalidatePasteLimits } from '../../composables/pasteLimits'
 
 const props = defineProps<{ show: boolean }>()
 
@@ -102,6 +104,77 @@ let initialRemoteTmux = DEFAULT_REMOTE_TMUX
 // dsh 反代配置变更即时重绑定监听（无需重启本系统；见 server/api/tools/dsh.go）
 const DEFAULT_DSH_BASE = 'http://127.0.0.1:3080'
 const DEFAULT_DSH_PROXY_PORT = 3081
+// 粘贴上传三端限额（P-20261123-6 S2 方案④；P-20261126-1 S1 显示值/哨兵分离）：
+// MB 数字框三行×二列；显示值恒为真实数字（「恢复默认」写 spec.defaults 的默认值，
+// 不写 0——0 低于 NInputNumber 的 min，失焦/点 + 会被静默钳成 1MB）；0 只在保存
+// 载荷里作为 PUT 哨兵出现（buildPasteLimitsPut）；spec 下发默认值+min/max，前端
+// 不抄范围；pasteLimitsSpec 缺失（旧服务）= 整块隐藏并提示不支持
+const pendingPasteLimits = ref<{ owner: { fileMB: number | null; imageMB: number | null }; share: { fileMB: number | null; imageMB: number | null }; remote: { fileMB: number | null; imageMB: number | null } }>({
+  owner: { fileMB: null, imageMB: null },
+  share: { fileMB: null, imageMB: null },
+  remote: { fileMB: null, imageMB: null },
+})
+const initialPasteLimits = ref<Record<string, number | null>>({})
+const pasteLimitsSpec = ref<import('../../api/domains/pasteLimitsTypes').PasteLimitsSpec | null>(null)
+const pasteLimitRows = [
+  { key: 'owner' as const, labelKey: 'settings.pasteLimits.owner' },
+  { key: 'share' as const, labelKey: 'settings.pasteLimits.share' },
+  { key: 'remote' as const, labelKey: 'settings.pasteLimits.remote' },
+]
+function pasteLimitChanged(key: 'owner' | 'share' | 'remote', field: 'fileMB' | 'imageMB'): boolean {
+  return pendingPasteLimits.value[key][field] !== initialPasteLimits.value[`${key}.${field}`]
+}
+/** 任一叶子相对 initial 生效值有变更（save 与关闭护栏 isDirty 共用同一判定） */
+function pasteLimitsAnyChanged(): boolean {
+  return pasteLimitsSpec.value !== null
+    && (['owner', 'share', 'remote'] as const).some(
+      (k) => pasteLimitChanged(k, 'fileMB') || pasteLimitChanged(k, 'imageMB'),
+    )
+}
+function restorePasteLimit(key: 'owner' | 'share' | 'remote', field: 'fileMB' | 'imageMB') {
+  // P-20261126-1 S1：写真实默认数字而非协议哨兵 0——0 低于 NInputNumber 的 min(1)，
+  // 用户点进框再点走（blur 钳制）或按一下 + 就会被静默改成 1MB；且 0 ≠ initial
+  // 生效值会让行级「已修改」标记常亮。哨兵只在保存载荷里生成（buildPasteLimitsPut）
+  const defaults = pasteLimitsSpec.value?.defaults[key]
+  if (!defaults) return
+  pendingPasteLimits.value[key][field] = defaults[field]
+}
+/** 单叶 PUT 值（P-20261126-1 S2）：显示值 == spec 默认 → 发 0 哨兵（保持 PUT
+ *  「跟随未来默认、不把今天的默认数字钉死」的契约），否则发显示值。点「恢复默认」
+ *  写的是默认数字，故与手动输入恰好等于默认同价——这是简化口径的唯一语义差
+ *  （不再区分「显式钉住默认数字」，见 P-20261126-1 风险①）。清空的框（null）不发，
+ *  服务端缺省/null 均为「不动」 */
+function pasteLimitPutValue(key: 'owner' | 'share' | 'remote', field: 'fileMB' | 'imageMB'): number | undefined {
+  const pending = pendingPasteLimits.value[key][field]
+  if (pending === null) return undefined
+  const defaults = pasteLimitsSpec.value?.defaults[key]
+  return defaults && pending === defaults[field] ? 0 : pending
+}
+/** 变更叶子的 PUT 载荷：三端对象恒存在、只填变更叶（叶子级增量语义；恢复后
+ *  未变更端保持空对象，不整体缺省） */
+function buildPasteLimitsPut(): PasteLimitsPut {
+  const put: PasteLimitsPut = {}
+  for (const k of ['owner', 'share', 'remote'] as const) {
+    const pair: PasteLimitPairPut = {}
+    for (const f of ['fileMB', 'imageMB'] as const) {
+      if (!pasteLimitChanged(k, f)) continue
+      const v = pasteLimitPutValue(k, f)
+      if (v !== undefined) pair[f] = v
+    }
+    put[k] = pair
+  }
+  return put
+}
+/** 数字框可访问名（P-20261125-1 ⑥）：行名+文件/图片+单位——「文件/图片」
+ *  标签在视觉上紧邻输入框，读屏靠 aria-label 建立同一关联 */
+function pasteLimitAriaLabel(rowLabelKey: string, fieldLabelKey: string): string {
+  return t('settings.pasteLimits.inputAria', {
+    row: t(rowLabelKey),
+    field: t(fieldLabelKey),
+    unit: t('settings.pasteLimits.mbUnit'),
+  })
+}
+
 const pendingDshWebBase = ref(DEFAULT_DSH_BASE)
 const pendingDshWebToken = ref('')
 const pendingDshLaunchCommand = ref('')
@@ -207,6 +280,18 @@ async function load() {
     }
     // tmux 鼠标接管（P-20261109-7）：镜像同步（模块级，提示条一键按钮同源）
     syncTmuxMouseTakeoverLocal(data.terminalTmuxMouseEnabled)
+    // 粘贴上传限额（P-20261123-6 S2）：生效值（GET 已补默认/钳制）+ spec；
+    // spec 缺失（旧服务）= 保持 null → 设置块隐藏
+    const plData = (data as import('../../api/domains/pasteLimitsTypes').SettingsDataWithPasteLimits).pasteLimits
+    pasteLimitsSpec.value = (data as import('../../api/domains/pasteLimitsTypes').SettingsDataWithPasteLimits).pasteLimitsSpec ?? null
+    if (plData) {
+      for (const k of ['owner', 'share', 'remote'] as const) {
+        pendingPasteLimits.value[k].fileMB = plData[k]?.fileMB ?? null
+        pendingPasteLimits.value[k].imageMB = plData[k]?.imageMB ?? null
+        initialPasteLimits.value[`${k}.fileMB`] = plData[k]?.fileMB ?? null
+        initialPasteLimits.value[`${k}.imageMB`] = plData[k]?.imageMB ?? null
+      }
+    }
     pendingDshWebBase.value = data.dshWebBase || DEFAULT_DSH_BASE
     pendingDshWebToken.value = data.dshWebToken || ''
     pendingDshLaunchCommand.value = data.dshLaunchCommand || ''
@@ -282,7 +367,8 @@ async function save() {
     || pendingDshWebToken.value !== initialDshWebToken
     || pendingDshLaunchCommand.value !== initialDshLaunchCommand
     || pendingDshProxyPort.value !== initialDshProxyPort
-  if (backendChanged || scrollbackChanged || idleTimeoutChanged || defaultShellChanged || historyChanged || pastePrecheckChanged || remoteTmuxChanged || dshChanged) {
+  const pasteLimitsChanged = pasteLimitsAnyChanged()
+  if (backendChanged || scrollbackChanged || idleTimeoutChanged || defaultShellChanged || historyChanged || pastePrecheckChanged || remoteTmuxChanged || dshChanged || pasteLimitsChanged) {
     try {
       await settingsApi.update({
         ...(backendChanged ? { terminalBackend: pendingTerminalBackend.value } : {}),
@@ -293,6 +379,9 @@ async function save() {
         ...(historyChanged ? { terminalHistoryEnabled: pendingHistoryEnabled.value } : {}),
         ...(pastePrecheckChanged ? { terminalPastePrecheckEnabled: pendingPastePrecheck.value } : {}),
         ...(remoteTmuxChanged ? { terminalRemoteTmux: pendingRemoteTmux.value } : {}),
+        // 粘贴限额：只发变更叶子（叶子级增量语义）；显示值等于 spec 默认的叶子
+        // 发 0 哨兵（跟随未来默认），否则发显示数字（见 buildPasteLimitsPut）
+        ...(pasteLimitsChanged ? { pasteLimits: buildPasteLimitsPut() } : {}),
         ...(dshChanged ? {
           dshWebBase: pendingDshWebBase.value,
           dshWebToken: pendingDshWebToken.value,
@@ -314,6 +403,16 @@ async function save() {
         invalidatePastePrecheckCache()
       }
       if (remoteTmuxChanged) initialRemoteTmux = pendingRemoteTmux.value
+      if (pasteLimitsChanged) {
+        for (const k of ['owner', 'share', 'remote'] as const) {
+          initialPasteLimits.value[`${k}.fileMB`] = pendingPasteLimits.value[k].fileMB ?? null
+          initialPasteLimits.value[`${k}.imageMB`] = pendingPasteLimits.value[k].imageMB ?? null
+        }
+        // 单例失效（下次预检前 load 重拉真实生效值——0 哨兵对应服务端默认，
+        // 前端不做全局生效值推导：展示值已由 defaults 回写 initial，通信链仍以
+        // 服务端下发为准；加载失败由服务端权威兜底）
+        invalidatePasteLimits()
+      }
       if (dshChanged) {
         // 反代配置变更即时重绑定监听（base/exposeAll/端口均即时生效）
         initialDshWebBase = pendingDshWebBase.value
@@ -493,6 +592,8 @@ function isDirty(): boolean {
     || pendingDshProxyPort.value !== initialDshProxyPort
     || pendingDshExposeAll.value !== initialDshExposeAll
     || pendingDshNpmCommand.value !== initialDshNpmCommand
+    // 粘贴限额（P-20261126-1 S2b）：恢复默认后不保存直接关窗不能静默丢弃
+    || pasteLimitsAnyChanged()
 }
 
 defineExpose({ load, save, isDirty })
@@ -681,6 +782,70 @@ defineExpose({ load, save, isDirty })
       </div>
       <div class="backend-hint">
         {{ t('settings.terminalRemoteTmuxHint') }}
+      </div>
+    </div>
+
+    <!-- 粘贴上传三端限额（P-20261123-6 S2 方案④；P-20261125-1 结构收口）：
+         三行×文件/图片两列 MB 数字框。单位独立成 span（不再用 NInputNumber 的
+         suffix slot）——naive-ui 2.44.1 里 suffix 与默认上下按钮同处
+         .n-input__suffix（flex-shrink:0），120px 定宽时把 flex-grow:1、最小尺寸 0
+         的 .n-input__input 压成 0 宽：数值在 DOM 却视觉全空、不可编辑。150px 无
+         suffix 实测数值区 72px（原 120px + 「文件 MB」= 0）。spec 缺失（旧服务）
+         = 整块隐藏（不把静默 200 当保存成功） -->
+    <div
+      v-if="pasteLimitsSpec"
+      class="form-group"
+      data-testid="settings-paste-limits"
+    >
+      <div class="form-label">
+        {{ t('settings.pasteLimits.title') }}
+      </div>
+      <div
+        v-for="row in pasteLimitRows"
+        :key="row.key"
+        class="paste-limit-row"
+      >
+        <span class="slider-label">{{ t(row.labelKey) }}</span>
+        <!-- 「文件/图片 + 数字框 + MB」各自 nowrap 成组：窄屏按组换行，
+             标签与输入框不被拆散（settings-modal.css 窄屏 max-width 兜底） -->
+        <span class="paste-limit-group">
+          <span class="paste-limit-field-label">{{ t('settings.pasteLimits.fileLabel') }}</span>
+          <n-input-number
+            v-model:value="pendingPasteLimits[row.key].fileMB"
+            :min="pasteLimitsSpec.ranges[row.key].fileMin"
+            :max="pasteLimitsSpec.ranges[row.key].fileMax"
+            :input-props="{ 'aria-label': pasteLimitAriaLabel(row.labelKey, 'settings.pasteLimits.fileLabel') }"
+            size="small"
+            style="width: 150px"
+          />
+          <span class="slider-value-units">{{ t('settings.pasteLimits.mbUnit') }}</span>
+        </span>
+        <span class="paste-limit-group">
+          <span class="paste-limit-field-label">{{ t('settings.pasteLimits.imageLabel') }}</span>
+          <n-input-number
+            v-model:value="pendingPasteLimits[row.key].imageMB"
+            :min="pasteLimitsSpec.ranges[row.key].imageMin"
+            :max="pasteLimitsSpec.ranges[row.key].imageMax"
+            :input-props="{ 'aria-label': pasteLimitAriaLabel(row.labelKey, 'settings.pasteLimits.imageLabel') }"
+            size="small"
+            style="width: 150px"
+          />
+          <span class="slider-value-units">{{ t('settings.pasteLimits.mbUnit') }}</span>
+        </span>
+        <n-button
+          size="tiny"
+          quaternary
+          @click="restorePasteLimit(row.key, 'fileMB'); restorePasteLimit(row.key, 'imageMB')"
+        >
+          {{ t('settings.pasteLimits.restoreDefault') }}
+        </n-button>
+        <SettingModifiedMark
+          :modified="pasteLimitChanged(row.key, 'fileMB') || pasteLimitChanged(row.key, 'imageMB')"
+          @restore="restorePasteLimit(row.key, 'fileMB'); restorePasteLimit(row.key, 'imageMB')"
+        />
+      </div>
+      <div class="backend-hint">
+        {{ t('settings.pasteLimits.hint') }}
       </div>
     </div>
 
@@ -1167,6 +1332,26 @@ defineExpose({ load, save, isDirty })
 }
 .slider-value-units {
   font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-dim);
+}
+/* 粘贴上传限额行（P-20261125-1）：桌面单行；窄屏按「行名 / 文件组 / 图片组」换行
+   ——组内 nowrap 保证「文件 + 数字框 + MB」不拆散（组宽约 206px < 390 视口内容区
+   344px）。gap 走间距令牌（design-tokens 高频面禁 on-scale 字面量）。 */
+.paste-limit-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: 6px;
+}
+.paste-limit-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+.paste-limit-field-label {
+  font-size: 12px;
   color: var(--text-dim);
 }
 .backend-hint {

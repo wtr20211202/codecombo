@@ -166,6 +166,7 @@ import { initSettingsSync } from './utils/settingsSync'
 import { createCrashGuard, formatCrashDetail, truncateText, CRASH_SUMMARY_MAX } from './utils/crashGuard'
 import type { CapturedError } from './utils/crashGuard'
 import { FLICKER_DEBUG_QUERY_KEY, setFlickerDebug } from './utils/flickerDebug'
+import { LOW_FX_QUERY_KEY, parseLowFxQuery, useLowFxStore } from './stores/low-fx'
 import NotificationCenter from './components/notifications/NotificationCenter.vue'
 import PostmortemModal from './components/terminal/PostmortemModal.vue'
 import WhatsNewPopup from './components/help/WhatsNewPopup.vue'
@@ -307,6 +308,17 @@ const router = useRouter()
 // ops navigate 携 query 跳转激活/关闭（route.query watch），远控现场一键取证
 setFlickerDebug(new URLSearchParams(window.location.search).get(FLICKER_DEBUG_QUERY_KEY) === '1')
 watch(() => route.query[FLICKER_DEBUG_QUERY_KEY], (v) => { setFlickerDebug(v === '1') })
+
+// 低特效档零点击入口（P-20261125-2 S2 ⑥，?__lowfx=1）：冷启动由 early-init 首帧前
+// 落位（见 themes/early-init.ts），这里补运行期经 ops navigate 携 query 到达的切换
+// ——远控现场一条链接即把剩余模糊 + 装饰动画全关；显式 query 同样落盘以跨导航保持
+const lowFxStore = useLowFxStore()
+function applyLowFxQuery(v: unknown) {
+  const parsed = parseLowFxQuery(typeof v === 'string' ? v : null)
+  if (parsed !== null) lowFxStore.setEnabled(parsed)
+}
+applyLowFxQuery(new URLSearchParams(window.location.search).get(LOW_FX_QUERY_KEY))
+watch(() => route.query[LOW_FX_QUERY_KEY], applyLowFxQuery)
 
 // ---- 渲染错误兜底「白屏保险丝」（P-20261002-26）----
 // 动机：更新走「中心分发、子实例自拉替换」，带渲染错误的坏构建推到远程

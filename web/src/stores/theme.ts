@@ -11,6 +11,7 @@ import {
 import { applyThemeColorMeta } from '../themes/themeColor'
 import { resolveDiffPair } from '../themes/diffPalette'
 import { useFontStore } from './font'
+import { applyLowFxRootAttribute, readStoredLowFx } from './low-fx'
 import { safeStorage } from '../utils/storage'
 
 /** localStorage key：用户选定主题（写入侧 setTheme；跨标签分发见 utils/settingsSync） */
@@ -77,6 +78,11 @@ export const useThemeStore = defineStore('theme', () => {
     // theme-color meta 随主题联动（P-20261004-134）：安装态状态栏/移动端地址栏色
     // 跟手切换。用户手切、OS 跟随、跨标签 syncFromStorage 均流经本 watch，单点覆盖
     applyThemeColorMeta(themeDef.value)
+    // 低特效根属性幂等重写（P-20261125-2 S2）：apply() 是「首帧/主题切换」单点，
+    // 属性与 CSS 变量同批落位——外部被清掉（devtools 手删/主题重放）后下次 apply
+    // 自动纠正；只读存储不读 query（query 已在 early-init 一次性消费并落盘，
+    // 否则同页 URL 带 ?__lowfx=1 时用户手动改回标准会被下一次主题切换反冲）
+    applyLowFxRootAttribute(readStoredLowFx())
   }
 
   // 主题变更统一在此刷新 CSS 变量（用户选择与 OS 跟随变更同享；落盘已收敛至 setTheme）

@@ -122,6 +122,9 @@ describe('定向查询唯一性守卫（e2e settings-search.spec.ts 依赖）', 
     // P-20261005-212 光标偏好锚点（形态/闪烁）
     expect(hits('闪烁')).toEqual(['terminal'])
     expect(hits('下划线')).toEqual(['terminal'])
+    // P-20261125-2 视觉特效档锚点（「减弱」直达外观；词条不含「闪烁」以免抢终端锚点）
+    expect(hits('视觉特效')).toEqual(['appearance'])
+    expect(hits('减弱')).toEqual(['appearance'])
     // 既有断言面不因锚点扩容漂移
     expect(hits('scrollback')).toEqual(['terminal'])
     expect(hits('凭据').length).toBe(2)

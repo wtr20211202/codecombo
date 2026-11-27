@@ -1,5 +1,6 @@
 import { ref, onUnmounted } from 'vue'
 import { applyLockRejection, LOCK_REJECTED_CLOSE_CODE } from '../stores/lock'
+import { recordWsLifecycle } from '../utils/wsLifecycle'
 
 // RFC 6455 标准关闭码中对客户端有「重连策略」含义的两个（服务端 P-20261003-313
 // SetReadLimit 读上限防线超限时 gorilla 自动回 1009，见 server/api/shared/ws.go）。
@@ -56,6 +57,9 @@ export function useWebSocketBase(options: UseWebSocketBaseOptions) {
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let reconnectAttempts = 0
+  // 诊断用 onopen 时刻（P-20261124-2 S1a④）：disconnect 显式上报 intentional 时
+  // 也需要连接存活时长，故提升到 composable 作用域（每次 connect 重置）
+  let wsOpenedAt = 0
 
   // shouldConnect 默认放行；返回 false 时 connect/scheduleReconnect 会跳过
   const shouldConnect = () => options.shouldConnect?.() ?? true
@@ -117,15 +121,20 @@ export function useWebSocketBase(options: UseWebSocketBaseOptions) {
 
     // 子协议携带 unlock token（锁定中间件在握手期校验）
     const protocols = options.getProtocols?.()
+    wsOpenedAt = 0
     ws = protocols && protocols.length > 0 ? new WebSocket(url, protocols) : new WebSocket(url)
 
     ws.onopen = () => {
       connected.value = true
+      wsOpenedAt = Date.now()
       options.onOpen?.(reconnectAttempts)
       reconnectAttempts = 0
     }
 
     ws.onclose = (event) => {
+      // WS 生命周期入环（P-20261124-2 S1a④）：4001/1009/1011/1006/1000 逐码
+      // 保留（closeKind 分类由叶子模块给），供诊断 JSON 定位「哪个通道怎么断的」
+      recordWsLifecycle(url, event.code, event.reason, event.wasClean, wsOpenedAt, reconnectAttempts, false)
       connected.value = false
       ws = null
       // 服务端锁定拒绝（close 4001）：token 已失效，继续用同一 token 重连
@@ -165,6 +174,9 @@ export function useWebSocketBase(options: UseWebSocketBaseOptions) {
       reconnectTimer = null
     }
     if (ws) {
+      // 主动关闭必须显式上报（onclose 即将被置 null，关闭事件不再触达本模块）：
+      // 1005 = 客户端 close() 无状态码，叶子模块按 intentional 归 normal
+      recordWsLifecycle(ws.url, 1005, '', true, wsOpenedAt, reconnectAttempts, true)
       ws.onclose = null // 防止触发重连
       ws.close()
       ws = null

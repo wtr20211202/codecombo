@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ErrorLogEntry } from '@/api/error-types'
+import { clearBrowserDiagnostics, projectErrorLogEntry, recordDiagEntry } from '@/utils/browserDiagnostics'
 
 const MAX_ENTRIES = 200
 
@@ -21,6 +22,10 @@ export const useErrorLogStore = defineStore('errorLog', () => {
     logs.value.unshift(full)
     if (logs.value.length > MAX_ENTRIES) logs.value.length = MAX_ENTRIES
     unreadCount.value++
+    // 浏览器诊断投影（P-20261124-2 S1a②）：错误中心是唯一 HTTP 错误真源，
+    // 此处把同一条目投影进诊断环（白名单字段 + URL 模板化）；Vue errorHandler
+    // 入账的渲染错误按 script 类记录——不新建第二套 HTTP 环，也不重复捕获
+    recordDiagEntry(projectErrorLogEntry(full, full.method === 'VUE' ? 'vue' : 'xhr'))
     return full
   }
 
@@ -38,6 +43,9 @@ export const useErrorLogStore = defineStore('errorLog', () => {
   function clear(): void {
     logs.value = []
     unreadCount.value = 0
+    // 诊断环/会话快照同步清（P-20261124-2 S1b b）：实例切换复用本 clear，
+    // 跨实例的失败请求/WS 记录不应带到新实例
+    clearBrowserDiagnostics()
   }
 
   return { logs, unreadCount, add, markAllRead, markRecovered, clear }

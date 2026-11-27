@@ -1,4 +1,5 @@
 import type { AxiosError } from 'axios'
+import type { DiagErrorClass } from '../utils/diagSanitize'
 
 export type ErrorCategory =
   | 'network' | 'auth' | 'forbidden' | 'notFound'
@@ -39,6 +40,23 @@ export interface ErrorLogEntry {
   retry?: ErrorRetryInfo
   /** 重试成功时刻（ISO）：非空即「已恢复」态，重试钮让位已恢复标记 */
   recoveredAt?: string
+  // ── 浏览器诊断投影（P-20261124-2 S1a①）：错误中心条目同时是本地诊断 JSON
+  // 的数据源，字段在捕获点计算（不改变既有展示面语义）──
+  /** 诊断错误类（六值固定：timeout|network|offline|http4xx|http5xx|unknown） */
+  errorClass?: DiagErrorClass
+  /** 请求总耗时 ms（浏览器侧墙钟/单调钟测量；服务端真实耗时按 requestId 对齐） */
+  durationMs?: number
+  /** 请求开始时刻（ISO；请求拦截器写入 startedAtWall 换算） */
+  startedAt?: string
+  /** 调用方声明 silent（存在性探测等预期失败）：诊断导出默认过滤 silent 4xx，
+   *  只保留 silent 超时/5xx 并给出 silentCount */
+  silent?: boolean
+  /** 捕获时前端路由 pathname（已脱敏；定位「哪个页面发生的」） */
+  route?: string
+  /** 浏览器等待上限（error.config.timeout 原值；0 = 未设上限，不硬编码 30000） */
+  clientTimeoutMs?: number
+  /** 浏览器侧是否已超时（ECONNABORTED/ETIMEDOUT）——诚实标注，勿把 30s 当服务端耗时 */
+  timedOut?: boolean
 }
 
 export class AppError extends Error {

@@ -660,53 +660,6 @@ func CreateSnippet(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": shareResponse(*created)})
 }
 
-// ListShares GET /api/share —— 全部分享（短链管理视图数据源）。响应附
-// frozenUsage{totalBytes,capBytes}（P-20261005-176 快照库占用——双体积护栏
-// 从撞 413 才知变常透明，agent 可程序化容量治理）；有快照在盘的行（冻结
-// 文件分享/终端输出快照）另带 frozenBytes = 该份快照目录字节量（找大头）。
-// 统计失败不阻断列表（管理面可用性优先，仅省略投影并留痕）
-//
-// 健康投影（P-20261020-10）：逐行补 health（见 health.go）。列表接口不带
-// 服务端分页（前端按 15 行/页切片），因此对返回行逐行判定；分享量级为手工
-// 创建的个位数到十位数，且同一项目根只 stat 一次，开销可控。stat 失败按
-// 异常值（target_missing/project_gone）投影，绝不让列表请求 500。
-func ListShares(c *gin.Context) {
-	list, err := store.Get().Share.List()
-	if err != nil {
-		shared.Error(c, http.StatusInternalServerError, "list shares failed", err)
-		return
-	}
-	total, perToken, uerr := share.SnapshotUsage()
-	health := newShareHealthProbe(store.Get())
-	// 会话输入闸自愈对账（P-20261122-17）：管理面是 owner 最常触达的入口，
-	// 借这次触达把残账扫掉（内部 5s 节流；DirectState 每行只做投影不重复
-	// 对账）。未装配访客面（测试）零开销
-	if shareSvc != nil {
-		shareSvc.ReconcileGates()
-	}
-	out := make([]gin.H, 0, len(list))
-	for _, s := range list {
-		row := shareResponse(s)
-		row["health"] = health.health(s)
-		if name := snapshotDirName(&s); name != "" {
-			if used, ok := perToken[name]; ok {
-				row["frozenBytes"] = used
-			}
-		}
-		out = append(out, row)
-	}
-	if uerr != nil {
-		slog.Warn("share usage stats failed", "err", uerr)
-	} else {
-		c.JSON(http.StatusOK, gin.H{"data": out, "frozenUsage": gin.H{
-			"totalBytes": total,
-			"capBytes":   share.MaxFrozenTotalBytes,
-		}})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": out})
-}
-
 // createTerminalFrozenReq 终端输出冻结快照分享请求（P-20261005-205）
 type createTerminalFrozenReq struct {
 	// SessionID 终端会话 ID（必填）。快照在创建时刻定格——不要求会话持续

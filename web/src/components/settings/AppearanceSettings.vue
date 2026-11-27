@@ -13,6 +13,7 @@ import { useUiZoomStore, UI_ZOOM_LEVELS, UI_ZOOM_DEFAULT, type UiZoomLevel } fro
 import { useUiDensityStore, UI_DENSITY_DEFAULT, type UiDensity } from '../../stores/ui-density'
 import { useGraphLanesStore, GRAPH_LANE_LIMITS, GRAPH_LANE_LIMIT_DEFAULT, type GraphLaneLimit } from '../../stores/graph-lanes'
 import { useFileNestingStore } from '../../stores/file-nesting'
+import { useLowFxStore, LOW_FX_DEFAULT } from '../../stores/low-fx'
 import { useThemeStore } from '../../stores/theme'
 import { useLocaleStore, LOCALE_DEFAULT } from '../../stores/locale'
 import { useTerminalThemeStore, TERMINAL_THEME_FOLLOW_DEFAULT, TERMINAL_FONT_DEFAULT } from '../../stores/terminal-theme'
@@ -33,6 +34,8 @@ const uiDensityStore = useUiDensityStore()
 const graphLanesStore = useGraphLanesStore()
 // 文件树同名族嵌套（P-20261006-21）：直写行（minimap 同款），即时生效不参与脏护栏
 const fileNestingStore = useFileNestingStore()
+// 低特效档（P-20261125-2 S2）：直写行（diffPalette 同形态），即时生效不参与脏护栏
+const lowFxStore = useLowFxStore()
 const uiStateStore = useUIStateStore()
 const themeStore = useThemeStore()
 const localeStore = useLocaleStore()
@@ -103,6 +106,12 @@ const graphLaneOptions = GRAPH_LANE_LIMITS.map(n => ({ value: n, label: String(n
 const diffPaletteOptions: { value: DiffPalette; label: () => string }[] = [
   { value: 'standard', label: () => t('appearance.diffPalette.standard') },
   { value: 'colorblind', label: () => t('appearance.diffPalette.colorblind') },
+]
+// 视觉特效档（P-20261125-2 S2）：标准 / 减弱（远控/屏幕共享/低配机）。直写 store
+// 即时生效（设备本地 localStorage 偏好，不参与脏护栏）
+const lowFxOptions: { value: boolean; label: () => string }[] = [
+  { value: false, label: () => t('appearance.lowFx.standard') },
+  { value: true, label: () => t('appearance.lowFx.reduced') },
 ]
 // 项目仪表盘默认落点（P-20261005-224）：editor = 历史现状（进项目落编辑器），
 // dashboard = 显式进入项目（首页点击/实例切换）主区先落仪表盘；刷新恢复/页内
@@ -438,6 +447,43 @@ defineExpose({ load, save, isDirty })
       </div>
       <div class="follow-hint">
         {{ t('appearance.diffPalette.hint') }}
+      </div>
+    </div>
+
+    <!-- 视觉特效档（P-20261125-2 S2）：标准/减弱。远控（UU 等串流）与屏幕共享下
+         全屏遮罩的毛玻璃模糊会被放大成整层闪烁；减弱档去模糊 + 遮罩实底 + 关装饰
+         动画（功能性 spinner 保留）。直写 store 即时生效（设备本地偏好，不参与脏
+         护栏）——远控是「这台机器的使用形态」，不该随账号漫游带到真机 -->
+    <div
+      class="form-group"
+      data-testid="settings-low-fx"
+    >
+      <div class="form-label">
+        {{ t('appearance.lowFx.label') }}
+      </div>
+      <div class="ctrl-row">
+        <n-radio-group
+          :value="lowFxStore.enabled"
+          size="small"
+          @update:value="(v: boolean) => lowFxStore.setEnabled(v)"
+        >
+          <n-radio-button
+            v-for="opt in lowFxOptions"
+            :key="String(opt.value)"
+            :value="opt.value"
+            :label="opt.label()"
+          />
+        </n-radio-group>
+        <SettingModifiedMark
+          :modified="lowFxStore.enabled !== LOW_FX_DEFAULT"
+          @restore="lowFxStore.setEnabled(LOW_FX_DEFAULT)"
+        />
+      </div>
+      <div class="follow-hint">
+        {{ t('appearance.lowFx.hint') }}
+      </div>
+      <div class="follow-hint">
+        {{ t('settings.syncTrackDeviceLocal') }}
       </div>
     </div>
 

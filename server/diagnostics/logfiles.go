@@ -1,7 +1,6 @@
 package diagnostics
 
 import (
-	"bufio"
 	"os"
 	"path/filepath"
 	"sort"
@@ -307,110 +306,19 @@ func lastIndexByte(b []byte, c byte) int {
 
 // logStats 单文件分析结果（logs-summary 的一节）
 type logStats struct {
-	file     string // zip 内条目名（logs/xxx）
-	bytes    int64
-	lines    int64
-	levels   map[string]int64
-	modules  map[string]int64
-	firstTS  string
-	lastTS   string
-	partial  bool
+	file    string // zip 内条目名（logs/xxx）
+	bytes   int64
+	lines   int64
+	errors  int64
+	levels  map[string]int64
+	modules map[string]int64
+	hours   map[string]*hourBucket
+	firstTS string
+	lastTS  string
+	partial bool
+	// windowed true = >8MiB 文件只分析了头 2MiB+尾 14MiB 窗口（与装箱同款）
+	windowed bool
 	analyzed int64
-}
-
-// analyzer 分析器（跨文件累计 errors.txt 的行数/字节数与分析预算）
-type analyzer struct {
-	red       *Redactor
-	budget    int64
-	errBuf    *strings.Builder
-	errLines  int
-	errBytes  int
-	errCapped bool
-}
-
-func newAnalyzer(red *Redactor) *analyzer {
-	return &analyzer{red: red, budget: logAnalysisMaxBytes, errBuf: &strings.Builder{}}
-}
-
-// errFull errors.txt 已达行数或字节封顶（双封顶见常量注释）
-func (a *analyzer) errFull() bool {
-	return a.errLines >= errorsMaxLines || a.errBytes >= errorsMaxBytes
-}
-
-// analyze 流式扫一个日志文件：总行数、级别计数、模块前缀 topN、首末时间戳，
-// 顺带把 WARN/ERROR 原文抄进 errors.txt 缓冲（2 万行封顶）。
-// budget 耗尽或遇病态长行 → partial=true 如实回告，不静默缩水。
-func (a *analyzer) analyze(entryName, path string, size int64) logStats {
-	st := logStats{
-		file:    entryName,
-		bytes:   size,
-		levels:  map[string]int64{},
-		modules: map[string]int64{},
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		st.partial = true
-		return st
-	}
-	defer f.Close()
-	if a.budget <= 0 {
-		st.partial = true
-		return st
-	}
-	buffered := bufio.NewReaderSize(f, 256<<10)
-	read := int64(0)
-	// errors.txt 分节头：只有真的有 WARN/ERROR 才写出（空节不复述）
-	sectionOpen := false
-	sc := bufio.NewScanner(buffered)
-	sc.Buffer(make([]byte, 64<<10), scanBufMax)
-	for sc.Scan() {
-		line := sc.Text()
-		read += int64(len(line)) + 1
-		a.budget -= int64(len(line)) + 1
-		st.lines++
-		if ts := timestampOf(line); ts != "" {
-			if st.firstTS == "" {
-				st.firstTS = ts
-			}
-			st.lastTS = ts
-		}
-		lv := levelOf(line)
-		if lv == "" {
-			st.levels["other"]++
-		} else {
-			st.levels[lv]++
-		}
-		if m := moduleOf(line); m != "" {
-			st.modules[m]++
-		}
-		if lv == "WARN" || lv == "ERROR" {
-			if !sectionOpen && !a.errFull() {
-				if a.errBuf.Len() > 0 {
-					a.errBuf.WriteString("\n")
-				}
-				a.errBuf.WriteString("## " + entryName + "\n")
-				sectionOpen = true
-			}
-			if !a.errFull() {
-				masked := a.red.Line(line)
-				a.errBuf.WriteString(masked)
-				a.errBuf.WriteString("\n")
-				a.errLines++
-				a.errBytes += len(masked) + 1
-			} else {
-				a.errCapped = true
-			}
-		}
-		if a.budget <= 0 {
-			st.partial = true
-			break
-		}
-	}
-	if err := sc.Err(); err != nil {
-		st.partial = true // 病态长行（>1MiB）：停止该文件，如实标 partial
-	}
-	st.analyzed = read
-	return st
 }
 
 // levelOf 行级别：slog 文本 handler `level=INFO` 优先，再认 `[WARN]` 旧形态
@@ -545,6 +453,12 @@ func renderLogSummary(stats []logStats) string {
 		}
 		if len(s.modules) > 0 {
 			b.WriteString("modules: " + topModules(s.modules, summaryModuleTopN) + "\n")
+		}
+		if hourly := renderHourly(s.hours); hourly != "" {
+			b.WriteString(hourly)
+		}
+		if s.windowed {
+			b.WriteString("windowed=true # >8MiB: analysed head 2MiB + tail 14MiB only (same window as the packed raw file)\n")
 		}
 		if s.partial {
 			b.WriteString("partial=true # 分析预算耗尽或遇病态长行：本文件统计不完整\n")

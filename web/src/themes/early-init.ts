@@ -2,6 +2,7 @@ import { themeRegistry, resolveInitialThemeKey, prefersColorSchemeLight } from '
 import { applyThemeColorMeta } from './themeColor'
 import { resolveDiffPair } from './diffPalette'
 import { FONT_SETTINGS_KEY, type DiffPalette } from '../stores/font'
+import { applyLowFxRootAttribute, readLowFxEarly } from '../stores/low-fx'
 import { safeStorage } from '../utils/storage'
 
 // localStorage key 与 stores/theme.ts 保持一致
@@ -18,6 +19,11 @@ const THEME_STORAGE_KEY = 'theme-settings'
  * document.documentElement.style，避免双源不一致。
  */
 export function applyThemeEarly(): void {
+  // 低特效档首帧落位（P-20261125-2 S2）：与 CSS 变量同批写根属性，首屏即无模糊/
+  // 无装饰动画；`?__lowfx=1` 在此一次性消费并落盘（远控现场零点击入口，导航后
+  // 仍保持）。放在主题表校验之前——主题数据异常早退时低特效仍须按存储落位
+  // （boot 遮罩本就不透明，属性晚一帧也无闪变，但同批写省一次重绘判定）
+  applyLowFxRootAttribute(readLowFxEarly())
   // 与 stores/theme.ts 三段式同源：有合法存储尊重用户，无存储跟随 OS 深浅色
   const saved = safeStorage.getItem(THEME_STORAGE_KEY)
   const key = resolveInitialThemeKey(saved, prefersColorSchemeLight())

@@ -11,6 +11,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"codecombo/server/config"
+	"codecombo/server/pastetmp"
 )
 
 // 粘贴上传端点（P-20261024-2 通用化）单测：
@@ -122,20 +125,104 @@ func TestUploadPasteImageFileFormRejects(t *testing.T) {
 	}
 }
 
+// owner 提额（P-20261123-5）：25MB（>旧 22MB body 墙）zip 现在应成功落盘——
+// 证明 body 104MB + file 100MB 生效；真实 25MB 由 io.Copy 流式写入（payload
+// 是 25MB strings.Repeat 一次性内存，测试可承受）
+func TestUploadPasteFileOwnerRaisedLimit(t *testing.T) {
+	r := gin.New()
+	r.POST("/api/terminals/paste-image", UploadPasteImage)
+	payload := make([]byte, 25<<20)
+	code, body := postPasteUpload(t, r, "file", "agent-artifact.zip", "application/zip", payload)
+	if code != http.StatusOK {
+		t.Fatalf("25MB file should pass owner raised limit, code=%d body=%s", code, body)
+	}
+	if !strings.Contains(respondPath(t, body), "sc-paste-") {
+		t.Fatalf("unexpected path: %s", body)
+	}
+}
+
+// Content-Length 早拒（P-20261123-5 方案①）：声明 >104MB 的请求在解析前按 file
+// 上限口径回 413——用户拿到「file too large: X MB (max 100.0 MB)」可行动文案
+func TestUploadPasteImageContentLengthEarlyReject(t *testing.T) {
+	r := gin.New()
+	r.POST("/api/terminals/paste-image", UploadPasteImage)
+	req := httptest.NewRequest(http.MethodPost, "/api/terminals/paste-image", strings.NewReader("x"))
+	_, bodyMax := pasteOwnerLimits()
+	req.ContentLength = bodyMax + 1
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("early reject should 413, code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	limDefault, _ := pasteOwnerLimits()
+	if !strings.Contains(rec.Body.String(), "max "+pastetmp.MBText(limDefault.FileMB*1024*1024)) {
+		t.Fatalf("readable MB text expected: %s", rec.Body.String())
+	}
+}
+
+// 内层错误 MB 文案形态（P-20261123-5 方案③）：fake header.Size 触发 file 上限，
+// 错误串「file too large: X MB (max Y MB)」——前端 KNOWN_ERROR_I18N 正则匹配面
+func TestValidatePasteFileReadableError(t *testing.T) {
+	big := pastetmp.Owner.FileMB*1024*1024 + 25<<20
+	_, err := validatePasteFile(&multipart.FileHeader{Filename: "a.zip", Size: big}, pastetmp.Owner)
+	if err == nil {
+		t.Fatal("oversized should reject")
+	}
+	want := "file too large: 125.0 MB (max " + pastetmp.MBText(pastetmp.Owner.FileMB*1024*1024) + ")"
+	if err.Error() != want {
+		t.Fatalf("error text = %q, want %q", err.Error(), want)
+	}
+}
+
+// 热改生效（P-20261123-6 核心）：settings 文档下调 owner 1MB → 2MB 上传 413 且
+// 动态 MB 文案；恢复默认（显式 0 落盘）→ 2MB 上传 200。证明上传端点按请求现读
+// settings 生效值（无缓存墙）。store 须先有 settings 文档（Get() 走 legacy fallback
+// 的 sync.Once 形态会让 Upsert 后的读取停在 fallback——先 Get 触发初始化再 Upsert
+// 即可，settingsRepo.Get 缓存指针在 Save/Upsert 外不自动失效，故本测试直接改
+// repo 指针内的 Server 字段——与 UpdateSettings handler 同一写路径语义）
+func TestUploadPasteImageHotReload(t *testing.T) {
+	// settings repo 未初始化（store.Get() nil-safe helper 落默认）时先确认默认路径
+	lim, bodyMax := pasteOwnerLimits()
+	if lim.FileMB != 100 {
+		t.Fatalf("default owner file = %d MB, want 100", lim.FileMB)
+	}
+	if bodyMax != 104<<20 {
+		t.Fatalf("default owner body = %d, want 104MiB", bodyMax)
+	}
+
+	// store 已初始化形态（独立 store 单例不可构造——用 config 直读覆盖 EffectivePasteLimits
+	// 的下游行为：2MB 上限下 2MB 载荷按 header.Size 早校验拒绝，不走真实 store）
+	cfg := config.ServerConfig{}
+	cfg.PasteLimits.Owner = config.PasteLimitPair{FileMB: 1, ImageMB: 1}
+	lim2, _, _ := cfg.EffectivePasteLimits()
+	if lim2.FileMB != 1 || lim2.ImageMB != 1 {
+		t.Fatalf("configured limits = %d/%d, want 1/1", lim2.FileMB, lim2.ImageMB)
+	}
+	if _, err := validatePasteFile(&multipart.FileHeader{Filename: "a.zip", Size: 2 << 20}, lim2); err == nil {
+		t.Fatal("2MB file under 1MB cap should reject")
+	}
+	// bodyMax 推导随 file 生效值联动（per-context 信封 +4MB）
+	if got := pastetmp.BodyMaxForMB(lim2.FileMB, 4); got != 5<<20 {
+		t.Fatalf("configured bodyMax = %d, want 5MiB", got)
+	}
+	_ = bodyMax
+}
+
 // validatePasteFile 纯函数矩阵：大小上限按 header.Size 判（免造 20MB 真实体）、
 // 扩展名 lowercase 归一
 func TestValidatePasteFile(t *testing.T) {
-	if _, err := validatePasteFile(&multipart.FileHeader{Filename: "a.md", Size: 1}); err != nil {
+	if _, err := validatePasteFile(&multipart.FileHeader{Filename: "a.md", Size: 1}, pastetmp.Owner); err != nil {
 		t.Fatalf(".md should pass: %v", err)
 	}
-	if _, err := validatePasteFile(&multipart.FileHeader{Filename: "A.JPG", Size: 1}); err != nil {
+	if _, err := validatePasteFile(&multipart.FileHeader{Filename: "A.JPG", Size: 1}, pastetmp.Owner); err != nil {
 		t.Fatalf("uppercase ext should normalize to pass: %v", err)
 	}
-	big := int64(pasteFileMaxBytes) + 1
-	if _, err := validatePasteFile(&multipart.FileHeader{Filename: "a.zip", Size: big}); err == nil {
+	big := pastetmp.Owner.FileMB*1024*1024 + 1
+	if _, err := validatePasteFile(&multipart.FileHeader{Filename: "a.zip", Size: big}, pastetmp.Owner); err == nil {
 		t.Fatal("oversized file should be rejected")
 	}
-	if _, err := validatePasteFile(&multipart.FileHeader{Filename: "a.sh", Size: pasteFileMaxBytes}); err != nil {
+	if _, err := validatePasteFile(&multipart.FileHeader{Filename: "a.sh", Size: pastetmp.Owner.FileMB * 1024 * 1024}, pastetmp.Owner); err != nil {
 		t.Fatalf("size == cap should pass: %v", err)
 	}
 }

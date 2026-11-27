@@ -1,0 +1,121 @@
+/**
+ * 低特效档样式（P-20261125-2 S2）：`html[data-low-fx="1"]` 时生效，由设置·外观
+ * 「视觉特效：标准/减弱」或 `?__lowfx=1` 打开（设备本地偏好，见 stores/low-fx.ts）。
+ *
+ * 收口面（三种，全部逐条枚举选择器）：
+ *   1. 剩余 backdrop-filter 全去（锁屏/命令面板/项目搜索/异常信号条/glass 兜底），
+ *      透明遮罩补实底——远控/串流下「下层内容变化 → 整层重采样」是闪烁主路径，
+ *      实底让下层动画完全不可见，鼠标移动也不再驱动整层重合成；
+ *   2. 装饰性动画逐条关闭（AppLogo 轨道/脉冲、skeleton shimmer、industrial
+ *      scanline、running 状态脉冲、更新进度流动条）——skeleton/进度条只停动画，
+ *      静态块保留（加载反馈仍在）；
+ *   3. scroll-behavior 恢复 auto（只覆盖 main.css 的两处 CSS；显式传
+ *      behavior:'smooth' 的 6 处 JS 调用不被 CSS 覆盖，v1 接受残余并已在提案写明）。
+ *
+ * 明确不做的两件事：
+ *   - 不抄 `prefers-reduced-motion` 的 `*{}` 全杀：那会把 n-spin / 自绘 spinner
+ *     （App.vue .spinning、AgentTerminalMini、DshConsoleBody、commit-panel、GitPanel）
+ *     一起冻死，加载反馈消失比动画本身更伤可用性——功能性 spinner 一律保留；
+ *   - 不写 transition-duration：过渡是离场/入场语义（P-20261011-1 遮罩防御链
+ *     依赖时长与 :duration 钉成对），且 check:motion 审 transition 面，本档只管
+ *     animation 与静态外观。
+ */
+
+/* ============== 1. 剩余 backdrop-filter 去模糊 + 透明底补实底 ============== */
+
+/* 锁屏（防窥面，P-20261125-2 S1③）：模糊去掉后 overlay 必须完全不透明——六主题
+   原值 rgba(...,0.85) 在无模糊时底色内容仍可辨（防窥失效），alpha=1.0 实底是
+   「成本归零 + 隐私不降级」的唯一解；卡片 --lock-card-bg(0.95) 落在实底上仍分层 */
+html[data-low-fx="1"] .lock-overlay {
+  backdrop-filter: none;
+  background: var(--bg-canvas);
+}
+
+/* 命令面板遮罩 / 项目搜索遮罩：65% 透明底 + blur(6px) → 不透明画布底 */
+html[data-low-fx="1"] .palette-mask,
+html[data-low-fx="1"] .ps-mask {
+  backdrop-filter: none;
+  background: var(--bg-canvas);
+}
+
+/* 监控页异常分诊条：92% 面板底 + blur(6px) → 面板实底（条带内容本身不变） */
+html[data-low-fx="1"] .attn-bar {
+  backdrop-filter: none;
+  background: var(--bg-panel);
+}
+
+/* 全 NModal 遮罩（设置/分享/确认框）：S1 已默认去模糊，本档再把 0.55 半透明
+   加深到 0.8，遮罩后的终端输出/状态点动画不可见 */
+html[data-low-fx="1"] .n-modal-mask {
+  background-color: rgba(0, 0, 0, 0.8) !important;
+}
+
+/* .glass-panel 兜底：S1 默认已无 blur，显式再过一道防回归（含 BranchCapsule
+   的 .branch-panel——S1 已在组件内补 --bg-surface 实底） */
+html[data-low-fx="1"] .glass-panel {
+  backdrop-filter: none;
+}
+
+/* ============== 2. 装饰性动画逐条关闭 ============== */
+
+/* AppLogo 轨道/节点脉冲/核心辉光（AppLogo.vue:74/79/84/90/96，2s~18s 无限循环） */
+html[data-low-fx="1"] .logo-animated .logo-orbit-outer,
+html[data-low-fx="1"] .logo-animated .logo-orbit-inner,
+html[data-low-fx="1"] .logo-animated .logo-node-a,
+html[data-low-fx="1"] .logo-animated .logo-node-b,
+html[data-low-fx="1"] .logo-animated .logo-core {
+  animation: none;
+}
+
+/* 骨架屏 shimmer（main.css:301/350 两处 .skeleton）：只停流动，渐变块保留 */
+html[data-low-fx="1"] .skeleton {
+  animation: none;
+}
+
+/* industrial 终端主题的 CRT 扫描线漂移（terminal-effects.css:151，仅 strong 档） */
+html[data-low-fx="1"] .term-pane[data-effects-scanline="strong"]::before,
+html[data-low-fx="1"] .terminal-theme-card[data-effects-scanline="strong"]::before {
+  animation: none;
+}
+
+/* 状态栏版本更新绿点脉冲（StatusBar.vue:334） */
+html[data-low-fx="1"] .update-dot {
+  animation: none;
+}
+
+/* 面板 running 状态点脉冲（各面板同一语义族）：agent 侧栏项目/会话树、
+   agent 终端头/悬浮窗、监控大屏运行态、会话总览、终端 tab。待批/提问点保持
+   脉冲——那是「等你决策」的功能性提示，不在「running 点」收口面 */
+html[data-low-fx="1"] .ats-item-dot.running,
+html[data-low-fx="1"] .atv-dot.running,
+html[data-low-fx="1"] .agm-root.is-running,
+html[data-low-fx="1"] .agm-item-dot.running,
+html[data-low-fx="1"] .mon-dot.is-running,
+html[data-low-fx="1"] .so-dot-running,
+html[data-low-fx="1"] .term-tab.is-running .term-tab-status {
+  animation: none;
+}
+
+/* 更新进度：流动条动效关闭但进度仍可见——静态满条替代（宽度/位置与
+   reduced-motion 分支同口径，见 UpdateProgressBlock.vue:226 既有写法） */
+html[data-low-fx="1"] .upd-bar--indeterminate .upd-fill {
+  animation: none;
+  width: 100%;
+}
+html[data-low-fx="1"] .upd-badge-dot {
+  animation: none;
+}
+html[data-low-fx="1"] .upd-badge-bar--indeterminate .upd-badge-fill {
+  animation: none;
+  width: 100%;
+}
+
+/* ============== 3. 平滑滚动恢复 auto（只覆盖 main.css:222-230 两处 CSS） ====== */
+
+html[data-low-fx="1"] {
+  scroll-behavior: auto !important;
+}
+html[data-low-fx="1"] *[style*="overflow-y: auto"],
+html[data-low-fx="1"] *[style*="overflow-y:auto"] {
+  scroll-behavior: auto !important;
+}

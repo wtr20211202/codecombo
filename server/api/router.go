@@ -49,9 +49,10 @@ var RequireTokenAuth = mw.RequireTokenAuthMiddleware
 // dev 为可选开关（P-20261007-6）：仅影响 CSP Report-Only 的 dev 分支
 // （script-src 放行 'unsafe-eval'），既有测试/调用方无参形态语义不变。
 func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
-	// 请求关联 ID（P-20261003-216）注册在全局第一顺位：后续任何中间件
-	// abort（423/401）或 panic 恢复的响应都带 X-Request-Id（含代理路由）
-	r.Use(mw.RequestID())
+	// 请求关联 ID（P-20261003-216）由组合根装配在 gin.Logger 之后、请求时间线
+	// 记录器与 Recovery 之内（server/app/app.go 的中间件顺序注）：formatter 在
+	// c.Next() 返回后经 param.Keys 读到本中间件写入的 rid。此处不再重复注册
+	// （重复注册会让同一请求生成/校验两次 id）。
 	r.Use(mw.CORS())
 	r.Use(mw.Metrics())
 	// 安全响应头基线（P-20261002-42）+ CSP Report-Only 观察期（P-20261007-6）。
@@ -279,8 +280,20 @@ func RegisterRoutes(r *gin.Engine, dev ...bool) RouteTable {
 		// dsh-web.log + crash.log + 平台基线 + 基础运行态打成一个流式 zip
 		//（逐行脱敏、凭据路径硬拒、单飞 + 30s 冷却、每次导出入审计）；
 		// probe=1 只回体量预览。鉴权由组中间件承担（与 servicelogs 同级管理面），
-		// 采集器同时被 CLI `codecombo diagnostics` 复用
+		// 采集器同时被 CLI `codecombo diagnostics` 复用；clientReport=1 条件
+		// 关联 5 分钟会话窗内的浏览器侧报告（P-20261126-2 S2）
 		api.GET("/system/diagnostics/export", system.DiagnosticsExport)
+		// 浏览器侧诊断报告上传（P-20261126-2 P-2b）：「导出浏览器诊断」本地
+		// 下载保底后异步附带上传的 server 作用域裁剪版（entries 最新 50/无
+		// resource/无 UA），供下一次导出以 state/browser.json 入包——证据面
+		// 两面合一只带一个 zip。组中间件四件套承担鉴权；另挂 per-route
+		// RateLimit（每 IP 每分钟 30 次，clip 同款惯例）防反复点击放大；
+		// 端点内部再有 256KB MaxBytesReader + typed 白名单（未知字段拒收）+
+		// Content-Type 必须 JSON 三道闸，报告纯内存 5 分钟会话窗。UI 内部写
+		// 面非 agent 能力端点（manual_routes_test 白名单登记缘由）
+		api.POST("/system/diagnostics/client-report", mw.RateLimitMiddleware(30, func(c *gin.Context) string {
+			return c.ClientIP()
+		}), system.PostDiagnosticsClientReport)
 
 		// 本机环境体检（P-20261003-317）：聚合既有环境信号为一张只读体检单
 		//（git/git-lfs/tmux/agent 运行时/端口注册表/buildInfo/数据盘水位，

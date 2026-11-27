@@ -31,6 +31,7 @@ import (
 	"codecombo/server/api/whatsnew"
 	"codecombo/server/bindhint"
 	"codecombo/server/config"
+	"codecombo/server/diagnostics"
 	"codecombo/server/filestore"
 	"codecombo/server/git"
 	"codecombo/server/git/auth"
@@ -192,6 +193,23 @@ func Run(opts Options) {
 	defer h.Close()
 	h.CleanOldLogs()
 	slog.SetDefault(slog.New(h))
+	// 进程内时间线与停顿看门狗（P-20261124-1 S1③）：app 生命周期拉起，CLI
+	// 采集进程不启动（导出时 state/stalls.json 写 skipped）。看门狗只在内存
+	// 记环，不写盘——写盘本身可能就是它要诊断的故障。
+	diagnostics.StartWatchdog(config.DataDir())
+	defer diagnostics.StopWatchdog()
+	// 宿主时序环（P-20261124-1 S3①b）：Linux 只读 /proc 宿主面；P-20261126-3
+	// S2 起三平台全启（Windows/mac 采进程 CPU%/RSS——进程自观测跨平台）。
+	// CLI 采集进程不启动（快照本身会写 skipped）。
+	diagnostics.StartHostHistory()
+	defer diagnostics.StopHostHistory()
+	// Go 运行时趋势环（P-20261126-3 S1）：60s × 120 点（2h）的堆/协程/GC 暂停
+	// 增量趋势，纯标准库三平台一致；CLI 采集进程不启动。
+	diagnostics.StartGoRuntime()
+	defer diagnostics.StopGoRuntime()
+	// block/mutex 采样率低速率常开（P-20261126-3 S3）：不装则 deep 档案恒空；
+	// CC_DIAG_PROFILE_RATE=0 全关（装配+登记见 observability.go installDiagProfileRates）。
+	installDiagProfileRates()
 	// 主 goroutine panic 兜底（必改B 补充面，仅结构化留痕）：先落当天日志再
 	// re-panic 保留原崩溃语义（runtime 打印 + crash.log 转储 + 退出码 2）。
 	// 只护本 goroutine——其他 goroutine 的 panic 由 crash.log 兜；不逐个包
@@ -313,6 +331,11 @@ func Run(opts Options) {
 	// 与顶层页面同 scheme（schemeful 同站），dsh 的 SameSite=Strict 会话
 	// cookie 才能在 iframe 内携带
 	config.SetTLSEnabled(useTLS)
+	// 诊断包 TLS 元数据注入（P-20261124-1 S3②）：证书路径只在组合根可知
+	// （--tls-cert 覆盖 / 自签落点），api/system 经此桥读取——不重读
+	// config/env，避免两处口径漂移。只传路径：证书元数据由 tlsutil 解析证书
+	// 本身，私钥永不读取。
+	system.SetDiagnosticsTLS(certFile, useTLS, cfg.Server.Host, cfg.Server.Port)
 
 	// 第五行构建版本（P-20261122-6）：更新子进程据此确认「健康检查的应答者
 	// 就是换包后的新二进制」——launchd 形态 KeepAlive 重拉起的旧实例也回 200，
@@ -362,13 +385,23 @@ func Run(opts Options) {
 		slog.Warn("invalid server.trustedProxies — all forwarded headers are ignored",
 			"err", err, "entries", trustedProxies)
 	}
-	r.Use(gin.LoggerWithFormatter(ginLogFormatter))
+	// 中间件顺序（P-20261124-1 S1①，顺序即语义，改前先读 middleware/timeline.go）：
+	//   Recovery        最外层：任何 panic 都写 500，进程不死
+	//   RequestTimeline 时间线记录：defer 先于 Recovery 的 recover 执行，能拿到
+	//                   panic 值并记入 state/requests.json 后再 re-panic；同时
+	//                   在 gin.Logger 之外，才能看到访问日志行是否真的写出（silent）
+	//   gin.Logger      访问日志：formatter 在 c.Next() 返回后经 param.Keys 读 rid
+	//   RequestID       关联 ID：必须在 Logger 之后（formatter 需要）、业务路由之前
+	// 历史顺序 Logger→Recovery 下 panic 请求只剩 500 响应、无请求环证据面。
 	r.Use(gin.Recovery())
+	r.Use(middleware.RequestTimeline())
+	r.Use(gin.LoggerWithFormatter(ginLogFormatter))
+	r.Use(middleware.RequestID())
 
 	// TLS 启用时下发 HSTS：浏览器后续访问强制走 https（ws 已随页面协议为 wss）
 	if useTLS {
 		r.Use(func(c *gin.Context) {
-			c.Header("Strict-Transport-Security", "max-age=31536000")
+			c.Header("Strict-Transport-Security", tlsutil.HSTSHeaderValue)
 			c.Next()
 		})
 	}
@@ -393,10 +426,19 @@ func Run(opts Options) {
 			strings.Contains(path, "/files/download") ||
 			strings.Contains(path, "/files/transfer")
 		longUpload := c.Request.Method == "POST" && strings.HasPrefix(path, "/drop/")
-		if longWrite || longTransfer || longUpload {
+		// 诊断包导出（P-20261124-1 S3④）：deep 预算 30s，全局 WriteTimeout 60s
+		// 在「等 30s 采集 + 流式写出」下仍可能踩线——导出是直链不经 axios，
+		// 服务端自己豁免写超时，前端不需要改超时
+		diagExport := path == "/api/system/diagnostics/export"
+		// 粘贴上传三端点（P-20261123-6 S2 方案⑦）：owner 可调至 512MB（+访客/远程
+		// 22MB body），30s 读/60s 写全局超时必截断——读写一并清零。含主人端
+		// /terminals/paste-image、远程 /remotehosts/:id/paste-image、访客
+		// /s/{token}/paste-upload（分享子服务另域，此处主服务路由面）
+		pasteUpload := c.Request.Method == "POST" && strings.HasSuffix(path, "/paste-image")
+		if longWrite || longTransfer || longUpload || pasteUpload || diagExport {
 			rc := http.NewResponseController(c.Writer)
 			_ = rc.SetWriteDeadline(time.Time{})
-			if longTransfer || longUpload {
+			if longTransfer || longUpload || pasteUpload {
 				_ = rc.SetReadDeadline(time.Time{})
 			}
 		}
@@ -499,6 +541,11 @@ func Run(opts Options) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		WriteTimeout:      60 * time.Second,
+		// TLS 握手/连接错误走 slog（P-20261124-1 S3②）：net/http 默认把
+		// 「TLS handshake error ...」写到 stderr，systemd/launchd 下进 journal
+		// 而不进按日日志——2026-11-24 复发面里 3 天 3,953 条握手错误因此
+		// 不在诊断包可检索的日志里。接到同一个 handler 后与访问日志同文件。
+		ErrorLog: slog.NewLogLogger(h, slog.LevelWarn),
 	}
 
 	// TLS 启用：明文回环辅助监听（仅 127.0.0.1，主端口+1）——Agent 回调与
@@ -1081,8 +1128,13 @@ func (h *dailyHandler) Enabled(_ context.Context, l slog.Level) bool {
 }
 
 func (h *dailyHandler) Handle(_ context.Context, r slog.Record) error {
+	// 写盘耗时探针（P-20261124-1 S1④）：wait = 等 handler 互斥锁，write =
+	// stderr + 按日文件实际写。慢样本进 diagnostics 的内存环，导出进
+	// collection-report.logWrite——请求 duration 不含这段，2026-11-24 的
+	// 「日志 gap 但请求有完成」类疑点靠它区分「日志被阻塞」与「没请求」。
+	t0 := time.Now()
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	waited := time.Since(t0)
 
 	buf := make([]byte, 0, 256)
 	buf = append(buf, r.Time.Format("2006-01-02 15:04:05")...)
@@ -1099,13 +1151,18 @@ func (h *dailyHandler) Handle(_ context.Context, r slog.Record) error {
 	})
 
 	line := string(buf)
+	writeStart := time.Now()
 	fmt.Fprintln(os.Stderr, line)
 
 	f := h.getFile()
 	if f != nil {
 		fmt.Fprintln(f, line)
 	}
+	writeDur := time.Since(writeStart)
+	h.mu.Unlock()
 
+	// 锁外记录：探针内部还有自己的互斥锁，避免与 handler 锁嵌套
+	diagnostics.RecordLogWrite(waited, writeDur)
 	return nil
 }
 
@@ -1202,11 +1259,15 @@ func ginLogFormatter(p gin.LogFormatterParams) string {
 type slogWriter struct{ level slog.Level }
 
 func (w *slogWriter) Write(p []byte) (n int, err error) {
+	start := time.Now()
 	msg := share.RedactLogLine(strings.TrimRight(string(p), "\n\r"))
 	if w.level >= slog.LevelError {
 		slog.Error("gin", "msg", msg)
 	} else {
 		slog.Info("gin", "msg", msg)
 	}
+	// 桥接总耗时（含 handler 的 wait+write）：与 dailyHandler 的 writeMs 对比
+	// 可分离「日志 handler 内部阻塞」与「slog 自身开销」（P-20261124-1 S1④）
+	diagnostics.RecordLogBridge(time.Since(start))
 	return len(p), nil
 }

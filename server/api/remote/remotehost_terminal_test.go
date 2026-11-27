@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"codecombo/server/config"
+	"codecombo/server/pastetmp"
 	"codecombo/server/remoteterminal"
 	"codecombo/server/sshclient"
 
@@ -71,13 +72,13 @@ func TestValidateRemotePaste(t *testing.T) {
 		}
 	}
 
-	if ext, err := validateRemotePaste(newHeader(1024, "image/png")); err != nil || ext != ".png" {
+	if ext, err := validateRemotePaste(newHeader(1024, "image/png"), pastetmp.Remote); err != nil || ext != ".png" {
 		t.Errorf("valid paste should pass, got ext=%q err=%v", ext, err)
 	}
-	if _, err := validateRemotePaste(newHeader(remotePasteMaxBytes+1, "image/png")); err == nil {
+	if _, err := validateRemotePaste(newHeader(pastetmp.DefaultRemoteImageMB<<20+1, "image/png"), pastetmp.Remote); err == nil {
 		t.Error("oversize paste should be rejected")
 	}
-	if _, err := validateRemotePaste(newHeader(1024, "application/zip")); err == nil {
+	if _, err := validateRemotePaste(newHeader(1024, "application/zip"), pastetmp.Remote); err == nil {
 		t.Error("non-whitelisted content type should be rejected")
 	}
 }
@@ -89,19 +90,19 @@ func TestValidateRemotePasteFile(t *testing.T) {
 		return &multipart.FileHeader{Size: size, Filename: name}
 	}
 
-	if ext, err := validateRemotePasteFile(newFileHeader(1024, "notes.md")); err != nil || ext != ".md" {
+	if ext, err := validateRemotePasteFile(newFileHeader(1024, "notes.md"), pastetmp.Remote); err != nil || ext != ".md" {
 		t.Errorf("whitelisted ext should pass, got ext=%q err=%v", ext, err)
 	}
-	if ext, err := validateRemotePasteFile(newFileHeader(1024, "A.JPG")); err != nil || ext != ".jpg" {
+	if ext, err := validateRemotePasteFile(newFileHeader(1024, "A.JPG"), pastetmp.Remote); err != nil || ext != ".jpg" {
 		t.Errorf("uppercase ext should normalize, got ext=%q err=%v", ext, err)
 	}
-	if _, err := validateRemotePasteFile(newFileHeader(remotePasteFileMaxBytes+1, "a.zip")); err == nil {
+	if _, err := validateRemotePasteFile(newFileHeader(pastetmp.DefaultRemoteFileMB<<20+1, "a.zip"), pastetmp.Remote); err == nil {
 		t.Error("oversize file should be rejected")
 	}
-	if _, err := validateRemotePasteFile(newFileHeader(1024, "evil.exe")); err == nil {
+	if _, err := validateRemotePasteFile(newFileHeader(1024, "evil.exe"), pastetmp.Remote); err == nil {
 		t.Error("non-whitelisted ext should be rejected")
 	}
-	if _, err := validateRemotePasteFile(newFileHeader(1024, "Makefile")); err == nil {
+	if _, err := validateRemotePasteFile(newFileHeader(1024, "Makefile"), pastetmp.Remote); err == nil {
 		t.Error("extensionless file should be rejected in v1")
 	}
 }

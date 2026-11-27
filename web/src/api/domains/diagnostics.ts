@@ -10,6 +10,7 @@
 import type { AxiosRequestConfig } from 'axios'
 import api from '../http'
 import { instanceApiBase } from '../../utils/directDownload'
+import type { ServerClientReportPayload } from '../../utils/browserDiagnostics'
 
 /** manifest 条目状态（与 server/diagnostics 的 Status 常量一一对应） */
 export type DiagnosticsEntryStatus = 'present' | 'truncated' | 'absent' | 'derived' | 'omitted' | 'denied'
@@ -59,6 +60,19 @@ export interface DiagnosticsExportParams {
   days?: number
   /** 敏感值遮蔽，缺省开；false = 取证对账档（服务端 mask=0） */
   mask?: boolean
+  /**
+   * 深度诊断（P-20261124-1）：服务端预算 20s → 30s，追加 self-probe、
+   * TLS 全窗扫描、dmesg 等 deep-only 探针（`?deep=1`）
+   */
+  deep?: boolean
+  /**
+   * 浏览器侧报告附带（P-20261126-2 S2 / P-20261127-1 修订）：点「导出诊断包」
+   * 时前端**恒先**自动 POST 一份最新裁剪快照，POST 成功才置 true——失败/超时
+   * 不带参数照常下载（纯服务端包，不阻断）。参数不在场服务端不产生
+   * state/browser.json 条目（防 manifest 恒注 absent 稀释缺席证据语义）。
+   * 经 /proxy 的远程实例 cookie Path 不匹配天然退化为 absent（fail-closed）
+   */
+  clientReport?: boolean
 }
 
 export const diagnosticsApi = {
@@ -70,7 +84,20 @@ export const diagnosticsApi = {
     const q = new URLSearchParams()
     if (params?.days && params.days > 0) q.set('days', String(params.days))
     if (params?.mask === false) q.set('mask', '0')
+    if (params?.deep) q.set('deep', '1')
+    // 条件携带只表达「带参数」意图：true→clientReport=1，缺省不带参数
+    if (params?.clientReport) q.set('clientReport', '1')
     const qs = q.toString()
     return `${instanceApiBase()}/system/diagnostics/export${qs ? `?${qs}` : ''}`
   },
+  /**
+   * 浏览器侧诊断报告上传（P-20261126-2 P-2b / P-20261127-1 修订）：调用点
+   * ①「导出浏览器诊断」本地下载保底后异步附带；②「导出诊断包」直链前恒先
+   * 同步附带（成功才带 clientReport=1）——均为显式点击触发，零自动后台申报。
+   * 服务端 typed 白名单收口后进 5 分钟会话窗内存（纯内存、重启即清）。载荷 =
+   * server 作用域裁剪版（buildServerClientReport），**不要**直接送本地全量
+   * payload。失败不阻断（silent + 3s 超时由调用点给）
+   */
+  postClientReport: (payload: ServerClientReportPayload, config?: AxiosRequestConfig) =>
+    api.post('/system/diagnostics/client-report', payload, config) as unknown as Promise<{ data?: { ok?: boolean } }>,
 }

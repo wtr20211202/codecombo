@@ -53,9 +53,22 @@ type ProbeLimits struct {
 
 // probeDerivedFiles 派生文件清单（固定，探针不生成也不计字节）
 var probeDerivedFiles = []string{
-	"README.txt", "manifest.json", "logs-summary.txt", "errors.txt", "platform.txt",
+	"README.txt", "manifest.json", "logs-summary.txt", "slow-requests.txt", "stalls.txt",
+	"errors.txt", "dsh-summary.txt", "platform.txt", "tls-summary.txt",
 	"state/runtime.json", "state/selfcheck.json", "state/update-status.json",
-	"state/data-dir-inventory.txt", "state/storage.json",
+	"state/data-dir-inventory.txt", "state/storage.json", "state/large-files.json",
+	"state/requests.json", "state/stalls.json", "state/host.json", "state/host-history.json",
+	"state/net.json", "state/tls.json", "state/share-health.json", "state/self-probe.json",
+	"state/collection-report.json",
+	// P-20261126-3：Go 运行时快照+趋势环 / 路由级热点聚合 / deep 档 pprof 档案。
+	// profiles/* 仅 deep 导出存在（cpu 另需显式 &cpu=1；shallow 一张档案都没有）；
+	// P-20261126-2：浏览器侧报告是条件性条目（导出请求携带 ?clientReport=1 且
+	// 5 分钟会话窗内有报告才入包——前端点导出时自动 POST，P-20261127-1），
+	// 缺席缘由见 manifest 的 reason 字段
+	"state/browser.json",
+	// goroutine 栈按停顿事件动态出现（state/goroutine-stalls-NN.txt），不列固定项
+	"state/goruntime.json", "state/routes.json",
+	"profiles/heap", "profiles/goroutine", "profiles/block", "profiles/mutex",
 }
 
 // Probe 轻量体量预览（stat + 截断决策；不读日志内容、不起子进程）
@@ -98,5 +111,17 @@ func Probe(opts Options) (*ProbeReport, error) {
 	}
 	rep.Totals.ZipUpperBoundBytes = rep.Totals.IncludedBytes
 	rep.Notes = dedupeNotes(notes)
+	// profiles/* 的 deep-only 语义（P-20261126-3 S3）：probe 与实包对账时不要把
+	// 四个档案当 shallow 也有的固定项
+	if opts.Deep {
+		rep.Notes = append(rep.Notes, "deep: profiles/{heap,goroutine,block,mutex} will be packed (cpu also requires &cpu=1); oversized binary profiles are dropped WHOLE, not truncated")
+	} else {
+		rep.Notes = append(rep.Notes, "shallow: no profiles/* entries — they are deep-only (cpu also requires &cpu=1)")
+	}
+	// 条件性条目注记（P-20261126-2 B5；P-20261127-1 措辞同步——前端点导出时自动
+	// POST，不再要求「先点导出浏览器诊断」）：探针不携带 cookie 上下文，browser.json
+	// 是否真入包由导出请求的 ?clientReport=1 参数 + 会话窗决定——这里只声明条件性，
+	// 让 reader 不把「derivedFiles 里有它」误读成「包里必有」
+	rep.Notes = append(rep.Notes, "state/browser.json is a CONDITIONAL derived entry: packed only when the export request carries ?clientReport=1 (the web UI POSTs a fresh browser snapshot automatically on export click) and a report is present in the 5-minute session window (absence reason lives in the manifest)")
 	return rep, nil
 }

@@ -16,6 +16,7 @@ import { gitHintToastAction, type GitHintAction } from '@/utils/gitFailHint'
 import { openSettingsTab } from '@/utils/openSettings'
 import { shouldShowToast } from '@/utils/toastDedupe'
 import { applyLockRejection, getUnlockToken } from '@/stores/lock'
+import { diagErrorClassOf, newClientRequestId } from '@/utils/diagSanitize'
 import i18n from '@/i18n'
 
 // 不走代理的路径前缀（始终发往本机后端）。/system/network 是二维码接力
@@ -74,6 +75,12 @@ const inflightGets = new Map<string, Promise<AxiosResponse>>()
 declare module 'axios' {
   export interface AxiosRequestConfig {
     skipInflightDedupe?: boolean
+    // 浏览器诊断元数据（P-20261124-2 S1a①）：请求拦截器在发出前写入，响应
+    // 拦截器读取换算 durationMs/startedAt。requestId 同时是 X-Request-Id 头的
+    // 客户端生成值（服务端 middleware.RequestID 校验 8~64 [A-Za-z0-9_-] 后沿用）
+    startedAtWall?: number
+    startedAtMono?: number
+    requestId?: string
   }
 }
 
@@ -213,6 +220,45 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// 请求拦截器：浏览器诊断元数据（P-20261124-2 S1a①）——记录开始时刻 + 客户端
+// 请求关联 id，并在未显式设置时写 X-Request-Id 头。服务端 middleware.RequestID
+// 对合法的上游 id（8~64 位 [A-Za-z0-9_-]）原样沿用并回执响应头，故浏览器与服务端
+// 日志能按同一 rid 对齐；响应头侧只作校验（网络层失败没有响应头时回落到本值）。
+// 不新建诊断 HTTP 环：这些字段只挂在既有请求上，错误仍由下方响应拦截器统一入账。
+api.interceptors.request.use((config) => {
+  config.startedAtWall = Date.now()
+  if (typeof performance !== 'undefined') config.startedAtMono = performance.now()
+  // headers 正常恒为 AxiosHeaders（axios 派发前归一），但 mock 型调用方可能给
+  // 纯对象甚至缺省——缺容器时只写 config.requestId（网络失败回落 rid 仍可用），
+  // 绝不因诊断元数据让请求本身失败（健壮性红线）
+  const headers = config.headers
+  const explicit = headers
+    ? (typeof headers.get === 'function' ? headers.get('X-Request-Id') : headers['X-Request-Id'])
+    : undefined
+  const rid = typeof explicit === 'string' && explicit !== ''
+    ? explicit
+    : (config.requestId || newClientRequestId())
+  config.requestId = rid
+  if (headers && !explicit) {
+    if (typeof headers.set === 'function') headers.set('X-Request-Id', rid)
+    else headers['X-Request-Id'] = rid
+  }
+  return config
+})
+
+// 请求耗时（诊断投影用）：优先单调钟（performance.now 不受系统时间跳变影响），
+// 缺省墙钟差；旧调用方/测试直调拦截器未带元数据时返回 undefined（不猜 0）
+function requestElapsedMs(config: InternalAxiosRequestConfig | undefined): number | undefined {
+  if (!config) return undefined
+  if (typeof config.startedAtMono === 'number' && typeof performance !== 'undefined') {
+    return Math.max(0, Math.round(performance.now() - config.startedAtMono))
+  }
+  if (typeof config.startedAtWall === 'number') {
+    return Math.max(0, Date.now() - config.startedAtWall)
+  }
+  return undefined
+}
+
 // 423 锁定响应统一处理（axios 拦截器与其他直连通道共用）：
 // 真锁定 → 清 unlock token + 切 lock store 锁定态；预期 Revoke / stale 竞态 → 不动状态。
 // 返回 true 表示真锁定（已处理），false 表示无需处理（调用方按各自通道静默拒绝即可）。
@@ -302,9 +348,17 @@ api.interceptors.response.use(
 
     // 请求关联 ID（P-20261003-216）：后端 X-Request-Id 响应头入错误元数据，
     // 与服务端日志的 rid= 字段精确对齐（跨面排障免时间猜测）；
-    // 无响应（网络层失败）或路由拦截的 fulfill 响应头缺省，不展示
+    // 无响应（网络层失败）或路由拦截的 fulfill 响应头缺省，不展示。
+    // P-20261124-2：客户端已在请求拦截器生成同源 rid（服务端合法上游 id 原样
+    // 沿用），响应头缺省时回落到客户端值——网络层失败不再丢失关联键
     const ridHeader = error.response?.headers?.['x-request-id']
-    const requestId = typeof ridHeader === 'string' && ridHeader !== '' ? ridHeader : undefined
+    const requestId = (typeof ridHeader === 'string' && ridHeader !== '' ? ridHeader : undefined)
+      ?? (error.config?.requestId || undefined)
+    // 浏览器诊断分类（P-20261124-2 S1a③）：六值固定；timedOut 独立于 offline
+    // 判定（离线时仍如实标注是否撞到浏览器等待上限）
+    const errorClass = diagErrorClassOf(error)
+    const timedOut = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+    const durationMs = requestElapsedMs(error.config)
 
     // rawMessage：优先后端原文，无 response 时用 i18n 兜底
     const rawMessage = backendError
@@ -324,6 +378,11 @@ api.interceptors.response.use(
       // 网络条目截走、丢掉「伴随资产 + 逃生门」语境。真缺失（release provides
       // no checksum/signature）不在此列，保持原文
       [/companion asset fetch failed: (.+?); retry or set/i, 'errors.known.updateCompanionFetchFailed', m => ({ reason: m[1] })],
+      // 粘贴上传超限（P-20261123-5）：owner 100MB/file + 20MB/image、share/remote
+      // 20MB+10MB——内层错误统一「file too large: X MB (max Y MB)」稳定形态
+      //（pastetmp.MBText 生成，改口径须两侧同步），捕获组给当前值
+      [/file too large: ([\d.]+) MB \(max ([\d.]+) MB\)/i, 'terminal.pasteFile.tooLarge', m => ({ size: m[1], max: m[2] })],
+      [/image too large: ([\d.]+) MB \(max ([\d.]+) MB\)/i, 'terminal.pasteFile.tooLargeImage', m => ({ size: m[1], max: m[2] })],
       // SSH 主机密钥 TOFU 变更拒绝（P-20261003-34，服务端稳定标记 hostKeyChangedMarker）
       [/host key has changed/i, 'errors.known.hostKeyChanged'],
       [/auth rejected by remote server|unable to authenticate|authentication failed/i, 'errors.known.authFailed'],
@@ -572,6 +631,15 @@ api.interceptors.response.use(
         // 结构化错误码（P-305 响应体 {error, code}；P-20261005-153）：详情面板
         // 徽标透出，用户报障可引用
         code: errorCode,
+        // 诊断投影（P-20261124-2 S1a）：分类/耗时/开始时刻/silent/浏览器等待上限
+        errorClass,
+        durationMs,
+        startedAt: typeof error.config?.startedAtWall === 'number'
+          ? new Date(error.config.startedAtWall).toISOString()
+          : undefined,
+        silent: error.config?.silent ? true : undefined,
+        clientTimeoutMs: typeof error.config?.timeout === 'number' ? error.config.timeout : undefined,
+        timedOut,
       })
     }
 

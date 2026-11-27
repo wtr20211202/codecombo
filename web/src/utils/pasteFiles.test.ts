@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  extractPasteFiles, isAllowedPasteFileExt, PASTE_FILE_MAX_COUNT,
-  pasteUploadKind, quotePastePathIfNeeded, readImageFromClipboard,
+  extractPasteFiles, isAllowedPasteFileExt, isPasteFileTooLarge,
+  PASTE_FILE_MAX_COUNT, PASTE_OWNER_FILE_MAX_BYTES, PASTE_OWNER_IMAGE_MAX_BYTES,
+  PASTE_SHARE_REMOTE_FILE_MAX_BYTES, PASTE_SHARE_REMOTE_IMAGE_MAX_BYTES,
+  pasteMbText, pasteUploadKind, quotePastePathIfNeeded, readImageFromClipboard,
   screenshotFileName, supportsClipboardRead,
 } from './pasteFiles'
 
@@ -155,5 +157,28 @@ describe('终端文件粘贴（P-20261024-2 纯函数）', () => {
 
   it('PASTE_FILE_MAX_COUNT 与提案口径一致（=5）', () => {
     expect(PASTE_FILE_MAX_COUNT).toBe(5)
+  })
+
+  // 上传预检限额对账（P-20261123-5）：与 server/pastetmp Limits 三端口径一致
+  //（owner 100/20 提额、share/remote 20/10 维持，MiB 整数）；预检只是即时反馈，
+  // 判定最终权威在服务端
+  it('预检阈值与 server pastetmp.Limits 三端一致（MiB 精确）', () => {
+    const mib = 1024 * 1024
+    expect(PASTE_OWNER_FILE_MAX_BYTES).toBe(100 * mib)
+    expect(PASTE_OWNER_IMAGE_MAX_BYTES).toBe(20 * mib)
+    expect(PASTE_SHARE_REMOTE_FILE_MAX_BYTES).toBe(20 * mib)
+    expect(PASTE_SHARE_REMOTE_IMAGE_MAX_BYTES).toBe(10 * mib)
+  })
+
+  it('isPasteFileTooLarge：严格大于语义（与服务端 header.Size > max 同口径——边界一致防两端分叉）', () => {
+    expect(isPasteFileTooLarge(PASTE_OWNER_FILE_MAX_BYTES, PASTE_OWNER_FILE_MAX_BYTES)).toBe(false)
+    expect(isPasteFileTooLarge(PASTE_OWNER_FILE_MAX_BYTES + 1, PASTE_OWNER_FILE_MAX_BYTES)).toBe(true)
+    expect(isPasteFileTooLarge(0, PASTE_OWNER_FILE_MAX_BYTES)).toBe(false)
+  })
+
+  it('pasteMbText：一位小数形态（与服务端 pastetmp.MBText 同形——KNOWN_ERROR_I18N 正则匹配面）', () => {
+    expect(pasteMbText(100 * 1024 * 1024)).toBe('100.0')
+    expect(pasteMbText(26528819)).toBe('25.3')
+    expect(pasteMbText(512 * 1024)).toBe('0.5')
   })
 })

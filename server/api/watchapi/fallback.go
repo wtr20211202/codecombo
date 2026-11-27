@@ -31,6 +31,9 @@ type Control interface {
 	FallbackStatus() (bool, string, time.Time)
 	// SetFallback 开关降级；nil = 翻转，返回开关后的状态
 	SetFallback(enable *bool) (bool, string, time.Time)
+	// WatcherStats 监听运行统计（P-20261124-1 S1⑥b）：watch 包返回其
+	// WatcherStats 值（any：api 层不 import watch，诊断包只按 JSON 消费）
+	WatcherStats() any
 }
 
 // control 组合根注入点（启动期一次写、请求期只读，mutex 只为测试可复位）；
@@ -52,6 +55,20 @@ func loadControl() Control {
 	controlMu.RLock()
 	defer controlMu.RUnlock()
 	return control
+}
+
+// WatcherStats 监听统计快照（P-20261124-1 S1⑥b，诊断包 runtime.watcher 段）：
+// 未装配（CLI/单测/纯 api 进程）返回带 skipped 的 map，调用方不需要另判
+// nil——「没装配」与「装配了但没 Start」在诊断包里区分得开
+func WatcherStats() any {
+	if ctl := loadControl(); ctl != nil {
+		return ctl.WatcherStats()
+	}
+	return map[string]any{
+		"status": "skipped",
+		"reason": "watch module not assembled in this process",
+		"note":   "counts/classes only — no watched paths and no raw error text are recorded",
+	}
 }
 
 func statusOf(enabled bool, source string, since time.Time) Status {

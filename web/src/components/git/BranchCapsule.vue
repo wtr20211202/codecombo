@@ -365,6 +365,11 @@ defineExpose({ refresh: fetchBranches })
   left: 0;
   width: 320px;
   max-height: 420px;
+  /* P-20261125-2 S1：.glass-panel 默认去掉 backdrop-filter 后，本面板是 12 个
+     消费点里唯一真依赖模糊透底的一处（其余 11 个自带不透明 --bg-surface）——
+     补实底保持「浮层不透明可读」原观感。用 --bg-surface 而非 --bg-panel：
+     后者是面板灰底（light #f6f8fa），与玻璃拟态原色（白）有明显色差 */
+  background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-strong);

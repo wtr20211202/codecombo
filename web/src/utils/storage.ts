@@ -66,6 +66,12 @@ export const safeStorage = {
     memory.delete(key)
   },
 
+  /** sessionStorage 是否真实可用（属性访问不抛）。区分「写失败」与「静默落
+   *  内存兜底」用——后者跨刷新不留存，调用方（浏览器诊断快照）需如实标记 */
+  sessionAvailable(): boolean {
+    return safeSession() !== null
+  },
+
   /** 读 sessionStorage；不可用/未设置返回 null */
   sessionGet(key: string): string | null {
     const s = safeSession()

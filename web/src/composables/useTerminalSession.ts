@@ -32,6 +32,7 @@ import {
   createWriteStormTracker,
 } from './terminalWriteBackpressure'
 import { maybeToastTerminalReject } from './terminalRejectFrames'
+import { recordWsLifecycle } from '../utils/wsLifecycle'
 
 // OSC 133 帧处理纯函数、addon 装配与快捷键接线已按区块拆出
 // （P-20261002-27 巨型组件拆分第二批：terminalOscFrames / useTerminalAddons /
@@ -708,10 +709,11 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
             : Promise.resolve(sharedEncoder.encode(event.data)),
         )
       }
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         // 链路死亡：簿记暂停（诚实边界，重挂 connect 恢复）。headless 期不做
         // 自动重连——无 term 可渲染，重连重放无从落地；驱逐态的断线在重见时
         // 由 connect 统一重建（重连守卫：inst 已不在 Map，onclose 早退不调度）
+        recordWsLifecycle(ws.url, ev.code, ev.reason, ev.wasClean, 0, 0, ev.code === 1005)
         headless = false
         evictedWs = null
       }
@@ -1121,7 +1123,9 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
     fit: FitAddon,
     isReconnect: boolean,
   ): void {
+    let openedAt = 0
     wsConn.onopen = () => {
+      openedAt = Date.now()
       connecting.value = false
       // 连接成功即撤销失败态：宿主触发的重连（实例切换/解锁兜底）成功后，
       // 旧 onclose 竞态写入的 failed 残留浮层须随之消失
@@ -1212,6 +1216,9 @@ export function useTerminalSession(params: UseTerminalSessionParams) {
       enqueueWriteMessage(dataPromise)
     }
     wsConn.onclose = (ev) => {
+      // WS 生命周期入环（P-20261124-2 S1a④）：主动关闭 = 实例已摘/已停止重连/1005
+      const owner = termInstances.get(sessionId)
+      recordWsLifecycle(wsConn.url, ev.code, ev.reason, ev.wasClean, openedAt, owner?.reconnectAttempts ?? 0, !owner || owner.ws !== wsConn || owner.reconnectAttempts > MAX_RECONNECT_ATTEMPTS || ev.code === 1005)
       // 本连接字节流终止：延迟队列一并作废（P-20261004-46）。须在孤儿检查之前——
       // 接管场景（本会话被后挂接 pane 抢走，Map 已登记接管者的 ws）旧连接 close
       // 时孤儿检查会早退，不清队则旧 pane 重见时把陈旧积压帧写进接管者的现役

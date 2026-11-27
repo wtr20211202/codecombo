@@ -246,9 +246,21 @@ test.describe('全屏遮罩过渡防御与闪烁自诊断', () => {
     const page = await ctx.newPage()
     await installOverlayTraceRecorder(page)
     try {
+      // boot 遮罩的存在期只到 checkStatus 首次探测完成（isReady→true 即离场
+      // 0.1s 后摘除）。`toHaveCount(0)` 在「遮罩尚未插入」时也立即通过：热缓存/
+      // 移动模拟下应用 mount 晚于首个计数（实测 Pixel 7 模拟 11/12 次空过），
+      // 随后读到的 trace 恒空——用例假红。延迟 lock/state 响应把遮罩可观测窗口
+      // 拉到 mount 之后（隔离实例本机 API 亚毫秒级，正常时窗口只有几十 ms），
+      // 断言面本身不变（真实 DOM 类 + computed 时长）
+      await page.route('**/api/lock/state', async (route) => {
+        await new Promise(resolve => setTimeout(resolve, 600))
+        await route.continue()
+      })
       await page.goto('/?__debug-flicker=1')
       const coarse = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches)
       test.skip(!coarse, '当前 Chromium 移动模拟未翻转 pointer:coarse（环境边界），样式表规则断言已另行覆盖')
+      // 先等遮罩真实插入再等离场：确保离场过渡一定发生在观测窗内
+      await expect(page.locator(BOOT_OVERLAY)).toHaveCount(1, { timeout: 15000 })
       await expect(page.locator(BOOT_OVERLAY)).toHaveCount(0, { timeout: 15000 })
       const trace = await page.evaluate(() => (window as unknown as { __overlayTrace: OverlayLeaveSnapshot[] }).__overlayTrace)
       expect(trace, '快照记录器已注入（addInitScript 生效）').toBeDefined()

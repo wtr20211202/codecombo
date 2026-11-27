@@ -110,6 +110,27 @@ export async function readImageFromClipboard(): Promise<ClipboardImageResult> {
  *  请求上传一个 file），单次总量闸只在前端——本值即真实闸 */
 export const PASTE_FILE_MAX_COUNT = 5
 
+/** 按上下文的粘贴上传限额（P-20261123-5）：与 server/pastetmp Limits 三端对账
+ *  （owner 100/20、share/remote 20/10）。前端只是预检（免得到服务端 413 才知道），
+ *  判定最终权威在服务端——对账由 pastetmp 单测与本文件单测双锚定。
+ *  MB→字节换算集中此处，TerminalPane prop 传字节数 */
+export const PASTE_OWNER_FILE_MAX_BYTES = 100 * 1024 * 1024
+export const PASTE_OWNER_IMAGE_MAX_BYTES = 20 * 1024 * 1024
+export const PASTE_SHARE_REMOTE_FILE_MAX_BYTES = 20 * 1024 * 1024
+export const PASTE_SHARE_REMOTE_IMAGE_MAX_BYTES = 10 * 1024 * 1024
+
+/** MB 文案（预检 toast/日志用）：一位小数，与服务端 pastetmp.MBText 同形态 */
+export function pasteMbText(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1)
+}
+
+/** 单文件预检（P-20261123-5 方案④）：超上限返回 true。image/file 分型由调用方
+ *  传入对应上限——**图片必须在压缩后再判**（大 PNG 经 canvas 重采样后可能落回
+ *  限内，先判会误拒），调用方见 useTerminalClipboard */
+export function isPasteFileTooLarge(bytes: number, maxBytes: number): boolean {
+  return bytes > maxBytes
+}
+
 /** 终端文件粘贴白名单（与 server/api/terminal/terminal_paste_image.go
  *  pasteFileAllowedExts 及 server/api/remote/remotehost_terminal.go
  *  remotePasteFileExt 三处对账）。前端白名单只是预筛——为的是「不支持类型」

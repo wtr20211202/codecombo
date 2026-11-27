@@ -6,7 +6,8 @@ import { useClipboardHistoryStore } from '../stores/clipboardHistory'
 import { notifyUserPrefsDirty } from '../stores/userPrefsLink'
 import { compressPasteImage } from '../utils/pasteImageCompress'
 import { buildTerminalCodeBlock } from '../utils/terminalCodeBlock'
-import { extractPasteFiles, PASTE_FILE_MAX_COUNT, pasteUploadKind, quotePastePathIfNeeded } from '../utils/pasteFiles'
+import { extractPasteFiles, PASTE_FILE_MAX_COUNT, pasteUploadKind, quotePastePathIfNeeded, isPasteFileTooLarge, pasteMbText } from '../utils/pasteFiles'
+import { getPasteLimits, loadPasteLimits, type PasteLimitEntry } from './pasteLimits'
 import type { TermInstance } from './useTerminalInstances'
 import { getLastCommandOutputRecord, getCommandOutputPromptClamp, reanchorCommandStart } from './useTerminalSession'
 import { extractBufferLines } from './terminalCommandMarks'
@@ -73,8 +74,19 @@ export interface UseTerminalClipboardParams {
   termInstances: Map<string, TermInstance>
   // 粘贴上传策略（必传）：返回贴入终端的路径文本，null=上传未成功。
   // kind=image 截图压缩链 / kind=file 白名单文件链（P-20261024-2）——项目终端
-  // 由 TerminalPane 的 uploadPaste prop 透传项目端点实现，远程终端传各自实现
+  // 由 TerminalPane 的 uploadPaste prop 透传项目端点实现，远程终端传各自实现。
+  // maxFileBytes/maxImageBytes 按上下文传入（P-20261123-5：项目终端 owner 100/20、
+  // 远程终端 20/10）——预检 + toast 用；0/undefined = 不预检（服务端仍是最终权威）
   uploadPaste: (file: File, kind: 'image' | 'file') => Promise<string | null>
+  /** 可选覆盖：本上下文的 file/image 上限（字节）——优先于全局生效值单例
+   *  （P-6 S2：单例=服务端生效值现读；props 留作测试/特殊宿主覆盖） */
+  maxFileBytes?: number
+  maxImageBytes?: number
+  /** 本宿主的端别（P-6 S2）：owner=项目终端（100MB 默认）、remote=远程终端
+   *  （20MB 默认）；share 走访客页不走本链 */
+  limitKind?: 'owner' | 'remote' | 'share'
+  /** 本宿主是否已传 uploadPaste 的端别——预检生效值解析入口 */
+  _limitsResolved?: never
 }
 
 // 写入剪贴板的统一封装：navigator.clipboard 在非安全上下文（HTTP 非 localhost）下不可用，
@@ -287,6 +299,23 @@ export function useTerminalClipboard(params: UseTerminalClipboardParams) {
     inst.term.focus()
   }
 
+  // 当前上下文生效限额（字节）：props 显式覆盖 > 全局单例按端别取 > null 不预检。
+  // 单例未拉到时惰性触发 load（不 await——本轮不预检由服务端兜底，下轮生效）
+  function resolveMaxBytes(kind: 'image' | 'file'): number | null {
+    if (kind === 'image' ? params.maxImageBytes : params.maxFileBytes) {
+      return (kind === 'image' ? params.maxImageBytes : params.maxFileBytes) || null
+    }
+    const data = getPasteLimits()
+    if (!data) {
+      void loadPasteLimits().catch(() => {})
+      return null
+    }
+    const entry: PasteLimitEntry | undefined =
+      params.limitKind === 'remote' ? data.remote : params.limitKind === 'share' ? data.share : data.owner
+    if (!entry) return null
+    return (kind === 'image' ? entry.imageMB : entry.fileMB) * 1024 * 1024
+  }
+
   // 尝试从剪贴板粘贴截图：成功返回 true（已上传 + applyPaste 路径），无图片返回 false。
   // 供右键粘贴链与 Ctrl+V 无文件时的截图兜底共用；navigator.clipboard.read() 取
   // image/* blob（OS 复制的「文件」不在 read() 暴露面内——那类走 attachNativePaste
@@ -305,6 +334,13 @@ export function useTerminalClipboard(params: UseTerminalClipboardParams) {
           // 无需压缩或任一步失败时原样返回，粘贴链路零风险
           const file = await compressPasteImage(new File([blob], `pasted.${ext}`, { type: imgType }))
           debug('after compress, size=', file.size, 'type=', file.type)
+          // 压缩后预检（P-20261123-5 方案④：图片先压缩再判，大 PNG 重采样后可能
+          // 落回限内——先判会误拒）；超限 toast 并跳过本项
+          const maxImg = resolveMaxBytes('image')
+          if (maxImg && isPasteFileTooLarge(file.size, maxImg)) {
+            message.warning(t('terminal.pasteFile.precheckTooLarge', { name: file.name, max: pasteMbText(maxImg) }))
+            return true // 已给出可读反馈，不再走 text 路径重复提示
+          }
           try {
             const path = await params.uploadPaste(file, 'image')
             if (path) {
@@ -347,6 +383,13 @@ export function useTerminalClipboard(params: UseTerminalClipboardParams) {
         }
         try {
           const payload = kind === 'image' ? await compressPasteImage(file) : file
+          // 压缩后预检（P-20261123-5 方案④）：image 形态压缩后判、file 形态原样判；
+          // 上限按形态取对应参数，超限 toast 跳过不阻断同批其余文件
+          const maxBytes = resolveMaxBytes(kind)
+          if (maxBytes && isPasteFileTooLarge(payload.size, maxBytes)) {
+            message.warning(t('terminal.pasteFile.precheckTooLarge', { name: file.name, max: pasteMbText(maxBytes) }))
+            continue
+          }
           const path = await params.uploadPaste(payload, kind)
           if (path) {
             paths.push(quotePastePathIfNeeded(path))

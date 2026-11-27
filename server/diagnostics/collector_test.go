@@ -73,6 +73,11 @@ func TestPlanAndWriteZip(t *testing.T) {
 		"state/runtime.json", "state/selfcheck.json", "state/update-status.json",
 		"state/data-dir-inventory.txt", "state/storage.json", "state/update-result.json", "state/pid.txt",
 		"logs/dsh-web.log", "logs/update.log", "logs/extra.log",
+		// v2 取证面（P-20261124-1）：派生文件恒在包（内容按环境写 ok/skipped）
+		"slow-requests.txt", "stalls.txt", "dsh-summary.txt", "tls-summary.txt",
+		"state/requests.json", "state/stalls.json", "state/host.json", "state/host-history.json",
+		"state/net.json", "state/tls.json", "state/share-health.json", "state/self-probe.json",
+		"state/large-files.json", "state/collection-report.json",
 	} {
 		e, ok := byName[want]
 		if !ok {

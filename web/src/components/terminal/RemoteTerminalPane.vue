@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import TerminalPane from './TerminalPane.vue'
+import { PASTE_SHARE_REMOTE_FILE_MAX_BYTES, PASTE_SHARE_REMOTE_IMAGE_MAX_BYTES } from '../../utils/pasteFiles'
 import { getRemoteTerminalWsUrl, remoteHostApi } from '../../api/client'
 import { createRemoteInputHistoryCollector } from '../../composables/useRemoteInputHistory'
 import { useI18n } from '../../composables/useI18n'
@@ -167,6 +168,9 @@ defineExpose({
       :ws-url-factory="getRemoteTerminalWsUrl"
       :resize-call="resizeCall"
       :upload-paste="uploadPaste"
+      :paste-max-file-bytes="PASTE_SHARE_REMOTE_FILE_MAX_BYTES"
+      :paste-max-image-bytes="PASTE_SHARE_REMOTE_IMAGE_MAX_BYTES"
+      :paste-limit-kind="'remote'"
       :active="props.active !== false"
       :ended="props.ended"
       :redraw-call="redrawCall"

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { deployApi, type DeployTask, type DeployerInstance } from '../api/client'
 import { getUnlockToken } from './lock'
+import { recordWsLifecycle } from '../utils/wsLifecycle'
 
 export interface DeployLogEntry {
   time: string
@@ -54,6 +55,8 @@ export const useDeployTaskStore = defineStore('deployTask', () => {
   // 超限后进度面板保持已有内容，任务结束态由通知中心兜底
   let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
   let wsReconnectAttempts = 0
+  // 诊断用 onopen 时刻（P-20261124-2 S1a④）：close 时算连接存活时长
+  let wsOpenedAt = 0
   const MAX_WS_RECONNECTS = 5
 
   function scheduleWsReconnect(taskId: string) {
@@ -123,9 +126,14 @@ export const useDeployTaskStore = defineStore('deployTask', () => {
     const url = `${proto}//${location.host}/ws/deploy/${taskId}`
     const ws = new WebSocket(url, unlockToken ? [unlockToken] : undefined)
     wsConnection.value = ws
+    wsOpenedAt = 0
 
-    ws.onopen = () => { connected.value = true; wsReconnectAttempts = 0 }
-    ws.onclose = () => {
+    ws.onopen = () => { connected.value = true; wsOpenedAt = Date.now(); wsReconnectAttempts = 0 }
+    ws.onclose = (ev) => {
+      // WS 生命周期入环（P-20261124-2 S1a④）：补 ev 参数（原实现无参，close
+      // code/reason 完全丢失）；孤儿/主动 close（handleDone/reset/换连接）按
+      // wsConnection 已摘除判 intentional
+      recordWsLifecycle(url, ev.code, ev.reason, ev.wasClean, wsOpenedAt, wsReconnectAttempts, wsConnection.value !== ws)
       connected.value = false
       // 孤儿 socket 守卫：被 done/reset/重连替换的旧连接不触发重连
       if (wsConnection.value !== ws) return

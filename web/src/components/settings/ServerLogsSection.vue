@@ -12,7 +12,7 @@
 // 交互：先 probe（体量预览）再直链下载——失败就地提示可重试，成功即浏览器
 // 原生下载（不经 blob，见 utils/directDownload 的判词）。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NEmpty, NInput, NSelect, useMessage } from 'naive-ui'
+import { NButton, NCheckbox, NEmpty, NInput, NSelect, useMessage } from 'naive-ui'
 import { CopyOutline, DownloadOutline, RefreshOutline, TerminalOutline } from '@vicons/ionicons5'
 import { useI18n } from '../../composables/useI18n'
 import { useAgentFix } from '../../composables/useAgentFix'
@@ -21,6 +21,11 @@ import { formatBytes } from '../../utils/bytes'
 import { triggerDirectDownload } from '../../utils/directDownload'
 import { serverLogApi, type ServerLogTail } from '../../api/domains/system'
 import { diagnosticsApi, type DiagnosticsProbe } from '../../api/domains/diagnostics'
+import {
+  buildBrowserDiagnosticsPayload,
+  buildServerClientReport,
+  downloadBrowserDiagnostics,
+} from '../../utils/browserDiagnostics'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -121,6 +126,8 @@ function fixWithAgent(): void {
 const diagProbe = ref<DiagnosticsProbe | null>(null)
 const diagBusy = ref(false)
 const diagError = ref(false)
+// 深度诊断（P-20261124-1）：服务端预算 20s→30s + 追加宿主/TLS/网络/自连接取证
+const diagDeep = ref(false)
 
 const diagSizeText = computed(() => {
   const t = diagProbe.value?.totals
@@ -130,17 +137,68 @@ const diagSizeText = computed(() => {
 async function exportDiagnostics(): Promise<void> {
   diagBusy.value = true
   diagError.value = false
+  const deep = diagDeep.value
   try {
-    const res = await diagnosticsApi.probe({ days: 3 }, { silent: true })
+    // 体量预览只是「先看多大」：失败不得阻断导出（P-20261124-1 S3④）——
+    // 预览走 axios（可能超时/被拦截），导出是直链原生下载，两者失败面独立
+    const res = await diagnosticsApi.probe({ days: 3, deep }, { silent: true })
     diagProbe.value = res.data ?? null
-    triggerDirectDownload(diagnosticsApi.exportUrl({ days: 3 }), 'codecombo-diagnostics.zip')
-    message.success(t('monitor.serverLog.diagStarted', { size: diagSizeText.value }))
   } catch {
-    // axios 拦截器已弹全局 toast（silent 只是防重复）；就地留可重试态
-    diagError.value = true
-  } finally {
-    diagBusy.value = false
+    diagProbe.value = null
+    diagError.value = true // 仅表示「大小未知」，下载仍继续
   }
+  // 浏览器快照自动附带（P-20261127-1）：点「导出诊断包」即视为同意——直链前
+  // 恒先 POST 一份最新裁剪快照进服务端会话窗，成功才带 clientReport=1（点一次
+  // B 拿全服务端+浏览器两面证据）；失败/超时直链退化纯服务端包（绝不阻断，
+  // P-20261124-1 S3④ 纪律），参数不在场服务端不产生 browser.json 条目。
+  // 恒发新快照不读「点过 A 没有」（lastReportPostAt 5min 前端窗口已退役）：
+  // 环实时变、最新最有价值；服务端单 session ≤4 份滚动封顶天然兜底，前端无需
+  // 去重。POST 只由本次显式点击触发，零自动后台申报（P-2b 隐私承诺不变）
+  let attachClient = false
+  try {
+    const snapshot = buildServerClientReport(buildBrowserDiagnosticsPayload())
+    await diagnosticsApi.postClientReport(snapshot, { timeout: 3000, silent: true })
+    attachClient = true
+  } catch {
+    // 轻提示不阻断：直链随后照常触发（attachClient 保持 false=纯服务端包）
+    message.warning(t('monitor.serverLog.diagClientReportFailed'))
+  }
+  triggerDirectDownload(diagnosticsApi.exportUrl({ days: 3, deep, clientReport: attachClient }), 'codecombo-diagnostics.zip')
+  message.success(
+    diagProbe.value
+      ? t('monitor.serverLog.diagStarted', { size: diagSizeText.value })
+      : t('monitor.serverLog.diagStartedNoProbe'),
+  )
+  diagBusy.value = false
+}
+
+// 浏览器诊断（P-20261124-2 S1a⑤，与上方服务端诊断包是两个独立动作）：
+// 本地内存环（失败请求/未捕获异常/WS 关闭码/资源失败）立即生成 JSON 下载，
+// Blob 不经服务器——服务器卡死/无法导出时仍可用；失败就地 toast 可重试
+function exportBrowserDiagnostics(): void {
+  let payload
+  try {
+    // 单次构造（P-20261126-2 B1）：本地下载与 POST 上传共用同一快照——环在变，
+    // 两次构造可能不同，zip 内 browser.json 必须与用户本地文件一致
+    payload = buildBrowserDiagnosticsPayload()
+    const res = downloadBrowserDiagnostics(payload)
+    message.success(t('monitor.serverLog.browserDiagDone', { n: res.entries }))
+  } catch {
+    message.error(t('monitor.serverLog.browserDiagFailed'))
+    return
+  }
+  // 本地下载保底成功后才异步附带上传（P-20261126-2 P-2b）：server 作用域裁剪
+  // 版（最新 50 条/无 resource/无 UA）进服务端 5 分钟会话窗；3s 超时 + silent，
+  // 失败只提示「本地已保存」绝不阻断已完成的下载。P-20261127-1 后导出直链不再
+  // 依赖此 POST（点「导出诊断包」会恒发自带新快照），此处保留 A 自身行为不变
+  // ——显式点击触发的上报，点一次 A 服务端即留一份会话窗证据
+  void (async () => {
+    try {
+      await diagnosticsApi.postClientReport(buildServerClientReport(payload), { timeout: 3000, silent: true })
+    } catch {
+      message.warning(t('monitor.serverLog.browserDiagNotAttached'))
+    }
+  })()
 }
 </script>
 
@@ -253,10 +311,34 @@ async function exportDiagnostics(): Promise<void> {
         v-else-if="diagError"
         class="svclog-chip svclog-chip-warn"
         data-testid="svclog-diag-error"
-      >{{ t('monitor.serverLog.diagFailed') }}</span>
+      >{{ t('monitor.serverLog.diagPreviewFailed') }}</span>
+      <!-- 深度诊断是参数开关不是动作：放在按钮组之外，窄屏时单独占一行、
+           不与三枚动作按钮抢同一行宽（组内不拆散是既定约束——见下方
+           svclog-action-buttons 注释） -->
+      <NCheckbox
+        v-model:checked="diagDeep"
+        size="small"
+        class="svclog-deep"
+        :title="t('monitor.serverLog.diagDeepTip')"
+        data-testid="svclog-diag-deep"
+      >
+        {{ t('monitor.serverLog.diagDeep') }}
+      </NCheckbox>
       <!-- 动作按钮成组：窄屏下整组换行（注记一行 / 按钮一行），不出现
            「注记 + 两按钮挤一行、第三枚单独掉行」的碎排 -->
       <div class="svclog-action-buttons">
+        <NButton
+          size="tiny"
+          quaternary
+          :title="t('monitor.serverLog.browserDiagTip')"
+          data-testid="svclog-browser-diag"
+          @click="exportBrowserDiagnostics"
+        >
+          <template #icon>
+            <DownloadOutline />
+          </template>
+          {{ t('monitor.serverLog.browserDiagExport') }}
+        </NButton>
         <NButton
           size="tiny"
           quaternary
@@ -349,5 +431,10 @@ async function exportDiagnostics(): Promise<void> {
 .svclog-actions .svclog-chip { margin-right: auto; white-space: nowrap; }
 /* 三枚动作按钮成组换行：组内不拆散，窄屏整组落到注记下一行 */
 .svclog-action-buttons { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end; }
+.svclog-deep {
+  font-size: var(--fs-meta-min, 11.5px);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
 .svclog-footnote { margin: 0; font-size: var(--fs-meta-min, 11.5px); color: var(--text-dim); }
 </style>

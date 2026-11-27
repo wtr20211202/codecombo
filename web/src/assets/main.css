@@ -230,9 +230,13 @@ html {
 }
 
 /* Naive UI Modal 遮罩层样式增强 */
+/* P-20261125-2 S1：删 backdrop-filter: blur(3px) —— 全屏遮罩每帧对下层内容整层
+   重采样，远控/串流（UU、向日葵等）的合成/捕获链路上会被放大成整块闪烁；用户
+   在 UU 远控下对六处 backdrop-filter 临时置 none 后设置/分享/锁屏三面不再闪。
+   底色 0.5→0.55 补回少量对比（无模糊时遮罩观感偏薄）。低特效档仍覆盖锁屏/
+   命令面板等其余遮罩面（styles/low-fx.css） */
 .n-modal-mask {
-  background-color: rgba(0, 0, 0, 0.5) !important;
-  backdrop-filter: blur(3px);
+  background-color: rgba(0, 0, 0, 0.55) !important;
 }
 
 /* 输入框聚焦动画增强 */
@@ -278,11 +282,13 @@ html {
 }
 
 /* 玻璃拟态工具类 */
+/* P-20261125-2 S1：删 backdrop-filter: blur(12px) saturate(140%) —— 12 个消费点
+   中 11 个自身写有不透明 background: var(--bg-surface)（scoped 特异性压过本类），
+   模糊被实底完全遮住、纯开销零视觉收益；唯一真依赖的 BranchCapsule .branch-panel
+   已补 --bg-surface 实底（见 BranchCapsule.vue）。远控下这层全屏重采样是闪烁
+   主路径之一，默认去掉即零视觉变化降级 */
 .glass-panel {
   background: var(--bg-glass);
-  /* 只写标准属性：手写 -webkit- 双份会被 lightningcss 去重成仅剩 -webkit-，
-     新版 Chromium 已移除该别名 → 玻璃模糊全站静默失效（构建自动补前缀） */
-  backdrop-filter: blur(12px) saturate(140%);
 }
 
 /* 骨架屏动画 */

@@ -739,6 +739,20 @@ export default {
     terminalRemoteTmux: 'Remote terminal tmux persistence',
     terminalRemoteTmuxEnable: 'Start remote terminals inside a tmux session on the remote host (falls back to plain shell when tmux is missing)',
     terminalRemoteTmuxHint: 'When enabled, remote processes and output survive SSH drops; reopening the terminal tab resumes the session. Only affects newly opened remote console terminals',
+    // Paste upload limits (P-20261123-6 S2; P-20261125-1 splits label/unit — the unit
+    // is its own span, not a naive suffix, because a suffix squeezes the input to 0 width)
+    pasteLimits: {
+      title: 'Paste upload limits',
+      owner: 'Local terminal',
+      share: 'Share visitors',
+      remote: 'Remote terminals',
+      fileLabel: 'File',
+      imageLabel: 'Image',
+      mbUnit: 'MB',
+      inputAria: '{row} {field} ({unit})',
+      restoreDefault: 'Restore default',
+      hint: 'Local terminal up to 512MB (large uploads use ~2x peak temp disk and take longer on slow links); share/remote can only be tightened within defaults. Click "Restore default" to return to defaults; changes apply immediately after saving.',
+    },
     tmuxStatus: 'tmux status',
     tmuxInstalled: 'Installed',
     tmuxNotInstalled: 'Not installed',
@@ -3566,6 +3580,11 @@ export default {
       unsupported: 'Unsupported file type: {name} (use file-tree paste / drag-drop instead)',
       tooMany: 'At most {n} files per paste; extra ignored',
       folderHint: 'Folder paste is not supported yet — drag the folder into the file tree instead',
+      // Paste over-limit readable errors (P-20261123-5): server inner MB text → localized;
+      // owner 100/20, share/remote 20/10 via max param — no per-endpoint hardcode
+      tooLarge: 'File exceeds {max} MB (current {size} MB)',
+      tooLargeImage: 'Image exceeds {max} MB (current {size} MB)',
+      precheckTooLarge: '"{name}" exceeds the {max} MB limit — skipped',
     },
     // WebGL context loss auto-fallback (browser caps ~16 active WebGL contexts; oldest evicted)
     webglContextLost: 'GPU rendering context lost; this terminal switched to CPU rendering (functionality unaffected)',
@@ -7633,6 +7652,12 @@ export default {
       previewRemove: '− removed line',
       hint: 'The colorblind-friendly tier swaps red/green for blue/orange (deuteranopia-safe) so color-vision-deficient users can tell diff sides apart. Applies to the text diff view and the Monaco diff editor at once',
     },
+    lowFx: {
+      label: 'Visual effects',
+      standard: 'Standard',
+      reduced: 'Reduced',
+      hint: 'Reduced turns off frosted-glass blur and decorative animations (loading spinners and other necessary feedback stay) and makes overlays opaque — recommended over remote control (UU/Sunlogin/TeamViewer), screen sharing and on low-end machines; fewer overlay flickers and dropped frames. Applies per device, does not roam with your account',
+    },
     dashboardLanding: {
       label: 'Default view when entering a project',
       editor: 'Editor',
@@ -7690,7 +7715,7 @@ export default {
     keywords: {
       general: '通用 自动拉取 拉取间隔 智能体 审批 守护 运行时 自定义 备份 general auto fetch interval agent provider guard approval runtime custom backup workspace',
       appearance: '外观 主题 暗色 亮色 语言 字体 编辑器 连字 换行 小地图 固定滚动 置顶 密度 紧凑 保存时格式化 格式化 自动保存 仪表盘 默认 落点 泳道 拓扑 提交图 文件树 嵌套 同名族 appearance theme dark light language font editor ligatures word wrap whitespace minimap sticky scroll format on save zoom density compact dashboard landing graph lane nesting fileNesting',
-      terminal: '终端 回滚 字体 光标 后端 复制 历史记录 terminal scrollback font cursor backend shell bash tmux powershell wsl copy select history bell dsh',
+      terminal: '终端 回滚 字体 光标 后端 复制 历史记录 粘贴上传 上传 限额 terminal scrollback font cursor backend shell bash tmux powershell wsl copy select history bell dsh paste upload limits',
       agentcron: '定时任务 定时 计划 周期 每日 每周 触发 智能体 自动 试跑 依赖链 前序 父任务 完成触发 接力 续命 relayFrom agent cron schedule daily weekly trigger automation dependency chain predecessor variables placeholder date time weekday 变量 占位符 relay',
       sentinel: '输出哨兵 哨兵 监控 订阅 正则 匹配 OOM 死锁 告警 通知 sentinel watch monitor pattern regex alert',
       git: 'Git 用户名 邮箱 提交 拉取 推送 凭据 换行 git user name email commit pull push credential line ending gitignore gitattributes',
@@ -7738,10 +7763,23 @@ export default {
       loadFailed: 'Failed to read logs — try again',
       // Diagnostics bundle (P-20261122-10 S2a): all-module logs + update chain + platform + runtime in one zip
       diagExport: 'Export diagnostics',
-      diagTip: 'Bundle all-module logs + update chain + platform info + runtime state (line-masked, credentials excluded); previews the size before downloading',
+      diagTip: 'Bundle all-module logs + update chain + platform info + runtime state (line-masked, credentials excluded); automatically attaches the latest browser snapshot — both sides in one bundle',
       diagStarted: 'Diagnostics download started ({size} of raw logs, smaller once compressed)',
       diagFailed: 'Diagnostics export failed — click to retry',
       diagSize: '~{size} · {files} files',
+      diagDeep: 'Deep diagnostics (~30s)',
+      diagDeepTip: 'Adds host/certificate/network timeline forensics and a wider TLS handshake scan; slower and slightly larger',
+      diagStartedNoProbe: 'Diagnostics download started (size preview failed — size unknown)',
+      diagPreviewFailed: 'Size preview failed (download started)',
+      diagClientReportFailed: 'Browser snapshot upload failed — this bundle excludes the browser report (server-side evidence downloads as usual)',
+      // Browser-side diagnostics (P-20261124-2 S1a⑤): local JSON download, never via server;
+      // the same snapshot is uploaded on success; exporting diagnostics attaches its own
+      // fresh snapshot automatically (P-20261127-1) — clicking this button first is not required
+      browserDiagExport: 'Export browser diagnostics',
+      browserDiagTip: 'Failed requests / uncaught errors / WS close codes / resource load failures from this session (sanitized at capture time — no bodies, headers or tokens); JSON is generated and downloaded locally without going through the server, and the same snapshot is uploaded to the server session window on success (exporting diagnostics automatically attaches the latest snapshot; remote instances via /proxy excluded)',
+      browserDiagDone: 'Browser diagnostics downloaded ({n} records)',
+      browserDiagFailed: 'Failed to build browser diagnostics — try again',
+      browserDiagNotAttached: 'Browser diagnostics saved locally; attaching to the server bundle failed',
       footnote: 'Shows the tail window of recent writes; full files rotate daily under the data directory logs/ (the diagnostics bundle takes the whole set)',
     },
     // Disk usage (P-20261002-12): panel card + watchdog notification templates
@@ -8565,6 +8603,7 @@ export default {
       },
       diagnostics: {
         export: 'Export diagnostics bundle',
+        client_report: 'Upload browser-side diagnostic report (system, in-memory 5-minute window)',
       },
       approval: {
         export: 'Export decision history CSV',

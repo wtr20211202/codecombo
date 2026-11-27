@@ -935,6 +935,32 @@
       "clear": "—（无清除点：用户策展偏好，useLayoutReset 不波及）",
       "note": "P-20261119-4 统一双视图「原文件↔预览」：切换即写（toggleFileViewMode），打开链按 kind 缺省+偏好覆盖——GitHub/VS Code 记住上次选择惯例",
       "keys": ["sc.filePreview.mode."]
+    },
+    {
+      "id": "ls.diag.snapshot",
+      "item": "sc.diag.snapshot（浏览器诊断环最近 50 条已脱敏条目，sessionStorage 刷新留存）",
+      "lane": "localStorage",
+      "refresh": "✓ 启动期 installBrowserDiagnostics restoreSnapshot 读回并入内存环",
+      "routeTrip": "✓ 保持（标签页存活期内）",
+      "multiTab": "✗（sessionStorage 标签页隔离；诊断环本就是每标签页本地面）",
+      "crossBrowser": "✗（会话级存储）",
+      "crossMachine": "✗（会话级存储）",
+      "clear": "锁定/登出（applyLockRejection / lock）与错误中心清空/实例切换（errorLog.clear）清；关标签页自然清",
+      "note": "P-20261124-2 S1b：浏览器诊断下载本地 JSON 为主路径（不经服务器），sessionStorage 只是刷新留存快照；捕获时已脱敏（无 token/body/header），配额满/存储不可用只标 snapshotWriteFailed=true 不阻断导出（内存数组为真源）；写侧走 safeStorage.sessionSet，禁裸 sessionStorage",
+      "keys": ["sc.diag.*"]
+    },
+    {
+      "id": "ls.appearance.lowFx",
+      "item": "sc.appearance.lowFx（视觉特效档：标准/减弱——远控/屏幕共享/低配机去模糊+遮罩实底+关装饰动画）",
+      "lane": "localStorage",
+      "refresh": "✓ early-init 首帧读（?__lowfx=1 优先并落盘）/ 设置·外观行直写 setEnabled",
+      "routeTrip": "✓ 保持（根属性 data-low-fx 首帧由存储重放）",
+      "multiTab": "同设备共享（后写赢；settingsSync 读回即时改写根属性）",
+      "crossBrowser": "✗（设备本地——远控是本机使用形态，不随账号漫游到真机）",
+      "crossMachine": "✗（设备本地）",
+      "clear": "设置·外观切回标准即写 {enabled:false}；?__lowfx=0 显式关",
+      "note": "P-20261125-2 S2：CSS 收口 styles/low-fx.css（html[data-low-fx=1] 逐条枚举），功能性 spinner 不在收口面；不做 UU/串流自动探测（宿主无信号，显式开关+文案+query 入口）",
+      "keys": ["sc.appearance.lowFx"]
     }
   ],
   "legacyScKeys": [

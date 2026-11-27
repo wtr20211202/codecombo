@@ -356,6 +356,7 @@ Commands:
               --out FILE   output path (default: codecombo-diagnostics-<timestamp>.zip)
               --days N     daily log days to include (default: 3)
               --no-mask    do NOT mask sensitive values (forensics only)
+              --deep       deep collection (~30s)
   version     Show version information
   help        Show this help message
 
@@ -817,18 +818,19 @@ func cmdUninstall() {
 //   - 其余完全一致：按日日志（默认 3 天）/更新链日志/dsh-web.log/crash.log/
 //     PID 文件/数据目录清点/平台基线/脱敏/截断/预算。
 //
-// 用法：codecombo diagnostics [--out FILE] [--days N] [--no-mask]
+// 用法：codecombo diagnostics [--out FILE] [--days N] [--no-mask] [--deep]
 func cmdDiagnostics() {
 	if hasFlag("--help") || hasFlag("-h") {
-		fmt.Println(`Usage: codecombo diagnostics [--out FILE] [--days N] [--no-mask]
+		fmt.Println(`Usage: codecombo diagnostics [--out FILE] [--days N] [--no-mask] [--deep]
 
 Collects a diagnostics bundle (all-module logs + update chain + platform baseline
-+ platform deep sampling + storage stats + basic runtime state) into a zip.
-Works without the service running.
++ platform deep sampling + storage stats + basic runtime state + in-process
+timeline + host/TLS/net forensics) into a zip. Works without the service running.
 
   --out FILE   output path (default: codecombo-diagnostics-<timestamp>.zip)
   --days N     daily log days to include (default: 3)
-  --no-mask    do NOT mask sensitive values (forensics only)`)
+  --no-mask    do NOT mask sensitive values (forensics only)
+  --deep       deep collection (~30s): wider TLS scan window, dmesg tail, etc.`)
 		return
 	}
 	out, _ := findFlag("--out", "-o")
@@ -844,15 +846,28 @@ Works without the service running.
 	}
 	// mask 默认开（诊断包是外发物；--no-mask 仅取证对账档）
 	maskOn := !hasFlag("--no-mask")
+	// --deep（P-20261124-1 S3④）：采集面更宽（host-history 需要进程内采样，
+	// CLI 形态仍写 skipped；TLS 扫描窗口放大；dmesg 等 deep-only 命令）
+	deep := hasFlag("--deep")
+	// TLS 证书元数据（只读 cert，不读 key）：CLI 从配置取同一路径
+	cfg := config.Load()
+	certFile, tlsOn := cfg.Server.TLSCertFile, cfg.Server.TLSEnabledOrDefault()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	budget := 20 * time.Second
+	if deep {
+		budget = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	bundle, err := diagnostics.Plan(ctx, diagnostics.Options{
-		DataDir: config.DataDir(),
-		Version: version,
-		LogDays: days,
-		Mask:    maskOn,
-		Source:  "cli",
+		DataDir:     config.DataDir(),
+		Version:     version,
+		LogDays:     days,
+		Mask:        maskOn,
+		Source:      "cli",
+		Deep:        deep,
+		TLSCertFile: certFile,
+		TLSEnabled:  tlsOn,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: diagnostics collection failed: %v\n", err)
@@ -886,7 +901,7 @@ Works without the service running.
 	fmt.Printf("diagnostics bundle written: %s (%d bytes)\n", out, size)
 	fmt.Printf("entries=%d included=%d omitted=%d absent=%d truncated=%d masked=%t days=%d\n",
 		t.Entries, t.IncludedBytes, t.OmittedBytes, t.Absent, t.Truncated, maskOn, days)
-	fmt.Println("note: selfcheck/update-status/terminal-sessions are skipped in offline CLI mode (start the service and use GET /api/system/diagnostics/export for the full set)")
+	fmt.Println("note: selfcheck/update-status/terminal-sessions/pprof-profiles/go-runtime-trend are skipped in offline CLI mode (start the service and use GET /api/system/diagnostics/export for the full set)")
 }
 
 // ==================== reset-lock ====================

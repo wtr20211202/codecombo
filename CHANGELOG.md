@@ -9,6 +9,101 @@ history is not part of this public changelog.
 
 ## [Unreleased]
 
+## [0.0.1-beta.11] - 2026-11-27
+
+### Added
+
+- **Diagnostics bundle v2: server-side forensics** — the bundle now answers
+  "which request was slow, where did the time go, was it the machine or the
+  network": a request timeline (requests of 1 s or more, route-templated,
+  query strings never recorded); an in-process stall watchdog sampled every
+  second that tells a blocked process apart from a suspended VM or host
+  (stalls of 10 s or more carry aggregated goroutine stacks); errors grouped
+  by normalized signature, so a repeating handshake error no longer crowds
+  out everything else; host state (mounts, disk, pressure, I/O — `/proc` on
+  Linux, command fallbacks elsewhere) with a one-hour history; a TLS
+  certificate summary (public metadata only — private keys are never read —
+  listing the names that no longer match the machine's current addresses);
+  network state (addresses, MTU, routes, DNS, TCP retransmits; proxy
+  variables as `scheme://host:port` only); per-stage timings of the share
+  list; and the largest files with a log-rotation check. Every probe writes
+  its outcome to `collection-report.json` — a probe that times out is
+  recorded, not hidden.
+- **"Deep diagnostics" option** — a new checkbox (~30 s) adds host,
+  certificate and network forensics plus pprof profiles (heap, goroutine,
+  block, mutex; a 5 s CPU profile on request) that can be read offline with
+  `go tool pprof`. Profiles never contain build-machine paths. Block and
+  mutex sampling runs at a low rate from startup so those profiles have
+  data (`CC_DIAG_PROFILE_RATE=0` turns it off). The offline CLI gains the
+  same mode: `codecombo diagnostics --out diag.zip --deep`.
+- **Performance evidence** — `goruntime.json` (memory statistics, GC pause
+  distribution, goroutine and thread counts, with a two-hour trend ring);
+  process self-observation on all three platforms (CPU, memory, handles,
+  threads — Windows and macOS were previously skipped); and `routes.json`, a
+  24-hour per-route table of count, total, average and maximum time plus
+  4xx/5xx counts — the first place to look for "which endpoint is slow".
+- **Browser-side diagnostics** — Settings → Monitor → Service logs gains
+  "Export browser diagnostics": this session's failed requests, uncaught
+  errors, WebSocket close codes and resource load failures, sanitized at
+  capture time (no bodies or tokens; URLs lose their origin, query string
+  and share tokens), downloaded as a local JSON file without going through
+  the server. "Export diagnostics" now posts a fresh browser snapshot first,
+  so one zip carries both the server and the browser side
+  (`state/browser.json`); if that upload fails the server-side bundle still
+  downloads, with a short notice. Instances opened through remote `/proxy`
+  access omit the browser entry.
+
+### Changed
+
+- **Paste uploads: higher default, now configurable** — pasting into the
+  local terminal accepts files up to 100 MB (images up to 20 MB), up from
+  20 MB / 10 MB; share visitors and remote terminals keep 20 MB / 10 MB. A
+  new "Paste upload limits" block in Settings → Terminal sets the file and
+  image limit per context — the local terminal can go up to 512 MB, share
+  and remote can only be tightened below their defaults — and takes effect
+  immediately after saving. Over-limit errors name the limit in MB instead
+  of a raw byte count, and the frontend checks the size after image
+  compression, before anything is uploaded.
+- **Visual effects: Standard or Reduced** — a new Settings → Appearance
+  option. Reduced turns off frosted-glass blur and decorative animations
+  (loading spinners and other necessary feedback stay) and makes overlays
+  opaque; it is recommended over remote-control tools (UU, Sunlogin,
+  TeamViewer), screen sharing and on low-end machines, where it means fewer
+  overlay flickers and dropped frames. The choice is per device. Frosted
+  blur is also off by default on modal masks and panels (the lock screen
+  keeps its blur for privacy). `?__lowfx=1` switches it on without opening
+  Settings. Reduced lowers flicker; it cannot remove flicker that comes from
+  the remote-control capture side itself.
+- **Shared terminal on wide, short windows** — a "Fit window / Zoom in"
+  toggle in the page header shrinks the font so every row is visible (never
+  smaller than 12 px — below that it falls back to width-first zoom). By
+  default the page chooses automatically. Full-screen programs that use the
+  alternate screen stay anchored to the bottom and re-layout when they
+  switch buffers, and the header compacts on short viewports. `?fit=window`
+  or `?fit=width` forces a mode in the link.
+
+### Fixed
+
+- **Shared terminal scrolling, second pass** — scroll writes are merged
+  into one per animation frame, with a short suppression window after a
+  wheel gesture and a two-frame confirmation at the bottom, so resizing or
+  new output no longer yanks the view back. Scrollback history is reachable
+  again in the oversized view: keep scrolling up past the top to read it,
+  and leave with the "Back to live" button or by scrolling back down. The
+  replay tail grows from 128 KB to 512 KB, so a reconnect restores more of
+  the recent output.
+- **Share creation dialog width** — on a 1920 px screen the dialog
+  stretched across the whole window (inputs nearly 1900 px wide); it is now
+  560 px and centered.
+- **Paste upload limit inputs** — the six number inputs rendered with zero
+  width (the unit suffix squeezed them out); they now have a fixed width,
+  wrap per row on narrow screens and carry accessible labels.
+- **"Restore default" for paste limits** — it used to write 0, which was
+  clamped to 1 MB and left the row marked as changed; it now writes the
+  real default values, and the limits count toward unsaved changes.
+- **Remote terminal uploads** — the remote paste path was missing the
+  request body size cap that the local and share paths already had.
+
 ## [0.0.1-beta.10] - 2026-11-23
 
 ### Added
@@ -688,7 +783,8 @@ First public release (beta).
   what's-inside toolbox inventory, typical-scenario walkthroughs, and an
   open contribution guide (DCO-signed PRs welcome).
 
-[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.10...HEAD
+[Unreleased]: https://github.com/wtr20211202/codecombo/compare/v0.0.1-beta.11...HEAD
+[0.0.1-beta.11]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.11
 [0.0.1-beta.10]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.10
 [0.0.1-beta.9]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.9
 [0.0.1-beta.8]: https://github.com/wtr20211202/codecombo/releases/tag/v0.0.1-beta.8

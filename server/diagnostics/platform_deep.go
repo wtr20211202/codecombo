@@ -47,6 +47,9 @@ const (
 	// filterListenerRows 监听表只留 LISTENING 行（Windows netstat 不带
 	// -l 语义，全表含 ESTABLISHED/TIME_WAIT 会把监听表淹掉）
 	filterListenerRows
+	// filterTail 保留末 N 行（dmesg：最新证据在尾；capCommandOutput 只从
+	// 头部剪，方向相反）
+	filterTail
 )
 
 // platformEnv 深度采样的身份上下文（纯数据：GOOS 注入单测直接构造对拍）。
@@ -108,6 +111,18 @@ type ProcessTreeSample struct {
 // capCommandOutput 输出上限：先按行、再按字节（0=不限）。返回截断事实说明，
 // 由调用方并入 sample.Note——「capped」必须在包里可见，否则读者会把截断
 // 当成命令只输出这么多。
+// filterTailOutput 保留末 n 行（n<=0 原样）
+func filterTailOutput(text string, n int) (string, string) {
+	if n <= 0 {
+		return text, ""
+	}
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(lines) <= n {
+		return text, ""
+	}
+	return strings.Join(lines[len(lines)-n:], "\n"), fmt.Sprintf("kept the last %d lines", n)
+}
+
 func capCommandOutput(text string, maxLines, maxBytes int) (string, string) {
 	var notes []string
 	if maxLines > 0 {

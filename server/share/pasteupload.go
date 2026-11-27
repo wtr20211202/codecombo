@@ -58,18 +58,36 @@ import (
 	"codecombo/server/notification"
 	"codecombo/server/pastetmp"
 	"codecombo/server/store"
+	"html/template"
 )
 
+// 粘贴上传限额单一事实源 = server/pastetmp（P-20261123-5）：访客端 file 20MB /
+// image 10MB / body 22MB **刻意维持**（与 drops 协作收件箱 20MB/file 口径一致、
+// 访客频控/落盘面更敏感，提额另案）——数值不变，只换事实源；主人端已提额到
+// 100MB，两端自此**不再同值**，历史「主人端同值」注释全部退役。
+// pasteShareLimits 当前生效的 share 端限额（P-20261123-6）：每次上传请求现读
+// settings 生效值（share 面范围=默认 20/10，只允许下调）；store 为 nil 回落默认。
+// BodyMax 按 file 生效值 +2MB 推导
+func pasteShareLimits() (pastetmp.Limit, int64) {
+	lim := pastetmp.Share
+	if st := store.Get(); st != nil && st.Settings != nil && st.Settings.Get() != nil {
+		_, lim, _ = st.Settings.Get().Server.EffectivePasteLimits()
+	}
+	return lim, pastetmp.BodyMaxForMB(lim.FileMB, 2)
+}
+
+// pasteLimitsJS window.__scPasteLimits 注入体（P-20261123-6 S2 方案⑥，
+// termpage.go PasteLimitsJS 字段消费）：nil-safe 现读 settings 生效值（渲染期），
+// 纯数字 template.JS；store 不可用 → 注入 null（访客页预检跳过，服务端权威兜底）
+func pasteLimitsJS() template.JS {
+	if st := store.Get(); st != nil && st.Settings != nil && st.Settings.Get() != nil {
+		_, share, _ := st.Settings.Get().Server.EffectivePasteLimits()
+		return template.JS(fmt.Sprintf("window.__scPasteLimits={fileMB:%d,imageMB:%d};", share.FileMB, share.ImageMB))
+	}
+	return template.JS("window.__scPasteLimits=null;")
+}
+
 const (
-	// pasteBodyLimit 请求体上限：file 形态 20MB + multipart 编码余量（主人端
-	// pasteImageBodyMaxBytes 同值——22MB）
-	pasteBodyLimit = int64(22) << 20
-
-	// pasteImageMaxBytes image 形态（截图 blob）单文件上限（主人端同值）
-	pasteImageMaxBytes = 10 << 20
-	// pasteFileMaxBytes file 形态单文件上限（主人端同值）
-	pasteFileMaxBytes = 20 << 20
-
 	// 频控（ratePair 复用，drops.go dropMaxPerIP/dropMaxPerToken 同参数取态）：
 	// 每 (token,IP) 每分钟 10 次（正常访客贴几张截图远够）、token 全局每分钟
 	// 60 次防多 IP 合围
@@ -145,7 +163,8 @@ func (s *Service) handlePasteUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSONErrorStatus(w, http.StatusTooManyRequests, "rate_limited")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, pasteBodyLimit)
+	lim, bodyMax := pasteShareLimits()
+	r.Body = http.MaxBytesReader(w, r.Body, bodyMax)
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) {
@@ -187,24 +206,24 @@ func (s *Service) handlePasteUpload(w http.ResponseWriter, r *http.Request) {
 				writeJSONErrorStatus(w, http.StatusBadRequest, "no_file")
 				return
 			}
-			s.writePasteUploadFile(w, r, sh, file, header, visitorID, nick, mode, "image")
+			s.writePasteUploadFile(w, r, sh, file, header, visitorID, nick, mode, "image", lim)
 			return
 		}
 		writeJSONErrorStatus(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	s.writePasteUploadFile(w, r, sh, file, header, visitorID, nick, mode, "file")
+	s.writePasteUploadFile(w, r, sh, file, header, visitorID, nick, mode, "file", lim)
 }
 
 // writePasteUploadFile 校验 + 落盘 + 响应 + 副作用旁路（审计/敏感名 note/ops
 // 广播）。kind 仅用于校验分档与审计语境（image 截图 blob 按内容形态 / file
 // 白名单文件按扩展名），两形态规则各自独立（主人端同构）
 func (s *Service) writePasteUploadFile(w http.ResponseWriter, r *http.Request, sh *store.Share,
-	file multipart.File, header *multipart.FileHeader, visitorID, nick, mode, kind string) {
+	file multipart.File, header *multipart.FileHeader, visitorID, nick, mode, kind string, lim pastetmp.Limit) {
 	var ext string
 	switch kind {
 	case "file":
-		if header.Size > pasteFileMaxBytes {
+		if header.Size > lim.FileMB*1024*1024 {
 			writeJSONErrorStatus(w, http.StatusBadRequest, "too_large")
 			return
 		}
@@ -218,7 +237,7 @@ func (s *Service) writePasteUploadFile(w http.ResponseWriter, r *http.Request, s
 		// 不可信时落盘即产生「名字说 png、内容是别的」的文件交给主机 shell，
 		// 且与头注白名单承诺不符。CT 归一：去参数（; charset=…）+ 小写，
 		// 浏览器 blob 上传实际不带参数，这里兼容非浏览器客户端的合法形态）
-		if header.Size > pasteImageMaxBytes {
+		if header.Size > lim.ImageMB*1024*1024 {
 			writeJSONErrorStatus(w, http.StatusBadRequest, "too_large")
 			return
 		}

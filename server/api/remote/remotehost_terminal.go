@@ -21,6 +21,7 @@ import (
 
 	shared "codecombo/server/api/shared"
 	"codecombo/server/errmarkers"
+	"codecombo/server/pastetmp"
 	"codecombo/server/remoteterminal"
 	"codecombo/server/sshclient"
 	"codecombo/server/store"
@@ -773,15 +774,23 @@ func RemoteTerminalWS(c *gin.Context) {
 
 // ============== 粘贴上传（SFTP 上传远程 /tmp） ==============
 
-const (
-	// remotePasteMaxBytes image 形态（截图 blob）大小上限（截图通常 < 2MB，留余量）
-	remotePasteMaxBytes = 10 << 20
-	// remotePasteFileMaxBytes file 形态（P-20261024-2 通用文件粘贴）大小上限，
-	// 与本地端点 pasteFileMaxBytes 同口径
-	remotePasteFileMaxBytes = 20 << 20
-	// remotePasteDir 远程落盘目录
-	remotePasteDir = "/tmp"
-)
+// 粘贴上传限额单一事实源 = server/pastetmp（P-20261123-5）：remote 端 file 20MB /
+// image 10MB 刻意维持（同步 SFTP 30s 读/60s 写超时下 100MB 不可靠、远端 /tmp 无
+// 清理面——流式与提额另案）；**body 22MB 为本提案新增**：此前 FormFile 直解析无
+// body 上限，超大请求会先完整 spool 再按 header.Size 拒绝。
+// pasteRemoteLimits 当前生效的 remote 端限额（P-20261123-6）：每次上传请求现读
+// settings 生效值（remote 面范围=默认 20/10，只允许下调）；store 为 nil 回落默认。
+// BodyMax 按 file 生效值 +2MB 推导
+func pasteRemoteLimits() (pastetmp.Limit, int64) {
+	lim := pastetmp.Remote
+	if st := store.Get(); st != nil && st.Settings != nil && st.Settings.Get() != nil {
+		_, _, lim = st.Settings.Get().Server.EffectivePasteLimits()
+	}
+	return lim, pastetmp.BodyMaxForMB(lim.FileMB, 2)
+}
+
+// remotePasteDir 远程落盘目录
+const remotePasteDir = "/tmp"
 
 // remotePasteImageExt Content-Type → 扩展名精确白名单
 // 不用 contains：畸形类型（如 "image/png; x=..."）必须拒绝而非误判（前端 blob.type 是精确值）
@@ -826,9 +835,9 @@ var remotePasteFileExt = map[string]bool{
 }
 
 // validateRemotePaste 校验 image 形态上传大小 + Content-Type，返回扩展名
-func validateRemotePaste(header *multipart.FileHeader) (string, error) {
-	if header.Size > remotePasteMaxBytes {
-		return "", fmt.Errorf("image too large: %d bytes (max %d)", header.Size, remotePasteMaxBytes)
+func validateRemotePaste(header *multipart.FileHeader, lim pastetmp.Limit) (string, error) {
+	if header.Size > lim.ImageMB*1024*1024 {
+		return "", fmt.Errorf("image too large: %s (max %s)", pastetmp.MBText(header.Size), pastetmp.MBText(lim.ImageMB*1024*1024))
 	}
 	ct := header.Header.Get("Content-Type")
 	ext, ok := remotePasteImageExt(ct)
@@ -841,9 +850,9 @@ func validateRemotePaste(header *multipart.FileHeader) (string, error) {
 // validateRemotePasteFile 校验 file 形态（P-20261024-2）上传大小 + 扩展名白名单。
 // 扩展名取自原始文件名（File.name 只有 basename，无目录成分）：paste 事件 File 的
 // MIME 常为空或通用 octet-stream，与本地端点同口径按扩展名判定
-func validateRemotePasteFile(header *multipart.FileHeader) (string, error) {
-	if header.Size > remotePasteFileMaxBytes {
-		return "", fmt.Errorf("file too large: %d bytes (max %d)", header.Size, remotePasteFileMaxBytes)
+func validateRemotePasteFile(header *multipart.FileHeader, lim pastetmp.Limit) (string, error) {
+	if header.Size > lim.FileMB*1024*1024 {
+		return "", fmt.Errorf("file too large: %s (max %s)", pastetmp.MBText(header.Size), pastetmp.MBText(lim.FileMB*1024*1024))
 	}
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if !remotePasteFileExt[ext] {
@@ -877,6 +886,15 @@ func remotePasteName(ms int64, randHex, ext string) string {
 // 安全约束：独立 Dial 专用连接（不与终端会话复用 Client，避免其 SFTP
 // 子通道与会话流量互相干扰）；文件名带随机后缀；两形态各自精确白名单
 func UploadRemotePasteImage(c *gin.Context) {
+	// body 上限（P-20261123-5 方案②）：与本地端点同策略——解析前套上 + Content-Length
+	// 早拒；超大 body 不再先完整 spool 进内存/临时文件
+	lim, bodyMax := pasteRemoteLimits()
+	shared.LimitBody(c, bodyMax)
+	if cl := c.Request.ContentLength; cl > bodyMax {
+		shared.Error(c, http.StatusRequestEntityTooLarge, "remote paste file failed",
+			fmt.Errorf("file too large: %s (max %s)", pastetmp.MBText(cl), pastetmp.MBText(lim.FileMB*1024*1024)))
+		return
+	}
 	hostID := c.Param("id")
 	if !remoteResIDRe.MatchString(hostID) {
 		shared.Error(c, http.StatusNotFound, "remote host not found", nil)
@@ -897,6 +915,11 @@ func UploadRemotePasteImage(c *gin.Context) {
 	isFileForm := err == nil
 	errMsg := "remote paste file failed"
 	if err != nil {
+		if shared.BodyTooLarge(err) {
+			shared.Error(c, http.StatusRequestEntityTooLarge, errMsg,
+				fmt.Errorf("request body too large (max %s)", pastetmp.MBText(bodyMax)))
+			return
+		}
 		if !errors.Is(err, http.ErrMissingFile) {
 			shared.Error(c, http.StatusBadRequest, errMsg, err)
 			return
@@ -912,9 +935,9 @@ func UploadRemotePasteImage(c *gin.Context) {
 
 	var ext string
 	if isFileForm {
-		ext, err = validateRemotePasteFile(header)
+		ext, err = validateRemotePasteFile(header, lim)
 	} else {
-		ext, err = validateRemotePaste(header)
+		ext, err = validateRemotePaste(header, lim)
 	}
 	if err != nil {
 		shared.Error(c, http.StatusBadRequest, errMsg, err)

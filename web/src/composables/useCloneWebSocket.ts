@@ -1,5 +1,6 @@
 import type { CloneResult, CloneStatus } from './useCloneProgress'
 import { applyLockRejection, getUnlockToken, LOCK_REJECTED_CLOSE_CODE } from '@/stores/lock'
+import { recordWsLifecycle } from '@/utils/wsLifecycle'
 import i18n from '@/i18n'
 
 /**
@@ -48,6 +49,20 @@ export function connectCloneWS(taskId: string, handlers: CloneWSHandlers = {}): 
   const url = getCloneWSUrl(taskId)
   const protocols = getCloneWSProtocols()
   const ws = protocols && protocols.length > 0 ? new WebSocket(url, protocols) : new WebSocket(url)
+
+  // WS 生命周期入环（P-20261124-2 S1a④）：用 addEventListener 而非 onclose——
+  // 上层（useCloneProgress/useCloneTracker/waitForCloneDone）会改写 ws.onclose，
+  // 且取消路径先 ws.onclose=null 再 close()（关闭事件仍会派发）。取消/卸载的
+  // 客户端 close() 在 close 事件里报 1005（无状态码），据此显式标 intentional。
+  // 非标准实现（单测 mock 为普通对象，无 EventTarget 接口）探测后跳过埋点——
+  // 诊断降级绝不阻断克隆连接本身（健壮性红线）
+  let openedAt = 0
+  if (typeof ws.addEventListener === 'function') {
+    ws.addEventListener('open', () => { openedAt = Date.now() })
+    ws.addEventListener('close', (ev) => {
+      recordWsLifecycle(url, ev.code, ev.reason, ev.wasClean, openedAt, 0, ev.code === 1005)
+    })
+  }
 
   ws.onmessage = (event) => {
     try {

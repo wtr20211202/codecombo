@@ -143,18 +143,20 @@ export const remoteHostApi = {
     api.get<ArrayBuffer>(`/remotehosts/${id}/terminals/${sessionId}/scrollback`, {
       responseType: 'arraybuffer', ...config,
     }),
-  // 粘贴图片 SFTP 上传远程 /tmp，返回远程路径文本（贴入终端供 CLI 读取）
+  // 粘贴图片 SFTP 上传远程 /tmp，返回远程路径文本（贴入终端供 CLI 读取）。
+  // timeout: 0（P-20261123-5）：remote 端限额 20MB 维持，但慢 SFTP 链路 + 服务端
+  // body 上限新增后 413 早拒也要等到 Content-Length 判完——放开 axios 超时保持一致
   uploadPasteImage: (id: string, blob: Blob) => {
     const form = new FormData()
     form.append('image', blob)
-    return api.post<{ data: { path: string; size: number } }>(`/remotehosts/${id}/paste-image`, form)
+    return api.post<{ data: { path: string; size: number } }>(`/remotehosts/${id}/paste-image`, form, { timeout: 0 })
   },
   // 粘贴文件 SFTP 上传远程 /tmp（P-20261024-2）：paste 事件捕获的 OS 复制文件
   //（扩展名白名单/20MB 上限由服务端判定），与截图形态同端点、按 multipart 字段分派
   uploadPasteFile: (id: string, file: File) => {
     const form = new FormData()
     form.append('file', file)
-    return api.post<{ data: { path: string; size: number } }>(`/remotehosts/${id}/paste-image`, form)
+    return api.post<{ data: { path: string; size: number } }>(`/remotehosts/${id}/paste-image`, form, { timeout: 0 })
   },
   // ============== 文件管理（SFTP） ==============
   files: {
