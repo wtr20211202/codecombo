@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"codecombo/server/config"
 	"codecombo/server/filestore"
 	"codecombo/server/middleware"
 	"codecombo/server/store"
@@ -334,8 +335,12 @@ func TestClientReportGeneratedAtMapping(t *testing.T) {
 // 7. 导出关联正道：POST → cookie → export clientReport=1 → browser.json 过 Redactor
 // （token 遮蔽 + 路径归一）；审计只记元数据不含内容
 func TestClientReportExportCorrelationRedacts(t *testing.T) {
-	r, dir := clientReportTestRouter(t)
-	payload := `{"schemaVersion":1,"generatedAt":"2026-11-27T09:00:00Z","page":{"timezone":"X","tzOffsetMinutes":0,"visibility":"visible"},"entries":[{"kind":"request","source":"xhr","ts":"2026-11-27T08:59:00Z","errorClass":"network","path":"/api/share/abcdefghij123456/status","route":"/share","message":"failed ` + filepath.ToSlash(dir) + `/logs/token=s3cret_value leaks /s/abcdefghij123456"}],"ws":[]}`
+	// 夹具里的数据目录取 config.DataDir()（产品各消费面写出的形态）而非
+	// t.TempDir() 原始串：DataDir() 会把 8.3 短名展开成长名（windows runner
+	// TMP=C:\Users\RUNNER~1\... 形态），归一器以长名为键——原始短名形态在
+	// runner 上替换不上（ubuntu 无短名故全绿假象）
+	r, _ := clientReportTestRouter(t)
+	payload := `{"schemaVersion":1,"generatedAt":"2026-11-27T09:00:00Z","page":{"timezone":"X","tzOffsetMinutes":0,"visibility":"visible"},"entries":[{"kind":"request","source":"xhr","ts":"2026-11-27T08:59:00Z","errorClass":"network","path":"/api/share/abcdefghij123456/status","route":"/share","message":"failed ` + filepath.ToSlash(config.DataDir()) + `/logs/token=s3cret_value leaks /s/abcdefghij123456"}],"ws":[]}`
 	w := postClientReportJSON(t, r, payload)
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST = %d body=%s", w.Code, w.Body.String())
